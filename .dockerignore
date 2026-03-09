@@ -1,0 +1,34 @@
+# Don't send these to Docker
+.DS_Store
+__pycache__
+*.pyc
+*.pyo
+node_modules/
+.git/
+.gitignore
+
+# Dev/local files not needed in cloud
+services/
+templates/
+scripts/
+*.html
+*.sh
+*.md
+*.pdf
+config/
+webapp/frontend/src/
+webapp/frontend/public/
+webapp/frontend/node_modules/
+webapp/frontend/package*.json
+webapp/frontend/*.js
+webapp/frontend/*.json
+webapp/frontend/Dockerfile
+webapp/frontend/nginx.conf
+webapp/frontend/README.md
+webapp/frontend/.gitignore
+webapp/backend/Dockerfile
+webapp/backend/railway.toml
+webapp/backend/__pycache__/
+webapp/docker-compose.yml
+webapp/start-dev.sh
+webapp/.DS_Store
