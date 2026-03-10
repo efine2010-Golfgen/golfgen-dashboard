@@ -10,6 +10,8 @@
   --orange-light: #FDECD6;
   --red: #D03030;
   --blue: #3E658C;
+  --blue-active: #2B5078;
+  --blue-hover: #345D85;
   --gold: #F5B731;
   --sky-blue: #7BAED0;
   --navy: #0E1F2D;
@@ -148,12 +150,12 @@ body {
 }
 
 .nav-tab:hover {
-  background: rgba(14,31,45,0.08);
-  color: var(--navy);
+  background: rgba(62,101,140,0.12);
+  color: var(--blue);
 }
 
 .nav-tab.active {
-  background: var(--navy);
+  background: var(--blue-active);
   color: #fff;
 }
 
@@ -180,7 +182,7 @@ body {
   font-family: 'Space Grotesk', sans-serif;
   font-size: 22px;
   font-weight: 700;
-  color: var(--navy);
+  color: var(--blue);
   margin-bottom: 4px;
 }
 
@@ -205,7 +207,7 @@ body {
   border-radius: 8px;
   border: none;
   background: transparent;
-  color: var(--navy);
+  color: var(--blue);
   font-size: 13px;
   font-weight: 600;
   cursor: pointer;
@@ -213,8 +215,8 @@ body {
   font-family: 'Sora', sans-serif;
 }
 
-.range-tab:hover { color: #fff; background: var(--navy-mid); }
-.range-tab.active { background: var(--navy); color: #fff; font-weight: 600; }
+.range-tab:hover { color: #fff; background: var(--blue-hover); }
+.range-tab.active { background: var(--blue-active); color: #fff; font-weight: 600; }
 
 /* ── KPI Cards ─────────────────────────────────────────── */
 .kpi-grid {
@@ -227,7 +229,7 @@ body {
 .kpi-card {
   background: white;
   border: 1px solid var(--border);
-  border-top: 3px solid var(--gold);
+  border-top: 3px solid var(--blue);
   border-radius: 14px;
   padding: 20px;
   box-shadow: var(--card-shadow);
@@ -371,7 +373,7 @@ tr:hover td { background: var(--teal-bg); }
   border-radius: 8px;
   border: none;
   background: transparent;
-  color: var(--navy);
+  color: var(--blue);
   font-size: 12px;
   font-weight: 600;
   cursor: pointer;
@@ -380,8 +382,8 @@ tr:hover td { background: var(--teal-bg); }
   white-space: nowrap;
 }
 
-.comp-tab:hover { color: #fff; background: var(--navy-mid); }
-.comp-tab.active { background: var(--navy); color: #fff; font-weight: 700; }
+.comp-tab:hover { color: #fff; background: var(--blue-hover); }
+.comp-tab.active { background: var(--blue-active); color: #fff; font-weight: 700; }
 
 .comp-table {
   width: 100%;
@@ -389,7 +391,7 @@ tr:hover td { background: var(--teal-bg); }
 }
 
 .comp-table thead th {
-  background: var(--navy);
+  background: var(--blue-active);
   padding: 12px 16px;
   font-size: 12px;
   text-transform: uppercase;
