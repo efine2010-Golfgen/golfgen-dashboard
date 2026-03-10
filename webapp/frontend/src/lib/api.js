@@ -36,6 +36,9 @@ export const api = {
     fetchJSON(`/api/ads/search-terms?days=${days}&limit=${limit}`),
   adsNegativeKeywords: () => fetchJSON(`/api/ads/negative-keywords`),
 
+  // Warehouse
+  warehouse: () => fetchJSON(`/api/warehouse`),
+
   // Item Master
   itemMaster: () => fetchJSON(`/api/item-master`),
   updateItem: (asin, data) =>

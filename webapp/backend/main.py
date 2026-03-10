@@ -3280,6 +3280,109 @@ def bulk_update_item_master(body: dict = Body(...)):
     return {"status": "ok", "updated": updated}
 
 
+# ── GolfGen Warehouse ──────────────────────────────────────
+
+WAREHOUSE_PATH = DB_DIR / "warehouse.csv"
+
+
+@app.get("/api/warehouse")
+def get_warehouse():
+    """Return warehouse inventory grouped by master item with sub-items."""
+    if not WAREHOUSE_PATH.exists():
+        return {"masters": [], "count": 0}
+
+    # Load raw warehouse rows
+    raw_items = []
+    with open(WAREHOUSE_PATH, newline="", encoding="utf-8-sig") as f:
+        reader = csv.DictReader(f)
+        for row in reader:
+            raw_items.append({
+                "itemNumber": (row.get("item_number") or "").strip(),
+                "description": (row.get("description") or "").strip(),
+                "pack": int(float(row.get("pack") or 1)),
+                "onHand": int(float(row.get("on_hand") or 0)),
+                "damage": int(float(row.get("damage") or 0)),
+                "qcHold": int(float(row.get("qc_hold") or 0)),
+                "pcsOnHand": int(float(row.get("pcs_on_hand") or 0)),
+                "pcsAllocated": int(float(row.get("pcs_allocated") or 0)),
+                "pcsAvailable": int(float(row.get("pcs_available") or 0)),
+                "itemRef": (row.get("item_ref") or "").strip(),
+            })
+
+    # Load item master for ASIN + product name lookup
+    item_master = load_item_master()
+    im_lookup = {i["sku"]: i for i in item_master}
+
+    # Group by item_ref
+    groups = {}
+    for item in raw_items:
+        ref = item["itemRef"]
+        if ref not in groups:
+            groups[ref] = {"master": None, "subs": []}
+        if item["itemNumber"] == ref:
+            groups[ref]["master"] = item
+        else:
+            groups[ref]["subs"].append(item)
+
+    # Build response: each master has aggregated totals + list of subs
+    masters = []
+    for ref, group in groups.items():
+        master = group["master"]
+        subs = group["subs"]
+
+        # If no master record exists, create a virtual one from the ref
+        if not master:
+            master = {
+                "itemNumber": ref,
+                "description": subs[0]["description"] if subs else "",
+                "pack": subs[0]["pack"] if subs else 1,
+                "onHand": 0, "damage": 0, "qcHold": 0,
+                "pcsOnHand": 0, "pcsAllocated": 0, "pcsAvailable": 0,
+                "itemRef": ref,
+            }
+
+        # Aggregate totals across master + all subs
+        all_items = [master] + subs
+        total_pcs_oh = sum(i["pcsOnHand"] for i in all_items)
+        total_pcs_alloc = sum(i["pcsAllocated"] for i in all_items)
+        total_pcs_avail = sum(i["pcsAvailable"] for i in all_items)
+        total_damage = sum(i["damage"] for i in all_items)
+        total_qc = sum(i["qcHold"] for i in all_items)
+
+        # Lookup from Item Master
+        im_info = im_lookup.get(ref, {})
+        asin = im_info.get("asin", "")
+        im_name = im_info.get("productName", "")
+        color = im_info.get("color", "")
+
+        # Suffix label for sub-items
+        for sub in subs:
+            suffix = sub["itemNumber"].replace(ref, "", 1)
+            sub["suffix"] = suffix if suffix else sub["itemNumber"]
+
+        masters.append({
+            "itemRef": ref,
+            "itemNumber": master["itemNumber"],
+            "asin": asin,
+            "description": im_name if im_name else master["description"],
+            "whDescription": master["description"],
+            "color": color,
+            "pack": master["pack"],
+            "totalOnHand": total_pcs_oh,
+            "totalDamage": total_damage,
+            "totalQcHold": total_qc,
+            "totalAllocated": total_pcs_alloc,
+            "totalAvailable": total_pcs_avail,
+            "subCount": len(subs),
+            "subs": subs,
+        })
+
+    # Sort: items with ASIN first (known products), then by total on-hand desc
+    masters.sort(key=lambda m: (0 if m["asin"] else 1, -m["totalOnHand"]))
+
+    return {"masters": masters, "count": len(masters)}
+
+
 # ── Static Frontend ────────────────────────────────────────
 # Serve the built React frontend from the same server.
 # Check local dist/ first (Docker), then ../frontend/dist/ (local dev)

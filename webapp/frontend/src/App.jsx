@@ -5,6 +5,7 @@ import Products from "./pages/Products";
 import Inventory from "./pages/Inventory";
 import Advertising from "./pages/Advertising";
 import ItemMaster from "./pages/ItemMaster";
+import Warehouse from "./pages/Warehouse";
 import "./App.css";
 
 export default function App() {
@@ -53,6 +54,9 @@ export default function App() {
             <NavLink to="/item-master" className={({ isActive }) => isActive ? "nav-tab active" : "nav-tab"}>
               <span>📋</span> Item Master
             </NavLink>
+            <NavLink to="/warehouse" className={({ isActive }) => isActive ? "nav-tab active" : "nav-tab"}>
+              <span>🏢</span> GolfGen WH
+            </NavLink>
           </div>
         </nav>
 
@@ -65,6 +69,7 @@ export default function App() {
             <Route path="/inventory" element={<Inventory />} />
             <Route path="/advertising" element={<Advertising />} />
             <Route path="/item-master" element={<ItemMaster />} />
+            <Route path="/warehouse" element={<Warehouse />} />
           </Routes>
         </main>
       </div>

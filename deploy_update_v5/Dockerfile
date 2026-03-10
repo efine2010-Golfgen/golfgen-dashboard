@@ -25,6 +25,7 @@ RUN mkdir -p ./data
 COPY data/golfgen_amazon.duckdb* ./data/
 COPY data/cogs.csv ./data/
 COPY data/item_master.csv ./data/
+COPY data/warehouse.csv ./data/
 
 # Environment
 ENV DB_DIR=/app/data
