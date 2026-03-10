@@ -143,6 +143,8 @@ export default function Dashboard() {
                 <CompRow label="TACOS %" values={comparison} fmt={c => `${c.tacos}%`} />
                 <CompRow label="Sessions" values={comparison} fmt={c => c.sessions.toLocaleString()} chg={c => c.sessChg} />
                 <CompRow label="Conv Rate" values={comparison} fmt={c => `${c.convRate}%`} cls="divider-row" />
+                <CompRow label="COGS" values={comparison} fmt={c => fmt$(c.cogs || 0)} />
+                <CompRow label="Amazon Fees" values={comparison} fmt={c => fmt$(c.amazonFees || 0)} />
                 <CompRow label="Net Profit" values={comparison} fmt={c => fmt$(c.netProfit)} cls="profit-row" isPnl />
                 <CompRow label="Margin" values={comparison} fmt={c => `${c.margin}%`} isPnl />
               </tbody>
@@ -179,6 +181,79 @@ export default function Dashboard() {
           <KPI label="Margin" value={`${summary.margin}%`} className={summary.margin >= 0 ? "pos" : "neg"} />
         </div>
       )}
+
+      {/* ── P&L Waterfall ──────────────────────────────── */}
+      {pnl && pnl.revenue > 0 && (() => {
+        const wfData = [
+          { name: "Revenue", value: pnl.revenue, fill: "#2ECFAA" },
+          { name: "COGS", value: -pnl.cogs, fill: "#E87830" },
+          { name: "FBA Fees", value: -pnl.fbaFees, fill: "#3E658C" },
+          { name: "Referral", value: -pnl.referralFees, fill: "#7BAED0" },
+          { name: "Ad Spend", value: -pnl.adSpend, fill: "#F5B731" },
+          { name: "Net Profit", value: pnl.netProfit, fill: pnl.netProfit >= 0 ? "#2ECFAA" : "#D03030" },
+        ];
+        return (
+          <div className="chart-grid">
+            <div className="chart-card">
+              <h3>P&L Waterfall ({days <= 90 ? `${days}D` : days <= 180 ? "6M" : "1Y"})</h3>
+              <p className="sub">Revenue → costs → net profit breakdown</p>
+              <ResponsiveContainer width="100%" height={300}>
+                <BarChart data={wfData} margin={{ top: 10, right: 10, bottom: 10, left: 10 }}>
+                  <CartesianGrid strokeDasharray="3 3" stroke="rgba(14,31,45,0.08)" />
+                  <XAxis dataKey="name" tick={{ fill: "#6B8090", fontSize: 11 }} />
+                  <YAxis tick={{ fill: "#6B8090", fontSize: 11 }} tickFormatter={v => `$${(Math.abs(v)/1000).toFixed(0)}k`} />
+                  <Tooltip contentStyle={TOOLTIP_STYLE} formatter={(v) => [fmt$(Math.abs(v)), v < 0 ? "Cost" : "Amount"]} />
+                  <Bar dataKey="value" radius={[4,4,0,0]}>
+                    {wfData.map((entry, i) => (
+                      <Cell key={i} fill={entry.fill} />
+                    ))}
+                  </Bar>
+                </BarChart>
+              </ResponsiveContainer>
+            </div>
+            <div className="chart-card">
+              <h3>Cost Structure (% of Revenue)</h3>
+              <p className="sub">Where revenue goes</p>
+              <div style={{ padding: "20px 0" }}>
+                {[
+                  { name: "COGS", value: pnl.cogs, fill: "#E87830" },
+                  { name: "Amazon Fees", value: (pnl.fbaFees || 0) + (pnl.referralFees || 0), fill: "#3E658C" },
+                  { name: "Ad Spend", value: pnl.adSpend, fill: "#F5B731" },
+                  { name: "Net Profit", value: pnl.netProfit, fill: pnl.netProfit >= 0 ? "#2ECFAA" : "#D03030" },
+                ].map(item => {
+                  const pct = pnl.revenue > 0 ? Math.round(item.value / pnl.revenue * 1000) / 10 : 0;
+                  return (
+                    <div key={item.name} style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 16 }}>
+                      <div style={{ width: 100, fontSize: 12, fontWeight: 600, color: "#2A3D50", flexShrink: 0 }}>{item.name}</div>
+                      <div style={{ flex: 1, background: "rgba(14,31,45,0.06)", borderRadius: 6, height: 28, overflow: "hidden", position: "relative" }}>
+                        <div style={{
+                          width: `${Math.min(Math.abs(pct), 100)}%`,
+                          height: "100%",
+                          background: item.fill,
+                          borderRadius: 6,
+                          transition: "width 0.5s ease",
+                          display: "flex",
+                          alignItems: "center",
+                          justifyContent: "flex-end",
+                          paddingRight: 8,
+                        }}>
+                          {Math.abs(pct) > 8 && (
+                            <span style={{ color: "#fff", fontSize: 11, fontWeight: 700 }}>{pct}%</span>
+                          )}
+                        </div>
+                        {Math.abs(pct) <= 8 && (
+                          <span style={{ position: "absolute", left: `${Math.abs(pct) + 2}%`, top: "50%", transform: "translateY(-50%)", fontSize: 11, fontWeight: 600, color: "#6B8090" }}>{pct}%</span>
+                        )}
+                      </div>
+                      <div style={{ width: 80, textAlign: "right", fontSize: 13, fontWeight: 600, fontFamily: "'Space Grotesk', sans-serif", color: "#2A3D50" }}>{fmt$(item.value)}</div>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          </div>
+        );
+      })()}
 
       {/* ── Charts: Row 1 ──────────────────────────────── */}
       <div className="chart-grid">

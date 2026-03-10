@@ -73,18 +73,16 @@ def fmt_date(d) -> str:
 
 
 def get_today(con) -> datetime:
-    """Get 'today' anchored to the latest date with actual sales data.
+    """Get 'today' anchored to the latest date in the database.
 
-    Two issues to handle:
-    1. Railway servers run in UTC, so datetime.now() may be tomorrow.
-    2. The SP-API may have written a row for today with $0 because the
-       data hasn't synced yet.  We want the most recent date that has
-       real revenue so the dashboard never shows an empty "Today".
+    Railway servers run in UTC, so datetime.now() may be off.
+    Use the actual max date from daily_sales so Today/WTD/MTD match
+    what the user sees as "current".  If today has $0 revenue that's
+    fine — the dashboard will show $0 for Today.
     """
     try:
         row = con.execute(
-            "SELECT MAX(date) FROM daily_sales "
-            "WHERE asin = 'ALL' AND ordered_product_sales > 0"
+            "SELECT MAX(date) FROM daily_sales WHERE asin = 'ALL'"
         ).fetchone()
         if row and row[0]:
             d = row[0]
@@ -937,11 +935,18 @@ def period_comparison(view: str = Query("realtime")):
             return 0
         return round((cur - prev) / prev * 100, 1)
 
-    # Compute a single margin rate from full product list (to avoid calling _build_product_list per period)
+    # Compute cost ratios from full product list
     full_products = _build_product_list(con, f"{yr-1}-01-01")
     full_prod_rev = sum(pp["rev"] for pp in full_products)
     full_prod_net = sum(pp["net"] for pp in full_products)
+    full_prod_cogs = sum(pp["cogsTotal"] for pp in full_products)
+    full_prod_fba = sum(pp["fbaTotal"] for pp in full_products)
+    full_prod_referral = sum(pp["referralTotal"] for pp in full_products)
+
     margin_pct = full_prod_net / full_prod_rev if full_prod_rev > 0 else 0
+    cogs_pct = full_prod_cogs / full_prod_rev if full_prod_rev > 0 else 0
+    fba_pct = full_prod_fba / full_prod_rev if full_prod_rev > 0 else 0
+    referral_pct = full_prod_referral / full_prod_rev if full_prod_rev > 0 else 0
 
     results = []
     for p in periods:
@@ -972,15 +977,20 @@ def period_comparison(view: str = Query("realtime")):
             pass
 
         tacos = round(ad_spend / rev * 100, 1) if rev > 0 else 0
-        net = round(rev * margin_pct, 2)
-        margin_val = round(margin_pct * 100)
+
+        # Cost breakdown using known ratios
+        cogs = round(rev * cogs_pct, 2)
+        fba_fees = round(rev * fba_pct, 2)
+        referral_fees = round(rev * referral_pct, 2)
+        amazon_fees = round(fba_fees + referral_fees, 2)
+        net = round(rev - cogs - amazon_fees - ad_spend, 2)
+        margin_val = round(net / rev * 100, 1) if rev > 0 else 0
 
         # Compute last-year equivalents
         try:
             ly_start = datetime.strptime(p["start"], "%Y-%m-%d").replace(year=datetime.strptime(p["start"], "%Y-%m-%d").year - 1)
             ly_end = datetime.strptime(p["end"], "%Y-%m-%d").replace(year=datetime.strptime(p["end"], "%Y-%m-%d").year - 1)
         except ValueError:
-            # Feb 29 edge case
             ly_start = datetime.strptime(p["start"], "%Y-%m-%d") - timedelta(days=365)
             ly_end = datetime.strptime(p["end"], "%Y-%m-%d") - timedelta(days=365)
 
@@ -1018,6 +1028,10 @@ def period_comparison(view: str = Query("realtime")):
             "convRate": conv,
             "adSpend": ad_spend,
             "tacos": tacos,
+            "cogs": cogs,
+            "amazonFees": amazon_fees,
+            "fbaFees": fba_fees,
+            "referralFees": referral_fees,
             "netProfit": net,
             "margin": margin_val,
             "revChg": chg(rev, ly_rev),
