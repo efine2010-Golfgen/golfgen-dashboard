@@ -17,8 +17,10 @@ RUN touch ./webapp/__init__.py ./webapp/backend/__init__.py
 # Copy pre-built frontend from backend/dist (fully git-tracked copy)
 COPY webapp/backend/dist/ ./webapp/frontend/dist/
 
+# Copy SP-API credentials and scripts for background sync
+COPY config/ ./config/
+
 # Copy data files if they exist (DuckDB database + COGS)
-# Use a shell command so it doesn't fail if the file is missing
 RUN mkdir -p ./data
 COPY data/golfgen_amazon.duckdb* ./data/
 COPY data/cogs.csv ./data/

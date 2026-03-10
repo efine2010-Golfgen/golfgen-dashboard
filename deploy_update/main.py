@@ -1,12 +1,18 @@
 """
 GolfGen Dashboard API — FastAPI backend serving Amazon SP-API data from DuckDB.
+Includes background data sync from Amazon SP-API (runs every 2 hours on Railway).
 """
 
 import os
 import csv
+import json
+import asyncio
+import logging
+import threading
 from pathlib import Path
 from datetime import datetime, timedelta
 from typing import Optional
+from contextlib import asynccontextmanager
 
 import duckdb
 from fastapi import FastAPI, Query, Request
@@ -15,13 +21,226 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
 from pydantic import BaseModel
 
+logger = logging.getLogger("golfgen")
+
 # ── Paths ───────────────────────────────────────────────
 BASE_DIR = Path(__file__).resolve().parent.parent.parent  # GolfGen Amazon Dashboard/
 DB_DIR = Path(os.environ.get("DB_DIR", str(BASE_DIR / "data")))
 DB_PATH = DB_DIR / "golfgen_amazon.duckdb"
 COGS_PATH = DB_DIR / "cogs.csv"
+CONFIG_PATH = BASE_DIR / "config" / "credentials.json"
 
-app = FastAPI(title="GolfGen Dashboard API", version="1.0.0")
+# ── Background SP-API Sync ──────────────────────────────
+SYNC_INTERVAL_HOURS = 2
+
+def _run_sp_api_sync():
+    """Pull latest data from Amazon SP-API into DuckDB (runs in background thread)."""
+    try:
+        from sp_api.api import Reports, Orders, Inventories, Finances
+        from sp_api.base import Marketplaces, ReportType
+    except ImportError:
+        logger.warning("SP-API library not installed — skipping sync")
+        return
+
+    if not CONFIG_PATH.exists():
+        logger.warning(f"No credentials at {CONFIG_PATH} — skipping sync")
+        return
+
+    with open(CONFIG_PATH) as f:
+        creds_json = json.load(f)
+
+    sp = creds_json.get("AMAZON_SP_API", {})
+    credentials = {
+        "refresh_token": sp.get("refresh_token"),
+        "lwa_app_id": sp.get("lwa_app_id"),
+        "lwa_client_secret": sp.get("lwa_client_secret"),
+        "aws_access_key": sp.get("aws_access_key"),
+        "aws_secret_key": sp.get("aws_secret_key"),
+        "role_arn": sp.get("role_arn"),
+    }
+
+    if not credentials.get("refresh_token"):
+        logger.warning("SP-API credentials missing refresh_token — skipping sync")
+        return
+
+    logger.info("Starting SP-API background sync...")
+    import time, gzip, requests as req
+
+    # --- Pull Sales & Traffic Report (last 3 days to catch late data) ---
+    try:
+        end_date = datetime.utcnow().date()
+        start_date = end_date - timedelta(days=3)
+        logger.info(f"  Requesting Sales report {start_date} to {end_date}...")
+
+        reports = Reports(credentials=credentials, marketplace=Marketplaces.US)
+        report_response = reports.create_report(
+            reportType=ReportType.GET_SALES_AND_TRAFFIC_REPORT,
+            dataStartTime=start_date.isoformat(),
+            dataEndTime=end_date.isoformat(),
+            reportOptions={"dateGranularity": "DAY", "asinGranularity": "CHILD"}
+        )
+        report_id = report_response.payload.get("reportId")
+
+        report_data = None
+        for attempt in range(30):
+            time.sleep(10)
+            status_response = reports.get_report(report_id)
+            status = status_response.payload.get("processingStatus")
+            if status == "DONE":
+                doc_id = status_response.payload.get("reportDocumentId")
+                doc_response = reports.get_report_document(doc_id)
+                report_data = doc_response.payload
+                break
+            elif status in ("CANCELLED", "FATAL"):
+                logger.error(f"  Report failed: {status}")
+                break
+
+        if report_data:
+            # Download and parse
+            if isinstance(report_data, dict) and "url" in report_data:
+                is_gzipped = report_data.get("compressionAlgorithm", "").upper() == "GZIP"
+                resp = req.get(report_data["url"])
+                if is_gzipped:
+                    import gzip as gz
+                    report_text = gz.decompress(resp.content).decode("utf-8")
+                else:
+                    report_text = resp.text
+                report_data = json.loads(report_text)
+
+            if isinstance(report_data, str):
+                report_data = json.loads(report_data)
+
+            # Store in DuckDB (writable connection)
+            con = duckdb.connect(str(DB_PATH), read_only=False)
+            records = 0
+
+            # Per-date aggregate rows
+            for day_entry in report_data.get("salesAndTrafficByDate", []):
+                entry_date = day_entry.get("date", "")
+                traffic = day_entry.get("trafficByDate", {})
+                sales_info = day_entry.get("salesByDate", {})
+                ordered_sales = sales_info.get("orderedProductSales", {})
+                sales_amount = float(ordered_sales.get("amount", 0)) if isinstance(ordered_sales, dict) else float(ordered_sales or 0)
+
+                con.execute("""
+                    INSERT OR REPLACE INTO daily_sales
+                    (date, asin, units_ordered, ordered_product_sales,
+                     sessions, session_percentage, page_views,
+                     buy_box_percentage, unit_session_percentage)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """, [
+                    entry_date, "ALL",
+                    int(sales_info.get("unitsOrdered", 0)),
+                    sales_amount,
+                    int(traffic.get("sessions", 0)),
+                    float(traffic.get("sessionPercentage", 0)),
+                    int(traffic.get("pageViews", 0)),
+                    float(traffic.get("buyBoxPercentage", 0)),
+                    float(traffic.get("unitSessionPercentage", 0)),
+                ])
+                records += 1
+
+            # Per-ASIN rows (store with today's date for freshness)
+            for asin_entry in report_data.get("salesAndTrafficByAsin", []):
+                asin = asin_entry.get("childAsin") or asin_entry.get("parentAsin", "")
+                traffic = asin_entry.get("trafficByAsin", {})
+                sales_info = asin_entry.get("salesByAsin", {})
+                entry_date = asin_entry.get("date", str(start_date))
+                ordered_sales = sales_info.get("orderedProductSales", {})
+                sales_amount = float(ordered_sales.get("amount", 0)) if isinstance(ordered_sales, dict) else float(ordered_sales or 0)
+
+                con.execute("""
+                    INSERT OR REPLACE INTO daily_sales
+                    (date, asin, units_ordered, ordered_product_sales,
+                     sessions, session_percentage, page_views,
+                     buy_box_percentage, unit_session_percentage)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """, [
+                    entry_date, asin,
+                    int(sales_info.get("unitsOrdered", 0)),
+                    sales_amount,
+                    int(traffic.get("sessions", 0)),
+                    float(traffic.get("sessionPercentage", 0)),
+                    int(traffic.get("pageViews", 0)),
+                    float(traffic.get("buyBoxPercentage", 0)),
+                    float(traffic.get("unitSessionPercentage", 0)),
+                ])
+                records += 1
+
+            con.close()
+            logger.info(f"  Sales sync done: {records} records stored")
+
+    except Exception as e:
+        logger.error(f"  Sales sync error: {e}")
+
+    # --- Pull FBA Inventory ---
+    try:
+        logger.info("  Pulling FBA inventory...")
+        inventory_api = Inventories(credentials=credentials, marketplace=Marketplaces.US)
+        response = inventory_api.get_inventory_summary_marketplace(
+            marketplaceIds=["ATVPDKIKX0DER"],
+            granularityType="Marketplace",
+            granularityId="ATVPDKIKX0DER"
+        )
+        summaries = response.payload.get("inventorySummaries", [])
+        if summaries:
+            con = duckdb.connect(str(DB_PATH), read_only=False)
+            today = datetime.now().date()
+            for item in summaries:
+                inv = item.get("inventoryDetails", {})
+                fulfillable = inv.get("fulfillableQuantity", 0) or item.get("totalQuantity", 0)
+                reserved = inv.get("reservedQuantity", {})
+                reserved_qty = reserved.get("totalReservedQuantity", 0) if isinstance(reserved, dict) else int(reserved or 0)
+                con.execute("""
+                    INSERT OR REPLACE INTO fba_inventory
+                    (date, asin, sku, product_name, condition,
+                     fulfillable_quantity, inbound_working_quantity,
+                     inbound_shipped_quantity, inbound_receiving_quantity,
+                     reserved_quantity, unfulfillable_quantity, total_quantity)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """, [
+                    today, item.get("asin", ""),
+                    item.get("sellerSku", item.get("fnSku", "")),
+                    item.get("productName", "")[:200],
+                    item.get("condition", "NewItem"),
+                    int(fulfillable or 0),
+                    int(inv.get("inboundWorkingQuantity", 0) or 0),
+                    int(inv.get("inboundShippedQuantity", 0) or 0),
+                    int(inv.get("inboundReceivingQuantity", 0) or 0),
+                    int(reserved_qty or 0), 0,
+                    int(item.get("totalQuantity", 0)),
+                ])
+            con.close()
+            logger.info(f"  Inventory sync done: {len(summaries)} items")
+    except Exception as e:
+        logger.error(f"  Inventory sync error: {e}")
+
+    logger.info("SP-API background sync complete.")
+
+
+async def _sync_loop():
+    """Run SP-API sync every SYNC_INTERVAL_HOURS in background."""
+    # Run first sync 30 seconds after startup
+    await asyncio.sleep(30)
+    while True:
+        try:
+            loop = asyncio.get_event_loop()
+            await loop.run_in_executor(None, _run_sp_api_sync)
+        except Exception as e:
+            logger.error(f"Sync loop error: {e}")
+        await asyncio.sleep(SYNC_INTERVAL_HOURS * 3600)
+
+
+@asynccontextmanager
+async def lifespan(app):
+    """Start background sync on app startup."""
+    task = asyncio.create_task(_sync_loop())
+    logger.info("Background SP-API sync scheduled (every 2 hours)")
+    yield
+    task.cancel()
+
+
+app = FastAPI(title="GolfGen Dashboard API", version="1.0.0", lifespan=lifespan)
 
 # Allow frontend (dev on :5173, prod wherever)
 app.add_middleware(
@@ -104,7 +323,17 @@ def health():
         "db": str(DB_PATH),
         "db_exists": DB_PATH.exists(),
         "port": os.environ.get("PORT", "8000"),
+        "has_sp_api_creds": CONFIG_PATH.exists(),
     }
+
+
+@app.post("/api/sync")
+async def trigger_sync():
+    """Manually trigger an SP-API data sync."""
+    import asyncio
+    loop = asyncio.get_event_loop()
+    await loop.run_in_executor(None, _run_sp_api_sync)
+    return {"status": "sync_complete"}
 
 
 @app.get("/api/summary")
@@ -1382,17 +1611,40 @@ def _build_waterfall(con, cogs_data, start: str, end: str) -> dict:
         total_other_fees += fin.get("other", 0)
         total_refund_units += fin.get("refund_count", 0)
 
-    # Scale to actual sales if per-ASIN data is partial
-    scale = sales / prod_rev if prod_rev > 0 else 1
-    cogs = round(total_cogs * scale, 2)
-    fba_fees = round(total_fba * scale, 2)
-    referral_fees = round(total_referral * scale, 2)
+    # If we have per-ASIN data for this period, scale to actual sales
+    # If not, fall back to global cost ratios from _build_product_list
+    if prod_rev > 0 and total_cogs > 0:
+        scale = sales / prod_rev if prod_rev > 0 else 1
+        cogs = round(total_cogs * scale, 2)
+        fba_fees = round(total_fba * scale, 2)
+        referral_fees = round(total_referral * scale, 2)
+        promo = round(total_promo * scale, 2)
+        shipping = round(total_shipping * scale, 2)
+        refunds = round(total_refunds * scale, 2)
+        other_fees = round(total_other_fees * scale, 2)
+    elif sales > 0:
+        # No per-ASIN data for this period — use global cost ratios
+        # This happens when SP-API per-ASIN report data has different dates
+        all_products = _build_product_list(con, "2020-01-01")
+        total_prd_rev = sum(p["rev"] for p in all_products)
+        if total_prd_rev > 0:
+            cogs_pct = sum(p["cogsTotal"] for p in all_products) / total_prd_rev
+            fba_pct = sum(p["fbaTotal"] for p in all_products) / total_prd_rev
+            ref_pct = sum(p["referralTotal"] for p in all_products) / total_prd_rev
+        else:
+            cogs_pct, fba_pct, ref_pct = 0.35, 0.06, 0.15
+        cogs = round(sales * cogs_pct, 2)
+        fba_fees = round(sales * fba_pct, 2)
+        referral_fees = round(sales * ref_pct, 2)
+        promo = 0
+        shipping = 0
+        refunds = 0
+        other_fees = 0
+    else:
+        cogs = fba_fees = referral_fees = promo = shipping = refunds = other_fees = 0
+
     amazon_fees = round(fba_fees + referral_fees, 2)
     ad_spend = round(total_ad, 2)  # already account-level, no scaling needed
-    promo = round(total_promo * scale, 2)
-    shipping = round(total_shipping * scale, 2)
-    refunds = round(total_refunds * scale, 2)
-    other_fees = round(total_other_fees * scale, 2)
     refund_units = total_refund_units
     return_pct = round(refund_units / units * 100, 1) if units > 0 else 0
     indirect = 0    # Not configured
