@@ -73,8 +73,9 @@ def _sync_today_orders():
     This is the critical path for showing live "Today" data.
     Runs at startup, on /api/sync, and inline if today has no data.
 
-    Key: For orders with no OrderTotal (Pending status), we call
-    getOrderItems to get actual item prices so revenue is accurate.
+    Strategy: Use getOrderItems for EVERY order to get accurate item-level
+    prices.  OrderTotal is unreliable (missing for Pending, sometimes $0
+    for FBA orders).  Item-level prices are the ground truth.
     """
     try:
         from sp_api.api import Orders as OrdersAPI
@@ -115,6 +116,8 @@ def _sync_today_orders():
             except Exception:
                 break
 
+        logger.info(f"  Got {len(order_list)} orders from last 2 days")
+
         con = duckdb.connect(str(DB_PATH), read_only=False)
 
         # Store raw orders
@@ -143,48 +146,82 @@ def _sync_today_orders():
                 order.get("IsPrime", False),
             ])
 
-        # For orders with $0 OrderTotal (Pending), fetch order items to get real prices
-        orders_needing_items = []
+        # ── Get item-level prices for ALL non-cancelled orders ──
+        # OrderTotal is unreliable.  getOrderItems gives us actual item prices.
+        # Rate limit: burst 30, then 0.5/sec.  We handle this with adaptive sleep.
+        today_str = (datetime.utcnow() - timedelta(hours=7)).strftime("%Y-%m-%d")
+        yesterday_str = (datetime.utcnow() - timedelta(hours=7) - timedelta(days=1)).strftime("%Y-%m-%d")
+
+        items_fetched = 0
+        items_failed = 0
+        burst_count = 0
+
         for order in order_list:
             status = order.get("OrderStatus", "")
             if status in ("Canceled", "Cancelled"):
                 continue
-            order_total = order.get("OrderTotal", {})
-            amount = float(order_total.get("Amount", 0)) if order_total else 0
-            if amount == 0:
-                orders_needing_items.append(order)
 
-        # Fetch item details for orders missing totals (rate-limited: 1 per second)
-        items_fetched = 0
-        for order in orders_needing_items:
+            # Only fetch items for today and yesterday orders
+            purchase_date = order.get("PurchaseDate", "")
+            if not purchase_date:
+                continue
+            try:
+                if "T" in purchase_date:
+                    dt = datetime.fromisoformat(purchase_date.replace("Z", "+00:00"))
+                    dt = dt - timedelta(hours=7)
+                    order_day = dt.strftime("%Y-%m-%d")
+                else:
+                    order_day = purchase_date[:10]
+            except Exception:
+                order_day = purchase_date[:10]
+
+            if order_day not in (today_str, yesterday_str):
+                continue
+
             order_id = order.get("AmazonOrderId")
             if not order_id:
                 continue
+
             try:
                 items_resp = orders_api.get_order_items(order_id)
                 item_list = items_resp.payload.get("OrderItems", [])
                 total_from_items = 0.0
                 total_qty = 0
                 for item in item_list:
-                    price = item.get("ItemPrice", {})
-                    qty = int(item.get("QuantityOrdered", 0))
-                    item_amount = float(price.get("Amount", 0)) if isinstance(price, dict) else 0
-                    total_from_items += item_amount
+                    # ItemPrice is the total for this line (price × qty)
+                    price = item.get("ItemPrice")
+                    if price and isinstance(price, dict):
+                        amt_str = price.get("Amount", "0")
+                        try:
+                            total_from_items += float(amt_str)
+                        except (ValueError, TypeError):
+                            pass
+                    qty = 0
+                    try:
+                        qty = int(item.get("QuantityOrdered", 0))
+                    except (ValueError, TypeError):
+                        pass
                     total_qty += qty
-                # Patch the order object so aggregation below picks it up
-                order["OrderTotal"] = {"Amount": str(total_from_items), "CurrencyCode": "USD"}
-                order["_items_qty"] = total_qty
+
+                # Always use item-level total (more accurate than OrderTotal)
+                order["_item_revenue"] = total_from_items
+                order["_item_qty"] = total_qty
                 items_fetched += 1
-                _t.sleep(0.5)  # Respect API rate limit
+
+                # Adaptive rate limiting: burst first 25, then sleep
+                burst_count += 1
+                if burst_count > 25:
+                    _t.sleep(2.0)  # Stay well under rate limit
             except Exception as e:
-                logger.warning(f"  Could not fetch items for {order_id}: {e}")
-            if items_fetched >= 30:  # Cap to keep it fast
-                break
+                items_failed += 1
+                logger.warning(f"  getOrderItems failed for {order_id}: {e}")
+                # On rate limit, back off
+                if "throttl" in str(e).lower() or "429" in str(e):
+                    _t.sleep(5.0)
 
-        if items_fetched > 0:
-            logger.info(f"  Fetched item details for {items_fetched} orders missing totals")
+        logger.info(f"  Fetched items for {items_fetched} orders ({items_failed} failed)")
 
-        # Aggregate orders by date → update daily_sales
+        # ── Aggregate by date ──
         from collections import defaultdict
         daily_agg = defaultdict(lambda: {"revenue": 0.0, "units": 0, "orders": 0})
 
@@ -195,31 +232,30 @@ def _sync_today_orders():
             purchase_date = order.get("PurchaseDate", "")
             if not purchase_date:
                 continue
-            # Parse ISO date and convert to Pacific time
             try:
                 if "T" in purchase_date:
                     dt = datetime.fromisoformat(purchase_date.replace("Z", "+00:00"))
-                    dt = dt - timedelta(hours=7)  # UTC → PDT
+                    dt = dt - timedelta(hours=7)
                     day_str = dt.strftime("%Y-%m-%d")
                 else:
                     day_str = purchase_date[:10]
             except Exception:
                 day_str = purchase_date[:10]
 
-            order_total = order.get("OrderTotal", {})
-            amount = float(order_total.get("Amount", 0)) if order_total else 0
-            # Use item qty if we fetched it, otherwise fall back to shipped+unshipped
-            n_items = order.get("_items_qty",
-                        order.get("NumberOfItemsShipped", 0) + order.get("NumberOfItemsUnshipped", 0))
+            # Prefer item-level revenue (most accurate), fall back to OrderTotal
+            if "_item_revenue" in order:
+                amount = order["_item_revenue"]
+                n_items = order["_item_qty"]
+            else:
+                order_total = order.get("OrderTotal", {})
+                amount = float(order_total.get("Amount", 0)) if order_total else 0
+                n_items = order.get("NumberOfItemsShipped", 0) + order.get("NumberOfItemsUnshipped", 0)
 
             daily_agg[day_str]["revenue"] += amount
             daily_agg[day_str]["units"] += n_items
             daily_agg[day_str]["orders"] += 1
 
-        # Update daily_sales for today AND yesterday (yesterday might have late orders)
-        today_str = (datetime.utcnow() - timedelta(hours=7)).strftime("%Y-%m-%d")
-        yesterday_str = (datetime.utcnow() - timedelta(hours=7) - timedelta(days=1)).strftime("%Y-%m-%d")
-
+        # ── Write to daily_sales ──
         for day_str in [today_str, yesterday_str]:
             if day_str not in daily_agg:
                 continue
@@ -230,8 +266,8 @@ def _sync_today_orders():
             ).fetchone()
             existing_rev = float(existing[0]) if existing and existing[0] else 0.0
 
-            # For today: always use order data (report won't have it)
-            # For yesterday: only if order data is higher (report may be stale)
+            # For today: always use order data (Sales Report won't have it)
+            # For yesterday: only if order data is higher (report may have caught up)
             if day_str == today_str or agg["revenue"] > existing_rev:
                 con.execute("""
                     INSERT OR REPLACE INTO daily_sales
@@ -240,13 +276,21 @@ def _sync_today_orders():
                      buy_box_percentage, unit_session_percentage)
                     VALUES (?, 'ALL', ?, ?, 0, 0, 0, 0, 0)
                 """, [day_str, agg["units"], agg["revenue"]])
-                logger.info(f"  Updated {day_str}: ${agg['revenue']:.2f} rev, {agg['units']} units from {agg['orders']} orders")
+                logger.info(f"  {day_str}: ${agg['revenue']:.2f} rev, {agg['units']} units, {agg['orders']} orders")
 
         con.close()
-        logger.info(f"  Today sync done: {len(order_list)} orders processed, dates: {list(daily_agg.keys())}")
+
+        # Log summary for debugging
+        for ds in sorted(daily_agg.keys()):
+            a = daily_agg[ds]
+            logger.info(f"  Date {ds}: ${a['revenue']:.2f} / {a['units']}u / {a['orders']} orders")
+
+        logger.info(f"  Today sync complete: {len(order_list)} orders, {items_fetched} items fetched")
         return True
     except Exception as e:
         logger.error(f"  Today orders sync error: {e}")
+        import traceback
+        logger.error(traceback.format_exc())
         return False
 
 
@@ -320,7 +364,7 @@ def _run_sp_api_sync():
         from sp_api.api import Finances as FinancesAPI
         logger.info("  Pulling financial events (fees, refunds)...")
 
-        fin_start = (datetime.utcnow() - timedelta(days=30)).isoformat()
+        fin_start = (datetime.utcnow() - timedelta(days=30)).strftime("%Y-%m-%dT%H:%M:%SZ")
         finances = FinancesAPI(credentials=credentials, marketplace=Marketplaces.US)
         response = finances.list_financial_events(
             PostedAfter=fin_start,
@@ -328,6 +372,8 @@ def _run_sp_api_sync():
         )
 
         events = response.payload.get("FinancialEvents", {})
+        logger.info(f"  Financial events keys: {list(events.keys()) if events else 'EMPTY'}")
+        logger.info(f"  ShipmentEvents: {len(events.get('ShipmentEventList', []))}, RefundEvents: {len(events.get('RefundEventList', []))}")
         con = duckdb.connect(str(DB_PATH), read_only=False)
         fin_records = 0
 
