@@ -832,6 +832,369 @@ def _auto_backfill_if_needed():
     logger.info(f"Auto-backfill complete: {total_records} total records inserted")
 
 
+# ── Amazon Ads API Sync ──────────────────────────────────
+
+def _load_ads_credentials() -> dict | None:
+    """Load Amazon Ads API credentials from env vars or config file."""
+    env_client_id = os.environ.get("AMAZON_ADS_CLIENT_ID", "")
+    if env_client_id:
+        creds = {
+            "refresh_token": os.environ.get("AMAZON_ADS_REFRESH_TOKEN", ""),
+            "client_id": env_client_id,
+            "client_secret": os.environ.get("AMAZON_ADS_CLIENT_SECRET", ""),
+            "profile_id": os.environ.get("AMAZON_ADS_PROFILE_ID", ""),
+        }
+        if creds["refresh_token"] and creds["client_secret"]:
+            return creds
+        return None
+
+    if CONFIG_PATH.exists():
+        with open(CONFIG_PATH) as f:
+            creds_json = json.load(f)
+        ads = creds_json.get("AMAZON_ADS_API", {})
+        creds = {
+            "refresh_token": ads.get("refresh_token", ""),
+            "client_id": ads.get("client_id", ""),
+            "client_secret": ads.get("client_secret", ""),
+            "profile_id": ads.get("profile_id", ""),
+        }
+        if creds["refresh_token"] and creds["client_id"]:
+            return creds
+
+    return None
+
+
+def _ensure_ads_tables():
+    """Create ads DuckDB tables if they don't exist."""
+    con = duckdb.connect(str(DB_PATH), read_only=False)
+    con.execute("""
+        CREATE TABLE IF NOT EXISTS advertising (
+            date TEXT,
+            campaign_id TEXT,
+            campaign_name TEXT,
+            impressions INTEGER DEFAULT 0,
+            clicks INTEGER DEFAULT 0,
+            spend DOUBLE DEFAULT 0,
+            sales DOUBLE DEFAULT 0,
+            orders INTEGER DEFAULT 0,
+            units INTEGER DEFAULT 0,
+            PRIMARY KEY (date, campaign_id)
+        )
+    """)
+    con.execute("""
+        CREATE TABLE IF NOT EXISTS ads_campaigns (
+            date TEXT,
+            campaign_id TEXT,
+            campaign_name TEXT,
+            campaign_type TEXT DEFAULT 'SP',
+            campaign_status TEXT DEFAULT '',
+            daily_budget DOUBLE DEFAULT 0,
+            impressions INTEGER DEFAULT 0,
+            clicks INTEGER DEFAULT 0,
+            spend DOUBLE DEFAULT 0,
+            sales DOUBLE DEFAULT 0,
+            orders INTEGER DEFAULT 0,
+            units INTEGER DEFAULT 0,
+            PRIMARY KEY (date, campaign_id)
+        )
+    """)
+    con.execute("""
+        CREATE TABLE IF NOT EXISTS ads_keywords (
+            date TEXT,
+            campaign_id TEXT,
+            campaign_name TEXT,
+            ad_group_id TEXT,
+            ad_group_name TEXT,
+            keyword_id TEXT,
+            keyword_text TEXT,
+            match_type TEXT,
+            impressions INTEGER DEFAULT 0,
+            clicks INTEGER DEFAULT 0,
+            spend DOUBLE DEFAULT 0,
+            sales DOUBLE DEFAULT 0,
+            orders INTEGER DEFAULT 0,
+            units INTEGER DEFAULT 0,
+            PRIMARY KEY (date, keyword_id)
+        )
+    """)
+    con.execute("""
+        CREATE TABLE IF NOT EXISTS ads_search_terms (
+            date TEXT,
+            campaign_id TEXT,
+            campaign_name TEXT,
+            ad_group_name TEXT,
+            keyword_text TEXT,
+            match_type TEXT,
+            search_term TEXT,
+            impressions INTEGER DEFAULT 0,
+            clicks INTEGER DEFAULT 0,
+            spend DOUBLE DEFAULT 0,
+            sales DOUBLE DEFAULT 0,
+            orders INTEGER DEFAULT 0,
+            units INTEGER DEFAULT 0,
+            PRIMARY KEY (date, search_term, campaign_id)
+        )
+    """)
+    con.execute("""
+        CREATE TABLE IF NOT EXISTS ads_negative_keywords (
+            keyword_text TEXT,
+            match_type TEXT,
+            campaign_name TEXT,
+            ad_group_name TEXT,
+            keyword_status TEXT DEFAULT 'ENABLED',
+            PRIMARY KEY (keyword_text, campaign_name)
+        )
+    """)
+    con.close()
+
+
+def _sync_ads_data():
+    """Pull Sponsored Products reporting data from Amazon Ads API v3."""
+    import time as _time
+    import gzip as gz
+    import requests as req
+
+    ads_creds = _load_ads_credentials()
+    if not ads_creds:
+        logger.info("Ads sync: no credentials configured, skipping")
+        return
+
+    _ensure_ads_tables()
+
+    profile_id = ads_creds.get("profile_id", "")
+    if not profile_id:
+        logger.warning("Ads sync: no profile_id set, attempting to discover profiles...")
+        try:
+            from ad_api.api import Profiles
+            result = Profiles(credentials=ads_creds).get_profiles()
+            profiles = result.payload
+            if profiles:
+                for p in profiles:
+                    if p.get("accountInfo", {}).get("marketplaceStringId") == "ATVPDKIKX0DER":
+                        profile_id = str(p.get("profileId", ""))
+                        break
+                if not profile_id:
+                    profile_id = str(profiles[0].get("profileId", ""))
+                logger.info(f"Ads sync: discovered profile_id={profile_id}")
+                ads_creds["profile_id"] = profile_id
+            else:
+                logger.error("Ads sync: no profiles found")
+                return
+        except Exception as e:
+            logger.error(f"Ads sync: failed to discover profiles: {e}")
+            return
+
+    # Pull last 60 days of data
+    today = datetime.now()
+    start_date = (today - timedelta(days=60)).strftime("%Y-%m-%d")
+    end_date = (today - timedelta(days=1)).strftime("%Y-%m-%d")
+
+    # ── Report 1: Campaign-level daily data ──
+    _pull_ads_report(
+        ads_creds, "spCampaigns",
+        columns=["date", "campaignId", "campaignName", "campaignStatus",
+                 "campaignBudgetAmount", "impressions", "clicks", "cost",
+                 "purchases", "unitsSold", "sales"],
+        start_date=start_date, end_date=end_date,
+        handler=_handle_campaign_report,
+    )
+
+    # ── Report 2: Targeting/Keywords daily data ──
+    _pull_ads_report(
+        ads_creds, "spTargeting",
+        columns=["date", "campaignId", "campaignName", "adGroupId",
+                 "adGroupName", "keywordId", "keywordText", "matchType",
+                 "impressions", "clicks", "cost", "purchases",
+                 "unitsSold", "sales"],
+        start_date=start_date, end_date=end_date,
+        handler=_handle_targeting_report,
+    )
+
+    # ── Report 3: Search terms ──
+    _pull_ads_report(
+        ads_creds, "spSearchTerm",
+        columns=["date", "campaignId", "campaignName", "adGroupName",
+                 "keywordText", "matchType", "searchTerm",
+                 "impressions", "clicks", "cost", "purchases",
+                 "unitsSold", "sales"],
+        start_date=start_date, end_date=end_date,
+        handler=_handle_search_term_report,
+    )
+
+    logger.info("Ads sync complete")
+
+
+def _pull_ads_report(creds, report_type_id, columns, start_date, end_date, handler):
+    """Create, poll, download, and process a single Amazon Ads v3 report."""
+    import time as _time
+    import gzip as gz
+    import requests as req
+    from ad_api.api import sponsored_products
+
+    body = json.dumps({
+        "name": f"{report_type_id}_{start_date}_{end_date}",
+        "startDate": start_date,
+        "endDate": end_date,
+        "configuration": {
+            "adProduct": "SPONSORED_PRODUCTS",
+            "groupBy": ["advertiser"],
+            "columns": columns,
+            "reportTypeId": report_type_id,
+            "timeUnit": "DAILY",
+            "format": "GZIP_JSON",
+        }
+    })
+
+    try:
+        logger.info(f"Ads sync: creating {report_type_id} report ({start_date} to {end_date})...")
+        reports_api = sponsored_products.Reports(credentials=creds)
+        result = reports_api.post_report(body=body)
+        report_id = result.payload.get("reportId")
+
+        if not report_id:
+            logger.error(f"Ads sync: no reportId returned for {report_type_id}")
+            return
+
+        # Poll for completion (max ~5 min)
+        download_url = None
+        for attempt in range(30):
+            _time.sleep(10)
+            status_result = reports_api.get_report(reportId=report_id)
+            status = status_result.payload.get("status")
+
+            if status == "COMPLETED":
+                download_url = status_result.payload.get("url")
+                break
+            elif status in ("FAILED", "CANCELLED"):
+                logger.error(f"Ads sync: {report_type_id} report {status}")
+                return
+
+        if not download_url:
+            logger.error(f"Ads sync: {report_type_id} report timed out")
+            return
+
+        # Download and decompress
+        resp = req.get(download_url)
+        try:
+            data = json.loads(gz.decompress(resp.content).decode("utf-8"))
+        except Exception:
+            data = json.loads(resp.text)
+
+        if isinstance(data, str):
+            data = json.loads(data)
+
+        handler(data)
+        logger.info(f"Ads sync: {report_type_id} — {len(data) if isinstance(data, list) else 'N/A'} rows processed")
+
+    except Exception as e:
+        logger.error(f"Ads sync error ({report_type_id}): {e}")
+
+
+def _handle_campaign_report(data):
+    """Insert campaign-level ads data into DuckDB."""
+    if not isinstance(data, list):
+        return
+
+    con = duckdb.connect(str(DB_PATH), read_only=False)
+    for row in data:
+        date = row.get("date", "")
+        campaign_id = str(row.get("campaignId", ""))
+        campaign_name = row.get("campaignName", "")
+        spend = float(row.get("cost", 0) or 0)
+        sales = float(row.get("sales", 0) or 0)
+        impressions = int(row.get("impressions", 0) or 0)
+        clicks = int(row.get("clicks", 0) or 0)
+        orders = int(row.get("purchases", 0) or 0)
+        units = int(row.get("unitsSold", 0) or 0)
+        status = row.get("campaignStatus", "")
+        budget = float(row.get("campaignBudgetAmount", 0) or 0)
+
+        # Aggregate table (for summary endpoints)
+        con.execute("""
+            INSERT OR REPLACE INTO advertising
+            (date, campaign_id, campaign_name, impressions, clicks, spend, sales, orders, units)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """, [date, campaign_id, campaign_name, impressions, clicks, spend, sales, orders, units])
+
+        # Campaign detail table
+        con.execute("""
+            INSERT OR REPLACE INTO ads_campaigns
+            (date, campaign_id, campaign_name, campaign_type, campaign_status,
+             daily_budget, impressions, clicks, spend, sales, orders, units)
+            VALUES (?, ?, ?, 'SP', ?, ?, ?, ?, ?, ?, ?, ?)
+        """, [date, campaign_id, campaign_name, status, budget,
+              impressions, clicks, spend, sales, orders, units])
+
+    con.close()
+
+
+def _handle_targeting_report(data):
+    """Insert keyword/targeting data into DuckDB."""
+    if not isinstance(data, list):
+        return
+
+    con = duckdb.connect(str(DB_PATH), read_only=False)
+    for row in data:
+        date = row.get("date", "")
+        keyword_id = str(row.get("keywordId", row.get("targetId", "")))
+        con.execute("""
+            INSERT OR REPLACE INTO ads_keywords
+            (date, campaign_id, campaign_name, ad_group_id, ad_group_name,
+             keyword_id, keyword_text, match_type,
+             impressions, clicks, spend, sales, orders, units)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """, [
+            date,
+            str(row.get("campaignId", "")),
+            row.get("campaignName", ""),
+            str(row.get("adGroupId", "")),
+            row.get("adGroupName", ""),
+            keyword_id,
+            row.get("keywordText", row.get("targeting", "")),
+            row.get("matchType", ""),
+            int(row.get("impressions", 0) or 0),
+            int(row.get("clicks", 0) or 0),
+            float(row.get("cost", 0) or 0),
+            float(row.get("sales", 0) or 0),
+            int(row.get("purchases", 0) or 0),
+            int(row.get("unitsSold", 0) or 0),
+        ])
+    con.close()
+
+
+def _handle_search_term_report(data):
+    """Insert search term data into DuckDB."""
+    if not isinstance(data, list):
+        return
+
+    con = duckdb.connect(str(DB_PATH), read_only=False)
+    for row in data:
+        date = row.get("date", "")
+        search_term = row.get("searchTerm", "")
+        campaign_id = str(row.get("campaignId", ""))
+        con.execute("""
+            INSERT OR REPLACE INTO ads_search_terms
+            (date, campaign_id, campaign_name, ad_group_name,
+             keyword_text, match_type, search_term,
+             impressions, clicks, spend, sales, orders, units)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """, [
+            date, campaign_id,
+            row.get("campaignName", ""),
+            row.get("adGroupName", ""),
+            row.get("keywordText", ""),
+            row.get("matchType", ""),
+            search_term,
+            int(row.get("impressions", 0) or 0),
+            int(row.get("clicks", 0) or 0),
+            float(row.get("cost", 0) or 0),
+            float(row.get("sales", 0) or 0),
+            int(row.get("purchases", 0) or 0),
+            int(row.get("unitsSold", 0) or 0),
+        ])
+    con.close()
+
+
 async def _sync_loop():
     """Run SP-API sync in background.
 
@@ -855,6 +1218,13 @@ async def _sync_loop():
     except Exception as e:
         logger.error(f"Auto-backfill error: {e}")
 
+    # Sync ads data
+    try:
+        loop = asyncio.get_event_loop()
+        await loop.run_in_executor(None, _sync_ads_data)
+    except Exception as e:
+        logger.error(f"Ads sync error: {e}")
+
     # Short delay before full sync (let server finish starting)
     await asyncio.sleep(10)
     while True:
@@ -863,6 +1233,14 @@ async def _sync_loop():
             await loop.run_in_executor(None, _run_sp_api_sync)
         except Exception as e:
             logger.error(f"Sync loop error: {e}")
+
+        # Also refresh ads data each cycle
+        try:
+            loop = asyncio.get_event_loop()
+            await loop.run_in_executor(None, _sync_ads_data)
+        except Exception as e:
+            logger.error(f"Ads re-sync error: {e}")
+
         await asyncio.sleep(SYNC_INTERVAL_HOURS * 3600)
 
 
@@ -1677,6 +2055,46 @@ def ads_negative_keywords():
     ]
 
     return {"negativeKeywords": keywords}
+
+
+# ── Ads: Profile Discovery + Manual Sync ────────────────────
+
+@app.get("/api/ads/profiles")
+def ads_profiles():
+    """Discover Amazon Ads profiles for this account."""
+    ads_creds = _load_ads_credentials()
+    if not ads_creds:
+        return {"error": "No Amazon Ads credentials configured. Set AMAZON_ADS_CLIENT_ID, AMAZON_ADS_CLIENT_SECRET, AMAZON_ADS_REFRESH_TOKEN env vars."}
+
+    try:
+        from ad_api.api import Profiles
+        result = Profiles(credentials=ads_creds).get_profiles()
+        profiles = []
+        for p in result.payload:
+            profiles.append({
+                "profileId": p.get("profileId"),
+                "countryCode": p.get("countryCode"),
+                "accountName": p.get("accountInfo", {}).get("name", ""),
+                "marketplace": p.get("accountInfo", {}).get("marketplaceStringId", ""),
+                "type": p.get("accountInfo", {}).get("type", ""),
+            })
+        return {"profiles": profiles, "configured_profile_id": ads_creds.get("profile_id", "")}
+    except Exception as e:
+        return {"error": str(e)}
+
+
+@app.post("/api/ads/sync")
+async def trigger_ads_sync():
+    """Manually trigger an ads data sync."""
+    ads_creds = _load_ads_credentials()
+    if not ads_creds:
+        return {"error": "No Amazon Ads credentials configured"}
+    try:
+        loop = asyncio.get_event_loop()
+        await loop.run_in_executor(None, _sync_ads_data)
+        return {"status": "ads_sync_complete"}
+    except Exception as e:
+        return {"error": str(e)}
 
 
 # ── Debug: Today Orders ────────────────────────────────────
