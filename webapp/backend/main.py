@@ -217,7 +217,11 @@ def inventory():
         dos = round(fba_stock / avg_daily) if avg_daily > 0 else 999
 
         # Get name from COGS file first, then inventory table
-        name = (cogs_data.get(asin, {}).get("product_name") or r[2] or asin)
+        cogs_name = cogs_data.get(asin, {}).get("product_name", "")
+        # Exclude names that are just the ASIN repeated
+        if cogs_name and cogs_name.strip().upper() == asin.upper():
+            cogs_name = ""
+        name = (cogs_name or r[2] or asin)
 
         items.append({
             "asin": asin,
@@ -332,6 +336,17 @@ def _build_product_list(con, cutoff: str) -> list:
     """Build product-level P&L. Core business logic."""
     cogs_data = load_cogs()
 
+    # Get product names/SKUs from fba_inventory as fallback
+    inv_names = {}
+    try:
+        inv_rows = con.execute(
+            "SELECT asin, sku, product_name FROM fba_inventory"
+        ).fetchall()
+        for ir in inv_rows:
+            inv_names[ir[0]] = {"sku": ir[1] or "", "product_name": ir[2] or ""}
+    except Exception:
+        pass
+
     # Product-level sales — use per-ASIN data (excluding aggregate 'ALL' row)
     rows = con.execute("""
         SELECT asin,
@@ -375,8 +390,21 @@ def _build_product_list(con, cutoff: str) -> list:
         if cogs_per_unit == 0:
             cogs_per_unit = round(aur * 0.35, 2)  # estimate
 
-        # Name: COGS file > API
-        name = cogs_info.get("product_name") or api_name or asin
+        # Name: COGS file > inventory table > API > ASIN
+        inv_info = inv_names.get(asin, {})
+        cogs_name = cogs_info.get("product_name", "")
+        # Exclude names that are just the ASIN repeated
+        if cogs_name and cogs_name.strip().upper() == asin.upper():
+            cogs_name = ""
+        name = (cogs_name
+                or api_name
+                or inv_info.get("product_name")
+                or asin)
+
+        # SKU: COGS file > daily_sales > inventory table
+        resolved_sku = (sku
+                        or cogs_info.get("sku", "")
+                        or inv_info.get("sku", ""))
 
         # FBA fees
         fin = fin_by_asin.get(asin, {})
@@ -409,7 +437,7 @@ def _build_product_list(con, cutoff: str) -> list:
 
         products.append({
             "asin": asin,
-            "sku": sku or cogs_info.get("sku", ""),
+            "sku": resolved_sku,
             "name": name,
             "rev": round(revenue, 2),
             "units": units,

@@ -17,10 +17,11 @@ RUN touch ./webapp/__init__.py ./webapp/backend/__init__.py
 # Copy pre-built frontend (no need for Node.js in prod)
 COPY webapp/frontend/dist/ ./webapp/frontend/dist/
 
-# Copy data files if they exist (DuckDB database)
+# Copy data files if they exist (DuckDB database + COGS)
 # Use a shell command so it doesn't fail if the file is missing
 RUN mkdir -p ./data
 COPY data/golfgen_amazon.duckdb* ./data/
+COPY data/cogs.csv ./data/
 
 # Environment
 ENV DB_DIR=/app/data

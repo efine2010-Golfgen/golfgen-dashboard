@@ -87,7 +87,12 @@ export default function Inventory() {
 
               return (
                 <tr key={item.asin}>
-                  <td style={{ maxWidth: 250, overflow: "hidden", textOverflow: "ellipsis" }}>{item.name}</td>
+                  <td style={{ maxWidth: 280 }}>
+                    <div style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{item.name}</div>
+                    <div style={{ fontSize: 11, color: "var(--muted)", marginTop: 2, fontFamily: "'Space Grotesk', monospace" }}>
+                      {item.asin}{item.sku ? ` · ${item.sku}` : ""}
+                    </div>
+                  </td>
                   <td>{item.fbaStock.toLocaleString()}</td>
                   <td>{item.inbound.toLocaleString()}</td>
                   <td>{item.reserved.toLocaleString()}</td>

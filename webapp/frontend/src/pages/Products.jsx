@@ -91,7 +91,12 @@ export default function Products() {
           <tbody>
             {display.map((p) => (
               <tr key={p.asin}>
-                <td style={{ maxWidth: 220, overflow: "hidden", textOverflow: "ellipsis" }}>{p.name}</td>
+                <td style={{ maxWidth: 260 }}>
+                  <div style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{p.name}</div>
+                  <div style={{ fontSize: 11, color: "var(--muted)", marginTop: 2, fontFamily: "'Space Grotesk', monospace" }}>
+                    {p.asin}{p.sku ? ` · ${p.sku}` : ""}
+                  </div>
+                </td>
                 <td>{fmt$(p.rev)}</td>
                 <td>{p.units.toLocaleString()}</td>
                 <td>${p.price.toFixed(2)}</td>
