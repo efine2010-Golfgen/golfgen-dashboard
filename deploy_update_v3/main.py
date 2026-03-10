@@ -67,186 +67,8 @@ def _load_sp_api_credentials() -> dict | None:
     return None
 
 
-def _sync_today_orders():
-    """Fast sync: pull today's orders from Amazon Orders API (takes ~5 seconds).
-
-    This is the critical path for showing live "Today" data.
-    Runs at startup, on /api/sync, and inline if today has no data.
-    """
-    try:
-        from sp_api.api import Orders as OrdersAPI
-        from sp_api.base import Marketplaces
-    except ImportError:
-        logger.warning("SP-API library not installed — skipping today sync")
-        return False
-
-    credentials = _load_sp_api_credentials()
-    if not credentials:
-        return False
-
-    logger.info("  Syncing today's orders (real-time)...")
-    try:
-        # Get orders from last 2 days to catch any we missed
-        after_date = (datetime.utcnow() - timedelta(days=2)).isoformat()
-        orders_api = OrdersAPI(credentials=credentials, marketplace=Marketplaces.US)
-        response = orders_api.get_orders(
-            CreatedAfter=after_date,
-            MarketplaceIds=["ATVPDKIKX0DER"],
-            MaxResultsPerPage=100
-        )
-
-        order_list = response.payload.get("Orders", [])
-
-        # Handle pagination — get ALL orders, not just first 100
-        next_token = response.payload.get("NextToken")
-        while next_token:
-            try:
-                next_resp = orders_api.get_orders(
-                    NextToken=next_token,
-                    MarketplaceIds=["ATVPDKIKX0DER"],
-                )
-                more_orders = next_resp.payload.get("Orders", [])
-                order_list.extend(more_orders)
-                next_token = next_resp.payload.get("NextToken")
-            except Exception:
-                break
-
-        con = duckdb.connect(str(DB_PATH), read_only=False)
-
-        # Store raw orders
-        for order in order_list:
-            order_total = order.get("OrderTotal", {})
-            con.execute("""
-                INSERT OR REPLACE INTO orders
-                (order_id, purchase_date, order_status, fulfillment_channel,
-                 sales_channel, order_total, currency_code, number_of_items,
-                 ship_city, ship_state, ship_postal_code,
-                 is_business_order, is_prime)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            """, [
-                order.get("AmazonOrderId"),
-                order.get("PurchaseDate"),
-                order.get("OrderStatus"),
-                order.get("FulfillmentChannel"),
-                order.get("SalesChannel"),
-                float(order_total.get("Amount", 0)) if order_total else 0,
-                order_total.get("CurrencyCode", "USD") if order_total else "USD",
-                order.get("NumberOfItemsShipped", 0) + order.get("NumberOfItemsUnshipped", 0),
-                order.get("ShippingAddress", {}).get("City", ""),
-                order.get("ShippingAddress", {}).get("StateOrRegion", ""),
-                order.get("ShippingAddress", {}).get("PostalCode", ""),
-                order.get("IsBusinessOrder", False),
-                order.get("IsPrime", False),
-            ])
-
-        # Aggregate orders by date → update daily_sales
-        from collections import defaultdict
-        daily_agg = defaultdict(lambda: {"revenue": 0.0, "units": 0, "orders": 0})
-
-        for order in order_list:
-            status = order.get("OrderStatus", "")
-            if status in ("Canceled", "Cancelled"):
-                continue
-            purchase_date = order.get("PurchaseDate", "")
-            if not purchase_date:
-                continue
-            # Parse ISO date and convert to Pacific time
-            try:
-                if "T" in purchase_date:
-                    dt = datetime.fromisoformat(purchase_date.replace("Z", "+00:00"))
-                    dt = dt - timedelta(hours=7)  # UTC → PDT
-                    day_str = dt.strftime("%Y-%m-%d")
-                else:
-                    day_str = purchase_date[:10]
-            except Exception:
-                day_str = purchase_date[:10]
-
-            order_total = order.get("OrderTotal", {})
-            amount = float(order_total.get("Amount", 0)) if order_total else 0
-            n_items = order.get("NumberOfItemsShipped", 0) + order.get("NumberOfItemsUnshipped", 0)
-
-            daily_agg[day_str]["revenue"] += amount
-            daily_agg[day_str]["units"] += n_items
-            daily_agg[day_str]["orders"] += 1
-
-        # Update daily_sales for today AND yesterday (yesterday might have late orders)
-        today_str = (datetime.utcnow() - timedelta(hours=7)).strftime("%Y-%m-%d")
-        yesterday_str = (datetime.utcnow() - timedelta(hours=7) - timedelta(days=1)).strftime("%Y-%m-%d")
-
-        for day_str in [today_str, yesterday_str]:
-            if day_str not in daily_agg:
-                continue
-            agg = daily_agg[day_str]
-            existing = con.execute(
-                "SELECT ordered_product_sales FROM daily_sales WHERE date = ? AND asin = 'ALL'",
-                [day_str]
-            ).fetchone()
-            existing_rev = float(existing[0]) if existing and existing[0] else 0.0
-
-            # For today: always use order data (report won't have it)
-            # For yesterday: only if order data is higher (report may be stale)
-            if day_str == today_str or agg["revenue"] > existing_rev:
-                con.execute("""
-                    INSERT OR REPLACE INTO daily_sales
-                    (date, asin, units_ordered, ordered_product_sales,
-                     sessions, session_percentage, page_views,
-                     buy_box_percentage, unit_session_percentage)
-                    VALUES (?, 'ALL', ?, ?, 0, 0, 0, 0, 0)
-                """, [day_str, agg["units"], agg["revenue"]])
-                logger.info(f"  Updated {day_str}: ${agg['revenue']:.2f} from {agg['orders']} orders")
-
-        con.close()
-        logger.info(f"  Today sync done: {len(order_list)} orders processed, dates: {list(daily_agg.keys())}")
-        return True
-    except Exception as e:
-        logger.error(f"  Today orders sync error: {e}")
-        return False
-
-
-# Track last today-sync so we don't hammer the API
-_last_today_sync = 0.0
-
-
-def _ensure_today_data():
-    """If today has no data in daily_sales, do a quick Orders API pull.
-
-    Called inline by profitability/comparison endpoints so the user
-    never sees Today = $0 when Amazon has live data.
-    Throttled to at most once per 5 minutes.
-    """
-    global _last_today_sync
-    import time as _time
-    now = _time.time()
-    if now - _last_today_sync < 300:          # 5-minute cooldown
-        return
-
-    today_str = (datetime.utcnow() - timedelta(hours=7)).strftime("%Y-%m-%d")
-    try:
-        con = duckdb.connect(str(DB_PATH), read_only=False)
-        row = con.execute(
-            "SELECT ordered_product_sales FROM daily_sales WHERE date = ? AND asin = 'ALL'",
-            [today_str]
-        ).fetchone()
-        con.close()
-        has_data = row and row[0] and float(row[0]) > 0
-    except Exception:
-        has_data = False
-
-    if not has_data:
-        logger.info("Today has no data — triggering quick Orders API sync")
-        _last_today_sync = now
-        _sync_today_orders()
-
-
 def _run_sp_api_sync():
-    """Pull latest data from Amazon SP-API into DuckDB (runs in background thread).
-
-    Order of operations (fastest first):
-    1. Today's Orders (fast, ~5 seconds) — critical for live "Today" data
-    2. Financial Events (fast, ~5 seconds) — actual fees/refunds
-    3. FBA Inventory (fast, ~5 seconds)
-    4. Sales & Traffic Report (SLOW, 2-5 minutes) — historical data with sessions
-    """
+    """Pull latest data from Amazon SP-API into DuckDB (runs in background thread)."""
     try:
         from sp_api.api import Reports, Orders, Inventories, Finances
         from sp_api.base import Marketplaces, ReportType
@@ -262,116 +84,114 @@ def _run_sp_api_sync():
     logger.info("Starting SP-API background sync...")
     import time, gzip, requests as req
 
-    # ── 1. TODAY'S ORDERS (fast, real-time) ──────────────────────
-    global _last_today_sync
-    import time as _time
-    _last_today_sync = _time.time()
-    _sync_today_orders()
-
-    # ── 2. FINANCIAL EVENTS (actual fees, refunds, promos) ──────
+    # --- Pull Sales & Traffic Report (last 3 days to catch late data) ---
     try:
-        from sp_api.api import Finances as FinancesAPI
-        logger.info("  Pulling financial events (fees, refunds)...")
+        end_date = datetime.utcnow().date()
+        start_date = end_date - timedelta(days=3)
+        logger.info(f"  Requesting Sales report {start_date} to {end_date}...")
 
-        fin_start = (datetime.utcnow() - timedelta(days=30)).isoformat()
-        finances = FinancesAPI(credentials=credentials, marketplace=Marketplaces.US)
-        response = finances.list_financial_events(
-            PostedAfter=fin_start,
-            MaxResultsPerPage=100
+        reports = Reports(credentials=credentials, marketplace=Marketplaces.US)
+        report_response = reports.create_report(
+            reportType=ReportType.GET_SALES_AND_TRAFFIC_REPORT,
+            dataStartTime=start_date.isoformat(),
+            dataEndTime=end_date.isoformat(),
+            reportOptions={"dateGranularity": "DAY", "asinGranularity": "CHILD"}
         )
+        report_id = report_response.payload.get("reportId")
 
-        events = response.payload.get("FinancialEvents", {})
-        con = duckdb.connect(str(DB_PATH), read_only=False)
-        fin_records = 0
+        report_data = None
+        for attempt in range(30):
+            time.sleep(10)
+            status_response = reports.get_report(report_id)
+            status = status_response.payload.get("processingStatus")
+            if status == "DONE":
+                doc_id = status_response.payload.get("reportDocumentId")
+                doc_response = reports.get_report_document(doc_id)
+                report_data = doc_response.payload
+                break
+            elif status in ("CANCELLED", "FATAL"):
+                logger.error(f"  Report failed: {status}")
+                break
 
-        # Process shipment events (sales fees)
-        for event in events.get("ShipmentEventList", []):
-            order_id = event.get("AmazonOrderId", "")
-            posted_date = event.get("PostedDate", "")
+        if report_data:
+            # Download and parse
+            if isinstance(report_data, dict) and "url" in report_data:
+                is_gzipped = report_data.get("compressionAlgorithm", "").upper() == "GZIP"
+                resp = req.get(report_data["url"])
+                if is_gzipped:
+                    import gzip as gz
+                    report_text = gz.decompress(resp.content).decode("utf-8")
+                else:
+                    report_text = resp.text
+                report_data = json.loads(report_text)
 
-            for item in event.get("ShipmentItemList", []):
-                sku = item.get("SellerSKU", "")
-                asin_val = item.get("ASIN", sku)
+            if isinstance(report_data, str):
+                report_data = json.loads(report_data)
 
-                product_charges = 0.0
-                shipping_ch = 0.0
-                for c in item.get("ItemChargeList", []):
-                    amt = c.get("ChargeAmount", {})
-                    val = float(amt.get("Amount", 0)) if isinstance(amt, dict) else 0
-                    ct = c.get("ChargeType", "")
-                    if ct == "Principal":
-                        product_charges += val
-                    elif ct in ("ShippingCharge", "Shipping"):
-                        shipping_ch += val
+            # Store in DuckDB (writable connection)
+            con = duckdb.connect(str(DB_PATH), read_only=False)
+            records = 0
 
-                fba_fees_val = 0.0
-                commission_val = 0.0
-                other_val = 0.0
-                for f in item.get("ItemFeeList", []):
-                    amt = f.get("FeeAmount", {})
-                    val = abs(float(amt.get("Amount", 0))) if isinstance(amt, dict) else 0
-                    ft = f.get("FeeType", "")
-                    if "FBA" in ft or "Fulfillment" in ft:
-                        fba_fees_val += val
-                    elif ft in ("Commission", "ReferralFee"):
-                        commission_val += val
-                    else:
-                        other_val += val
-
-                promo_val = 0.0
-                for p in item.get("PromotionList", []):
-                    amt = p.get("PromotionAmount", {})
-                    promo_val += float(amt.get("Amount", 0)) if isinstance(amt, dict) else 0
-
-                net = product_charges + shipping_ch - fba_fees_val - commission_val + promo_val
+            # Per-date aggregate rows
+            for day_entry in report_data.get("salesAndTrafficByDate", []):
+                entry_date = day_entry.get("date", "")
+                traffic = day_entry.get("trafficByDate", {})
+                sales_info = day_entry.get("salesByDate", {})
+                ordered_sales = sales_info.get("orderedProductSales", {})
+                sales_amount = float(ordered_sales.get("amount", 0)) if isinstance(ordered_sales, dict) else float(ordered_sales or 0)
 
                 con.execute("""
-                    INSERT OR REPLACE INTO financial_events
-                    (date, asin, sku, order_id, event_type,
-                     product_charges, shipping_charges, fba_fees,
-                     commission, promotion_amount, other_fees, net_proceeds)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    INSERT OR REPLACE INTO daily_sales
+                    (date, asin, units_ordered, ordered_product_sales,
+                     sessions, session_percentage, page_views,
+                     buy_box_percentage, unit_session_percentage)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """, [
-                    posted_date[:10] if posted_date else None,
-                    asin_val, sku, order_id, "Shipment",
-                    product_charges, shipping_ch,
-                    fba_fees_val, commission_val, promo_val, other_val, net
+                    entry_date, "ALL",
+                    int(sales_info.get("unitsOrdered", 0)),
+                    sales_amount,
+                    int(traffic.get("sessions", 0)),
+                    float(traffic.get("sessionPercentage", 0)),
+                    int(traffic.get("pageViews", 0)),
+                    float(traffic.get("buyBoxPercentage", 0)),
+                    float(traffic.get("unitSessionPercentage", 0)),
                 ])
-                fin_records += 1
+                records += 1
 
-        # Process refund events
-        for event in events.get("RefundEventList", []):
-            order_id = event.get("AmazonOrderId", "")
-            posted_date = event.get("PostedDate", "")
-
-            for item in event.get("ShipmentItemAdjustmentList", event.get("ShipmentItemList", [])):
-                sku = item.get("SellerSKU", "")
-                asin_val = item.get("ASIN", sku)
-
-                refund_amount = 0.0
-                for c in item.get("ItemChargeAdjustmentList", item.get("ItemChargeList", [])):
-                    amt = c.get("ChargeAmount", {})
-                    refund_amount += float(amt.get("Amount", 0)) if isinstance(amt, dict) else 0
+            # Per-ASIN rows (store with today's date for freshness)
+            for asin_entry in report_data.get("salesAndTrafficByAsin", []):
+                asin = asin_entry.get("childAsin") or asin_entry.get("parentAsin", "")
+                traffic = asin_entry.get("trafficByAsin", {})
+                sales_info = asin_entry.get("salesByAsin", {})
+                entry_date = asin_entry.get("date", str(start_date))
+                ordered_sales = sales_info.get("orderedProductSales", {})
+                sales_amount = float(ordered_sales.get("amount", 0)) if isinstance(ordered_sales, dict) else float(ordered_sales or 0)
 
                 con.execute("""
-                    INSERT OR REPLACE INTO financial_events
-                    (date, asin, sku, order_id, event_type,
-                     product_charges, shipping_charges, fba_fees,
-                     commission, promotion_amount, other_fees, net_proceeds)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    INSERT OR REPLACE INTO daily_sales
+                    (date, asin, units_ordered, ordered_product_sales,
+                     sessions, session_percentage, page_views,
+                     buy_box_percentage, unit_session_percentage)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """, [
-                    posted_date[:10] if posted_date else None,
-                    asin_val, sku, order_id, "Refund",
-                    refund_amount, 0, 0, 0, 0, 0, refund_amount
+                    entry_date, asin,
+                    int(sales_info.get("unitsOrdered", 0)),
+                    sales_amount,
+                    int(traffic.get("sessions", 0)),
+                    float(traffic.get("sessionPercentage", 0)),
+                    int(traffic.get("pageViews", 0)),
+                    float(traffic.get("buyBoxPercentage", 0)),
+                    float(traffic.get("unitSessionPercentage", 0)),
                 ])
-                fin_records += 1
+                records += 1
 
-        con.close()
-        logger.info(f"  Financial events sync done: {fin_records} records")
+            con.close()
+            logger.info(f"  Sales sync done: {records} records stored")
+
     except Exception as e:
-        logger.error(f"  Financial events sync error: {e}")
+        logger.error(f"  Sales sync error: {e}")
 
-    # ── 3. FBA INVENTORY ────────────────────────────────────────
+    # --- Pull FBA Inventory ---
     try:
         logger.info("  Pulling FBA inventory...")
         inventory_api = Inventories(credentials=credentials, marketplace=Marketplaces.US)
@@ -413,130 +233,116 @@ def _run_sp_api_sync():
     except Exception as e:
         logger.error(f"  Inventory sync error: {e}")
 
-    # ── 4. SALES & TRAFFIC REPORT (slow, 2-5 min polling) ──────
+    # --- Pull Today's Orders (real-time, no delay) ---
     try:
-        end_date = datetime.utcnow().date()
-        start_date = end_date - timedelta(days=3)
-        logger.info(f"  Requesting Sales report {start_date} to {end_date}...")
+        from sp_api.api import Orders as OrdersAPI
+        logger.info("  Pulling today's orders (real-time)...")
 
-        reports = Reports(credentials=credentials, marketplace=Marketplaces.US)
-        report_response = reports.create_report(
-            reportType=ReportType.GET_SALES_AND_TRAFFIC_REPORT,
-            dataStartTime=start_date.isoformat(),
-            dataEndTime=end_date.isoformat(),
-            reportOptions={"dateGranularity": "DAY", "asinGranularity": "CHILD"}
+        # Get orders from last 2 days to catch any we missed
+        after_date = (datetime.utcnow() - timedelta(days=2)).isoformat()
+        orders_api = OrdersAPI(credentials=credentials, marketplace=Marketplaces.US)
+        response = orders_api.get_orders(
+            CreatedAfter=after_date,
+            MarketplaceIds=["ATVPDKIKX0DER"],
+            MaxResultsPerPage=100
         )
-        report_id = report_response.payload.get("reportId")
 
-        report_data = None
-        for attempt in range(30):
-            time.sleep(10)
-            status_response = reports.get_report(report_id)
-            status = status_response.payload.get("processingStatus")
-            if status == "DONE":
-                doc_id = status_response.payload.get("reportDocumentId")
-                doc_response = reports.get_report_document(doc_id)
-                report_data = doc_response.payload
-                break
-            elif status in ("CANCELLED", "FATAL"):
-                logger.error(f"  Report failed: {status}")
-                break
+        order_list = response.payload.get("Orders", [])
+        con = duckdb.connect(str(DB_PATH), read_only=False)
 
-        if report_data:
-            if isinstance(report_data, dict) and "url" in report_data:
-                is_gzipped = report_data.get("compressionAlgorithm", "").upper() == "GZIP"
-                resp = req.get(report_data["url"])
-                if is_gzipped:
-                    import gzip as gz
-                    report_text = gz.decompress(resp.content).decode("utf-8")
+        # Store raw orders
+        for order in order_list:
+            order_total = order.get("OrderTotal", {})
+            con.execute("""
+                INSERT OR REPLACE INTO orders
+                (order_id, purchase_date, order_status, fulfillment_channel,
+                 sales_channel, order_total, currency_code, number_of_items,
+                 ship_city, ship_state, ship_postal_code,
+                 is_business_order, is_prime)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """, [
+                order.get("AmazonOrderId"),
+                order.get("PurchaseDate"),
+                order.get("OrderStatus"),
+                order.get("FulfillmentChannel"),
+                order.get("SalesChannel"),
+                float(order_total.get("Amount", 0)) if order_total else 0,
+                order_total.get("CurrencyCode", "USD") if order_total else "USD",
+                order.get("NumberOfItemsShipped", 0) + order.get("NumberOfItemsUnshipped", 0),
+                order.get("ShippingAddress", {}).get("City", ""),
+                order.get("ShippingAddress", {}).get("StateOrRegion", ""),
+                order.get("ShippingAddress", {}).get("PostalCode", ""),
+                order.get("IsBusinessOrder", False),
+                order.get("IsPrime", False),
+            ])
+
+        # Aggregate orders by date → update daily_sales for dates where
+        # the Sales & Traffic Report hasn't caught up yet
+        from collections import defaultdict
+        daily_agg = defaultdict(lambda: {"revenue": 0.0, "units": 0, "orders": 0})
+
+        for order in order_list:
+            status = order.get("OrderStatus", "")
+            if status in ("Canceled", "Cancelled"):
+                continue
+            purchase_date = order.get("PurchaseDate", "")
+            if not purchase_date:
+                continue
+            # Parse ISO date and convert to Pacific time (seller's timezone)
+            try:
+                if "T" in purchase_date:
+                    dt = datetime.fromisoformat(purchase_date.replace("Z", "+00:00"))
+                    # Convert UTC to Pacific (UTC-7 for PDT, UTC-8 for PST)
+                    # March = PDT = UTC-7
+                    dt = dt - timedelta(hours=7)
+                    day_str = dt.strftime("%Y-%m-%d")
                 else:
-                    report_text = resp.text
-                report_data = json.loads(report_text)
+                    day_str = purchase_date[:10]
+            except Exception:
+                day_str = purchase_date[:10]
 
-            if isinstance(report_data, str):
-                report_data = json.loads(report_data)
+            order_total = order.get("OrderTotal", {})
+            amount = float(order_total.get("Amount", 0)) if order_total else 0
+            n_items = order.get("NumberOfItemsShipped", 0) + order.get("NumberOfItemsUnshipped", 0)
 
-            con = duckdb.connect(str(DB_PATH), read_only=False)
-            records = 0
+            daily_agg[day_str]["revenue"] += amount
+            daily_agg[day_str]["units"] += n_items
+            daily_agg[day_str]["orders"] += 1
 
-            for day_entry in report_data.get("salesAndTrafficByDate", []):
-                entry_date = day_entry.get("date", "")
-                traffic = day_entry.get("trafficByDate", {})
-                sales_info = day_entry.get("salesByDate", {})
-                ordered_sales = sales_info.get("orderedProductSales", {})
-                sales_amount = float(ordered_sales.get("amount", 0)) if isinstance(ordered_sales, dict) else float(ordered_sales or 0)
+        # Only update daily_sales for today (don't overwrite historical report data)
+        today_str = (datetime.utcnow() - timedelta(hours=7)).strftime("%Y-%m-%d")
+        if today_str in daily_agg:
+            agg = daily_agg[today_str]
+            # Check if the Sales & Traffic report already has data for today
+            existing = con.execute(
+                "SELECT ordered_product_sales FROM daily_sales WHERE date = ? AND asin = 'ALL'",
+                [today_str]
+            ).fetchone()
+            existing_rev = float(existing[0]) if existing and existing[0] else 0.0
 
+            # If order-based revenue is higher, update (report data is stale)
+            if agg["revenue"] > existing_rev:
                 con.execute("""
                     INSERT OR REPLACE INTO daily_sales
                     (date, asin, units_ordered, ordered_product_sales,
                      sessions, session_percentage, page_views,
                      buy_box_percentage, unit_session_percentage)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-                """, [
-                    entry_date, "ALL",
-                    int(sales_info.get("unitsOrdered", 0)),
-                    sales_amount,
-                    int(traffic.get("sessions", 0)),
-                    float(traffic.get("sessionPercentage", 0)),
-                    int(traffic.get("pageViews", 0)),
-                    float(traffic.get("buyBoxPercentage", 0)),
-                    float(traffic.get("unitSessionPercentage", 0)),
-                ])
-                records += 1
+                    VALUES (?, 'ALL', ?, ?, 0, 0, 0, 0, 0)
+                """, [today_str, agg["units"], agg["revenue"]])
+                logger.info(f"  Updated today ({today_str}): ${agg['revenue']:.2f} from {agg['orders']} orders")
 
-            for asin_entry in report_data.get("salesAndTrafficByAsin", []):
-                asin = asin_entry.get("childAsin") or asin_entry.get("parentAsin", "")
-                traffic = asin_entry.get("trafficByAsin", {})
-                sales_info = asin_entry.get("salesByAsin", {})
-                entry_date = asin_entry.get("date", str(start_date))
-                ordered_sales = sales_info.get("orderedProductSales", {})
-                sales_amount = float(ordered_sales.get("amount", 0)) if isinstance(ordered_sales, dict) else float(ordered_sales or 0)
-
-                con.execute("""
-                    INSERT OR REPLACE INTO daily_sales
-                    (date, asin, units_ordered, ordered_product_sales,
-                     sessions, session_percentage, page_views,
-                     buy_box_percentage, unit_session_percentage)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-                """, [
-                    entry_date, asin,
-                    int(sales_info.get("unitsOrdered", 0)),
-                    sales_amount,
-                    int(traffic.get("sessions", 0)),
-                    float(traffic.get("sessionPercentage", 0)),
-                    int(traffic.get("pageViews", 0)),
-                    float(traffic.get("buyBoxPercentage", 0)),
-                    float(traffic.get("unitSessionPercentage", 0)),
-                ])
-                records += 1
-
-            con.close()
-            logger.info(f"  Sales sync done: {records} records stored")
-
+        con.close()
+        logger.info(f"  Orders sync done: {len(order_list)} orders processed")
     except Exception as e:
-        logger.error(f"  Sales sync error: {e}")
+        logger.error(f"  Orders sync error: {e}")
 
     logger.info("SP-API background sync complete.")
 
 
 async def _sync_loop():
-    """Run SP-API sync in background.
-
-    Sequence:
-    1. Immediately sync today's orders (fast, ~5s) — so "Today" works right away
-    2. Wait 10s, then run full sync (slow, includes Sales Report polling)
-    3. Repeat full sync every SYNC_INTERVAL_HOURS
-    """
-    # Immediately pull today's orders — no delay
-    try:
-        loop = asyncio.get_event_loop()
-        await loop.run_in_executor(None, _sync_today_orders)
-        logger.info("Startup: today's orders synced")
-    except Exception as e:
-        logger.error(f"Startup today-sync error: {e}")
-
-    # Short delay before full sync (let server finish starting)
-    await asyncio.sleep(10)
+    """Run SP-API sync every SYNC_INTERVAL_HOURS in background."""
+    # Run first sync 30 seconds after startup
+    await asyncio.sleep(30)
     while True:
         try:
             loop = asyncio.get_event_loop()
@@ -550,7 +356,7 @@ async def _sync_loop():
 async def lifespan(app):
     """Start background sync on app startup."""
     task = asyncio.create_task(_sync_loop())
-    logger.info("Background SP-API sync scheduled (today orders → full sync → every 2 hours)")
+    logger.info("Background SP-API sync scheduled (every 2 hours)")
     yield
     task.cancel()
 
@@ -607,16 +413,26 @@ def fmt_date(d) -> str:
 
 
 def get_today(con) -> datetime:
-    """Return today's actual calendar date in US-Pacific timezone.
+    """Get 'today' anchored to the latest date in the database.
 
-    Railway servers run in UTC.  The business operates in Pacific time,
-    so we subtract 7 hours (PDT) from UTC to get the real calendar date.
-    'Today' always means today — if there's no data yet it shows $0,
-    which is correct until Orders API sync populates it.
+    Railway servers run in UTC, so datetime.now() may be off.
+    Use the actual max date from daily_sales so Today/WTD/MTD match
+    what the user sees as "current".  If today has $0 revenue that's
+    fine — the dashboard will show $0 for Today.
     """
-    now_utc = datetime.utcnow()
-    now_pacific = now_utc - timedelta(hours=7)          # PDT (UTC-7)
-    return now_pacific.replace(hour=0, minute=0, second=0, microsecond=0)
+    try:
+        row = con.execute(
+            "SELECT MAX(date) FROM daily_sales WHERE asin = 'ALL'"
+        ).fetchone()
+        if row and row[0]:
+            d = row[0]
+            if isinstance(d, str):
+                return datetime.strptime(d, "%Y-%m-%d")
+            if hasattr(d, "year"):
+                return datetime(d.year, d.month, d.day)
+    except Exception:
+        pass
+    return datetime.now()
 
 
 # ── API Routes ──────────────────────────────────────────
@@ -643,15 +459,11 @@ async def trigger_sync():
 
 @app.get("/api/sync")
 async def trigger_sync_get():
-    """Manually trigger sync. Fast: returns after today's orders are synced.
-    Full sync (Sales Report) continues in background."""
+    """Manually trigger sync (GET for easy browser testing)."""
     import asyncio
     loop = asyncio.get_event_loop()
-    # Fast: sync today's orders first (returns in ~5s)
-    await loop.run_in_executor(None, _sync_today_orders)
-    # Kick off full sync in background (don't wait for 5-min report poll)
-    asyncio.get_event_loop().run_in_executor(None, _run_sp_api_sync)
-    return {"status": "sync_complete", "today_synced": True}
+    await loop.run_in_executor(None, _run_sp_api_sync)
+    return {"status": "sync_complete"}
 
 
 @app.get("/api/summary")
@@ -979,13 +791,10 @@ def _build_product_list(con, cutoff: str) -> list:
         # FBA fees
         fin = fin_by_asin.get(asin, {})
         actual_fba = fin.get("fba_fees", 0)
-        # Better estimate for golf equipment (oversized/bulky items):
-        # Amazon FBA fees are typically 10-15% of selling price for large items
-        # Old formula ($5 + 3% of AUR) was WAY too low
-        est_fba_total = round(revenue * 0.12, 2)  # ~12% of revenue for oversized
-        fba_total = actual_fba if actual_fba > 0 else est_fba_total
+        est_fba_per_unit = round(5.0 + aur * 0.03, 2)
+        fba_total = actual_fba if actual_fba > 0 else round(units * est_fba_per_unit, 2)
 
-        # Referral fees (15% is standard for Sports & Outdoors)
+        # Referral fees
         actual_commission = fin.get("commission", 0)
         referral_total = round(actual_commission, 2) if actual_commission > 0 else round(revenue * 0.15, 2)
 
@@ -1372,9 +1181,6 @@ def period_comparison(view: str = Query("realtime")):
     - yearly: 2026 YTD / 2025 YTD (comp) / 2025 Full / 2024 Full
     - monthly2026: Jan / Feb / ... / current month / YTD total
     """
-    # Ensure today has live data before building the response
-    _ensure_today_data()
-
     con = get_db()
     cogs_data = load_cogs()
 
@@ -1664,9 +1470,6 @@ def profitability(view: str = Query("realtime")):
     Waterfall: Sales - Promo - Ads - Shipping - Refunds - Amazon Fees - COGS - Indirect = Net Profit
     Returns both account-level waterfall and per-ASIN item breakdown.
     """
-    # Ensure today has live data before building the response
-    _ensure_today_data()
-
     con = get_db()
     cogs_data = load_cogs()
 
@@ -1918,11 +1721,11 @@ def _build_waterfall(con, cogs_data, start: str, end: str) -> dict:
         actual_fba = fin.get("fba", 0)
         actual_comm = fin.get("comm", 0)
 
-        # FBA fees: use actual if available, else estimate ~12% of revenue (oversized golf equipment)
+        # FBA fees: use actual if available, else estimate
         if actual_fba > 0:
             total_fba += actual_fba
         else:
-            est_fba = round(rev * 0.12, 2)
+            est_fba = u * round(5.0 + aur * 0.03, 2)
             total_fba += est_fba
 
         # Referral fees: use actual commission if available, else 15%
@@ -1959,7 +1762,7 @@ def _build_waterfall(con, cogs_data, start: str, end: str) -> dict:
             fba_pct = sum(p["fbaTotal"] for p in all_products) / total_prd_rev
             ref_pct = sum(p["referralTotal"] for p in all_products) / total_prd_rev
         else:
-            cogs_pct, fba_pct, ref_pct = 0.35, 0.12, 0.15
+            cogs_pct, fba_pct, ref_pct = 0.35, 0.06, 0.15
         cogs = round(sales * cogs_pct, 2)
         fba_fees = round(sales * fba_pct, 2)
         referral_fees = round(sales * ref_pct, 2)
