@@ -70,6 +70,8 @@ export default function Warehouse() {
   const [filter, setFilter] = useState("All");
   const [sortKey, setSortKey] = useState("totalOnHand");
   const [sortDir, setSortDir] = useState("desc");
+  const [uploading, setUploading] = useState(false);
+  const [uploadMsg, setUploadMsg] = useState(null);
 
   const load = useCallback(() => {
     setLoading(true);
@@ -80,6 +82,35 @@ export default function Warehouse() {
   }, []);
 
   useEffect(() => { load(); }, [load]);
+
+  const handleUpload = async (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+    setUploading(true);
+    setUploadMsg(null);
+    try {
+      const formData = new FormData();
+      formData.append("file", file);
+      const API_BASE = import.meta.env.VITE_API_URL || "";
+      const res = await fetch(`${API_BASE}/api/upload/warehouse-excel`, {
+        method: "POST",
+        body: formData,
+      });
+      const data = await res.json();
+      if (res.ok) {
+        const whRows = data.warehouse?.rows || 0;
+        setUploadMsg({ type: "success", text: `Updated! ${whRows} warehouse items refreshed from ${file.name}` });
+        load(); // Reload data
+      } else {
+        setUploadMsg({ type: "error", text: data.detail || "Upload failed" });
+      }
+    } catch (err) {
+      setUploadMsg({ type: "error", text: err.message });
+    } finally {
+      setUploading(false);
+      e.target.value = ""; // Reset file input
+    }
+  };
 
   const handleSort = (key) => {
     if (sortKey === key) setSortDir(d => d === "desc" ? "asc" : "desc");
@@ -123,10 +154,37 @@ export default function Warehouse() {
 
   return (
     <>
-      <div className="page-header">
-        <h1>GolfGen Warehouse</h1>
-        <p>Moose 3PL Daily Inventory &middot; {masters.length} master items &middot; {totalPcsOH.toLocaleString()} total pcs on hand</p>
+      <div className="page-header" style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
+        <div>
+          <h1>GolfGen Warehouse</h1>
+          <p>Moose 3PL Daily Inventory &middot; {masters.length} master items &middot; {totalPcsOH.toLocaleString()} total pcs on hand</p>
+        </div>
+        <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+          <label style={{
+            display: "inline-flex", alignItems: "center", gap: 6, padding: "6px 14px",
+            background: "var(--teal)", color: "#fff", borderRadius: 8, cursor: "pointer",
+            fontSize: 13, fontWeight: 600, opacity: uploading ? 0.6 : 1,
+          }}>
+            {uploading ? "Uploading..." : "Upload Excel"}
+            <input type="file" accept=".xlsx,.xls" onChange={handleUpload}
+              style={{ display: "none" }} disabled={uploading} />
+          </label>
+        </div>
       </div>
+      {uploadMsg && (
+        <div style={{
+          padding: "8px 16px", marginBottom: 12, borderRadius: 8, fontSize: 13,
+          background: uploadMsg.type === "success" ? "#dcfce7" : "#fee2e2",
+          color: uploadMsg.type === "success" ? "#166534" : "#991b1b",
+          display: "flex", justifyContent: "space-between", alignItems: "center",
+        }}>
+          <span>{uploadMsg.text}</span>
+          <button onClick={() => setUploadMsg(null)} style={{
+            background: "none", border: "none", cursor: "pointer", fontSize: 16,
+            color: uploadMsg.type === "success" ? "#166534" : "#991b1b",
+          }}>×</button>
+        </div>
+      )}
 
       {/* Summary Cards */}
       <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))", gap: 16, marginBottom: 24 }}>

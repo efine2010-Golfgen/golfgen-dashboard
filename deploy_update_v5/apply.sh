@@ -3,15 +3,16 @@
 # Run from golfgen-dashboard root: bash deploy_update_v5/apply.sh
 set -e
 
-echo "=== GolfGen Deploy Fix v5.4 ==="
+echo "=== GolfGen Deploy Fix v5.5 ==="
 echo ""
 echo "Changes:"
-echo "  1. NEW: Item Master tab — 30 SKUs with editable pricing, COGS, planned units, carton dims"
-echo "  2. NEW: GolfGen WH tab — 82 master items with expandable sub-items (rebox, donate, return, etc.)"
-echo "  3. RETURNS/REFUNDS FIX: financial_events table created on startup, INSERT OR REPLACE → INSERT"
-echo "  4. DATE FILTER FIX: Item-level profitability now respects 30D/90D/1Y range selector"
-echo "  5. AUTO-BACKFILL: Detects missing historical data on startup, fills Apr 2024-present"
-echo "  6. All previous fixes (CurrencyAmount, pagination, YoY, etc.)"
+echo "  1. RETURNS FIX: _money() now handles sp_api model objects + PostedDate datetime handling"
+echo "  2. RETURNS FIX: _safe_get() accessor works for dicts AND sp_api model objects"
+echo "  3. RETURNS FIX: Enhanced debug endpoint shows Python types for root cause analysis"
+echo "  4. NEW: Excel upload endpoint — POST /api/upload/warehouse-excel"
+echo "  5. NEW: Upload button on GolfGen WH tab for weekly data refresh"
+echo "  6. NEW: openpyxl added to requirements for Excel parsing"
+echo "  7. All previous fixes (Item Master, GolfGen WH, date filter, backfill, etc.)"
 echo ""
 
 cp deploy_update_v5/main.py ./webapp/backend/main.py
@@ -39,4 +40,4 @@ fi
 
 echo ""
 echo "=== Done! Now run: ==="
-echo "  git add -A && git commit -m 'feat: Item Master + GolfGen WH tabs, returns/date fixes' && git push origin main"
+echo "  git add -A && git commit -m 'fix: returns data parsing + warehouse Excel upload' && git push origin main"

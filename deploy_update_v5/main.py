@@ -15,7 +15,7 @@ from typing import Optional
 from contextlib import asynccontextmanager
 
 import duckdb
-from fastapi import FastAPI, Query, Request, Body, HTTPException
+from fastapi import FastAPI, Query, Request, Body, HTTPException, UploadFile, File
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
@@ -449,15 +449,16 @@ def _run_sp_api_sync():
                     if isinstance(v, list):
                         logger.info(f"    {k}: {len(v)} items")
 
-            shipments = events.get("ShipmentEventList", [])
-            refunds = events.get("RefundEventList", [])
-            adjustments = events.get("AdjustmentEventList", [])
+            shipments = events.get("ShipmentEventList", []) or []
+            refunds = events.get("RefundEventList", []) or []
+            adjustments = events.get("AdjustmentEventList", []) or []
             all_shipment_events.extend(shipments)
             all_refund_events.extend(refunds)
             # AdjustmentEventList often contains return-related adjustments
             for adj in adjustments:
-                adj_type = adj.get("AdjustmentType", "")
-                if "return" in adj_type.lower() or "refund" in adj_type.lower() or "reversal" in adj_type.lower():
+                adj_type = adj.get("AdjustmentType", "") if isinstance(adj, dict) else getattr(adj, "AdjustmentType", "")
+                adj_type_str = str(adj_type or "").lower()
+                if "return" in adj_type_str or "refund" in adj_type_str or "reversal" in adj_type_str:
                     all_refund_events.append(adj)
             logger.info(f"  Financial events page {page}: {len(shipments)} shipments, {len(refunds)} refunds, {len(adjustments)} adjustments")
 
@@ -471,10 +472,49 @@ def _run_sp_api_sync():
         fin_records = 0
 
         # Helper: Amazon uses CurrencyAmount (not Amount) in money objects
+        # sp_api may return model objects, dicts, Decimals, or strings
         def _money(amt_obj):
-            if not isinstance(amt_obj, dict):
+            if amt_obj is None:
                 return 0.0
-            return float(amt_obj.get("CurrencyAmount", amt_obj.get("Amount", 0)) or 0)
+            # Plain dict
+            if isinstance(amt_obj, dict):
+                return float(amt_obj.get("CurrencyAmount", amt_obj.get("Amount", 0)) or 0)
+            # sp_api model object (has attributes instead of dict keys)
+            if hasattr(amt_obj, "CurrencyAmount"):
+                try:
+                    return float(amt_obj.CurrencyAmount or 0)
+                except Exception:
+                    pass
+            if hasattr(amt_obj, "Amount"):
+                try:
+                    return float(amt_obj.Amount or 0)
+                except Exception:
+                    pass
+            # Already a number (Decimal, float, int)
+            try:
+                return float(amt_obj)
+            except Exception:
+                return 0.0
+
+        # Helper: extract string date from PostedDate (may be str or datetime)
+        def _posted_date_str(pd_val):
+            if pd_val is None:
+                return None
+            if isinstance(pd_val, str):
+                return pd_val[:10] if len(pd_val) >= 10 else pd_val
+            # datetime object
+            if hasattr(pd_val, 'strftime'):
+                return pd_val.strftime("%Y-%m-%d")
+            return str(pd_val)[:10]
+
+        # Helper: safely get dict-like value (works for dicts AND sp_api model objects)
+        def _safe_get(obj, key, default=None):
+            if obj is None:
+                return default
+            if isinstance(obj, dict):
+                return obj.get(key, default)
+            # sp_api model object — try attribute access
+            return getattr(obj, key, default)
 
         # Clear old financial events for re-sync (avoids duplicates without needing PK)
         try:
@@ -485,30 +525,43 @@ def _run_sp_api_sync():
             logger.warning(f"  Could not clear old financial_events: {e}")
 
         # Process shipment events (sales fees)
+        first_shipment_logged = False
         for event in all_shipment_events:
-            order_id = event.get("AmazonOrderId", "")
-            posted_date = event.get("PostedDate", "")
+            order_id = _safe_get(event, "AmazonOrderId", "")
+            posted_date = _safe_get(event, "PostedDate", "")
+            date_str = _posted_date_str(posted_date)
 
-            for item in event.get("ShipmentItemList", []):
-                sku = item.get("SellerSKU", "")
-                asin_val = item.get("ASIN", sku)
+            for item in (_safe_get(event, "ShipmentItemList") or []):
+                sku = _safe_get(item, "SellerSKU", "")
+                asin_val = _safe_get(item, "ASIN", sku)
 
                 product_charges = 0.0
                 shipping_ch = 0.0
-                for c in item.get("ItemChargeList", []):
-                    val = _money(c.get("ChargeAmount", {}))
-                    ct = c.get("ChargeType", "")
+                charge_list = _safe_get(item, "ItemChargeList") or []
+                for c in charge_list:
+                    val = _money(_safe_get(c, "ChargeAmount"))
+                    ct = _safe_get(c, "ChargeType", "")
                     if ct == "Principal":
                         product_charges += val
                     elif ct in ("ShippingCharge", "Shipping"):
                         shipping_ch += val
 
+                # Log first shipment's charge structure for debugging
+                if not first_shipment_logged and charge_list:
+                    first_c = charge_list[0]
+                    ca = _safe_get(first_c, "ChargeAmount")
+                    logger.info(f"  DEBUG charge structure: type={type(first_c).__name__}, "
+                               f"ChargeAmount type={type(ca).__name__}, "
+                               f"ChargeAmount value={ca}, "
+                               f"parsed_val={_money(ca)}")
+                    first_shipment_logged = True
+
                 fba_fees_val = 0.0
                 commission_val = 0.0
                 other_val = 0.0
-                for f in item.get("ItemFeeList", []):
-                    val = abs(_money(f.get("FeeAmount", {})))
-                    ft = f.get("FeeType", "")
+                for f in (_safe_get(item, "ItemFeeList") or []):
+                    val = abs(_money(_safe_get(f, "FeeAmount")))
+                    ft = _safe_get(f, "FeeType", "")
                     if "FBA" in ft or "Fulfillment" in ft:
                         fba_fees_val += val
                     elif ft in ("Commission", "ReferralFee"):
@@ -517,8 +570,8 @@ def _run_sp_api_sync():
                         other_val += val
 
                 promo_val = 0.0
-                for p in item.get("PromotionList", []):
-                    promo_val += _money(p.get("PromotionAmount", {}))
+                for p in (_safe_get(item, "PromotionList") or []):
+                    promo_val += _money(_safe_get(p, "PromotionAmount"))
 
                 net = product_charges + shipping_ch - fba_fees_val - commission_val + promo_val
 
@@ -530,8 +583,7 @@ def _run_sp_api_sync():
                          commission, promotion_amount, other_fees, net_proceeds)
                         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     """, [
-                        posted_date[:10] if posted_date else None,
-                        asin_val, sku, order_id, "Shipment",
+                        date_str, asin_val, sku, order_id, "Shipment",
                         product_charges, shipping_ch,
                         fba_fees_val, commission_val, promo_val, other_val, net
                     ])
@@ -540,35 +592,50 @@ def _run_sp_api_sync():
                     logger.warning(f"  Shipment insert error: {ins_err}")
 
         # Process refund events (from RefundEventList + return-related AdjustmentEventList)
+        first_refund_logged = False
         for event in all_refund_events:
-            order_id = event.get("AmazonOrderId", "")
-            posted_date = event.get("PostedDate", "")
+            order_id = _safe_get(event, "AmazonOrderId", "")
+            posted_date = _safe_get(event, "PostedDate", "")
+            date_str = _posted_date_str(posted_date)
 
             # Try multiple possible item list keys (different event types use different keys)
-            item_list = (event.get("ShipmentItemAdjustmentList")
-                        or event.get("ShipmentItemList")
-                        or event.get("AdjustmentItemList")
+            item_list = (_safe_get(event, "ShipmentItemAdjustmentList")
+                        or _safe_get(event, "ShipmentItemList")
+                        or _safe_get(event, "AdjustmentItemList")
                         or [])
+
+            if not first_refund_logged:
+                logger.info(f"  DEBUG refund event keys: {list(event.keys()) if isinstance(event, dict) else dir(event)}")
+                logger.info(f"  DEBUG refund item_list length: {len(item_list)}, type: {type(item_list).__name__}")
+                if item_list:
+                    first_item = item_list[0]
+                    logger.info(f"  DEBUG refund first item keys: {list(first_item.keys()) if isinstance(first_item, dict) else 'model'}")
+                first_refund_logged = True
+
             for item in item_list:
-                sku = item.get("SellerSKU", "")
-                asin_val = item.get("ASIN", sku)
+                sku = _safe_get(item, "SellerSKU", "")
+                asin_val = _safe_get(item, "ASIN", sku)
 
                 refund_amount = 0.0
                 refund_fba = 0.0
                 refund_comm = 0.0
                 refund_other = 0.0
-                for c in item.get("ItemChargeAdjustmentList", item.get("ItemChargeList", [])):
-                    val = _money(c.get("ChargeAmount", {}))
-                    ct = c.get("ChargeType", "")
+                charge_adj_list = (_safe_get(item, "ItemChargeAdjustmentList")
+                                  or _safe_get(item, "ItemChargeList") or [])
+                for c in charge_adj_list:
+                    val = _money(_safe_get(c, "ChargeAmount"))
+                    ct = _safe_get(c, "ChargeType", "")
                     if ct == "Principal":
                         refund_amount += val
                     else:
                         refund_other += abs(val)
 
                 # Also capture fee adjustments for refunds
-                for f in item.get("ItemFeeAdjustmentList", item.get("ItemFeeList", [])):
-                    val = _money(f.get("FeeAmount", {}))
-                    ft = f.get("FeeType", "")
+                fee_adj_list = (_safe_get(item, "ItemFeeAdjustmentList")
+                               or _safe_get(item, "ItemFeeList") or [])
+                for f in fee_adj_list:
+                    val = _money(_safe_get(f, "FeeAmount"))
+                    ft = _safe_get(f, "FeeType", "")
                     if "FBA" in ft or "Fulfillment" in ft:
                         refund_fba += abs(val)
                     elif ft in ("Commission", "ReferralFee"):
@@ -582,7 +649,7 @@ def _run_sp_api_sync():
                          commission, promotion_amount, other_fees, net_proceeds)
                         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     """, [
-                        posted_date[:10] if posted_date else None,
+                        date_str,
                         asin_val, sku, order_id, "Refund",
                         abs(refund_amount), 0, refund_fba, refund_comm, 0, refund_other,
                         abs(refund_amount)
@@ -2250,31 +2317,68 @@ def debug_financial_events():
 
         summary = {}
         sample_charge = None
+        type_debug = {}  # Shows Python types for debugging
         for k, v in events.items():
             if isinstance(v, list):
                 summary[k] = len(v)
                 # Grab a sample charge structure from first shipment
                 if k == "ShipmentEventList" and len(v) > 0 and not sample_charge:
-                    items = v[0].get("ShipmentItemList", [])
+                    first_event = v[0]
+                    type_debug["shipment_event_type"] = type(first_event).__name__
+                    items = first_event.get("ShipmentItemList", []) if isinstance(first_event, dict) else getattr(first_event, "ShipmentItemList", [])
                     if items:
-                        charges = items[0].get("ItemChargeList", [])
+                        first_item = items[0]
+                        type_debug["shipment_item_type"] = type(first_item).__name__
+                        charges = first_item.get("ItemChargeList", []) if isinstance(first_item, dict) else getattr(first_item, "ItemChargeList", [])
                         if charges:
-                            sample_charge = charges[0]
+                            first_charge = charges[0]
+                            type_debug["charge_type"] = type(first_charge).__name__
+                            ca = first_charge.get("ChargeAmount", None) if isinstance(first_charge, dict) else getattr(first_charge, "ChargeAmount", None)
+                            type_debug["charge_amount_type"] = type(ca).__name__
+                            type_debug["charge_amount_value"] = str(ca)
+                            type_debug["charge_amount_is_dict"] = isinstance(ca, dict)
+                            type_debug["charge_amount_has_attr"] = hasattr(ca, "CurrencyAmount")
+                            sample_charge = first_charge
+                            # Try to get the actual parsed value
+                            if isinstance(ca, dict):
+                                type_debug["parsed_amount"] = float(ca.get("CurrencyAmount", 0) or 0)
+                            elif hasattr(ca, "CurrencyAmount"):
+                                type_debug["parsed_amount"] = float(ca.CurrencyAmount or 0)
+                            else:
+                                type_debug["parsed_amount"] = f"unparseable: {ca}"
+
+                        fees = first_item.get("ItemFeeList", []) if isinstance(first_item, dict) else getattr(first_item, "ItemFeeList", [])
+                        if fees:
+                            first_fee = fees[0]
+                            fa = first_fee.get("FeeAmount", None) if isinstance(first_fee, dict) else getattr(first_fee, "FeeAmount", None)
+                            type_debug["fee_amount_type"] = type(fa).__name__
+                            type_debug["fee_amount_value"] = str(fa)
+
+                    # Check PostedDate type
+                    pd = first_event.get("PostedDate", None) if isinstance(first_event, dict) else getattr(first_event, "PostedDate", None)
+                    type_debug["posted_date_type"] = type(pd).__name__
+                    type_debug["posted_date_value"] = str(pd)[:30]
+
                 if k == "RefundEventList" and len(v) > 0:
                     first = v[0]
-                    summary["refund_sample_keys"] = list(first.keys())
-                    summary["refund_sample_order_id"] = first.get("AmazonOrderId", "N/A")
-                    adj_items = first.get("ShipmentItemAdjustmentList", [])
+                    summary["refund_sample_keys"] = list(first.keys()) if isinstance(first, dict) else [a for a in dir(first) if not a.startswith('_')]
+                    summary["refund_sample_order_id"] = first.get("AmazonOrderId", "N/A") if isinstance(first, dict) else getattr(first, "AmazonOrderId", "N/A")
+                    adj_items = (first.get("ShipmentItemAdjustmentList", []) if isinstance(first, dict)
+                                else getattr(first, "ShipmentItemAdjustmentList", [])) or []
                     if adj_items:
-                        adj_charges = adj_items[0].get("ItemChargeAdjustmentList", [])
+                        first_adj = adj_items[0]
+                        adj_charges = (first_adj.get("ItemChargeAdjustmentList", []) if isinstance(first_adj, dict)
+                                      else getattr(first_adj, "ItemChargeAdjustmentList", [])) or []
                         summary["refund_sample_charge"] = adj_charges[0] if adj_charges else "no charges"
+                        summary["refund_item_type"] = type(first_adj).__name__
             else:
                 summary[k] = str(v)[:100]
 
         # Also check what's in the DB
         con = duckdb.connect(str(DB_PATH), read_only=False)
         db_counts = con.execute("""
-            SELECT event_type, COUNT(*), SUM(ABS(product_charges))
+            SELECT event_type, COUNT(*), SUM(ABS(product_charges)),
+                   SUM(ABS(fba_fees)), SUM(ABS(commission))
             FROM financial_events
             GROUP BY event_type
         """).fetchall()
@@ -2287,8 +2391,10 @@ def debug_financial_events():
             "payload_keys": list(payload.keys()),
             "event_type_counts": summary,
             "sample_charge_object": sample_charge,
+            "type_debug": type_debug,
             "has_next_page": has_next,
-            "db_records": [{"type": r[0], "count": r[1], "total_charges": round(r[2], 2)} for r in db_counts]
+            "db_records": [{"type": r[0], "count": r[1], "total_charges": round(r[2], 2),
+                           "fba_fees": round(r[3], 2), "commission": round(r[4], 2)} for r in db_counts]
         }
     except Exception as e:
         import traceback
@@ -3381,6 +3487,218 @@ def get_warehouse():
     masters.sort(key=lambda m: (0 if m["asin"] else 1, -m["totalOnHand"]))
 
     return {"masters": masters, "count": len(masters)}
+
+
+# ── Excel Upload: Refresh Warehouse + Item Master from Excel ────────────
+
+@app.post("/api/upload/warehouse-excel")
+async def upload_warehouse_excel(file: UploadFile = File(...)):
+    """Upload an Excel file to refresh warehouse data and optionally item master.
+
+    Looks for sheets named 'Raw Warehouse Data' and 'Item Master'.
+    Parses each into the corresponding CSV file (warehouse.csv, item_master.csv).
+    Returns a summary of what was updated.
+    """
+    try:
+        import openpyxl
+    except ImportError:
+        raise HTTPException(status_code=500, detail="openpyxl not installed. Add it to requirements.txt.")
+
+    # Save upload temporarily
+    import tempfile
+    tmp_path = None
+    try:
+        contents = await file.read()
+        with tempfile.NamedTemporaryFile(delete=False, suffix=".xlsx") as tmp:
+            tmp.write(contents)
+            tmp_path = tmp.name
+
+        wb = openpyxl.load_workbook(tmp_path, data_only=True)
+        result = {"filename": file.filename, "sheets_found": list(wb.sheetnames)}
+
+        # ── Parse Raw Warehouse Data ──
+        wh_sheet_name = None
+        for name in wb.sheetnames:
+            if "warehouse" in name.lower() or "raw" in name.lower():
+                wh_sheet_name = name
+                break
+
+        if wh_sheet_name:
+            ws = wb[wh_sheet_name]
+            rows = list(ws.iter_rows(values_only=True))
+            if len(rows) > 1:
+                headers = [str(h or "").strip() for h in rows[0]]
+                # Map Excel headers to our CSV column names
+                col_map = {}
+                for i, h in enumerate(headers):
+                    hl = h.lower().replace(" ", "_").replace("-", "_")
+                    if hl == "item_number" or hl == "item_no" or hl == "item":
+                        col_map["item_number"] = i
+                    elif hl == "description" or hl == "desc":
+                        col_map["description"] = i
+                    elif hl == "pack":
+                        col_map["pack"] = i
+                    elif hl in ("on_hand", "on hand", "oh"):
+                        col_map["on_hand"] = i
+                    elif hl in ("damage", "damaged", "dam"):
+                        col_map["damage"] = i
+                    elif hl in ("qc_hold", "qc hold", "qchold"):
+                        col_map["qc_hold"] = i
+                    elif hl in ("pcs_on_hand", "pcs on hand", "pcs_on_hand"):
+                        col_map["pcs_on_hand"] = i
+                    elif hl in ("pcs_allocated", "pcs allocated", "pcs_alloc"):
+                        col_map["pcs_allocated"] = i
+                    elif hl in ("pcs_available", "pcs available", "pcs_avail"):
+                        col_map["pcs_available"] = i
+                    elif hl in ("item_ref", "item ref", "itemref"):
+                        col_map["item_ref"] = i
+
+                # Auto-detect column positions by header name patterns
+                # Also try exact header match as fallback
+                header_exact = {h.strip(): i for i, h in enumerate(headers)}
+                for csv_col, excel_header in [
+                    ("item_number", "Item Number"), ("description", "Description"),
+                    ("pack", "Pack"), ("on_hand", "On-Hand"),
+                    ("damage", "Damage"), ("qc_hold", "QC Hold"),
+                    ("pcs_on_hand", "Pcs On-Hand"), ("pcs_allocated", "Pcs Allocated"),
+                    ("pcs_available", "Pcs Available"), ("item_ref", "Item Ref"),
+                ]:
+                    if csv_col not in col_map and excel_header in header_exact:
+                        col_map[csv_col] = header_exact[excel_header]
+
+                logger.info(f"  Warehouse Excel: {len(rows)-1} data rows, mapped columns: {col_map}")
+
+                # Filter to GG-prefix items and write CSV
+                wh_rows = []
+                for row in rows[1:]:
+                    item_num = str(row[col_map.get("item_number", 0)] or "").strip()
+                    if not item_num.startswith("GG"):
+                        continue
+                    wh_rows.append({
+                        "item_number": item_num,
+                        "description": str(row[col_map.get("description", 1)] or "").strip(),
+                        "pack": int(float(row[col_map.get("pack", 2)] or 1)),
+                        "on_hand": int(float(row[col_map.get("on_hand", 3)] or 0)),
+                        "damage": int(float(row[col_map.get("damage", 5)] or 0)),
+                        "qc_hold": int(float(row[col_map.get("qc_hold", 7)] or 0)),
+                        "pcs_on_hand": int(float(row[col_map.get("pcs_on_hand", 8)] or 0)),
+                        "pcs_allocated": int(float(row[col_map.get("pcs_allocated", 9)] or 0)),
+                        "pcs_available": int(float(row[col_map.get("pcs_available", 10)] or 0)),
+                        "item_ref": str(row[col_map.get("item_ref", 11)] or "").strip(),
+                    })
+
+                if wh_rows:
+                    fieldnames = ["item_number", "description", "pack", "on_hand", "damage",
+                                 "qc_hold", "pcs_on_hand", "pcs_allocated", "pcs_available", "item_ref"]
+                    with open(WAREHOUSE_PATH, "w", newline="", encoding="utf-8") as f:
+                        writer = csv.DictWriter(f, fieldnames=fieldnames)
+                        writer.writeheader()
+                        writer.writerows(wh_rows)
+                    result["warehouse"] = {"status": "updated", "rows": len(wh_rows)}
+                    logger.info(f"  Warehouse CSV refreshed: {len(wh_rows)} items")
+                else:
+                    result["warehouse"] = {"status": "no_gg_items_found", "rows": 0}
+        else:
+            result["warehouse"] = {"status": "sheet_not_found"}
+
+        # ── Parse Item Master (if present) ──
+        im_sheet_name = None
+        for name in wb.sheetnames:
+            if "item master" in name.lower() or "itemmaster" in name.lower():
+                im_sheet_name = name
+                break
+
+        if im_sheet_name:
+            ws = wb[im_sheet_name]
+            rows = list(ws.iter_rows(values_only=True))
+            if len(rows) > 1:
+                headers = [str(h or "").strip() for h in rows[0]]
+                # Check if this looks like our item master format
+                header_lower = [h.lower() for h in headers]
+                has_asin = any("asin" in h for h in header_lower)
+                has_sku = any("sku" in h or "item" in h for h in header_lower)
+
+                if has_asin or has_sku:
+                    # Load existing item master to merge/update
+                    existing = load_item_master()
+                    existing_by_sku = {i.get("sku", ""): i for i in existing}
+
+                    # Find column positions
+                    hmap = {h.lower().strip(): i for i, h in enumerate(headers)}
+                    asin_col = next((i for h, i in hmap.items() if "asin" in h), None)
+                    sku_col = next((i for h, i in hmap.items() if "sku" in h or h == "item number"), None)
+                    name_col = next((i for h, i in hmap.items() if "product" in h or "name" in h), None)
+                    color_col = next((i for h, i in hmap.items() if "color" in h), None)
+
+                    updated_count = 0
+                    for row in rows[1:]:
+                        sku_val = str(row[sku_col] or "").strip() if sku_col is not None else ""
+                        if not sku_val or not sku_val.startswith("GG"):
+                            continue
+                        if sku_val in existing_by_sku:
+                            # Update product name and color if present in Excel
+                            if name_col is not None and row[name_col]:
+                                existing_by_sku[sku_val]["productName"] = str(row[name_col]).strip()
+                            if color_col is not None and row[color_col]:
+                                existing_by_sku[sku_val]["color"] = str(row[color_col]).strip()
+                            updated_count += 1
+
+                    if updated_count > 0:
+                        save_item_master(list(existing_by_sku.values()))
+                    result["itemMaster"] = {"status": "updated", "matched": updated_count}
+                else:
+                    result["itemMaster"] = {"status": "unrecognized_format"}
+        else:
+            result["itemMaster"] = {"status": "sheet_not_found"}
+
+        wb.close()
+        return result
+
+    except Exception as e:
+        import traceback
+        logger.error(f"Excel upload error: {traceback.format_exc()}")
+        raise HTTPException(status_code=500, detail=str(e))
+    finally:
+        if tmp_path:
+            try:
+                os.unlink(tmp_path)
+            except Exception:
+                pass
+
+
+@app.post("/api/refresh-warehouse")
+async def refresh_warehouse_from_file():
+    """Check for a dropped Excel file in the data directory and refresh warehouse data.
+
+    Looks for any .xlsx file in /data/ that contains a 'Raw Warehouse Data' sheet.
+    This allows users to drop an Excel file into the data folder and hit this endpoint.
+    """
+    try:
+        import openpyxl
+    except ImportError:
+        raise HTTPException(status_code=500, detail="openpyxl not installed")
+
+    # Look for Excel files in the data directory
+    xlsx_files = sorted(DB_DIR.glob("*.xlsx"), key=lambda f: f.stat().st_mtime, reverse=True)
+    if not xlsx_files:
+        return {"status": "no_xlsx_found", "data_dir": str(DB_DIR)}
+
+    # Use the most recently modified Excel file
+    excel_path = xlsx_files[0]
+    logger.info(f"  Found Excel file for warehouse refresh: {excel_path.name}")
+
+    # Re-use the upload logic by calling it with the file
+    from starlette.datastructures import UploadFile as StarletteUpload
+    from io import BytesIO
+
+    with open(excel_path, "rb") as f:
+        content = f.read()
+
+    # Create a mock UploadFile
+    mock_file = UploadFile(filename=excel_path.name, file=BytesIO(content))
+    result = await upload_warehouse_excel(mock_file)
+    result["source_file"] = excel_path.name
+    return result
 
 
 # ── Static Frontend ────────────────────────────────────────
