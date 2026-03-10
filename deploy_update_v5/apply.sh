@@ -24,6 +24,13 @@ echo "✓ requirements.txt updated"
 cp deploy_update_v5/Dockerfile ./Dockerfile
 echo "✓ Dockerfile updated"
 
+# Sync built frontend dist to where Dockerfile expects it
+if [ -d "webapp/frontend/dist" ]; then
+  rm -rf webapp/backend/dist
+  cp -r webapp/frontend/dist webapp/backend/dist
+  echo "✓ Frontend dist synced to webapp/backend/dist"
+fi
+
 echo ""
 echo "=== Done! Now run: ==="
 echo "  git add -A && git commit -m 'feat: YoY 12mo chart, conv vs AUR, color mix, products donut, fin events pagination' && git push origin main"

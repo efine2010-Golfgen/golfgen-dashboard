@@ -362,35 +362,44 @@ def _run_sp_api_sync():
     # ── 2. FINANCIAL EVENTS (actual fees, refunds, promos) ──────
     try:
         from sp_api.api import Finances as FinancesAPI
+        from sp_api.util import load_all_pages, throttle_retry
         logger.info("  Pulling financial events (fees, refunds)...")
 
         fin_start = (datetime.utcnow() - timedelta(days=90)).strftime("%Y-%m-%dT%H:%M:%SZ")
         finances = FinancesAPI(credentials=credentials, marketplace=Marketplaces.US)
 
-        # Paginate through all financial events
+        # Use load_all_pages for proper pagination
         all_shipment_events = []
         all_refund_events = []
-        next_token = None
         page = 0
-        while True:
-            page += 1
-            kwargs = dict(PostedAfter=fin_start, MaxResultsPerPage=100)
-            if next_token:
-                kwargs["NextToken"] = next_token
-            response = finances.list_financial_events(**kwargs)
-            events = response.payload.get("FinancialEvents", {})
 
-            shipments = events.get("ShipmentEventList", [])
-            refunds = events.get("RefundEventList", [])
-            all_shipment_events.extend(shipments)
-            all_refund_events.extend(refunds)
+        @load_all_pages()
+        def _fetch_financial_events(**kwargs):
+            return finances.list_financial_events(**kwargs)
 
-            next_token = response.payload.get("NextToken")
-            logger.info(f"  Financial events page {page}: {len(shipments)} shipments, {len(refunds)} refunds, next={bool(next_token)}")
-            if not next_token or page >= 20:
-                break
-            import time as _t2
-            _t2.sleep(0.5)
+        try:
+            for resp_page in _fetch_financial_events(PostedAfter=fin_start, MaxResultsPerPage=100):
+                page += 1
+                events = resp_page.payload.get("FinancialEvents", {})
+
+                # Log ALL event type keys for debugging
+                if page == 1:
+                    logger.info(f"  Financial events keys (page 1): {list(events.keys()) if events else 'EMPTY'}")
+                    # Also log raw response keys at top level
+                    logger.info(f"  Raw payload keys: {list(resp_page.payload.keys())}")
+
+                shipments = events.get("ShipmentEventList", [])
+                refunds = events.get("RefundEventList", [])
+                all_shipment_events.extend(shipments)
+                all_refund_events.extend(refunds)
+                logger.info(f"  Financial events page {page}: {len(shipments)} shipments, {len(refunds)} refunds")
+
+                if page >= 20:
+                    break
+        except Exception as page_err:
+            logger.error(f"  Financial events pagination error: {page_err}")
+            import traceback
+            logger.error(traceback.format_exc())
 
         logger.info(f"  Total financial events: {len(all_shipment_events)} shipments, {len(all_refund_events)} refunds")
         con = duckdb.connect(str(DB_PATH), read_only=False)
