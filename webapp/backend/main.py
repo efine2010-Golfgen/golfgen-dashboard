@@ -1692,10 +1692,10 @@ def _build_product_list(con, cutoff: str) -> list:
                COALESCE(SUM(sessions), 0) AS sessions,
                COALESCE(SUM(total_order_items), 0) AS orders
         FROM daily_sales
-        WHERE asin != 'ALL'
+        WHERE asin != 'ALL' AND date >= ?
         GROUP BY asin
         ORDER BY SUM(ordered_product_sales) DESC
-    """).fetchall()
+    """, [cutoff]).fetchall()
 
     # Financial data (actual fees if available)
     fin_rows = con.execute("""
@@ -1703,8 +1703,9 @@ def _build_product_list(con, cutoff: str) -> list:
                SUM(ABS(fba_fees)) AS fba_fees,
                SUM(ABS(commission)) AS commission
         FROM financial_events
+        WHERE date >= ?
         GROUP BY asin
-    """).fetchall()
+    """, [cutoff]).fetchall()
     fin_by_asin = {r[0]: {"fba_fees": r[1], "commission": r[2]} for r in fin_rows}
 
     products = []
