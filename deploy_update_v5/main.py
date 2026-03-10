@@ -152,6 +152,24 @@ def _sync_today_orders():
         today_str = (datetime.utcnow() - timedelta(hours=7)).strftime("%Y-%m-%d")
         yesterday_str = (datetime.utcnow() - timedelta(hours=7) - timedelta(days=1)).strftime("%Y-%m-%d")
 
+        # Build ASIN price lookup from historical data for fallback
+        asin_prices = {}
+        try:
+            price_rows = con.execute("""
+                SELECT asin,
+                       SUM(ordered_product_sales) / NULLIF(SUM(units_ordered), 0) AS avg_price
+                FROM daily_sales
+                WHERE asin != 'ALL' AND units_ordered > 0
+                  AND date >= (CURRENT_DATE - INTERVAL '90' DAY)
+                GROUP BY asin
+            """).fetchall()
+            for pr in price_rows:
+                if pr[1] and pr[1] > 0:
+                    asin_prices[pr[0]] = float(pr[1])
+        except Exception:
+            pass
+        logger.info(f"  ASIN price fallback: {len(asin_prices)} ASINs with known prices")
+
         items_fetched = 0
         items_failed = 0
         burst_count = 0
@@ -188,19 +206,30 @@ def _sync_today_orders():
                 total_from_items = 0.0
                 total_qty = 0
                 for item in item_list:
-                    # ItemPrice is the total for this line (price × qty)
-                    price = item.get("ItemPrice")
-                    if price and isinstance(price, dict):
-                        amt_str = price.get("Amount", "0")
-                        try:
-                            total_from_items += float(amt_str)
-                        except (ValueError, TypeError):
-                            pass
+                    asin = item.get("ASIN", "")
                     qty = 0
                     try:
                         qty = int(item.get("QuantityOrdered", 0))
                     except (ValueError, TypeError):
                         pass
+
+                    # ItemPrice is the total for this line (price × qty)
+                    price = item.get("ItemPrice")
+                    item_amount = 0.0
+                    if price and isinstance(price, dict):
+                        amt_str = price.get("Amount", "0")
+                        try:
+                            item_amount = float(amt_str)
+                        except (ValueError, TypeError):
+                            pass
+
+                    # Fallback: if ItemPrice is 0 or missing (Pending orders),
+                    # use historical average price for this ASIN
+                    if item_amount == 0 and qty > 0 and asin in asin_prices:
+                        item_amount = round(asin_prices[asin] * qty, 2)
+                        logger.info(f"    {order_id}: used fallback price for {asin} = ${item_amount:.2f} ({qty} × ${asin_prices[asin]:.2f})")
+
+                    total_from_items += item_amount
                     total_qty += qty
 
                 # Always use item-level total (more accurate than OrderTotal)
@@ -1487,6 +1516,71 @@ def ads_negative_keywords():
     ]
 
     return {"negativeKeywords": keywords}
+
+
+# ── Debug: Today Orders ────────────────────────────────────
+
+@app.get("/api/debug/today-orders")
+def debug_today_orders():
+    """Show raw order data for today to debug pricing issues."""
+    try:
+        from sp_api.api import Orders as OrdersAPI
+        from sp_api.base import Marketplaces
+        import time as _t
+
+        creds = _load_sp_api_credentials()
+        orders_api = OrdersAPI(credentials=creds, marketplace=Marketplaces.US)
+
+        today_str = (datetime.utcnow() - timedelta(hours=7)).strftime("%Y-%m-%d")
+        after_date = (datetime.utcnow() - timedelta(days=1)).isoformat()
+
+        response = orders_api.get_orders(
+            CreatedAfter=after_date,
+            MarketplaceIds=["ATVPDKIKX0DER"],
+            MaxResultsPerPage=50
+        )
+        order_list = response.payload.get("Orders", [])
+
+        results = []
+        for order in order_list[:10]:  # limit to 10
+            order_id = order.get("AmazonOrderId")
+            status = order.get("OrderStatus")
+            purchase_date = order.get("PurchaseDate", "")
+            order_total = order.get("OrderTotal", {})
+
+            # Try to get items
+            items_info = []
+            try:
+                _t.sleep(0.5)
+                items_resp = orders_api.get_order_items(order_id)
+                for item in items_resp.payload.get("OrderItems", []):
+                    items_info.append({
+                        "asin": item.get("ASIN"),
+                        "title": (item.get("Title") or "")[:60],
+                        "qty": item.get("QuantityOrdered"),
+                        "ItemPrice": item.get("ItemPrice"),
+                        "ItemTax": item.get("ItemTax"),
+                        "PromotionDiscount": item.get("PromotionDiscount"),
+                    })
+            except Exception as e:
+                items_info = [{"error": str(e)}]
+
+            results.append({
+                "order_id": order_id,
+                "status": status,
+                "purchase_date": purchase_date,
+                "OrderTotal": order_total,
+                "items": items_info,
+            })
+
+        return {
+            "today_pacific": today_str,
+            "total_orders_fetched": len(order_list),
+            "sample_orders": results,
+        }
+    except Exception as e:
+        import traceback
+        return {"error": str(e), "traceback": traceback.format_exc()}
 
 
 # ── Debug: Financial Events ───────────────────────────────
