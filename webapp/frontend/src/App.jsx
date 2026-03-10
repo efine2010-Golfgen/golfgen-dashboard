@@ -13,14 +13,17 @@ export default function App() {
         <header className="header">
           <div className="header-inner">
             <div className="header-left">
-              <div className="brand-logo">
-                <span className="golf">Golf</span>
-                <span className="gen">Gen</span>
+              <div style={{ display: "flex", flexDirection: "column" }}>
+                <div className="brand-logo">
+                  <span className="golf">Golf</span>
+                  <span className="gen">Gen</span>
+                </div>
+                <div className="brand-tagline">Golf for everyone. Seriously everyone.</div>
               </div>
               <div className="brand-divider" />
               <div className="brand-title">
                 <h1>Amazon FBA Dashboard</h1>
-                <p>PGA Tour Licensed &bull; SP-API Analytics</p>
+                <p>PGA TOUR Licensed &bull; SP-API Analytics</p>
               </div>
             </div>
             <div className="header-right">
