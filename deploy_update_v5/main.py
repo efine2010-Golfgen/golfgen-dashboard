@@ -160,7 +160,7 @@ def _sync_today_orders():
                        SUM(ordered_product_sales) / NULLIF(SUM(units_ordered), 0) AS avg_price
                 FROM daily_sales
                 WHERE asin != 'ALL' AND units_ordered > 0
-                  AND date >= (CURRENT_DATE - INTERVAL '90' DAY)
+                  AND date >= CURRENT_DATE - 90
                 GROUP BY asin
             """).fetchall()
             for pr in price_rows:
