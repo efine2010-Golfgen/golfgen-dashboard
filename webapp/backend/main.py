@@ -381,6 +381,29 @@ def _run_sp_api_sync():
     logger.info("Starting SP-API background sync...")
     import time, gzip, requests as req
 
+    # ── Ensure financial_events table exists ──────────────────────
+    try:
+        _con = duckdb.connect(str(DB_PATH), read_only=False)
+        _con.execute("""
+            CREATE TABLE IF NOT EXISTS financial_events (
+                date DATE,
+                asin VARCHAR,
+                sku VARCHAR,
+                order_id VARCHAR,
+                event_type VARCHAR,
+                product_charges DOUBLE DEFAULT 0,
+                shipping_charges DOUBLE DEFAULT 0,
+                fba_fees DOUBLE DEFAULT 0,
+                commission DOUBLE DEFAULT 0,
+                promotion_amount DOUBLE DEFAULT 0,
+                other_fees DOUBLE DEFAULT 0,
+                net_proceeds DOUBLE DEFAULT 0
+            )
+        """)
+        _con.close()
+    except Exception as e:
+        logger.warning(f"  Could not ensure financial_events table: {e}")
+
     # ── 1. TODAY'S ORDERS (fast, real-time) ──────────────────────
     global _last_today_sync
     import time as _time
@@ -428,9 +451,15 @@ def _run_sp_api_sync():
 
             shipments = events.get("ShipmentEventList", [])
             refunds = events.get("RefundEventList", [])
+            adjustments = events.get("AdjustmentEventList", [])
             all_shipment_events.extend(shipments)
             all_refund_events.extend(refunds)
-            logger.info(f"  Financial events page {page}: {len(shipments)} shipments, {len(refunds)} refunds")
+            # AdjustmentEventList often contains return-related adjustments
+            for adj in adjustments:
+                adj_type = adj.get("AdjustmentType", "")
+                if "return" in adj_type.lower() or "refund" in adj_type.lower() or "reversal" in adj_type.lower():
+                    all_refund_events.append(adj)
+            logger.info(f"  Financial events page {page}: {len(shipments)} shipments, {len(refunds)} refunds, {len(adjustments)} adjustments")
 
             # Check for next page
             next_token = payload.get("NextToken")
@@ -446,6 +475,14 @@ def _run_sp_api_sync():
             if not isinstance(amt_obj, dict):
                 return 0.0
             return float(amt_obj.get("CurrencyAmount", amt_obj.get("Amount", 0)) or 0)
+
+        # Clear old financial events for re-sync (avoids duplicates without needing PK)
+        try:
+            cutoff_date = (datetime.utcnow() - timedelta(days=90)).strftime("%Y-%m-%d")
+            con.execute("DELETE FROM financial_events WHERE date >= ?", [cutoff_date])
+            logger.info(f"  Cleared financial_events from {cutoff_date} for re-sync")
+        except Exception as e:
+            logger.warning(f"  Could not clear old financial_events: {e}")
 
         # Process shipment events (sales fees)
         for event in all_shipment_events:
@@ -485,48 +522,78 @@ def _run_sp_api_sync():
 
                 net = product_charges + shipping_ch - fba_fees_val - commission_val + promo_val
 
-                con.execute("""
-                    INSERT OR REPLACE INTO financial_events
-                    (date, asin, sku, order_id, event_type,
-                     product_charges, shipping_charges, fba_fees,
-                     commission, promotion_amount, other_fees, net_proceeds)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                """, [
-                    posted_date[:10] if posted_date else None,
-                    asin_val, sku, order_id, "Shipment",
-                    product_charges, shipping_ch,
-                    fba_fees_val, commission_val, promo_val, other_val, net
-                ])
-                fin_records += 1
+                try:
+                    con.execute("""
+                        INSERT INTO financial_events
+                        (date, asin, sku, order_id, event_type,
+                         product_charges, shipping_charges, fba_fees,
+                         commission, promotion_amount, other_fees, net_proceeds)
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    """, [
+                        posted_date[:10] if posted_date else None,
+                        asin_val, sku, order_id, "Shipment",
+                        product_charges, shipping_ch,
+                        fba_fees_val, commission_val, promo_val, other_val, net
+                    ])
+                    fin_records += 1
+                except Exception as ins_err:
+                    logger.warning(f"  Shipment insert error: {ins_err}")
 
-        # Process refund events
+        # Process refund events (from RefundEventList + return-related AdjustmentEventList)
         for event in all_refund_events:
             order_id = event.get("AmazonOrderId", "")
             posted_date = event.get("PostedDate", "")
 
-            for item in event.get("ShipmentItemAdjustmentList", event.get("ShipmentItemList", [])):
+            # Try multiple possible item list keys (different event types use different keys)
+            item_list = (event.get("ShipmentItemAdjustmentList")
+                        or event.get("ShipmentItemList")
+                        or event.get("AdjustmentItemList")
+                        or [])
+            for item in item_list:
                 sku = item.get("SellerSKU", "")
                 asin_val = item.get("ASIN", sku)
 
                 refund_amount = 0.0
+                refund_fba = 0.0
+                refund_comm = 0.0
+                refund_other = 0.0
                 for c in item.get("ItemChargeAdjustmentList", item.get("ItemChargeList", [])):
-                    refund_amount += _money(c.get("ChargeAmount", {}))
+                    val = _money(c.get("ChargeAmount", {}))
+                    ct = c.get("ChargeType", "")
+                    if ct == "Principal":
+                        refund_amount += val
+                    else:
+                        refund_other += abs(val)
 
-                con.execute("""
-                    INSERT OR REPLACE INTO financial_events
-                    (date, asin, sku, order_id, event_type,
-                     product_charges, shipping_charges, fba_fees,
-                     commission, promotion_amount, other_fees, net_proceeds)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                """, [
-                    posted_date[:10] if posted_date else None,
-                    asin_val, sku, order_id, "Refund",
-                    refund_amount, 0, 0, 0, 0, 0, refund_amount
-                ])
-                fin_records += 1
+                # Also capture fee adjustments for refunds
+                for f in item.get("ItemFeeAdjustmentList", item.get("ItemFeeList", [])):
+                    val = _money(f.get("FeeAmount", {}))
+                    ft = f.get("FeeType", "")
+                    if "FBA" in ft or "Fulfillment" in ft:
+                        refund_fba += abs(val)
+                    elif ft in ("Commission", "ReferralFee"):
+                        refund_comm += abs(val)
+
+                try:
+                    con.execute("""
+                        INSERT INTO financial_events
+                        (date, asin, sku, order_id, event_type,
+                         product_charges, shipping_charges, fba_fees,
+                         commission, promotion_amount, other_fees, net_proceeds)
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    """, [
+                        posted_date[:10] if posted_date else None,
+                        asin_val, sku, order_id, "Refund",
+                        abs(refund_amount), 0, refund_fba, refund_comm, 0, refund_other,
+                        abs(refund_amount)
+                    ])
+                    fin_records += 1
+                    logger.info(f"  Inserted refund: order={order_id}, asin={asin_val}, amount=${abs(refund_amount):.2f}")
+                except Exception as ins_err:
+                    logger.error(f"  Refund insert error for {order_id}/{asin_val}: {ins_err}")
 
         con.close()
-        logger.info(f"  Financial events sync done: {fin_records} records")
+        logger.info(f"  Financial events sync done: {fin_records} records (shipments + refunds)")
     except Exception as e:
         logger.error(f"  Financial events sync error: {e}")
 
