@@ -788,8 +788,9 @@ async def trigger_sync_get():
 @app.get("/api/summary")
 def summary(days: int = Query(365, description="Number of days to include")):
     """High-level KPIs: revenue, units, orders, sessions, AUR, conv rate."""
+    _ensure_today_data()
     con = get_db()
-    cutoff = (datetime.now() - timedelta(days=days)).strftime("%Y-%m-%d")
+    cutoff = (get_today(con) - timedelta(days=days)).strftime("%Y-%m-%d") if days > 0 else get_today(con).strftime("%Y-%m-%d")
 
     row = con.execute("""
         SELECT
@@ -836,8 +837,9 @@ def summary(days: int = Query(365, description="Number of days to include")):
 @app.get("/api/daily")
 def daily_sales(days: int = Query(365), granularity: str = Query("daily")):
     """Time-series sales data for charts. Granularity: daily or weekly."""
+    _ensure_today_data()
     con = get_db()
-    cutoff = (datetime.now() - timedelta(days=days)).strftime("%Y-%m-%d")
+    cutoff = (get_today(con) - timedelta(days=days)).strftime("%Y-%m-%d")
 
     rows = con.execute("""
         SELECT
@@ -1822,8 +1824,20 @@ def monthly_yoy():
             months_map[mo] = {}
         months_map[mo][yr] = rev
 
-    # Always include 2024, 2025, 2026
-    years = [2024, 2025, 2026]
+    # Determine which years actually have data
+    all_years = set()
+    for mo_data in months_map.values():
+        for yr in mo_data:
+            if mo_data[yr] > 0:
+                all_years.add(yr)
+
+    # Always include current year; include previous years only if they have data
+    current_year = datetime.utcnow().year
+    years = sorted(all_years | {current_year})
+    # Ensure we show at least 2 years for comparison
+    if len(years) < 2 and current_year - 1 not in years:
+        years = [current_year - 1] + years
+
     month_names = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"]
     data = []
     for mo in range(1, 13):
