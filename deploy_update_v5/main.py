@@ -413,6 +413,12 @@ def _run_sp_api_sync():
         con = duckdb.connect(str(DB_PATH), read_only=False)
         fin_records = 0
 
+        # Helper: Amazon uses CurrencyAmount (not Amount) in money objects
+        def _money(amt_obj):
+            if not isinstance(amt_obj, dict):
+                return 0.0
+            return float(amt_obj.get("CurrencyAmount", amt_obj.get("Amount", 0)) or 0)
+
         # Process shipment events (sales fees)
         for event in all_shipment_events:
             order_id = event.get("AmazonOrderId", "")
@@ -425,8 +431,7 @@ def _run_sp_api_sync():
                 product_charges = 0.0
                 shipping_ch = 0.0
                 for c in item.get("ItemChargeList", []):
-                    amt = c.get("ChargeAmount", {})
-                    val = float(amt.get("Amount", 0)) if isinstance(amt, dict) else 0
+                    val = _money(c.get("ChargeAmount", {}))
                     ct = c.get("ChargeType", "")
                     if ct == "Principal":
                         product_charges += val
@@ -437,8 +442,7 @@ def _run_sp_api_sync():
                 commission_val = 0.0
                 other_val = 0.0
                 for f in item.get("ItemFeeList", []):
-                    amt = f.get("FeeAmount", {})
-                    val = abs(float(amt.get("Amount", 0))) if isinstance(amt, dict) else 0
+                    val = abs(_money(f.get("FeeAmount", {})))
                     ft = f.get("FeeType", "")
                     if "FBA" in ft or "Fulfillment" in ft:
                         fba_fees_val += val
@@ -449,8 +453,7 @@ def _run_sp_api_sync():
 
                 promo_val = 0.0
                 for p in item.get("PromotionList", []):
-                    amt = p.get("PromotionAmount", {})
-                    promo_val += float(amt.get("Amount", 0)) if isinstance(amt, dict) else 0
+                    promo_val += _money(p.get("PromotionAmount", {}))
 
                 net = product_charges + shipping_ch - fba_fees_val - commission_val + promo_val
 
@@ -479,8 +482,7 @@ def _run_sp_api_sync():
 
                 refund_amount = 0.0
                 for c in item.get("ItemChargeAdjustmentList", item.get("ItemChargeList", [])):
-                    amt = c.get("ChargeAmount", {})
-                    refund_amount += float(amt.get("Amount", 0)) if isinstance(amt, dict) else 0
+                    refund_amount += _money(c.get("ChargeAmount", {}))
 
                 con.execute("""
                     INSERT OR REPLACE INTO financial_events
@@ -1507,14 +1509,25 @@ def debug_financial_events():
         events = payload.get("FinancialEvents", {})
 
         summary = {}
+        sample_charge = None
         for k, v in events.items():
             if isinstance(v, list):
                 summary[k] = len(v)
-                # For refunds, show first item structure
+                # Grab a sample charge structure from first shipment
+                if k == "ShipmentEventList" and len(v) > 0 and not sample_charge:
+                    items = v[0].get("ShipmentItemList", [])
+                    if items:
+                        charges = items[0].get("ItemChargeList", [])
+                        if charges:
+                            sample_charge = charges[0]
                 if k == "RefundEventList" and len(v) > 0:
                     first = v[0]
                     summary["refund_sample_keys"] = list(first.keys())
                     summary["refund_sample_order_id"] = first.get("AmazonOrderId", "N/A")
+                    adj_items = first.get("ShipmentItemAdjustmentList", [])
+                    if adj_items:
+                        adj_charges = adj_items[0].get("ItemChargeAdjustmentList", [])
+                        summary["refund_sample_charge"] = adj_charges[0] if adj_charges else "no charges"
             else:
                 summary[k] = str(v)[:100]
 
@@ -1533,6 +1546,7 @@ def debug_financial_events():
             "api_date_range": fin_start,
             "payload_keys": list(payload.keys()),
             "event_type_counts": summary,
+            "sample_charge_object": sample_charge,
             "has_next_page": has_next,
             "db_records": [{"type": r[0], "count": r[1], "total_charges": round(r[2], 2)} for r in db_counts]
         }
