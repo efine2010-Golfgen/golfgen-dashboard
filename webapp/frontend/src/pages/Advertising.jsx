@@ -186,10 +186,10 @@ function OverviewTab({ daily }) {
         <p className="sub">Daily spend and attributed sales</p>
         <ResponsiveContainer width="100%" height={300}>
           <ComposedChart data={daily}>
-            <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.06)" />
-            <XAxis dataKey="date" tick={{ fill: "#8892b0", fontSize: 11 }} tickFormatter={d => d.slice(5)} />
-            <YAxis tick={{ fill: "#8892b0", fontSize: 11 }} tickFormatter={v => `$${(v).toFixed(0)}`} />
-            <Tooltip contentStyle={{ background: "#0E1F2D", border: "1px solid rgba(46,207,170,0.2)", borderRadius: 8, color: "#e0e8f0" }}
+            <CartesianGrid strokeDasharray="3 3" stroke="rgba(14,31,45,0.08)" />
+            <XAxis dataKey="date" tick={{ fill: "#6B8090", fontSize: 11 }} tickFormatter={d => d.slice(5)} />
+            <YAxis tick={{ fill: "#6B8090", fontSize: 11 }} tickFormatter={v => `$${(v).toFixed(0)}`} />
+            <Tooltip contentStyle={{ background: "#fff", border: "1px solid rgba(14,31,45,0.1)", borderRadius: 8, color: "#2A3D50", boxShadow: "0 4px 12px rgba(14,31,45,0.1)" }}
               formatter={(v, name) => [`$${v.toFixed(2)}`, name]} />
             <Legend />
             <Bar dataKey="spend" fill="#E87830" radius={[3,3,0,0]} name="Ad Spend" />
@@ -213,10 +213,10 @@ function OverviewTab({ daily }) {
                 <stop offset="95%" stopColor="#7BAED0" stopOpacity={0} />
               </linearGradient>
             </defs>
-            <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.06)" />
-            <XAxis dataKey="date" tick={{ fill: "#8892b0", fontSize: 11 }} tickFormatter={d => d.slice(5)} />
-            <YAxis tick={{ fill: "#8892b0", fontSize: 11 }} tickFormatter={v => `${v}%`} />
-            <Tooltip contentStyle={{ background: "#0E1F2D", border: "1px solid rgba(46,207,170,0.2)", borderRadius: 8, color: "#e0e8f0" }}
+            <CartesianGrid strokeDasharray="3 3" stroke="rgba(14,31,45,0.08)" />
+            <XAxis dataKey="date" tick={{ fill: "#6B8090", fontSize: 11 }} tickFormatter={d => d.slice(5)} />
+            <YAxis tick={{ fill: "#6B8090", fontSize: 11 }} tickFormatter={v => `${v}%`} />
+            <Tooltip contentStyle={{ background: "#fff", border: "1px solid rgba(14,31,45,0.1)", borderRadius: 8, color: "#2A3D50", boxShadow: "0 4px 12px rgba(14,31,45,0.1)" }}
               formatter={(v) => [`${v}%`]} />
             <Legend />
             <Area type="monotone" dataKey="acos" stroke="#F5B731" strokeWidth={2} fill="url(#acosGrad)" name="ACOS" />
@@ -230,11 +230,11 @@ function OverviewTab({ daily }) {
         <p className="sub">Daily click and impression volume</p>
         <ResponsiveContainer width="100%" height={300}>
           <ComposedChart data={daily}>
-            <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.06)" />
-            <XAxis dataKey="date" tick={{ fill: "#8892b0", fontSize: 11 }} tickFormatter={d => d.slice(5)} />
-            <YAxis yAxisId="left" tick={{ fill: "#8892b0", fontSize: 11 }} />
-            <YAxis yAxisId="right" orientation="right" tick={{ fill: "#8892b0", fontSize: 11 }} />
-            <Tooltip contentStyle={{ background: "#0E1F2D", border: "1px solid rgba(46,207,170,0.2)", borderRadius: 8, color: "#e0e8f0" }} />
+            <CartesianGrid strokeDasharray="3 3" stroke="rgba(14,31,45,0.08)" />
+            <XAxis dataKey="date" tick={{ fill: "#6B8090", fontSize: 11 }} tickFormatter={d => d.slice(5)} />
+            <YAxis yAxisId="left" tick={{ fill: "#6B8090", fontSize: 11 }} />
+            <YAxis yAxisId="right" orientation="right" tick={{ fill: "#6B8090", fontSize: 11 }} />
+            <Tooltip contentStyle={{ background: "#fff", border: "1px solid rgba(14,31,45,0.1)", borderRadius: 8, color: "#2A3D50", boxShadow: "0 4px 12px rgba(14,31,45,0.1)" }} />
             <Legend />
             <Bar yAxisId="left" dataKey="clicks" fill="#3E658C" radius={[3,3,0,0]} name="Clicks" />
             <Line yAxisId="right" type="monotone" dataKey="impressions" stroke="#E87830" strokeWidth={2} dot={false} name="Impressions" />
@@ -253,10 +253,10 @@ function OverviewTab({ daily }) {
                 <stop offset="95%" stopColor="#2ECFAA" stopOpacity={0} />
               </linearGradient>
             </defs>
-            <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.06)" />
-            <XAxis dataKey="date" tick={{ fill: "#8892b0", fontSize: 11 }} tickFormatter={d => d.slice(5)} />
-            <YAxis tick={{ fill: "#8892b0", fontSize: 11 }} tickFormatter={v => `${v}x`} />
-            <Tooltip contentStyle={{ background: "#0E1F2D", border: "1px solid rgba(46,207,170,0.2)", borderRadius: 8, color: "#e0e8f0" }}
+            <CartesianGrid strokeDasharray="3 3" stroke="rgba(14,31,45,0.08)" />
+            <XAxis dataKey="date" tick={{ fill: "#6B8090", fontSize: 11 }} tickFormatter={d => d.slice(5)} />
+            <YAxis tick={{ fill: "#6B8090", fontSize: 11 }} tickFormatter={v => `${v}x`} />
+            <Tooltip contentStyle={{ background: "#fff", border: "1px solid rgba(14,31,45,0.1)", borderRadius: 8, color: "#2A3D50", boxShadow: "0 4px 12px rgba(14,31,45,0.1)" }}
               formatter={(v) => [`${v}x`, "ROAS"]} />
             <Area type="monotone" dataKey="roas" stroke="#2ECFAA" strokeWidth={2} fill="url(#roasGrad)" />
           </AreaChart>
@@ -338,7 +338,7 @@ function KeywordsTab({ data, onSort, sortKey, sortDir }) {
           <h3 style={{ color: "var(--teal)" }}>Top 5 Keywords (by ROAS)</h3>
           <p className="sub">Best performing keywords</p>
           {best.map((k, i) => (
-            <div key={i} style={{ display: "flex", justifyContent: "space-between", padding: "8px 0", borderBottom: "1px solid rgba(255,255,255,0.05)" }}>
+            <div key={i} style={{ display: "flex", justifyContent: "space-between", padding: "8px 0", borderBottom: "1px solid rgba(14,31,45,0.06)" }}>
               <span style={{ flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{k.keyword} <span style={{ color: "var(--muted)", fontSize: 11 }}>({k.matchType})</span></span>
               <span style={{ color: "var(--teal)", fontWeight: 600, minWidth: 60, textAlign: "right" }}>{k.roas}x</span>
               <span style={{ color: "var(--muted)", minWidth: 60, textAlign: "right" }}>{fmt$(k.sales)}</span>
@@ -349,7 +349,7 @@ function KeywordsTab({ data, onSort, sortKey, sortDir }) {
           <h3 style={{ color: "var(--neg)" }}>Bottom 5 Keywords (by ROAS)</h3>
           <p className="sub">Keywords needing attention</p>
           {worst.map((k, i) => (
-            <div key={i} style={{ display: "flex", justifyContent: "space-between", padding: "8px 0", borderBottom: "1px solid rgba(255,255,255,0.05)" }}>
+            <div key={i} style={{ display: "flex", justifyContent: "space-between", padding: "8px 0", borderBottom: "1px solid rgba(14,31,45,0.06)" }}>
               <span style={{ flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{k.keyword} <span style={{ color: "var(--muted)", fontSize: 11 }}>({k.matchType})</span></span>
               <span style={{ color: "var(--neg)", fontWeight: 600, minWidth: 60, textAlign: "right" }}>{k.roas}x</span>
               <span style={{ color: "var(--muted)", minWidth: 60, textAlign: "right" }}>{fmt$(k.spend)} spent</span>
@@ -494,7 +494,7 @@ function NegativeKeywordsTab({ data }) {
 
 function TH({ label, k, onSort, sortKey, sortDir }) {
   return (
-    <th onClick={() => onSort(k)} style={sortKey === k ? { color: "#2ECFAA" } : {}}>
+    <th onClick={() => onSort(k)} style={sortKey === k ? { color: "var(--teal-dark)" } : {}}>
       {label} {sortKey === k ? (sortDir === "desc" ? "▼" : "▲") : ""}
     </th>
   );

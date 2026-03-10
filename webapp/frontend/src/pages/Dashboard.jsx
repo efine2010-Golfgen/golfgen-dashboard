@@ -13,7 +13,7 @@ const RANGES = [
 ];
 
 const COLORS = ["#2ECFAA", "#3E658C", "#E87830", "#F5B731", "#7BAED0", "#22A387", "#D03030", "#8B5CF6", "#94a3b8", "#8892b0"];
-const TOOLTIP_STYLE = { background: "#0E1F2D", border: "1px solid rgba(46,207,170,0.2)", borderRadius: 8, color: "#e0e8f0" };
+const TOOLTIP_STYLE = { background: "#fff", border: "1px solid rgba(14,31,45,0.1)", borderRadius: 8, color: "#2A3D50", boxShadow: "0 4px 12px rgba(14,31,45,0.1)" };
 
 // Moving average helper
 function movingAvg(data, key, window) {
@@ -166,9 +166,9 @@ export default function Dashboard() {
                   <stop offset="95%" stopColor="#3E658C" stopOpacity={0} />
                 </linearGradient>
               </defs>
-              <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.06)" />
-              <XAxis dataKey="date" tick={{ fill: "#8892b0", fontSize: 11 }} tickFormatter={d => d.slice(5)} />
-              <YAxis tick={{ fill: "#8892b0", fontSize: 11 }} tickFormatter={v => `$${(v/1000).toFixed(0)}k`} />
+              <CartesianGrid strokeDasharray="3 3" stroke="rgba(14,31,45,0.08)" />
+              <XAxis dataKey="date" tick={{ fill: "#6B8090", fontSize: 11 }} tickFormatter={d => d.slice(5)} />
+              <YAxis tick={{ fill: "#6B8090", fontSize: 11 }} tickFormatter={v => `$${(v/1000).toFixed(0)}k`} />
               <Tooltip contentStyle={TOOLTIP_STYLE} formatter={(v) => [`$${v.toLocaleString()}`, ""]} labelFormatter={l => l} />
               <Legend />
               <Area type="monotone" dataKey="revenue" name="Revenue" stroke="#3E658C" strokeWidth={1.5} fill="url(#revGrad)" />
@@ -184,10 +184,10 @@ export default function Dashboard() {
           <p className="sub">Weekly ad spend with TACOS trend</p>
           <ResponsiveContainer width="100%" height={300}>
             <ComposedChart data={dailyRaw}>
-              <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.06)" />
-              <XAxis dataKey="date" tick={{ fill: "#8892b0", fontSize: 11 }} tickFormatter={d => d.slice(5)} />
-              <YAxis yAxisId="left" tick={{ fill: "#8892b0", fontSize: 11 }} tickFormatter={v => `$${(v/1000).toFixed(0)}k`} />
-              <YAxis yAxisId="right" orientation="right" tick={{ fill: "#8892b0", fontSize: 11 }} tickFormatter={v => `${v}%`} />
+              <CartesianGrid strokeDasharray="3 3" stroke="rgba(14,31,45,0.08)" />
+              <XAxis dataKey="date" tick={{ fill: "#6B8090", fontSize: 11 }} tickFormatter={d => d.slice(5)} />
+              <YAxis yAxisId="left" tick={{ fill: "#6B8090", fontSize: 11 }} tickFormatter={v => `$${(v/1000).toFixed(0)}k`} />
+              <YAxis yAxisId="right" orientation="right" tick={{ fill: "#6B8090", fontSize: 11 }} tickFormatter={v => `${v}%`} />
               <Tooltip contentStyle={TOOLTIP_STYLE} />
               <Legend />
               <Bar yAxisId="left" dataKey="revenue" name="Revenue" fill="#2ECFAA" radius={[3,3,0,0]} opacity={0.6} />
@@ -205,10 +205,10 @@ export default function Dashboard() {
           <p className="sub">Average unit retail vs daily unit volume</p>
           <ResponsiveContainer width="100%" height={300}>
             <ComposedChart data={dailyRaw}>
-              <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.06)" />
-              <XAxis dataKey="date" tick={{ fill: "#8892b0", fontSize: 11 }} tickFormatter={d => d.slice(5)} />
-              <YAxis yAxisId="left" tick={{ fill: "#8892b0", fontSize: 11 }} tickFormatter={v => `$${v}`} label={{ value: "AUR $", angle: -90, position: "insideLeft", fill: "#8892b0", fontSize: 11 }} />
-              <YAxis yAxisId="right" orientation="right" tick={{ fill: "#8892b0", fontSize: 11 }} label={{ value: "Units", angle: 90, position: "insideRight", fill: "#8892b0", fontSize: 11 }} />
+              <CartesianGrid strokeDasharray="3 3" stroke="rgba(14,31,45,0.08)" />
+              <XAxis dataKey="date" tick={{ fill: "#6B8090", fontSize: 11 }} tickFormatter={d => d.slice(5)} />
+              <YAxis yAxisId="left" tick={{ fill: "#6B8090", fontSize: 11 }} tickFormatter={v => `$${v}`} label={{ value: "AUR $", angle: -90, position: "insideLeft", fill: "#6B8090", fontSize: 11 }} />
+              <YAxis yAxisId="right" orientation="right" tick={{ fill: "#6B8090", fontSize: 11 }} label={{ value: "Units", angle: 90, position: "insideRight", fill: "#6B8090", fontSize: 11 }} />
               <Tooltip contentStyle={TOOLTIP_STYLE} />
               <Legend />
               <Area yAxisId="left" type="monotone" dataKey="aur" name="AUR ($)" stroke="#3E658C" fill="rgba(62,101,140,0.08)" strokeWidth={2} />
@@ -223,10 +223,10 @@ export default function Dashboard() {
           <p className="sub">Sessions, orders, units with conversion rate overlay</p>
           <ResponsiveContainer width="100%" height={300}>
             <ComposedChart data={dailyRaw}>
-              <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.06)" />
-              <XAxis dataKey="date" tick={{ fill: "#8892b0", fontSize: 11 }} tickFormatter={d => d.slice(5)} />
-              <YAxis yAxisId="left" tick={{ fill: "#8892b0", fontSize: 11 }} label={{ value: "Count", angle: -90, position: "insideLeft", fill: "#8892b0", fontSize: 11 }} />
-              <YAxis yAxisId="right" orientation="right" tick={{ fill: "#8892b0", fontSize: 11 }} tickFormatter={v => `${v}%`} domain={[0, 15]} label={{ value: "Conv %", angle: 90, position: "insideRight", fill: "#8892b0", fontSize: 11 }} />
+              <CartesianGrid strokeDasharray="3 3" stroke="rgba(14,31,45,0.08)" />
+              <XAxis dataKey="date" tick={{ fill: "#6B8090", fontSize: 11 }} tickFormatter={d => d.slice(5)} />
+              <YAxis yAxisId="left" tick={{ fill: "#6B8090", fontSize: 11 }} label={{ value: "Count", angle: -90, position: "insideLeft", fill: "#6B8090", fontSize: 11 }} />
+              <YAxis yAxisId="right" orientation="right" tick={{ fill: "#6B8090", fontSize: 11 }} tickFormatter={v => `${v}%`} domain={[0, 15]} label={{ value: "Conv %", angle: 90, position: "insideRight", fill: "#6B8090", fontSize: 11 }} />
               <Tooltip contentStyle={TOOLTIP_STYLE} />
               <Legend />
               <Area yAxisId="left" type="monotone" dataKey="sessions" name="Sessions" stroke="#3E658C" fill="rgba(62,101,140,0.08)" strokeWidth={2} />
@@ -265,7 +265,7 @@ export default function Dashboard() {
                 layout="vertical"
                 align="right"
                 verticalAlign="middle"
-                formatter={(value) => <span style={{ color: "#e0e8f0", fontSize: 11 }}>{value.length > 20 ? value.slice(0, 18) + "…" : value}</span>}
+                formatter={(value) => <span style={{ color: "#2A3D50", fontSize: 11 }}>{value.length > 20 ? value.slice(0, 18) + "…" : value}</span>}
               />
             </PieChart>
           </ResponsiveContainer>
@@ -277,9 +277,9 @@ export default function Dashboard() {
           <p className="sub">Revenue by month across years</p>
           <ResponsiveContainer width="100%" height={300}>
             <BarChart data={yoyData}>
-              <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.06)" />
-              <XAxis dataKey="month" tick={{ fill: "#8892b0", fontSize: 11 }} />
-              <YAxis tick={{ fill: "#8892b0", fontSize: 11 }} tickFormatter={v => `$${(v/1000).toFixed(0)}k`} />
+              <CartesianGrid strokeDasharray="3 3" stroke="rgba(14,31,45,0.08)" />
+              <XAxis dataKey="month" tick={{ fill: "#6B8090", fontSize: 11 }} />
+              <YAxis tick={{ fill: "#6B8090", fontSize: 11 }} tickFormatter={v => `$${(v/1000).toFixed(0)}k`} />
               <Tooltip contentStyle={TOOLTIP_STYLE} formatter={v => [fmt$(v), "Revenue"]} />
               <Legend />
               {yoyYears.map((yr, i) => (
@@ -298,9 +298,9 @@ export default function Dashboard() {
           <p className="sub">P&L waterfall for selected period</p>
           <ResponsiveContainer width="100%" height={300}>
             <BarChart data={waterfall}>
-              <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.06)" />
-              <XAxis dataKey="name" tick={{ fill: "#8892b0", fontSize: 11 }} />
-              <YAxis tick={{ fill: "#8892b0", fontSize: 11 }} tickFormatter={v => `$${(Math.abs(v)/1000).toFixed(0)}k`} />
+              <CartesianGrid strokeDasharray="3 3" stroke="rgba(14,31,45,0.08)" />
+              <XAxis dataKey="name" tick={{ fill: "#6B8090", fontSize: 11 }} />
+              <YAxis tick={{ fill: "#6B8090", fontSize: 11 }} tickFormatter={v => `$${(Math.abs(v)/1000).toFixed(0)}k`} />
               <Tooltip
                 contentStyle={TOOLTIP_STYLE}
                 formatter={(v) => [fmt$(Math.abs(v)), v < 0 ? "Cost" : "Amount"]}
@@ -326,9 +326,9 @@ export default function Dashboard() {
                   <stop offset="95%" stopColor="#E87830" stopOpacity={0} />
                 </linearGradient>
               </defs>
-              <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.06)" />
-              <XAxis dataKey="date" tick={{ fill: "#8892b0", fontSize: 11 }} tickFormatter={d => d.slice(5)} />
-              <YAxis tick={{ fill: "#8892b0", fontSize: 11 }} tickFormatter={v => `${v}%`} />
+              <CartesianGrid strokeDasharray="3 3" stroke="rgba(14,31,45,0.08)" />
+              <XAxis dataKey="date" tick={{ fill: "#6B8090", fontSize: 11 }} tickFormatter={d => d.slice(5)} />
+              <YAxis tick={{ fill: "#6B8090", fontSize: 11 }} tickFormatter={v => `${v}%`} />
               <Tooltip
                 contentStyle={TOOLTIP_STYLE}
                 formatter={(v) => [`${v}%`, "Conv Rate"]}

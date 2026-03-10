@@ -9,30 +9,46 @@ export default function App() {
   return (
     <BrowserRouter>
       <div className="app">
-        <nav className="sidebar">
-          <div className="logo">
-            <span className="logo-icon">⛳</span>
-            <span className="logo-text">GolfGen</span>
+        {/* ── Branded Header ── */}
+        <header className="header">
+          <div className="header-inner">
+            <div className="header-left">
+              <div className="brand-logo">
+                <span className="golf">Golf</span>
+                <span className="gen">Gen</span>
+              </div>
+              <div className="brand-divider" />
+              <div className="brand-title">
+                <h1>Amazon FBA Dashboard</h1>
+                <p>PGA Tour Licensed &bull; SP-API Analytics</p>
+              </div>
+            </div>
+            <div className="header-right">
+              <span className="live-badge">LIVE DATA</span>
+            </div>
           </div>
-          <div className="nav-links">
-            <NavLink to="/" end>
-              <span className="nav-icon">📊</span> Dashboard
+          <div className="gradient-bar" />
+        </header>
+
+        {/* ── Navigation Tabs ── */}
+        <nav className="nav-bar">
+          <div className="nav-inner">
+            <NavLink to="/" end className={({ isActive }) => isActive ? "nav-tab active" : "nav-tab"}>
+              <span>📊</span> Dashboard
             </NavLink>
-            <NavLink to="/products">
-              <span className="nav-icon">📦</span> Products
+            <NavLink to="/products" className={({ isActive }) => isActive ? "nav-tab active" : "nav-tab"}>
+              <span>📦</span> Products
             </NavLink>
-            <NavLink to="/inventory">
-              <span className="nav-icon">🏭</span> Inventory
+            <NavLink to="/inventory" className={({ isActive }) => isActive ? "nav-tab active" : "nav-tab"}>
+              <span>🏭</span> Inventory
             </NavLink>
-            <NavLink to="/advertising">
-              <span className="nav-icon">📣</span> Advertising
+            <NavLink to="/advertising" className={({ isActive }) => isActive ? "nav-tab active" : "nav-tab"}>
+              <span>📣</span> Advertising
             </NavLink>
-          </div>
-          <div className="nav-footer">
-            <div className="nav-badge">LIVE DATA</div>
-            <span className="nav-sub">Amazon SP-API + Ads API</span>
           </div>
         </nav>
+
+        {/* ── Main Content ── */}
         <main className="main-content">
           <Routes>
             <Route path="/" element={<Dashboard />} />
