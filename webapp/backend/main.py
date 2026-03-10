@@ -76,7 +76,12 @@ def fmt_date(d) -> str:
 
 @app.get("/api/health")
 def health():
-    return {"status": "ok", "db": str(DB_PATH), "db_exists": DB_PATH.exists()}
+    return {
+        "status": "ok",
+        "db": str(DB_PATH),
+        "db_exists": DB_PATH.exists(),
+        "port": os.environ.get("PORT", "8000"),
+    }
 
 
 @app.get("/api/summary")

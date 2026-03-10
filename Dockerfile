@@ -17,8 +17,10 @@ RUN touch ./webapp/__init__.py ./webapp/backend/__init__.py
 # Copy pre-built frontend (no need for Node.js in prod)
 COPY webapp/frontend/dist/ ./webapp/frontend/dist/
 
-# Copy data files (DuckDB database only — skip .wal for clean state)
-COPY data/golfgen_amazon.duckdb ./data/golfgen_amazon.duckdb
+# Copy data files if they exist (DuckDB database)
+# Use a shell command so it doesn't fail if the file is missing
+RUN mkdir -p ./data
+COPY data/golfgen_amazon.duckdb* ./data/
 
 # Environment
 ENV DB_DIR=/app/data
@@ -27,4 +29,4 @@ ENV PORT=8000
 EXPOSE 8000
 
 # Railway injects $PORT automatically
-CMD ["sh", "-c", "uvicorn webapp.backend.main:app --host 0.0.0.0 --port ${PORT}"]
+CMD ["sh", "-c", "uvicorn webapp.backend.main:app --host 0.0.0.0 --port ${PORT:-8000}"]
