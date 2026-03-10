@@ -72,6 +72,28 @@ def fmt_date(d) -> str:
     return str(d)
 
 
+def get_today(con) -> datetime:
+    """Get 'today' anchored to the latest date in the database.
+
+    Railway servers run in UTC, so datetime.now() may be tomorrow relative
+    to the latest data.  Use the max date from daily_sales as the anchor
+    so Today / WTD / MTD always show the most recent data.
+    """
+    try:
+        row = con.execute(
+            "SELECT MAX(date) FROM daily_sales WHERE asin = 'ALL'"
+        ).fetchone()
+        if row and row[0]:
+            d = row[0]
+            if isinstance(d, str):
+                return datetime.strptime(d, "%Y-%m-%d")
+            if hasattr(d, "year"):
+                return datetime(d.year, d.month, d.day)
+    except Exception:
+        pass
+    return datetime.now()
+
+
 # ── API Routes ──────────────────────────────────────────
 
 @app.get("/api/health")
@@ -796,8 +818,8 @@ def period_comparison(view: str = Query("realtime")):
     con = get_db()
     cogs_data = load_cogs()
 
-    now = datetime.now()
-    today_start = now.replace(hour=0, minute=0, second=0, microsecond=0)
+    today_start = get_today(con)
+    today_start = today_start.replace(hour=0, minute=0, second=0, microsecond=0)
     tomorrow = (today_start + timedelta(days=1)).strftime("%Y-%m-%d")
     yr = today_start.year
     month_names = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec']
@@ -1069,8 +1091,8 @@ def profitability(view: str = Query("realtime")):
     con = get_db()
     cogs_data = load_cogs()
 
-    now = datetime.now()
-    today_start = now.replace(hour=0, minute=0, second=0, microsecond=0)
+    today_start = get_today(con)
+    today_start = today_start.replace(hour=0, minute=0, second=0, microsecond=0)
     tomorrow = (today_start + timedelta(days=1)).strftime("%Y-%m-%d")
     yr = today_start.year
     month_names = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec']

@@ -37,11 +37,11 @@ export default function App() {
             <NavLink to="/" end className={({ isActive }) => isActive ? "nav-tab active" : "nav-tab"}>
               <span>📊</span> Dashboard
             </NavLink>
-            <NavLink to="/profitability" className={({ isActive }) => isActive ? "nav-tab active" : "nav-tab"}>
-              <span>💰</span> Profitability
-            </NavLink>
             <NavLink to="/products" className={({ isActive }) => isActive ? "nav-tab active" : "nav-tab"}>
               <span>📦</span> Products
+            </NavLink>
+            <NavLink to="/profitability" className={({ isActive }) => isActive ? "nav-tab active" : "nav-tab"}>
+              <span>💰</span> Profitability
             </NavLink>
             <NavLink to="/inventory" className={({ isActive }) => isActive ? "nav-tab active" : "nav-tab"}>
               <span>🏭</span> Inventory
@@ -56,8 +56,8 @@ export default function App() {
         <main className="main-content">
           <Routes>
             <Route path="/" element={<Dashboard />} />
-            <Route path="/profitability" element={<Profitability />} />
             <Route path="/products" element={<Products />} />
+            <Route path="/profitability" element={<Profitability />} />
             <Route path="/inventory" element={<Inventory />} />
             <Route path="/advertising" element={<Advertising />} />
           </Routes>
