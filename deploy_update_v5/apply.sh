@@ -1,18 +1,18 @@
 #!/bin/bash
-# GolfGen Deploy Fix v5 — Live "Today" + correct WTD + full order revenue
+# GolfGen Deploy Fix v5 — Financial fixes + backfill + chart improvements
 # Run from golfgen-dashboard root: bash deploy_update_v5/apply.sh
 set -e
 
 echo "=== GolfGen Deploy Fix v5 ==="
 echo ""
 echo "Fixes:"
-echo "  1. Monthly YoY: 12 months x 3 years (2024/2025/2026)"
-echo "  2. Traffic funnel: sessions area + orders/units bars + conv overlay"
-echo "  3. Conversion vs AUR: dual axis showing pricing vs conversion"
-echo "  4. Revenue by Product donut moved to Products tab"
-echo "  5. NEW: Sales by Color (% of total) chart on Dashboard"
-echo "  6. Financial Events: pagination (up to 20 pages) + 90 days window"
-echo "  7. NEW: /api/color-mix endpoint for color breakdown"
+echo "  1. CurrencyAmount fix: returns/refunds were $0 due to wrong field name"
+echo "  2. Financial Events: manual NextToken pagination (up to 20 pages)"
+echo "  3. Today data: overwrite protection (never clobber good data with worse)"
+echo "  4. Monthly YoY: always 3 years (2024/2025/2026) as grouped bars"
+echo "  5. NEW: /api/backfill endpoint to pull historical 2024 data"
+echo "  6. Traffic funnel: sessions area + orders/units bars + conv overlay"
+echo "  7. All charts full-width with improved visibility"
 echo ""
 
 cp deploy_update_v5/main.py ./webapp/backend/main.py
@@ -33,4 +33,4 @@ fi
 
 echo ""
 echo "=== Done! Now run: ==="
-echo "  git add -A && git commit -m 'feat: YoY 12mo chart, conv vs AUR, color mix, products donut, fin events pagination' && git push origin main"
+echo "  git add -A && git commit -m 'fix: CurrencyAmount, overwrite protect, backfill, YoY 3 bars' && git push origin main"

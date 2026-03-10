@@ -266,9 +266,8 @@ def _sync_today_orders():
             ).fetchone()
             existing_rev = float(existing[0]) if existing and existing[0] else 0.0
 
-            # For today: always use order data (Sales Report won't have it)
-            # For yesterday: only if order data is higher (report may have caught up)
-            if day_str == today_str or agg["revenue"] > existing_rev:
+            # Only overwrite if new revenue is >= existing (never clobber good data with partial sync)
+            if agg["revenue"] >= existing_rev:
                 con.execute("""
                     INSERT OR REPLACE INTO daily_sales
                     (date, asin, units_ordered, ordered_product_sales,
@@ -788,7 +787,6 @@ async def trigger_sync_get():
 @app.get("/api/summary")
 def summary(days: int = Query(365, description="Number of days to include")):
     """High-level KPIs: revenue, units, orders, sessions, AUR, conv rate."""
-    _ensure_today_data()
     con = get_db()
     cutoff = (get_today(con) - timedelta(days=days)).strftime("%Y-%m-%d") if days > 0 else get_today(con).strftime("%Y-%m-%d")
 
@@ -837,7 +835,6 @@ def summary(days: int = Query(365, description="Number of days to include")):
 @app.get("/api/daily")
 def daily_sales(days: int = Query(365), granularity: str = Query("daily")):
     """Time-series sales data for charts. Granularity: daily or weekly."""
-    _ensure_today_data()
     con = get_db()
     cutoff = (get_today(con) - timedelta(days=days)).strftime("%Y-%m-%d")
 
@@ -1824,19 +1821,8 @@ def monthly_yoy():
             months_map[mo] = {}
         months_map[mo][yr] = rev
 
-    # Determine which years actually have data
-    all_years = set()
-    for mo_data in months_map.values():
-        for yr in mo_data:
-            if mo_data[yr] > 0:
-                all_years.add(yr)
-
-    # Always include current year; include previous years only if they have data
-    current_year = datetime.utcnow().year
-    years = sorted(all_years | {current_year})
-    # Ensure we show at least 2 years for comparison
-    if len(years) < 2 and current_year - 1 not in years:
-        years = [current_year - 1] + years
+    # Always show 3 years for comparison
+    years = [2024, 2025, 2026]
 
     month_names = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"]
     data = []
@@ -1847,6 +1833,143 @@ def monthly_yoy():
         data.append(entry)
 
     return {"years": years, "data": data}
+
+
+@app.get("/api/backfill")
+def backfill_historical(
+    start: str = Query(..., description="Start date YYYY-MM-DD"),
+    end: str = Query(..., description="End date YYYY-MM-DD"),
+):
+    """Backfill historical Sales & Traffic data for a date range.
+    Amazon limits report ranges to ~30 days, so this endpoint
+    breaks the range into 30-day chunks and requests each one.
+    This is a SLOW endpoint (each chunk takes 2-5 minutes for polling)."""
+    from datetime import date as dt_date
+    import gzip as gz
+
+    creds = _load_sp_api_credentials()
+    reports = Reports(credentials=creds, marketplace=_Mp.US)
+
+    start_dt = dt_date.fromisoformat(start)
+    end_dt = dt_date.fromisoformat(end)
+
+    total_records = 0
+    chunks_done = 0
+    errors = []
+
+    chunk_start = start_dt
+    while chunk_start < end_dt:
+        chunk_end = min(chunk_start + timedelta(days=29), end_dt)
+        logger.info(f"  Backfill requesting report {chunk_start} to {chunk_end}...")
+
+        try:
+            report_response = reports.create_report(
+                reportType=ReportType.GET_SALES_AND_TRAFFIC_REPORT,
+                dataStartTime=chunk_start.isoformat(),
+                dataEndTime=chunk_end.isoformat(),
+                reportOptions={"dateGranularity": "DAY", "asinGranularity": "CHILD"}
+            )
+            report_id = report_response.payload.get("reportId")
+
+            report_data = None
+            for attempt in range(30):
+                time.sleep(10)
+                status_response = reports.get_report(report_id)
+                status = status_response.payload.get("processingStatus")
+                if status == "DONE":
+                    doc_id = status_response.payload.get("reportDocumentId")
+                    doc_response = reports.get_report_document(doc_id)
+                    report_data = doc_response.payload
+                    break
+                elif status in ("CANCELLED", "FATAL"):
+                    errors.append(f"{chunk_start}-{chunk_end}: Report {status}")
+                    break
+
+            if report_data:
+                if isinstance(report_data, dict) and "url" in report_data:
+                    is_gzipped = report_data.get("compressionAlgorithm", "").upper() == "GZIP"
+                    resp = req.get(report_data["url"])
+                    if is_gzipped:
+                        report_text = gz.decompress(resp.content).decode("utf-8")
+                    else:
+                        report_text = resp.text
+                    report_data = json.loads(report_text)
+
+                if isinstance(report_data, str):
+                    report_data = json.loads(report_data)
+
+                con = duckdb.connect(str(DB_PATH), read_only=False)
+                records = 0
+
+                for day_entry in report_data.get("salesAndTrafficByDate", []):
+                    entry_date = day_entry.get("date", "")
+                    traffic = day_entry.get("trafficByDate", {})
+                    sales_info = day_entry.get("salesByDate", {})
+                    ordered_sales = sales_info.get("orderedProductSales", {})
+                    sales_amount = float(ordered_sales.get("amount", 0)) if isinstance(ordered_sales, dict) else float(ordered_sales or 0)
+
+                    con.execute("""
+                        INSERT OR REPLACE INTO daily_sales
+                        (date, asin, units_ordered, ordered_product_sales,
+                         sessions, session_percentage, page_views,
+                         buy_box_percentage, unit_session_percentage)
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    """, [
+                        entry_date, "ALL",
+                        int(sales_info.get("unitsOrdered", 0)),
+                        sales_amount,
+                        int(traffic.get("sessions", 0)),
+                        float(traffic.get("sessionPercentage", 0)),
+                        int(traffic.get("pageViews", 0)),
+                        float(traffic.get("buyBoxPercentage", 0)),
+                        float(traffic.get("unitSessionPercentage", 0)),
+                    ])
+                    records += 1
+
+                for asin_entry in report_data.get("salesAndTrafficByAsin", []):
+                    asin = asin_entry.get("childAsin") or asin_entry.get("parentAsin", "")
+                    traffic = asin_entry.get("trafficByAsin", {})
+                    sales_info = asin_entry.get("salesByAsin", {})
+                    entry_date = asin_entry.get("date", str(chunk_start))
+                    ordered_sales = sales_info.get("orderedProductSales", {})
+                    sales_amount = float(ordered_sales.get("amount", 0)) if isinstance(ordered_sales, dict) else float(ordered_sales or 0)
+
+                    con.execute("""
+                        INSERT OR REPLACE INTO daily_sales
+                        (date, asin, units_ordered, ordered_product_sales,
+                         sessions, session_percentage, page_views,
+                         buy_box_percentage, unit_session_percentage)
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    """, [
+                        entry_date, asin,
+                        int(sales_info.get("unitsOrdered", 0)),
+                        sales_amount,
+                        int(traffic.get("sessions", 0)),
+                        float(traffic.get("sessionPercentage", 0)),
+                        int(traffic.get("pageViews", 0)),
+                        float(traffic.get("buyBoxPercentage", 0)),
+                        float(traffic.get("unitSessionPercentage", 0)),
+                    ])
+                    records += 1
+
+                con.close()
+                total_records += records
+                chunks_done += 1
+                logger.info(f"  Backfill chunk {chunk_start}-{chunk_end}: {records} records")
+
+        except Exception as e:
+            errors.append(f"{chunk_start}-{chunk_end}: {str(e)}")
+            logger.error(f"  Backfill error {chunk_start}-{chunk_end}: {e}")
+
+        chunk_start = chunk_end + timedelta(days=1)
+
+    return {
+        "status": "done",
+        "chunks_processed": chunks_done,
+        "total_records": total_records,
+        "errors": errors,
+        "range": f"{start} to {end}",
+    }
 
 
 @app.get("/api/product-mix")
