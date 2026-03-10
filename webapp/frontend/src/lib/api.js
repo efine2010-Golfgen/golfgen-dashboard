@@ -16,6 +16,11 @@ export const api = {
     fetchJSON(`/api/product/${asin}?days=${days}`),
   pnl: (days = 365) => fetchJSON(`/api/pnl?days=${days}`),
 
+  // Dashboard analytics
+  comparison: () => fetchJSON(`/api/comparison`),
+  monthlyYoY: () => fetchJSON(`/api/monthly-yoy`),
+  productMix: (days = 365) => fetchJSON(`/api/product-mix?days=${days}`),
+
   // Advertising endpoints
   adsSummary: (days = 30) => fetchJSON(`/api/ads/summary?days=${days}`),
   adsDaily: (days = 30) => fetchJSON(`/api/ads/daily?days=${days}`),

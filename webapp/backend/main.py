@@ -752,6 +752,184 @@ def ads_negative_keywords():
     return {"negativeKeywords": keywords}
 
 
+# ── Period Comparison & Analytics ──────────────────────────
+
+@app.get("/api/comparison")
+def period_comparison():
+    """Return KPI comparison across multiple time periods (Today/WTD/MTD/YTD, etc.)."""
+    con = get_db()
+    cogs_data = load_cogs()
+
+    now = datetime.now()
+    today_start = now.replace(hour=0, minute=0, second=0, microsecond=0)
+
+    # Week start (Monday)
+    week_start = today_start - timedelta(days=today_start.weekday())
+    month_start = today_start.replace(day=1)
+    year_start = today_start.replace(month=1, day=1)
+
+    # Previous year equivalents for YoY
+    ly_today_start = today_start.replace(year=today_start.year - 1)
+    ly_week_start = week_start.replace(year=week_start.year - 1)
+    ly_month_start = month_start.replace(year=month_start.year - 1)
+    ly_year_start = year_start.replace(year=year_start.year - 1)
+
+    periods = [
+        {"label": "Today", "start": today_start.strftime("%Y-%m-%d"), "end": (today_start + timedelta(days=1)).strftime("%Y-%m-%d"),
+         "lyStart": ly_today_start.strftime("%Y-%m-%d"), "lyEnd": (ly_today_start + timedelta(days=1)).strftime("%Y-%m-%d")},
+        {"label": "WTD", "start": week_start.strftime("%Y-%m-%d"), "end": (today_start + timedelta(days=1)).strftime("%Y-%m-%d"),
+         "lyStart": ly_week_start.strftime("%Y-%m-%d"), "lyEnd": (ly_today_start + timedelta(days=1)).strftime("%Y-%m-%d")},
+        {"label": "MTD", "start": month_start.strftime("%Y-%m-%d"), "end": (today_start + timedelta(days=1)).strftime("%Y-%m-%d"),
+         "lyStart": ly_month_start.strftime("%Y-%m-%d"), "lyEnd": (ly_today_start + timedelta(days=1)).strftime("%Y-%m-%d")},
+        {"label": "YTD", "start": year_start.strftime("%Y-%m-%d"), "end": (today_start + timedelta(days=1)).strftime("%Y-%m-%d"),
+         "lyStart": ly_year_start.strftime("%Y-%m-%d"), "lyEnd": (ly_today_start + timedelta(days=1)).strftime("%Y-%m-%d")},
+    ]
+
+    results = []
+    for p in periods:
+        row = con.execute("""
+            SELECT
+                COALESCE(SUM(ordered_product_sales), 0),
+                COALESCE(SUM(units_ordered), 0),
+                COALESCE(SUM(sessions), 0)
+            FROM daily_sales
+            WHERE date >= ? AND date < ? AND asin = 'ALL'
+        """, [p["start"], p["end"]]).fetchone()
+
+        ly_row = con.execute("""
+            SELECT
+                COALESCE(SUM(ordered_product_sales), 0),
+                COALESCE(SUM(units_ordered), 0),
+                COALESCE(SUM(sessions), 0)
+            FROM daily_sales
+            WHERE date >= ? AND date < ? AND asin = 'ALL'
+        """, [p["lyStart"], p["lyEnd"]]).fetchone()
+
+        rev, units, sessions = row
+        ly_rev, ly_units, ly_sessions = ly_row
+        orders = units
+        ly_orders = ly_units
+        aur = round(rev / units, 2) if units else 0
+        conv = round(units / sessions * 100, 1) if sessions else 0
+
+        # Ad spend for period
+        ad_spend = 0
+        try:
+            ad_row = con.execute("""
+                SELECT COALESCE(SUM(total_spend), 0)
+                FROM ads_daily_summary
+                WHERE date >= ? AND date < ?
+            """, [p["start"], p["end"]]).fetchone()
+            ad_spend = round(ad_row[0], 2) if ad_row else 0
+        except Exception:
+            pass
+
+        ly_ad = 0
+        try:
+            ly_ad_row = con.execute("""
+                SELECT COALESCE(SUM(total_spend), 0)
+                FROM ads_daily_summary
+                WHERE date >= ? AND date < ?
+            """, [p["lyStart"], p["lyEnd"]]).fetchone()
+            ly_ad = round(ly_ad_row[0], 2) if ly_ad_row else 0
+        except Exception:
+            pass
+
+        tacos = round(ad_spend / rev * 100, 1) if rev > 0 else 0
+
+        # Estimate net profit using product margins
+        products = _build_product_list(con, p["start"])
+        prod_rev = sum(pp["rev"] for pp in products)
+        prod_net = sum(pp["net"] for pp in products)
+        margin_pct = prod_net / prod_rev if prod_rev > 0 else 0
+        net = round(rev * margin_pct, 2)
+        margin = round(margin_pct * 100)
+
+        def chg(cur, prev):
+            if prev == 0:
+                return 0
+            return round((cur - prev) / prev * 100, 1)
+
+        results.append({
+            "label": p["label"],
+            "revenue": round(rev, 2),
+            "units": units,
+            "orders": orders,
+            "aur": aur,
+            "sessions": sessions,
+            "convRate": conv,
+            "adSpend": ad_spend,
+            "tacos": tacos,
+            "netProfit": net,
+            "margin": margin,
+            "revChg": chg(rev, ly_rev),
+            "unitChg": chg(units, ly_units),
+            "orderChg": chg(orders, ly_orders),
+            "sessChg": chg(sessions, ly_sessions),
+            "adChg": chg(ad_spend, ly_ad),
+        })
+
+    con.close()
+    return {"periods": results}
+
+
+@app.get("/api/monthly-yoy")
+def monthly_yoy():
+    """Monthly revenue broken down by year for YoY comparison."""
+    con = get_db()
+
+    rows = con.execute("""
+        SELECT
+            EXTRACT(YEAR FROM date) AS yr,
+            EXTRACT(MONTH FROM date) AS mo,
+            COALESCE(SUM(ordered_product_sales), 0) AS revenue
+        FROM daily_sales
+        WHERE asin = 'ALL'
+        GROUP BY EXTRACT(YEAR FROM date), EXTRACT(MONTH FROM date)
+        ORDER BY yr, mo
+    """).fetchall()
+
+    con.close()
+
+    months_map = {}
+    years = set()
+    for r in rows:
+        yr, mo, rev = int(r[0]), int(r[1]), round(r[2], 2)
+        years.add(yr)
+        if mo not in months_map:
+            months_map[mo] = {}
+        months_map[mo][yr] = rev
+
+    month_names = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"]
+    data = []
+    for mo in range(1, 13):
+        entry = {"month": month_names[mo - 1]}
+        for yr in sorted(years):
+            entry[str(yr)] = months_map.get(mo, {}).get(yr, 0)
+        data.append(entry)
+
+    return {"years": sorted(years), "data": data}
+
+
+@app.get("/api/product-mix")
+def product_mix(days: int = Query(365)):
+    """Top 10 products by revenue for donut chart."""
+    con = get_db()
+    cutoff = (datetime.now() - timedelta(days=days)).strftime("%Y-%m-%d")
+    products = _build_product_list(con, cutoff)
+    con.close()
+
+    products.sort(key=lambda p: p["rev"], reverse=True)
+    top10 = products[:10]
+    other_rev = sum(p["rev"] for p in products[10:])
+
+    result = [{"name": p["name"][:30], "value": p["rev"]} for p in top10]
+    if other_rev > 0:
+        result.append({"name": "Other", "value": round(other_rev, 2)})
+
+    return {"products": result}
+
+
 # ── Static Frontend ────────────────────────────────────────
 # Serve the built React frontend from the same server.
 # The frontend dist/ folder should be at webapp/frontend/dist/
