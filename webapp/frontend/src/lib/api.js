@@ -17,7 +17,7 @@ export const api = {
   pnl: (days = 365) => fetchJSON(`/api/pnl?days=${days}`),
 
   // Dashboard analytics
-  comparison: () => fetchJSON(`/api/comparison`),
+  comparison: (view = "realtime") => fetchJSON(`/api/comparison?view=${view}`),
   monthlyYoY: () => fetchJSON(`/api/monthly-yoy`),
   productMix: (days = 365) => fetchJSON(`/api/product-mix?days=${days}`),
 

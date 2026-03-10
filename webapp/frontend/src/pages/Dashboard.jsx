@@ -25,23 +25,34 @@ function movingAvg(data, key, window) {
   });
 }
 
+const COMP_VIEWS = [
+  { key: "realtime", label: "Today / WTD / MTD / YTD" },
+  { key: "weekly", label: "Weekly Rollups" },
+  { key: "monthly", label: "Monthly Rollups" },
+  { key: "yearly", label: "Year-over-Year" },
+  { key: "monthly2026", label: new Date().getFullYear() + " by Month" },
+];
+
 export default function Dashboard() {
   const [days, setDays] = useState(365);
   const [summary, setSummary] = useState(null);
   const [daily, setDaily] = useState([]);
   const [pnl, setPnl] = useState(null);
   const [comparison, setComparison] = useState([]);
+  const [compView, setCompView] = useState("realtime");
+  const [compLoading, setCompLoading] = useState(false);
   const [monthlyYoY, setMonthlyYoY] = useState({ years: [], data: [] });
   const [productMix, setProductMix] = useState([]);
   const [loading, setLoading] = useState(true);
 
+  // Load main dashboard data
   useEffect(() => {
     setLoading(true);
     Promise.all([
       api.summary(days),
       api.daily(days, days <= 90 ? "daily" : "weekly"),
       api.pnl(days),
-      api.comparison(),
+      api.comparison(compView),
       api.monthlyYoY(),
       api.productMix(days),
     ]).then(([s, d, p, comp, yoy, mix]) => {
@@ -57,6 +68,15 @@ export default function Dashboard() {
       setLoading(false);
     });
   }, [days]);
+
+  // Load comparison data when view changes
+  useEffect(() => {
+    setCompLoading(true);
+    api.comparison(compView).then(comp => {
+      setComparison(comp.periods || []);
+      setCompLoading(false);
+    }).catch(() => setCompLoading(false));
+  }, [compView]);
 
   if (loading) {
     return <div className="loading"><div className="spinner" /> Loading dashboard...</div>;
@@ -95,16 +115,32 @@ export default function Dashboard() {
       </div>
 
       {/* ── Period Comparison Table ──────────────────────── */}
-      {comparison.length > 0 && (
-        <div className="table-card comp-table-card">
-          <h3>Performance Snapshot</h3>
+      <div className="table-card comp-table-card">
+        <h3>Performance Snapshot</h3>
+        <div className="comp-tabs">
+          {COMP_VIEWS.map(v => (
+            <button
+              key={v.key}
+              className={`comp-tab ${compView === v.key ? "active" : ""}`}
+              onClick={() => setCompView(v.key)}
+            >
+              {v.label}
+            </button>
+          ))}
+        </div>
+        {compLoading ? (
+          <div style={{ padding: 24, textAlign: "center", color: "var(--muted)" }}>Loading...</div>
+        ) : comparison.length > 0 ? (
           <div style={{ overflowX: "auto" }}>
             <table className="comp-table">
               <thead>
                 <tr>
                   <th>Metric</th>
                   {comparison.map(c => (
-                    <th key={c.label}>{c.label}</th>
+                    <th key={c.label}>
+                      {c.label}
+                      {c.sub && <div style={{ fontSize: 10, fontWeight: 400, opacity: 0.7 }}>{c.sub}</div>}
+                    </th>
                   ))}
                 </tr>
               </thead>
@@ -122,8 +158,10 @@ export default function Dashboard() {
               </tbody>
             </table>
           </div>
-        </div>
-      )}
+        ) : (
+          <div style={{ padding: 24, textAlign: "center", color: "var(--muted)" }}>No data for this period</div>
+        )}
+      </div>
 
       {/* ── Range Tabs ──────────────────────────────────── */}
       <div className="range-tabs">

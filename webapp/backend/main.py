@@ -783,35 +783,134 @@ def ads_negative_keywords():
 # ── Period Comparison & Analytics ──────────────────────────
 
 @app.get("/api/comparison")
-def period_comparison():
-    """Return KPI comparison across multiple time periods (Today/WTD/MTD/YTD, etc.)."""
+def period_comparison(view: str = Query("realtime")):
+    """Return KPI comparison across multiple time periods.
+
+    Views:
+    - realtime: Today / WTD / MTD / YTD
+    - weekly: Last Week / 4 Weeks / 13 Weeks / 26 Weeks
+    - monthly: Last Month / 2 Mo Ago / 3 Mo Ago / Last 12 Mo
+    - yearly: 2026 YTD / 2025 YTD (comp) / 2025 Full / 2024 Full
+    - monthly2026: Jan / Feb / ... / current month / YTD total
+    """
     con = get_db()
     cogs_data = load_cogs()
 
     now = datetime.now()
     today_start = now.replace(hour=0, minute=0, second=0, microsecond=0)
+    tomorrow = (today_start + timedelta(days=1)).strftime("%Y-%m-%d")
+    yr = today_start.year
+    month_names = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec']
 
-    # Week start (Monday)
-    week_start = today_start - timedelta(days=today_start.weekday())
-    month_start = today_start.replace(day=1)
-    year_start = today_start.replace(month=1, day=1)
+    if view == "weekly":
+        wd = today_start.weekday()  # Monday=0
+        last_week_start = today_start - timedelta(days=wd + 7)
+        last_week_end = today_start - timedelta(days=wd)
+        periods = [
+            {"label": "Last Week",
+             "start": last_week_start.strftime("%Y-%m-%d"),
+             "end": last_week_end.strftime("%Y-%m-%d")},
+            {"label": "4 Weeks",
+             "start": (today_start - timedelta(days=28)).strftime("%Y-%m-%d"),
+             "end": tomorrow},
+            {"label": "13 Weeks",
+             "start": (today_start - timedelta(days=91)).strftime("%Y-%m-%d"),
+             "end": tomorrow},
+            {"label": "26 Weeks",
+             "start": (today_start - timedelta(days=182)).strftime("%Y-%m-%d"),
+             "end": tomorrow},
+        ]
+    elif view == "monthly":
+        periods = []
+        for i in range(1, 4):
+            m_start = today_start.replace(day=1)
+            # Go back i months
+            m = m_start.month - i
+            y = m_start.year
+            while m <= 0:
+                m += 12
+                y -= 1
+            m_start_actual = datetime(y, m, 1)
+            m_end_actual = datetime(y if m < 12 else y + 1, m + 1 if m < 12 else 1, 1)
+            label = "Last Month" if i == 1 else f"{i} Mo Ago" if i == 2 else "3 Mo Ago"
+            periods.append({
+                "label": label,
+                "sub": month_names[m - 1] + " " + str(y),
+                "start": m_start_actual.strftime("%Y-%m-%d"),
+                "end": m_end_actual.strftime("%Y-%m-%d"),
+            })
+        periods.append({
+            "label": "Last 12 Mo",
+            "start": (today_start - timedelta(days=365)).strftime("%Y-%m-%d"),
+            "end": tomorrow,
+        })
+    elif view == "yearly":
+        ytd_comp_end = datetime(yr - 1, today_start.month, today_start.day) + timedelta(days=1)
+        periods = [
+            {"label": f"{yr} YTD",
+             "start": f"{yr}-01-01",
+             "end": tomorrow},
+            {"label": f"{yr-1} YTD",
+             "sub": "same window comp",
+             "start": f"{yr-1}-01-01",
+             "end": ytd_comp_end.strftime("%Y-%m-%d")},
+            {"label": f"{yr-1} Full",
+             "start": f"{yr-1}-01-01",
+             "end": f"{yr}-01-01"},
+            {"label": f"{yr-2} Full",
+             "start": f"{yr-2}-01-01",
+             "end": f"{yr-1}-01-01"},
+        ]
+    elif view == "monthly2026":
+        periods = []
+        for m in range(1, today_start.month + 1):
+            m_start = datetime(yr, m, 1)
+            m_end = tomorrow if m == today_start.month else datetime(yr, m + 1, 1).strftime("%Y-%m-%d")
+            if isinstance(m_end, datetime):
+                m_end = m_end.strftime("%Y-%m-%d")
+            periods.append({
+                "label": month_names[m - 1],
+                "sub": str(yr),
+                "start": m_start.strftime("%Y-%m-%d"),
+                "end": m_end,
+            })
+        periods.append({
+            "label": f"{yr} Total",
+            "sub": "YTD",
+            "start": f"{yr}-01-01",
+            "end": tomorrow,
+        })
+    else:
+        # Default: realtime (Today / WTD / MTD / YTD)
+        week_start = today_start - timedelta(days=today_start.weekday())
+        month_start = today_start.replace(day=1)
+        year_start = today_start.replace(month=1, day=1)
 
-    # Previous year equivalents for YoY
-    ly_today_start = today_start.replace(year=today_start.year - 1)
-    ly_week_start = week_start.replace(year=week_start.year - 1)
-    ly_month_start = month_start.replace(year=month_start.year - 1)
-    ly_year_start = year_start.replace(year=year_start.year - 1)
+        periods = [
+            {"label": "Today",
+             "start": today_start.strftime("%Y-%m-%d"),
+             "end": tomorrow},
+            {"label": "WTD",
+             "start": week_start.strftime("%Y-%m-%d"),
+             "end": tomorrow},
+            {"label": "MTD",
+             "start": month_start.strftime("%Y-%m-%d"),
+             "end": tomorrow},
+            {"label": "YTD",
+             "start": year_start.strftime("%Y-%m-%d"),
+             "end": tomorrow},
+        ]
 
-    periods = [
-        {"label": "Today", "start": today_start.strftime("%Y-%m-%d"), "end": (today_start + timedelta(days=1)).strftime("%Y-%m-%d"),
-         "lyStart": ly_today_start.strftime("%Y-%m-%d"), "lyEnd": (ly_today_start + timedelta(days=1)).strftime("%Y-%m-%d")},
-        {"label": "WTD", "start": week_start.strftime("%Y-%m-%d"), "end": (today_start + timedelta(days=1)).strftime("%Y-%m-%d"),
-         "lyStart": ly_week_start.strftime("%Y-%m-%d"), "lyEnd": (ly_today_start + timedelta(days=1)).strftime("%Y-%m-%d")},
-        {"label": "MTD", "start": month_start.strftime("%Y-%m-%d"), "end": (today_start + timedelta(days=1)).strftime("%Y-%m-%d"),
-         "lyStart": ly_month_start.strftime("%Y-%m-%d"), "lyEnd": (ly_today_start + timedelta(days=1)).strftime("%Y-%m-%d")},
-        {"label": "YTD", "start": year_start.strftime("%Y-%m-%d"), "end": (today_start + timedelta(days=1)).strftime("%Y-%m-%d"),
-         "lyStart": ly_year_start.strftime("%Y-%m-%d"), "lyEnd": (ly_today_start + timedelta(days=1)).strftime("%Y-%m-%d")},
-    ]
+    def chg(cur, prev):
+        if prev == 0:
+            return 0
+        return round((cur - prev) / prev * 100, 1)
+
+    # Compute a single margin rate from full product list (to avoid calling _build_product_list per period)
+    full_products = _build_product_list(con, f"{yr-1}-01-01")
+    full_prod_rev = sum(pp["rev"] for pp in full_products)
+    full_prod_net = sum(pp["net"] for pp in full_products)
+    margin_pct = full_prod_net / full_prod_rev if full_prod_rev > 0 else 0
 
     results = []
     for p in periods:
@@ -824,19 +923,8 @@ def period_comparison():
             WHERE date >= ? AND date < ? AND asin = 'ALL'
         """, [p["start"], p["end"]]).fetchone()
 
-        ly_row = con.execute("""
-            SELECT
-                COALESCE(SUM(ordered_product_sales), 0),
-                COALESCE(SUM(units_ordered), 0),
-                COALESCE(SUM(sessions), 0)
-            FROM daily_sales
-            WHERE date >= ? AND date < ? AND asin = 'ALL'
-        """, [p["lyStart"], p["lyEnd"]]).fetchone()
-
         rev, units, sessions = row
-        ly_rev, ly_units, ly_sessions = ly_row
         orders = units
-        ly_orders = ly_units
         aur = round(rev / units, 2) if units else 0
         conv = round(units / sessions * 100, 1) if sessions else 0
 
@@ -852,34 +940,45 @@ def period_comparison():
         except Exception:
             pass
 
+        tacos = round(ad_spend / rev * 100, 1) if rev > 0 else 0
+        net = round(rev * margin_pct, 2)
+        margin_val = round(margin_pct * 100)
+
+        # Compute last-year equivalents
+        try:
+            ly_start = datetime.strptime(p["start"], "%Y-%m-%d").replace(year=datetime.strptime(p["start"], "%Y-%m-%d").year - 1)
+            ly_end = datetime.strptime(p["end"], "%Y-%m-%d").replace(year=datetime.strptime(p["end"], "%Y-%m-%d").year - 1)
+        except ValueError:
+            # Feb 29 edge case
+            ly_start = datetime.strptime(p["start"], "%Y-%m-%d") - timedelta(days=365)
+            ly_end = datetime.strptime(p["end"], "%Y-%m-%d") - timedelta(days=365)
+
+        ly_row = con.execute("""
+            SELECT
+                COALESCE(SUM(ordered_product_sales), 0),
+                COALESCE(SUM(units_ordered), 0),
+                COALESCE(SUM(sessions), 0)
+            FROM daily_sales
+            WHERE date >= ? AND date < ? AND asin = 'ALL'
+        """, [ly_start.strftime("%Y-%m-%d"), ly_end.strftime("%Y-%m-%d")]).fetchone()
+
+        ly_rev, ly_units, ly_sessions = ly_row
+        ly_orders = ly_units
+
         ly_ad = 0
         try:
             ly_ad_row = con.execute("""
                 SELECT COALESCE(SUM(total_spend), 0)
                 FROM ads_daily_summary
                 WHERE date >= ? AND date < ?
-            """, [p["lyStart"], p["lyEnd"]]).fetchone()
+            """, [ly_start.strftime("%Y-%m-%d"), ly_end.strftime("%Y-%m-%d")]).fetchone()
             ly_ad = round(ly_ad_row[0], 2) if ly_ad_row else 0
         except Exception:
             pass
 
-        tacos = round(ad_spend / rev * 100, 1) if rev > 0 else 0
-
-        # Estimate net profit using product margins
-        products = _build_product_list(con, p["start"])
-        prod_rev = sum(pp["rev"] for pp in products)
-        prod_net = sum(pp["net"] for pp in products)
-        margin_pct = prod_net / prod_rev if prod_rev > 0 else 0
-        net = round(rev * margin_pct, 2)
-        margin = round(margin_pct * 100)
-
-        def chg(cur, prev):
-            if prev == 0:
-                return 0
-            return round((cur - prev) / prev * 100, 1)
-
         results.append({
             "label": p["label"],
+            "sub": p.get("sub", ""),
             "revenue": round(rev, 2),
             "units": units,
             "orders": orders,
@@ -889,7 +988,7 @@ def period_comparison():
             "adSpend": ad_spend,
             "tacos": tacos,
             "netProfit": net,
-            "margin": margin,
+            "margin": margin_val,
             "revChg": chg(rev, ly_rev),
             "unitChg": chg(units, ly_units),
             "orderChg": chg(orders, ly_orders),
@@ -898,7 +997,7 @@ def period_comparison():
         })
 
     con.close()
-    return {"periods": results}
+    return {"view": view, "periods": results}
 
 
 @app.get("/api/monthly-yoy")
