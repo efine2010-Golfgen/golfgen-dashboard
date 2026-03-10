@@ -1414,8 +1414,10 @@ def _build_waterfall(con, cogs_data, start: str, end: str) -> dict:
 
 # ── Static Frontend ────────────────────────────────────────
 # Serve the built React frontend from the same server.
-# The frontend dist/ folder should be at webapp/frontend/dist/
-FRONTEND_DIR = Path(__file__).resolve().parent.parent / "frontend" / "dist"
+# Check local dist/ first (Docker), then ../frontend/dist/ (local dev)
+_local_dist = Path(__file__).resolve().parent / "dist"
+_dev_dist = Path(__file__).resolve().parent.parent / "frontend" / "dist"
+FRONTEND_DIR = _local_dist if _local_dist.exists() else _dev_dist
 
 if FRONTEND_DIR.exists():
     # Mount static assets (JS, CSS, images) — must come AFTER api routes
