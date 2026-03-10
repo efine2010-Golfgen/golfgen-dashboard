@@ -362,44 +362,52 @@ def _run_sp_api_sync():
     # ── 2. FINANCIAL EVENTS (actual fees, refunds, promos) ──────
     try:
         from sp_api.api import Finances as FinancesAPI
-        from sp_api.util import load_all_pages, throttle_retry
         logger.info("  Pulling financial events (fees, refunds)...")
 
         fin_start = (datetime.utcnow() - timedelta(days=90)).strftime("%Y-%m-%dT%H:%M:%SZ")
         finances = FinancesAPI(credentials=credentials, marketplace=Marketplaces.US)
 
-        # Use load_all_pages for proper pagination
+        # Manual NextToken pagination (more reliable than @load_all_pages)
         all_shipment_events = []
         all_refund_events = []
         page = 0
+        next_token = None
 
-        @load_all_pages()
-        def _fetch_financial_events(**kwargs):
-            return finances.list_financial_events(**kwargs)
+        while page < 20:
+            page += 1
+            kwargs = {"PostedAfter": fin_start, "MaxResultsPerPage": 100}
+            if next_token:
+                kwargs["NextToken"] = next_token
 
-        try:
-            for resp_page in _fetch_financial_events(PostedAfter=fin_start, MaxResultsPerPage=100):
-                page += 1
-                events = resp_page.payload.get("FinancialEvents", {})
+            try:
+                resp = finances.list_financial_events(**kwargs)
+            except Exception as api_err:
+                logger.error(f"  Financial events API call error (page {page}): {api_err}")
+                import traceback
+                logger.error(traceback.format_exc())
+                break
 
-                # Log ALL event type keys for debugging
-                if page == 1:
-                    logger.info(f"  Financial events keys (page 1): {list(events.keys()) if events else 'EMPTY'}")
-                    # Also log raw response keys at top level
-                    logger.info(f"  Raw payload keys: {list(resp_page.payload.keys())}")
+            payload = resp.payload if hasattr(resp, 'payload') else (resp if isinstance(resp, dict) else {})
+            events = payload.get("FinancialEvents", {})
 
-                shipments = events.get("ShipmentEventList", [])
-                refunds = events.get("RefundEventList", [])
-                all_shipment_events.extend(shipments)
-                all_refund_events.extend(refunds)
-                logger.info(f"  Financial events page {page}: {len(shipments)} shipments, {len(refunds)} refunds")
+            if page == 1:
+                logger.info(f"  Financial events payload keys: {list(payload.keys())}")
+                logger.info(f"  Financial events event keys: {list(events.keys()) if events else 'EMPTY'}")
+                # Log ALL event lists and their counts
+                for k, v in events.items():
+                    if isinstance(v, list):
+                        logger.info(f"    {k}: {len(v)} items")
 
-                if page >= 20:
-                    break
-        except Exception as page_err:
-            logger.error(f"  Financial events pagination error: {page_err}")
-            import traceback
-            logger.error(traceback.format_exc())
+            shipments = events.get("ShipmentEventList", [])
+            refunds = events.get("RefundEventList", [])
+            all_shipment_events.extend(shipments)
+            all_refund_events.extend(refunds)
+            logger.info(f"  Financial events page {page}: {len(shipments)} shipments, {len(refunds)} refunds")
+
+            # Check for next page
+            next_token = payload.get("NextToken")
+            if not next_token:
+                break
 
         logger.info(f"  Total financial events: {len(all_shipment_events)} shipments, {len(all_refund_events)} refunds")
         con = duckdb.connect(str(DB_PATH), read_only=False)
@@ -1478,6 +1486,55 @@ def ads_negative_keywords():
     ]
 
     return {"negativeKeywords": keywords}
+
+
+# ── Debug: Financial Events ───────────────────────────────
+
+@app.get("/api/debug/financial-events")
+def debug_financial_events():
+    """Call Financial Events API directly and return raw summary for debugging."""
+    try:
+        from sp_api.api import Finances as FinancesAPI
+        fin_start = (datetime.utcnow() - timedelta(days=90)).strftime("%Y-%m-%dT%H:%M:%SZ")
+        finances = FinancesAPI(credentials=credentials, marketplace=Marketplaces.US)
+
+        resp = finances.list_financial_events(PostedAfter=fin_start, MaxResultsPerPage=100)
+        payload = resp.payload if hasattr(resp, 'payload') else (resp if isinstance(resp, dict) else {})
+        events = payload.get("FinancialEvents", {})
+
+        summary = {}
+        for k, v in events.items():
+            if isinstance(v, list):
+                summary[k] = len(v)
+                # For refunds, show first item structure
+                if k == "RefundEventList" and len(v) > 0:
+                    first = v[0]
+                    summary["refund_sample_keys"] = list(first.keys())
+                    summary["refund_sample_order_id"] = first.get("AmazonOrderId", "N/A")
+            else:
+                summary[k] = str(v)[:100]
+
+        # Also check what's in the DB
+        con = duckdb.connect(str(DB_PATH), read_only=True)
+        db_counts = con.execute("""
+            SELECT event_type, COUNT(*), SUM(ABS(product_charges))
+            FROM financial_events
+            GROUP BY event_type
+        """).fetchall()
+        con.close()
+
+        has_next = "NextToken" in payload
+
+        return {
+            "api_date_range": fin_start,
+            "payload_keys": list(payload.keys()),
+            "event_type_counts": summary,
+            "has_next_page": has_next,
+            "db_records": [{"type": r[0], "count": r[1], "total_charges": round(r[2], 2)} for r in db_counts]
+        }
+    except Exception as e:
+        import traceback
+        return {"error": str(e), "traceback": traceback.format_exc()}
 
 
 # ── Period Comparison & Analytics ──────────────────────────
