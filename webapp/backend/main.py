@@ -1519,7 +1519,7 @@ def debug_financial_events():
                 summary[k] = str(v)[:100]
 
         # Also check what's in the DB
-        con = duckdb.connect(str(DB_PATH), read_only=True)
+        con = duckdb.connect(str(DB_PATH), read_only=False)
         db_counts = con.execute("""
             SELECT event_type, COUNT(*), SUM(ABS(product_charges))
             FROM financial_events
