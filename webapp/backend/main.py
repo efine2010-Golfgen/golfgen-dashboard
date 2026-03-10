@@ -233,6 +233,215 @@ def _run_sp_api_sync():
     except Exception as e:
         logger.error(f"  Inventory sync error: {e}")
 
+    # --- Pull Financial Events (actual fees, refunds, promos) ---
+    try:
+        from sp_api.api import Finances as FinancesAPI
+        logger.info("  Pulling financial events (fees, refunds)...")
+
+        fin_start = (datetime.utcnow() - timedelta(days=30)).isoformat()
+        finances = FinancesAPI(credentials=credentials, marketplace=Marketplaces.US)
+        response = finances.list_financial_events(
+            PostedAfter=fin_start,
+            MaxResultsPerPage=100
+        )
+
+        events = response.payload.get("FinancialEvents", {})
+        con = duckdb.connect(str(DB_PATH), read_only=False)
+        fin_records = 0
+
+        # Process shipment events (sales fees)
+        for event in events.get("ShipmentEventList", []):
+            order_id = event.get("AmazonOrderId", "")
+            posted_date = event.get("PostedDate", "")
+
+            for item in event.get("ShipmentItemList", []):
+                sku = item.get("SellerSKU", "")
+                asin_val = item.get("ASIN", sku)  # Prefer ASIN, fallback to SKU
+
+                # Parse charges
+                product_charges = 0.0
+                shipping_ch = 0.0
+                for c in item.get("ItemChargeList", []):
+                    amt = c.get("ChargeAmount", {})
+                    val = float(amt.get("Amount", 0)) if isinstance(amt, dict) else 0
+                    ct = c.get("ChargeType", "")
+                    if ct == "Principal":
+                        product_charges += val
+                    elif ct in ("ShippingCharge", "Shipping"):
+                        shipping_ch += val
+
+                # Parse fees
+                fba_fees_val = 0.0
+                commission_val = 0.0
+                other_val = 0.0
+                for f in item.get("ItemFeeList", []):
+                    amt = f.get("FeeAmount", {})
+                    val = abs(float(amt.get("Amount", 0))) if isinstance(amt, dict) else 0
+                    ft = f.get("FeeType", "")
+                    if "FBA" in ft or "Fulfillment" in ft:
+                        fba_fees_val += val
+                    elif ft in ("Commission", "ReferralFee"):
+                        commission_val += val
+                    else:
+                        other_val += val
+
+                # Parse promotions
+                promo_val = 0.0
+                for p in item.get("PromotionList", []):
+                    amt = p.get("PromotionAmount", {})
+                    promo_val += float(amt.get("Amount", 0)) if isinstance(amt, dict) else 0
+
+                net = product_charges + shipping_ch - fba_fees_val - commission_val + promo_val
+
+                con.execute("""
+                    INSERT OR REPLACE INTO financial_events
+                    (date, asin, sku, order_id, event_type,
+                     product_charges, shipping_charges, fba_fees,
+                     commission, promotion_amount, other_fees, net_proceeds)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """, [
+                    posted_date[:10] if posted_date else None,
+                    asin_val, sku, order_id, "Shipment",
+                    product_charges, shipping_ch,
+                    fba_fees_val, commission_val, promo_val, other_val, net
+                ])
+                fin_records += 1
+
+        # Process refund events
+        for event in events.get("RefundEventList", []):
+            order_id = event.get("AmazonOrderId", "")
+            posted_date = event.get("PostedDate", "")
+
+            for item in event.get("ShipmentItemAdjustmentList", event.get("ShipmentItemList", [])):
+                sku = item.get("SellerSKU", "")
+                asin_val = item.get("ASIN", sku)
+
+                refund_amount = 0.0
+                for c in item.get("ItemChargeAdjustmentList", item.get("ItemChargeList", [])):
+                    amt = c.get("ChargeAmount", {})
+                    refund_amount += float(amt.get("Amount", 0)) if isinstance(amt, dict) else 0
+
+                con.execute("""
+                    INSERT OR REPLACE INTO financial_events
+                    (date, asin, sku, order_id, event_type,
+                     product_charges, shipping_charges, fba_fees,
+                     commission, promotion_amount, other_fees, net_proceeds)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """, [
+                    posted_date[:10] if posted_date else None,
+                    asin_val, sku, order_id, "Refund",
+                    refund_amount, 0, 0, 0, 0, 0, refund_amount
+                ])
+                fin_records += 1
+
+        con.close()
+        logger.info(f"  Financial events sync done: {fin_records} records")
+    except Exception as e:
+        logger.error(f"  Financial events sync error: {e}")
+
+    # --- Pull Today's Orders (real-time, no delay) ---
+    try:
+        from sp_api.api import Orders as OrdersAPI
+        logger.info("  Pulling today's orders (real-time)...")
+
+        # Get orders from last 2 days to catch any we missed
+        after_date = (datetime.utcnow() - timedelta(days=2)).isoformat()
+        orders_api = OrdersAPI(credentials=credentials, marketplace=Marketplaces.US)
+        response = orders_api.get_orders(
+            CreatedAfter=after_date,
+            MarketplaceIds=["ATVPDKIKX0DER"],
+            MaxResultsPerPage=100
+        )
+
+        order_list = response.payload.get("Orders", [])
+        con = duckdb.connect(str(DB_PATH), read_only=False)
+
+        # Store raw orders
+        for order in order_list:
+            order_total = order.get("OrderTotal", {})
+            con.execute("""
+                INSERT OR REPLACE INTO orders
+                (order_id, purchase_date, order_status, fulfillment_channel,
+                 sales_channel, order_total, currency_code, number_of_items,
+                 ship_city, ship_state, ship_postal_code,
+                 is_business_order, is_prime)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """, [
+                order.get("AmazonOrderId"),
+                order.get("PurchaseDate"),
+                order.get("OrderStatus"),
+                order.get("FulfillmentChannel"),
+                order.get("SalesChannel"),
+                float(order_total.get("Amount", 0)) if order_total else 0,
+                order_total.get("CurrencyCode", "USD") if order_total else "USD",
+                order.get("NumberOfItemsShipped", 0) + order.get("NumberOfItemsUnshipped", 0),
+                order.get("ShippingAddress", {}).get("City", ""),
+                order.get("ShippingAddress", {}).get("StateOrRegion", ""),
+                order.get("ShippingAddress", {}).get("PostalCode", ""),
+                order.get("IsBusinessOrder", False),
+                order.get("IsPrime", False),
+            ])
+
+        # Aggregate orders by date → update daily_sales for dates where
+        # the Sales & Traffic Report hasn't caught up yet
+        from collections import defaultdict
+        daily_agg = defaultdict(lambda: {"revenue": 0.0, "units": 0, "orders": 0})
+
+        for order in order_list:
+            status = order.get("OrderStatus", "")
+            if status in ("Canceled", "Cancelled"):
+                continue
+            purchase_date = order.get("PurchaseDate", "")
+            if not purchase_date:
+                continue
+            # Parse ISO date and convert to Pacific time (seller's timezone)
+            try:
+                if "T" in purchase_date:
+                    dt = datetime.fromisoformat(purchase_date.replace("Z", "+00:00"))
+                    # Convert UTC to Pacific (UTC-7 for PDT, UTC-8 for PST)
+                    # March = PDT = UTC-7
+                    dt = dt - timedelta(hours=7)
+                    day_str = dt.strftime("%Y-%m-%d")
+                else:
+                    day_str = purchase_date[:10]
+            except Exception:
+                day_str = purchase_date[:10]
+
+            order_total = order.get("OrderTotal", {})
+            amount = float(order_total.get("Amount", 0)) if order_total else 0
+            n_items = order.get("NumberOfItemsShipped", 0) + order.get("NumberOfItemsUnshipped", 0)
+
+            daily_agg[day_str]["revenue"] += amount
+            daily_agg[day_str]["units"] += n_items
+            daily_agg[day_str]["orders"] += 1
+
+        # Only update daily_sales for today (don't overwrite historical report data)
+        today_str = (datetime.utcnow() - timedelta(hours=7)).strftime("%Y-%m-%d")
+        if today_str in daily_agg:
+            agg = daily_agg[today_str]
+            # Check if the Sales & Traffic report already has data for today
+            existing = con.execute(
+                "SELECT ordered_product_sales FROM daily_sales WHERE date = ? AND asin = 'ALL'",
+                [today_str]
+            ).fetchone()
+            existing_rev = float(existing[0]) if existing and existing[0] else 0.0
+
+            # If order-based revenue is higher, update (report data is stale)
+            if agg["revenue"] > existing_rev:
+                con.execute("""
+                    INSERT OR REPLACE INTO daily_sales
+                    (date, asin, units_ordered, ordered_product_sales,
+                     sessions, session_percentage, page_views,
+                     buy_box_percentage, unit_session_percentage)
+                    VALUES (?, 'ALL', ?, ?, 0, 0, 0, 0, 0)
+                """, [today_str, agg["units"], agg["revenue"]])
+                logger.info(f"  Updated today ({today_str}): ${agg['revenue']:.2f} from {agg['orders']} orders")
+
+        con.close()
+        logger.info(f"  Orders sync done: {len(order_list)} orders processed")
+    except Exception as e:
+        logger.error(f"  Orders sync error: {e}")
+
     logger.info("SP-API background sync complete.")
 
 
@@ -348,6 +557,15 @@ def health():
 @app.post("/api/sync")
 async def trigger_sync():
     """Manually trigger an SP-API data sync."""
+    import asyncio
+    loop = asyncio.get_event_loop()
+    await loop.run_in_executor(None, _run_sp_api_sync)
+    return {"status": "sync_complete"}
+
+
+@app.get("/api/sync")
+async def trigger_sync_get():
+    """Manually trigger sync (GET for easy browser testing)."""
     import asyncio
     loop = asyncio.get_event_loop()
     await loop.run_in_executor(None, _run_sp_api_sync)
@@ -679,10 +897,13 @@ def _build_product_list(con, cutoff: str) -> list:
         # FBA fees
         fin = fin_by_asin.get(asin, {})
         actual_fba = fin.get("fba_fees", 0)
-        est_fba_per_unit = round(5.0 + aur * 0.03, 2)
-        fba_total = actual_fba if actual_fba > 0 else round(units * est_fba_per_unit, 2)
+        # Better estimate for golf equipment (oversized/bulky items):
+        # Amazon FBA fees are typically 10-15% of selling price for large items
+        # Old formula ($5 + 3% of AUR) was WAY too low
+        est_fba_total = round(revenue * 0.12, 2)  # ~12% of revenue for oversized
+        fba_total = actual_fba if actual_fba > 0 else est_fba_total
 
-        # Referral fees
+        # Referral fees (15% is standard for Sports & Outdoors)
         actual_commission = fin.get("commission", 0)
         referral_total = round(actual_commission, 2) if actual_commission > 0 else round(revenue * 0.15, 2)
 
@@ -1609,11 +1830,11 @@ def _build_waterfall(con, cogs_data, start: str, end: str) -> dict:
         actual_fba = fin.get("fba", 0)
         actual_comm = fin.get("comm", 0)
 
-        # FBA fees: use actual if available, else estimate
+        # FBA fees: use actual if available, else estimate ~12% of revenue (oversized golf equipment)
         if actual_fba > 0:
             total_fba += actual_fba
         else:
-            est_fba = u * round(5.0 + aur * 0.03, 2)
+            est_fba = round(rev * 0.12, 2)
             total_fba += est_fba
 
         # Referral fees: use actual commission if available, else 15%
@@ -1650,7 +1871,7 @@ def _build_waterfall(con, cogs_data, start: str, end: str) -> dict:
             fba_pct = sum(p["fbaTotal"] for p in all_products) / total_prd_rev
             ref_pct = sum(p["referralTotal"] for p in all_products) / total_prd_rev
         else:
-            cogs_pct, fba_pct, ref_pct = 0.35, 0.06, 0.15
+            cogs_pct, fba_pct, ref_pct = 0.35, 0.12, 0.15
         cogs = round(sales * cogs_pct, 2)
         fba_fees = round(sales * fba_pct, 2)
         referral_fees = round(sales * ref_pct, 2)
