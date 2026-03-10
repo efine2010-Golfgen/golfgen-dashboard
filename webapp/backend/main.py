@@ -1845,8 +1845,7 @@ def backfill_historical(
     breaks the range into 30-day chunks and requests each one.
     This is a SLOW endpoint (each chunk takes 2-5 minutes for polling)."""
     from datetime import date as dt_date
-    import gzip as gz
-    import requests as req
+    import time, gzip as gz, requests as req
     from sp_api.api import Reports
     from sp_api.base import Marketplaces, ReportType
 
