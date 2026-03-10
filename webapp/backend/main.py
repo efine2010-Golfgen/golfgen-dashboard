@@ -519,26 +519,16 @@ def fmt_date(d) -> str:
 
 
 def get_today(con) -> datetime:
-    """Get 'today' anchored to the latest date in the database.
+    """Return today's actual calendar date in US-Pacific timezone.
 
-    Railway servers run in UTC, so datetime.now() may be off.
-    Use the actual max date from daily_sales so Today/WTD/MTD match
-    what the user sees as "current".  If today has $0 revenue that's
-    fine — the dashboard will show $0 for Today.
+    Railway servers run in UTC.  The business operates in Pacific time,
+    so we subtract 7 hours (PDT) from UTC to get the real calendar date.
+    'Today' always means today — if there's no data yet it shows $0,
+    which is correct until Orders API sync populates it.
     """
-    try:
-        row = con.execute(
-            "SELECT MAX(date) FROM daily_sales WHERE asin = 'ALL'"
-        ).fetchone()
-        if row and row[0]:
-            d = row[0]
-            if isinstance(d, str):
-                return datetime.strptime(d, "%Y-%m-%d")
-            if hasattr(d, "year"):
-                return datetime(d.year, d.month, d.day)
-    except Exception:
-        pass
-    return datetime.now()
+    now_utc = datetime.utcnow()
+    now_pacific = now_utc - timedelta(hours=7)          # PDT (UTC-7)
+    return now_pacific.replace(hour=0, minute=0, second=0, microsecond=0)
 
 
 # ── API Routes ──────────────────────────────────────────
