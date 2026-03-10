@@ -33,6 +33,40 @@ CONFIG_PATH = BASE_DIR / "config" / "credentials.json"
 # ── Background SP-API Sync ──────────────────────────────
 SYNC_INTERVAL_HOURS = 2
 
+
+def _load_sp_api_credentials() -> dict | None:
+    """Load SP-API credentials from env vars (Railway) or config file (local dev)."""
+    # Priority 1: Environment variables (used on Railway)
+    env_refresh = os.environ.get("SP_API_REFRESH_TOKEN", "")
+    if env_refresh:
+        return {
+            "refresh_token": env_refresh,
+            "lwa_app_id": os.environ.get("SP_API_LWA_APP_ID", ""),
+            "lwa_client_secret": os.environ.get("SP_API_LWA_CLIENT_SECRET", ""),
+            "aws_access_key": os.environ.get("SP_API_AWS_ACCESS_KEY", ""),
+            "aws_secret_key": os.environ.get("SP_API_AWS_SECRET_KEY", ""),
+            "role_arn": os.environ.get("SP_API_ROLE_ARN", ""),
+        }
+
+    # Priority 2: Config file (local development)
+    if CONFIG_PATH.exists():
+        with open(CONFIG_PATH) as f:
+            creds_json = json.load(f)
+        sp = creds_json.get("AMAZON_SP_API", {})
+        creds = {
+            "refresh_token": sp.get("refresh_token"),
+            "lwa_app_id": sp.get("lwa_app_id"),
+            "lwa_client_secret": sp.get("lwa_client_secret"),
+            "aws_access_key": sp.get("aws_access_key"),
+            "aws_secret_key": sp.get("aws_secret_key"),
+            "role_arn": sp.get("role_arn"),
+        }
+        if creds.get("refresh_token"):
+            return creds
+
+    return None
+
+
 def _run_sp_api_sync():
     """Pull latest data from Amazon SP-API into DuckDB (runs in background thread)."""
     try:
@@ -42,25 +76,9 @@ def _run_sp_api_sync():
         logger.warning("SP-API library not installed — skipping sync")
         return
 
-    if not CONFIG_PATH.exists():
-        logger.warning(f"No credentials at {CONFIG_PATH} — skipping sync")
-        return
-
-    with open(CONFIG_PATH) as f:
-        creds_json = json.load(f)
-
-    sp = creds_json.get("AMAZON_SP_API", {})
-    credentials = {
-        "refresh_token": sp.get("refresh_token"),
-        "lwa_app_id": sp.get("lwa_app_id"),
-        "lwa_client_secret": sp.get("lwa_client_secret"),
-        "aws_access_key": sp.get("aws_access_key"),
-        "aws_secret_key": sp.get("aws_secret_key"),
-        "role_arn": sp.get("role_arn"),
-    }
-
-    if not credentials.get("refresh_token"):
-        logger.warning("SP-API credentials missing refresh_token — skipping sync")
+    credentials = _load_sp_api_credentials()
+    if not credentials:
+        logger.warning("No SP-API credentials found (env vars or config file) — skipping sync")
         return
 
     logger.info("Starting SP-API background sync...")
@@ -323,7 +341,7 @@ def health():
         "db": str(DB_PATH),
         "db_exists": DB_PATH.exists(),
         "port": os.environ.get("PORT", "8000"),
-        "has_sp_api_creds": CONFIG_PATH.exists(),
+        "has_sp_api_creds": _load_sp_api_credentials() is not None,
     }
 
 

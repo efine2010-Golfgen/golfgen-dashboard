@@ -17,8 +17,8 @@ RUN touch ./webapp/__init__.py ./webapp/backend/__init__.py
 # Copy pre-built frontend from backend/dist (fully git-tracked copy)
 COPY webapp/backend/dist/ ./webapp/frontend/dist/
 
-# Copy SP-API credentials and scripts for background sync
-COPY config/ ./config/
+# SP-API credentials are passed via environment variables on Railway
+# (set in Railway dashboard, NOT baked into Docker image)
 
 # Copy data files if they exist (DuckDB database + COGS)
 RUN mkdir -p ./data
