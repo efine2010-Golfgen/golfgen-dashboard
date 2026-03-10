@@ -15,6 +15,22 @@ const RANGES = [
 const COLORS = ["#2ECFAA", "#3E658C", "#E87830", "#F5B731", "#7BAED0", "#22A387", "#D03030", "#8B5CF6", "#94a3b8", "#8892b0"];
 const TOOLTIP_STYLE = { background: "#fff", border: "1px solid rgba(14,31,45,0.1)", borderRadius: 8, color: "#2A3D50", boxShadow: "0 4px 12px rgba(14,31,45,0.1)" };
 
+// Color map for the color sales chart
+const COLOR_MAP = {
+  Orange: "#E87830",
+  Blue: "#3E658C",
+  Green: "#2ECFAA",
+  Red: "#D03030",
+  Grey: "#94a3b8",
+  White: "#e2e8f0",
+  Black: "#1e293b",
+  Pink: "#ec4899",
+  Purple: "#8B5CF6",
+  Yellow: "#F5B731",
+  Ombre: "#7BAED0",
+  Other: "#8892b0",
+};
+
 // Moving average helper
 function movingAvg(data, key, window) {
   return data.map((_, i) => {
@@ -42,7 +58,7 @@ export default function Dashboard() {
   const [compView, setCompView] = useState("realtime");
   const [compLoading, setCompLoading] = useState(false);
   const [monthlyYoY, setMonthlyYoY] = useState({ years: [], data: [] });
-  const [productMix, setProductMix] = useState([]);
+  const [colorData, setColorData] = useState([]);
   const [loading, setLoading] = useState(true);
 
   // Load main dashboard data
@@ -54,14 +70,14 @@ export default function Dashboard() {
       api.pnl(days),
       api.comparison(compView),
       api.monthlyYoY(),
-      api.productMix(days),
-    ]).then(([s, d, p, comp, yoy, mix]) => {
+      api.colorMix(days),
+    ]).then(([s, d, p, comp, yoy, colors]) => {
       setSummary(s);
       setDaily(d.data);
       setPnl(p);
       setComparison(comp.periods || []);
       setMonthlyYoY(yoy);
-      setProductMix(mix.products || []);
+      setColorData(colors.colors || []);
       setLoading(false);
     }).catch(err => {
       console.error("API error:", err);
@@ -92,10 +108,10 @@ export default function Dashboard() {
     ma30: ma30[i],
   }));
 
-  // Monthly YoY chart data
+  // Monthly YoY chart data — always 2024, 2025, 2026
   const yoyData = monthlyYoY.data || [];
   const yoyYears = monthlyYoY.years || [];
-  const yoyColors = ["#3E658C", "#2ECFAA", "#E87830", "#F5B731"];
+  const yoyColors = { "2024": "#94a3b8", "2025": "#3E658C", "2026": "#2ECFAA" };
 
   return (
     <>
@@ -300,9 +316,137 @@ export default function Dashboard() {
         </div>
       </div>
 
-      {/* ── Charts: Row 2 ──────────────────────────────── */}
+      {/* ── Charts: Row 2 — Traffic Funnel + Conversion vs AUR ── */}
       <div className="chart-grid">
-        {/* 3. AUR & Unit Velocity */}
+        {/* 3. Traffic & Conversion — Sessions as area, Orders + Units as bars */}
+        <div className="chart-card">
+          <h3>Traffic & Conversion Funnel</h3>
+          <p className="sub">Sessions (area) → Orders & Units (bars) with conversion overlay</p>
+          <ResponsiveContainer width="100%" height={320}>
+            <ComposedChart data={dailyRaw}>
+              <CartesianGrid strokeDasharray="3 3" stroke="rgba(14,31,45,0.08)" />
+              <XAxis dataKey="date" tick={{ fill: "#6B8090", fontSize: 11 }} tickFormatter={d => d.slice(5)} />
+              <YAxis yAxisId="left" tick={{ fill: "#6B8090", fontSize: 11 }} />
+              <YAxis yAxisId="right" orientation="right" tick={{ fill: "#6B8090", fontSize: 11 }} tickFormatter={v => `${v}%`} />
+              <Tooltip contentStyle={TOOLTIP_STYLE} />
+              <Legend />
+              <Area yAxisId="left" type="monotone" dataKey="sessions" name="Sessions" stroke="#3E658C" fill="rgba(62,101,140,0.1)" strokeWidth={1.5} />
+              <Bar yAxisId="left" dataKey="orders" name="Orders" fill="#2ECFAA" radius={[3,3,0,0]} barSize={days <= 90 ? 8 : 4} />
+              <Bar yAxisId="left" dataKey="units" name="Units" fill="#E87830" radius={[3,3,0,0]} barSize={days <= 90 ? 8 : 4} />
+              <Line yAxisId="right" type="monotone" dataKey="convRate" name="Conv %" stroke="#F5B731" strokeWidth={2.5} strokeDasharray="5 4" dot={false} />
+            </ComposedChart>
+          </ResponsiveContainer>
+        </div>
+
+        {/* 4. Conversion Rate vs AUR — dual axis to show relationship */}
+        <div className="chart-card">
+          <h3>Conversion Rate vs AUR</h3>
+          <p className="sub">How pricing impacts conversion — conv % (left) vs AUR $ (right)</p>
+          <ResponsiveContainer width="100%" height={320}>
+            <ComposedChart data={dailyRaw}>
+              <CartesianGrid strokeDasharray="3 3" stroke="rgba(14,31,45,0.08)" />
+              <XAxis dataKey="date" tick={{ fill: "#6B8090", fontSize: 11 }} tickFormatter={d => d.slice(5)} />
+              <YAxis
+                yAxisId="left"
+                tick={{ fill: "#E87830", fontSize: 11 }}
+                tickFormatter={v => `${v}%`}
+                domain={['auto', 'auto']}
+                label={{ value: "Conv %", angle: -90, position: "insideLeft", fill: "#E87830", fontSize: 11, dx: -5 }}
+              />
+              <YAxis
+                yAxisId="right"
+                orientation="right"
+                tick={{ fill: "#3E658C", fontSize: 11 }}
+                tickFormatter={v => `$${v}`}
+                domain={['auto', 'auto']}
+                label={{ value: "AUR $", angle: 90, position: "insideRight", fill: "#3E658C", fontSize: 11, dx: 5 }}
+              />
+              <Tooltip contentStyle={TOOLTIP_STYLE} formatter={(v, name) => {
+                if (name === "Conv %") return [`${v}%`, name];
+                if (name === "AUR ($)") return [`$${v.toFixed(2)}`, name];
+                return [v, name];
+              }} />
+              <Legend />
+              <Area yAxisId="left" type="monotone" dataKey="convRate" name="Conv %" stroke="#E87830" fill="rgba(232,120,48,0.1)" strokeWidth={2} />
+              <Line yAxisId="right" type="monotone" dataKey="aur" name="AUR ($)" stroke="#3E658C" strokeWidth={2.5} dot={false} />
+            </ComposedChart>
+          </ResponsiveContainer>
+        </div>
+      </div>
+
+      {/* ── Charts: Row 3 — Monthly YoY + Color Mix ──── */}
+      <div className="chart-grid">
+        {/* 5. Monthly Revenue Year-over-Year — 12 months, 3 bars each */}
+        <div className="chart-card">
+          <h3>Monthly Revenue Year-over-Year</h3>
+          <p className="sub">12-month comparison across 2024, 2025, 2026</p>
+          <ResponsiveContainer width="100%" height={320}>
+            <BarChart data={yoyData} margin={{ top: 10, right: 10, bottom: 10, left: 10 }}>
+              <CartesianGrid strokeDasharray="3 3" stroke="rgba(14,31,45,0.08)" />
+              <XAxis dataKey="month" tick={{ fill: "#6B8090", fontSize: 11 }} />
+              <YAxis tick={{ fill: "#6B8090", fontSize: 11 }} tickFormatter={v => `$${(v/1000).toFixed(0)}k`} />
+              <Tooltip contentStyle={TOOLTIP_STYLE} formatter={v => [fmt$(v), "Revenue"]} />
+              <Legend />
+              {yoyYears.map((yr) => (
+                <Bar
+                  key={yr}
+                  dataKey={String(yr)}
+                  name={String(yr)}
+                  fill={yoyColors[String(yr)] || "#8892b0"}
+                  radius={[3,3,0,0]}
+                />
+              ))}
+            </BarChart>
+          </ResponsiveContainer>
+        </div>
+
+        {/* 6. Sales by Color — horizontal bar chart with % */}
+        <div className="chart-card">
+          <h3>Sales by Color</h3>
+          <p className="sub">Revenue distribution by product color variant</p>
+          <div style={{ padding: "16px 0" }}>
+            {colorData.length > 0 ? colorData.map(item => (
+              <div key={item.color} style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 12 }}>
+                <div style={{ display: "flex", alignItems: "center", gap: 8, width: 90, flexShrink: 0 }}>
+                  <div style={{
+                    width: 14, height: 14, borderRadius: 3,
+                    background: COLOR_MAP[item.color] || "#8892b0",
+                    border: item.color === "White" ? "1px solid #cbd5e1" : "none",
+                  }} />
+                  <span style={{ fontSize: 12, fontWeight: 600, color: "#2A3D50" }}>{item.color}</span>
+                </div>
+                <div style={{ flex: 1, background: "rgba(14,31,45,0.06)", borderRadius: 6, height: 28, overflow: "hidden", position: "relative" }}>
+                  <div style={{
+                    width: `${Math.min(item.pct, 100)}%`,
+                    height: "100%",
+                    background: COLOR_MAP[item.color] || "#8892b0",
+                    borderRadius: 6,
+                    transition: "width 0.5s ease",
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "flex-end",
+                    paddingRight: 8,
+                    opacity: item.color === "White" ? 0.6 : 0.85,
+                  }}>
+                    {item.pct > 10 && (
+                      <span style={{ color: item.color === "White" ? "#2A3D50" : "#fff", fontSize: 11, fontWeight: 700 }}>{item.pct}%</span>
+                    )}
+                  </div>
+                  {item.pct <= 10 && (
+                    <span style={{ position: "absolute", left: `${item.pct + 2}%`, top: "50%", transform: "translateY(-50%)", fontSize: 11, fontWeight: 600, color: "#6B8090" }}>{item.pct}%</span>
+                  )}
+                </div>
+                <div style={{ width: 80, textAlign: "right", fontSize: 13, fontWeight: 600, fontFamily: "'Space Grotesk', sans-serif", color: "#2A3D50" }}>{fmt$(item.revenue)}</div>
+              </div>
+            )) : (
+              <div style={{ textAlign: "center", color: "var(--muted)", padding: 20 }}>No color data available</div>
+            )}
+          </div>
+        </div>
+      </div>
+
+      {/* ── Charts: Row 4 — AUR & Unit Velocity ────────── */}
+      <div className="chart-grid">
         <div className="chart-card">
           <h3>AUR & Unit Velocity</h3>
           <p className="sub">Average unit retail vs daily unit volume</p>
@@ -310,112 +454,16 @@ export default function Dashboard() {
             <ComposedChart data={dailyRaw}>
               <CartesianGrid strokeDasharray="3 3" stroke="rgba(14,31,45,0.08)" />
               <XAxis dataKey="date" tick={{ fill: "#6B8090", fontSize: 11 }} tickFormatter={d => d.slice(5)} />
-              <YAxis yAxisId="left" tick={{ fill: "#6B8090", fontSize: 11 }} tickFormatter={v => `$${v}`} label={{ value: "AUR $", angle: -90, position: "insideLeft", fill: "#6B8090", fontSize: 11 }} />
-              <YAxis yAxisId="right" orientation="right" tick={{ fill: "#6B8090", fontSize: 11 }} label={{ value: "Units", angle: 90, position: "insideRight", fill: "#6B8090", fontSize: 11 }} />
-              <Tooltip contentStyle={TOOLTIP_STYLE} />
+              <YAxis yAxisId="left" tick={{ fill: "#6B8090", fontSize: 11 }} tickFormatter={v => `$${v}`} domain={['auto', 'auto']} />
+              <YAxis yAxisId="right" orientation="right" tick={{ fill: "#6B8090", fontSize: 11 }} />
+              <Tooltip contentStyle={TOOLTIP_STYLE} formatter={(v, name) => {
+                if (name === "AUR ($)") return [`$${v.toFixed(2)}`, name];
+                return [v, name];
+              }} />
               <Legend />
               <Area yAxisId="left" type="monotone" dataKey="aur" name="AUR ($)" stroke="#3E658C" fill="rgba(62,101,140,0.08)" strokeWidth={2} />
               <Line yAxisId="right" type="monotone" dataKey="units" name="Units/Day" stroke="#E87830" strokeWidth={2} strokeDasharray="4 4" dot={false} />
             </ComposedChart>
-          </ResponsiveContainer>
-        </div>
-
-        {/* 4. Traffic & Conversion Funnel */}
-        <div className="chart-card">
-          <h3>Traffic & Conversion Funnel</h3>
-          <p className="sub">Sessions, orders, units with conversion rate overlay</p>
-          <ResponsiveContainer width="100%" height={300}>
-            <ComposedChart data={dailyRaw}>
-              <CartesianGrid strokeDasharray="3 3" stroke="rgba(14,31,45,0.08)" />
-              <XAxis dataKey="date" tick={{ fill: "#6B8090", fontSize: 11 }} tickFormatter={d => d.slice(5)} />
-              <YAxis yAxisId="left" tick={{ fill: "#6B8090", fontSize: 11 }} label={{ value: "Count", angle: -90, position: "insideLeft", fill: "#6B8090", fontSize: 11 }} />
-              <YAxis yAxisId="right" orientation="right" tick={{ fill: "#6B8090", fontSize: 11 }} tickFormatter={v => `${v}%`} domain={[0, 15]} label={{ value: "Conv %", angle: 90, position: "insideRight", fill: "#6B8090", fontSize: 11 }} />
-              <Tooltip contentStyle={TOOLTIP_STYLE} />
-              <Legend />
-              <Area yAxisId="left" type="monotone" dataKey="sessions" name="Sessions" stroke="#3E658C" fill="rgba(62,101,140,0.08)" strokeWidth={2} />
-              <Area yAxisId="left" type="monotone" dataKey="orders" name="Orders" stroke="#2ECFAA" fill="rgba(46,207,170,0.08)" strokeWidth={2} />
-              <Area yAxisId="left" type="monotone" dataKey="units" name="Units" stroke="#E87830" fill="rgba(232,120,48,0.08)" strokeWidth={2} />
-              <Line yAxisId="right" type="monotone" dataKey="convRate" name="Conv Rate %" stroke="#F5B731" strokeWidth={2.5} strokeDasharray="5 4" dot={false} />
-            </ComposedChart>
-          </ResponsiveContainer>
-        </div>
-      </div>
-
-      {/* ── Charts: Row 3 ──────────────────────────────── */}
-      <div className="chart-grid">
-        {/* 5. Revenue by Product (Donut) */}
-        <div className="chart-card">
-          <h3>Revenue by Product (Top 10)</h3>
-          <p className="sub">Product revenue distribution</p>
-          <ResponsiveContainer width="100%" height={300}>
-            <PieChart>
-              <Pie
-                data={productMix}
-                cx="50%"
-                cy="50%"
-                innerRadius={60}
-                outerRadius={110}
-                paddingAngle={2}
-                dataKey="value"
-                nameKey="name"
-              >
-                {productMix.map((_, i) => (
-                  <Cell key={i} fill={COLORS[i % COLORS.length]} />
-                ))}
-              </Pie>
-              <Tooltip contentStyle={TOOLTIP_STYLE} formatter={v => [fmt$(v), "Revenue"]} />
-              <Legend
-                layout="vertical"
-                align="right"
-                verticalAlign="middle"
-                formatter={(value) => <span style={{ color: "#2A3D50", fontSize: 11 }}>{value.length > 20 ? value.slice(0, 18) + "…" : value}</span>}
-              />
-            </PieChart>
-          </ResponsiveContainer>
-        </div>
-
-        {/* 6. Monthly Revenue Year-over-Year */}
-        <div className="chart-card">
-          <h3>Monthly Revenue Year-over-Year</h3>
-          <p className="sub">Revenue by month across years</p>
-          <ResponsiveContainer width="100%" height={300}>
-            <BarChart data={yoyData}>
-              <CartesianGrid strokeDasharray="3 3" stroke="rgba(14,31,45,0.08)" />
-              <XAxis dataKey="month" tick={{ fill: "#6B8090", fontSize: 11 }} />
-              <YAxis tick={{ fill: "#6B8090", fontSize: 11 }} tickFormatter={v => `$${(v/1000).toFixed(0)}k`} />
-              <Tooltip contentStyle={TOOLTIP_STYLE} formatter={v => [fmt$(v), "Revenue"]} />
-              <Legend />
-              {yoyYears.map((yr, i) => (
-                <Bar key={yr} dataKey={String(yr)} name={String(yr)} fill={yoyColors[i % yoyColors.length]} radius={[3,3,0,0]} />
-              ))}
-            </BarChart>
-          </ResponsiveContainer>
-        </div>
-      </div>
-
-      {/* ── Charts: Row 4 ──────────────────────────────── */}
-      <div className="chart-grid">
-        {/* 7. Conversion Rate Trend */}
-        <div className="chart-card">
-          <h3>Conversion Rate</h3>
-          <p className="sub">{days <= 90 ? "Daily" : "Weekly"} session-to-order rate</p>
-          <ResponsiveContainer width="100%" height={300}>
-            <AreaChart data={dailyRaw}>
-              <defs>
-                <linearGradient id="convGrad" x1="0" y1="0" x2="0" y2="1">
-                  <stop offset="5%" stopColor="#E87830" stopOpacity={0.3} />
-                  <stop offset="95%" stopColor="#E87830" stopOpacity={0} />
-                </linearGradient>
-              </defs>
-              <CartesianGrid strokeDasharray="3 3" stroke="rgba(14,31,45,0.08)" />
-              <XAxis dataKey="date" tick={{ fill: "#6B8090", fontSize: 11 }} tickFormatter={d => d.slice(5)} />
-              <YAxis tick={{ fill: "#6B8090", fontSize: 11 }} tickFormatter={v => `${v}%`} />
-              <Tooltip
-                contentStyle={TOOLTIP_STYLE}
-                formatter={(v) => [`${v}%`, "Conv Rate"]}
-              />
-              <Area type="monotone" dataKey="convRate" stroke="#E87830" strokeWidth={2} fill="url(#convGrad)" />
-            </AreaChart>
           </ResponsiveContainer>
         </div>
       </div>

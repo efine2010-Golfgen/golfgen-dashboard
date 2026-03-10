@@ -20,6 +20,7 @@ export const api = {
   comparison: (view = "realtime") => fetchJSON(`/api/comparison?view=${view}`),
   monthlyYoY: () => fetchJSON(`/api/monthly-yoy`),
   productMix: (days = 365) => fetchJSON(`/api/product-mix?days=${days}`),
+  colorMix: (days = 365) => fetchJSON(`/api/color-mix?days=${days}`),
 
   // Profitability (Sellerboard-style)
   profitability: (view = "realtime") => fetchJSON(`/api/profitability?view=${view}`),

@@ -1,4 +1,7 @@
 import { useState, useEffect } from "react";
+import {
+  PieChart, Pie, Cell, Tooltip, ResponsiveContainer, Legend,
+} from "recharts";
 import { api, fmt$ } from "../lib/api";
 
 const RANGES = [
@@ -8,9 +11,13 @@ const RANGES = [
   { label: "1Y", days: 365 },
 ];
 
+const COLORS = ["#2ECFAA", "#3E658C", "#E87830", "#F5B731", "#7BAED0", "#22A387", "#D03030", "#8B5CF6", "#94a3b8", "#8892b0"];
+const TOOLTIP_STYLE = { background: "#fff", border: "1px solid rgba(14,31,45,0.1)", borderRadius: 8, color: "#2A3D50", boxShadow: "0 4px 12px rgba(14,31,45,0.1)" };
+
 export default function Products() {
   const [days, setDays] = useState(365);
   const [products, setProducts] = useState([]);
+  const [productMix, setProductMix] = useState([]);
   const [loading, setLoading] = useState(true);
   const [sortKey, setSortKey] = useState("rev");
   const [sortDir, setSortDir] = useState("desc");
@@ -18,8 +25,12 @@ export default function Products() {
 
   useEffect(() => {
     setLoading(true);
-    api.products(days).then((d) => {
+    Promise.all([
+      api.products(days),
+      api.productMix(days),
+    ]).then(([d, mix]) => {
       setProducts(d.products);
+      setProductMix(mix.products || []);
       setLoading(false);
     });
   }, [days]);
@@ -69,6 +80,42 @@ export default function Products() {
         </button>
       </div>
 
+      {/* ── Revenue by Product Donut ──────────────────── */}
+      {productMix.length > 0 && (
+        <div className="chart-grid" style={{ marginBottom: 24 }}>
+          <div className="chart-card">
+            <h3>Revenue by Product (Top 10)</h3>
+            <p className="sub">Product revenue distribution</p>
+            <ResponsiveContainer width="100%" height={320}>
+              <PieChart>
+                <Pie
+                  data={productMix}
+                  cx="50%"
+                  cy="50%"
+                  innerRadius={60}
+                  outerRadius={120}
+                  paddingAngle={2}
+                  dataKey="value"
+                  nameKey="name"
+                >
+                  {productMix.map((_, i) => (
+                    <Cell key={i} fill={COLORS[i % COLORS.length]} />
+                  ))}
+                </Pie>
+                <Tooltip contentStyle={TOOLTIP_STYLE} formatter={v => [fmt$(v), "Revenue"]} />
+                <Legend
+                  layout="vertical"
+                  align="right"
+                  verticalAlign="middle"
+                  formatter={(value) => <span style={{ color: "#2A3D50", fontSize: 11 }}>{value.length > 25 ? value.slice(0, 23) + "…" : value}</span>}
+                />
+              </PieChart>
+            </ResponsiveContainer>
+          </div>
+        </div>
+      )}
+
+      {/* ── Product Table ────────────────────────────── */}
       <div className="table-card">
         <table>
           <thead>

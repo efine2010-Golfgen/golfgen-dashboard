@@ -364,21 +364,40 @@ def _run_sp_api_sync():
         from sp_api.api import Finances as FinancesAPI
         logger.info("  Pulling financial events (fees, refunds)...")
 
-        fin_start = (datetime.utcnow() - timedelta(days=30)).strftime("%Y-%m-%dT%H:%M:%SZ")
+        fin_start = (datetime.utcnow() - timedelta(days=90)).strftime("%Y-%m-%dT%H:%M:%SZ")
         finances = FinancesAPI(credentials=credentials, marketplace=Marketplaces.US)
-        response = finances.list_financial_events(
-            PostedAfter=fin_start,
-            MaxResultsPerPage=100
-        )
 
-        events = response.payload.get("FinancialEvents", {})
-        logger.info(f"  Financial events keys: {list(events.keys()) if events else 'EMPTY'}")
-        logger.info(f"  ShipmentEvents: {len(events.get('ShipmentEventList', []))}, RefundEvents: {len(events.get('RefundEventList', []))}")
+        # Paginate through all financial events
+        all_shipment_events = []
+        all_refund_events = []
+        next_token = None
+        page = 0
+        while True:
+            page += 1
+            kwargs = dict(PostedAfter=fin_start, MaxResultsPerPage=100)
+            if next_token:
+                kwargs["NextToken"] = next_token
+            response = finances.list_financial_events(**kwargs)
+            events = response.payload.get("FinancialEvents", {})
+
+            shipments = events.get("ShipmentEventList", [])
+            refunds = events.get("RefundEventList", [])
+            all_shipment_events.extend(shipments)
+            all_refund_events.extend(refunds)
+
+            next_token = response.payload.get("NextToken")
+            logger.info(f"  Financial events page {page}: {len(shipments)} shipments, {len(refunds)} refunds, next={bool(next_token)}")
+            if not next_token or page >= 20:
+                break
+            import time as _t2
+            _t2.sleep(0.5)
+
+        logger.info(f"  Total financial events: {len(all_shipment_events)} shipments, {len(all_refund_events)} refunds")
         con = duckdb.connect(str(DB_PATH), read_only=False)
         fin_records = 0
 
         # Process shipment events (sales fees)
-        for event in events.get("ShipmentEventList", []):
+        for event in all_shipment_events:
             order_id = event.get("AmazonOrderId", "")
             posted_date = event.get("PostedDate", "")
 
@@ -433,7 +452,7 @@ def _run_sp_api_sync():
                 fin_records += 1
 
         # Process refund events
-        for event in events.get("RefundEventList", []):
+        for event in all_refund_events:
             order_id = event.get("AmazonOrderId", "")
             posted_date = event.get("PostedDate", "")
 
@@ -1694,7 +1713,8 @@ def period_comparison(view: str = Query("realtime")):
 
 @app.get("/api/monthly-yoy")
 def monthly_yoy():
-    """Monthly revenue broken down by year for YoY comparison."""
+    """Monthly revenue broken down by year for YoY comparison.
+    Always returns 12 months with bars for 2024, 2025, 2026."""
     con = get_db()
 
     rows = con.execute("""
@@ -1704,6 +1724,7 @@ def monthly_yoy():
             COALESCE(SUM(ordered_product_sales), 0) AS revenue
         FROM daily_sales
         WHERE asin = 'ALL'
+          AND EXTRACT(YEAR FROM date) >= 2024
         GROUP BY EXTRACT(YEAR FROM date), EXTRACT(MONTH FROM date)
         ORDER BY yr, mo
     """).fetchall()
@@ -1711,23 +1732,23 @@ def monthly_yoy():
     con.close()
 
     months_map = {}
-    years = set()
     for r in rows:
         yr, mo, rev = int(r[0]), int(r[1]), round(r[2], 2)
-        years.add(yr)
         if mo not in months_map:
             months_map[mo] = {}
         months_map[mo][yr] = rev
 
+    # Always include 2024, 2025, 2026
+    years = [2024, 2025, 2026]
     month_names = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"]
     data = []
     for mo in range(1, 13):
         entry = {"month": month_names[mo - 1]}
-        for yr in sorted(years):
+        for yr in years:
             entry[str(yr)] = months_map.get(mo, {}).get(yr, 0)
         data.append(entry)
 
-    return {"years": sorted(years), "data": data}
+    return {"years": years, "data": data}
 
 
 @app.get("/api/product-mix")
@@ -1747,6 +1768,38 @@ def product_mix(days: int = Query(365)):
         result.append({"name": "Other", "value": round(other_rev, 2)})
 
     return {"products": result}
+
+
+@app.get("/api/color-mix")
+def color_mix(days: int = Query(365)):
+    """Sales breakdown by color extracted from product names."""
+    con = get_db()
+    cutoff = (datetime.now() - timedelta(days=days)).strftime("%Y-%m-%d")
+    products = _build_product_list(con, cutoff)
+    con.close()
+
+    import re
+    color_keywords = ["Orange", "Blue", "Green", "Red", "Grey", "White", "Black", "Pink", "Purple", "Yellow", "Ombre"]
+    color_totals = {}
+
+    for p in products:
+        name = p.get("name", "")
+        matched = False
+        for color in color_keywords:
+            if re.search(r'\b' + color + r'\b', name, re.IGNORECASE):
+                color_totals[color] = color_totals.get(color, 0) + p["rev"]
+                matched = True
+                break
+        if not matched:
+            color_totals["Other"] = color_totals.get("Other", 0) + p["rev"]
+
+    total_rev = sum(color_totals.values())
+    result = []
+    for color, rev in sorted(color_totals.items(), key=lambda x: x[1], reverse=True):
+        pct = round(rev / total_rev * 100, 1) if total_rev > 0 else 0
+        result.append({"color": color, "revenue": round(rev, 2), "pct": pct})
+
+    return {"colors": result, "total": round(total_rev, 2)}
 
 
 # ── Profitability (Sellerboard-style) ─────────────────────
