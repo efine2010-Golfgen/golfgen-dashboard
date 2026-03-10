@@ -678,13 +678,167 @@ def _run_sp_api_sync():
     logger.info("SP-API background sync complete.")
 
 
+def _auto_backfill_if_needed():
+    """Check if historical data is missing and backfill automatically.
+    This prevents data loss when Railway redeploys (ephemeral filesystem).
+    Backfills: Apr 2024 to yesterday, in 30-day chunks."""
+    import time as _time
+    import gzip as gz
+    import requests as req
+    from sp_api.api import Reports
+    from sp_api.base import Marketplaces, ReportType
+    from datetime import date as dt_date
+
+    con = duckdb.connect(str(DB_PATH), read_only=True)
+    try:
+        earliest_row = con.execute(
+            "SELECT MIN(date) FROM daily_sales WHERE asin = 'ALL'"
+        ).fetchone()
+        earliest = earliest_row[0] if earliest_row and earliest_row[0] else None
+        count_row = con.execute(
+            "SELECT COUNT(DISTINCT date) FROM daily_sales WHERE asin = 'ALL'"
+        ).fetchone()
+        total_days = count_row[0] if count_row else 0
+    except Exception:
+        earliest = None
+        total_days = 0
+    finally:
+        con.close()
+
+    # If we already have 500+ days of data, skip backfill
+    if total_days >= 500:
+        logger.info(f"Auto-backfill: {total_days} days of data found, skipping backfill")
+        return
+
+    logger.info(f"Auto-backfill: only {total_days} days found (earliest={earliest}). Starting historical backfill...")
+
+    creds = _load_sp_api_credentials()
+    if not creds:
+        logger.error("Auto-backfill: no SP-API credentials, skipping")
+        return
+
+    reports_api = Reports(credentials=creds, marketplace=Marketplaces.US)
+
+    # Backfill from Apr 2024 to yesterday
+    backfill_start = dt_date(2024, 4, 1)
+    backfill_end = dt_date.today() - timedelta(days=1)
+
+    chunk_start = backfill_start
+    total_records = 0
+
+    while chunk_start < backfill_end:
+        chunk_end = min(chunk_start + timedelta(days=29), backfill_end)
+        logger.info(f"  Auto-backfill: requesting {chunk_start} to {chunk_end}...")
+
+        try:
+            report_response = reports_api.create_report(
+                reportType=ReportType.GET_SALES_AND_TRAFFIC_REPORT,
+                dataStartTime=chunk_start.isoformat(),
+                dataEndTime=chunk_end.isoformat(),
+                reportOptions={"dateGranularity": "DAY", "asinGranularity": "CHILD"}
+            )
+            report_id = report_response.payload.get("reportId")
+
+            report_data = None
+            for attempt in range(30):
+                _time.sleep(10)
+                status_response = reports_api.get_report(report_id)
+                status = status_response.payload.get("processingStatus")
+                if status == "DONE":
+                    doc_id = status_response.payload.get("reportDocumentId")
+                    doc_response = reports_api.get_report_document(doc_id)
+                    report_data = doc_response.payload
+                    break
+                elif status in ("CANCELLED", "FATAL"):
+                    logger.warning(f"  Auto-backfill: report {chunk_start}-{chunk_end} status={status}")
+                    break
+
+            if report_data:
+                if isinstance(report_data, dict) and "url" in report_data:
+                    is_gzipped = report_data.get("compressionAlgorithm", "").upper() == "GZIP"
+                    resp = req.get(report_data["url"])
+                    if is_gzipped:
+                        report_text = gz.decompress(resp.content).decode("utf-8")
+                    else:
+                        report_text = resp.text
+                    report_data = json.loads(report_text)
+
+                if isinstance(report_data, str):
+                    report_data = json.loads(report_data)
+
+                wcon = duckdb.connect(str(DB_PATH), read_only=False)
+                records = 0
+
+                for day_entry in report_data.get("salesAndTrafficByDate", []):
+                    entry_date = day_entry.get("date", "")
+                    traffic = day_entry.get("trafficByDate", {})
+                    sales_info = day_entry.get("salesByDate", {})
+                    ordered_sales = sales_info.get("orderedProductSales", {})
+                    sales_amount = float(ordered_sales.get("amount", 0)) if isinstance(ordered_sales, dict) else float(ordered_sales or 0)
+
+                    wcon.execute("""
+                        INSERT OR REPLACE INTO daily_sales
+                        (date, asin, units_ordered, ordered_product_sales,
+                         sessions, session_percentage, page_views,
+                         buy_box_percentage, unit_session_percentage)
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    """, [
+                        entry_date, "ALL",
+                        int(sales_info.get("unitsOrdered", 0)),
+                        sales_amount,
+                        int(traffic.get("sessions", 0)),
+                        float(traffic.get("sessionPercentage", 0)),
+                        int(traffic.get("pageViews", 0)),
+                        float(traffic.get("buyBoxPercentage", 0)),
+                        float(traffic.get("unitSessionPercentage", 0)),
+                    ])
+                    records += 1
+
+                for asin_entry in report_data.get("salesAndTrafficByAsin", []):
+                    asin = asin_entry.get("childAsin") or asin_entry.get("parentAsin", "")
+                    traffic = asin_entry.get("trafficByAsin", {})
+                    sales_info = asin_entry.get("salesByAsin", {})
+                    entry_date = asin_entry.get("date", str(chunk_start))
+                    ordered_sales = sales_info.get("orderedProductSales", {})
+                    sales_amount = float(ordered_sales.get("amount", 0)) if isinstance(ordered_sales, dict) else float(ordered_sales or 0)
+
+                    wcon.execute("""
+                        INSERT OR REPLACE INTO daily_sales
+                        (date, asin, units_ordered, ordered_product_sales,
+                         sessions, session_percentage, page_views,
+                         buy_box_percentage, unit_session_percentage)
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    """, [
+                        entry_date, asin,
+                        int(sales_info.get("unitsOrdered", 0)),
+                        sales_amount,
+                        int(traffic.get("sessions", 0)),
+                        float(traffic.get("sessionPercentage", 0)),
+                        int(traffic.get("pageViews", 0)),
+                        float(traffic.get("buyBoxPercentage", 0)),
+                        float(traffic.get("unitSessionPercentage", 0)),
+                    ])
+                    records += 1
+
+                wcon.close()
+                total_records += records
+                logger.info(f"  Auto-backfill: {chunk_start}-{chunk_end}: {records} records")
+
+        except Exception as e:
+            logger.error(f"  Auto-backfill error {chunk_start}-{chunk_end}: {e}")
+
+        chunk_start = chunk_end + timedelta(days=1)
+
+    logger.info(f"Auto-backfill complete: {total_records} total records inserted")
+
+
 async def _sync_loop():
     """Run SP-API sync in background.
 
     Sequence:
     1. Immediately sync today's orders (fast, ~5s) — so "Today" works right away
-    2. Wait 10s, then run full sync (slow, includes Sales Report polling)
-    3. Repeat full sync every SYNC_INTERVAL_HOURS
+    2. Auto-backfill historical data if missing (detects fresh deploy)
+    3. Run full sync, repeat every SYNC_INTERVAL_HOURS
     """
     # Immediately pull today's orders — no delay
     try:
@@ -693,6 +847,13 @@ async def _sync_loop():
         logger.info("Startup: today's orders synced")
     except Exception as e:
         logger.error(f"Startup today-sync error: {e}")
+
+    # Auto-backfill if historical data is missing (e.g. after Railway redeploy)
+    try:
+        loop = asyncio.get_event_loop()
+        await loop.run_in_executor(None, _auto_backfill_if_needed)
+    except Exception as e:
+        logger.error(f"Auto-backfill error: {e}")
 
     # Short delay before full sync (let server finish starting)
     await asyncio.sleep(10)
@@ -1205,15 +1366,15 @@ def _aggregate_weekly(daily_data: list) -> list:
     for date_key in sorted(weeks.keys()):
         w = weeks[date_key]
         units = w["units"] or 1
-        sessions = w["sessions"] or 1
+        sessions = w["sessions"]
         result.append({
             "date": date_key,
             "revenue": round(w["revenue"], 2),
             "units": w["units"],
             "orders": w["orders"],
-            "sessions": w["sessions"],
+            "sessions": sessions,
             "aur": round(w["revenue"] / units, 2),
-            "convRate": round(w["orders"] / sessions * 100, 1),
+            "convRate": round(w["orders"] / sessions * 100, 1) if sessions else 0,
         })
     return result
 
