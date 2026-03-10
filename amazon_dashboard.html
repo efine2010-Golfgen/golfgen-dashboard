@@ -1,0 +1,414 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>GolfGen Amazon Dashboard</title>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.5.1" integrity="sha384-jb8JQMbMoBUzgWatfe6COACi2ljcDdZQ2OxczGA3bGNeWe+6DChMTBJemed7ZnvJ" crossorigin="anonymous"></script>
+    <style>
+        :root {
+            --bg-primary: #f0f2f5;
+            --bg-card: #ffffff;
+            --bg-header: #0f1923;
+            --text-primary: #1a1a2e;
+            --text-secondary: #6b7280;
+            --text-on-dark: #ffffff;
+            --accent: #2563eb;
+            --positive: #059669;
+            --negative: #dc2626;
+            --warning: #d97706;
+            --gap: 16px;
+            --radius: 10px;
+        }
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Inter, sans-serif; background: var(--bg-primary); color: var(--text-primary); }
+        .container { max-width: 1440px; margin: 0 auto; padding: var(--gap); }
+        header { background: var(--bg-header); color: var(--text-on-dark); padding: 20px 28px; border-radius: var(--radius); margin-bottom: var(--gap); display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 12px; }
+        header h1 { font-size: 22px; font-weight: 700; }
+        header .subtitle { font-size: 13px; opacity: 0.7; }
+        .logo-area { display: flex; align-items: center; gap: 12px; }
+        .logo-area .badge { background: var(--accent); padding: 4px 10px; border-radius: 4px; font-size: 11px; font-weight: 600; text-transform: uppercase; }
+        .filters { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+        .filters select, .filters input { padding: 6px 10px; border: 1px solid rgba(255,255,255,0.15); border-radius: 6px; background: rgba(255,255,255,0.08); color: #fff; font-size: 13px; }
+        .filters select option { background: var(--bg-header); }
+        .filters label { font-size: 11px; color: rgba(255,255,255,0.6); }
+        .filter-group { display: flex; flex-direction: column; gap: 3px; }
+
+        .kpi-row { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: var(--gap); margin-bottom: var(--gap); }
+        .kpi-card { background: var(--bg-card); border-radius: var(--radius); padding: 20px 24px; box-shadow: 0 1px 3px rgba(0,0,0,0.06); }
+        .kpi-label { font-size: 11px; color: var(--text-secondary); text-transform: uppercase; letter-spacing: 0.8px; margin-bottom: 6px; font-weight: 600; }
+        .kpi-value { font-size: 26px; font-weight: 800; margin-bottom: 4px; }
+        .kpi-change { font-size: 12px; font-weight: 600; }
+        .kpi-change.positive { color: var(--positive); }
+        .kpi-change.negative { color: var(--negative); }
+
+        .section-title { font-size: 16px; font-weight: 700; margin-bottom: 12px; padding-left: 4px; }
+        .chart-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(420px, 1fr)); gap: var(--gap); margin-bottom: var(--gap); }
+        .chart-card { background: var(--bg-card); border-radius: var(--radius); padding: 20px 24px; box-shadow: 0 1px 3px rgba(0,0,0,0.06); }
+        .chart-card h3 { font-size: 14px; font-weight: 600; margin-bottom: 16px; color: var(--text-primary); }
+        .chart-card canvas { max-height: 280px; }
+
+        .table-card { background: var(--bg-card); border-radius: var(--radius); padding: 20px 24px; box-shadow: 0 1px 3px rgba(0,0,0,0.06); margin-bottom: var(--gap); overflow-x: auto; }
+        .table-card h3 { font-size: 14px; font-weight: 600; margin-bottom: 16px; }
+        table { width: 100%; border-collapse: collapse; font-size: 13px; }
+        thead th { text-align: left; padding: 10px 12px; border-bottom: 2px solid #e5e7eb; color: var(--text-secondary); font-weight: 600; font-size: 11px; text-transform: uppercase; letter-spacing: 0.5px; cursor: pointer; white-space: nowrap; user-select: none; }
+        thead th:hover { color: var(--text-primary); background: #f8f9fa; }
+        tbody td { padding: 10px 12px; border-bottom: 1px solid #f3f4f6; }
+        tbody tr:hover { background: #f8fafc; }
+        .text-right { text-align: right; }
+        .text-center { text-align: center; }
+
+        .inv-alert { display: inline-block; padding: 2px 8px; border-radius: 4px; font-size: 11px; font-weight: 700; }
+        .inv-alert.LOW { background: #fef2f2; color: #dc2626; }
+        .inv-alert.OK { background: #f0fdf4; color: #059669; }
+        .inv-alert.EXCESS { background: #fffbeb; color: #d97706; }
+
+        .profit-bar { display: flex; height: 24px; border-radius: 4px; overflow: hidden; font-size: 10px; font-weight: 600; }
+        .profit-bar > div { display: flex; align-items: center; justify-content: center; color: #fff; white-space: nowrap; padding: 0 4px; }
+
+        footer { text-align: center; padding: 16px; font-size: 12px; color: var(--text-secondary); }
+
+        @media (max-width: 768px) {
+            header { flex-direction: column; align-items: flex-start; }
+            .kpi-row { grid-template-columns: repeat(2, 1fr); }
+            .chart-grid { grid-template-columns: 1fr; }
+        }
+        @media print {
+            body { background: #fff; }
+            .filters { display: none; }
+            .chart-card, .kpi-card { break-inside: avoid; box-shadow: none; border: 1px solid #e5e7eb; }
+        }
+    </style>
+</head>
+<body>
+
+<div class="container">
+    <header>
+        <div class="logo-area">
+            <div>
+                <h1>GolfGen Amazon Dashboard</h1>
+                <div class="subtitle">Elite Global Brands | PGA Tour Golf | Amazon FBA</div>
+            </div>
+            <span class="badge">LIVE</span>
+        </div>
+        <div class="filters">
+            <div class="filter-group">
+                <label>Time Range</label>
+                <select id="time-filter" onchange="dashboard.applyFilters()">
+                    <option value="30">Last 30 Days</option>
+                    <option value="60">Last 60 Days</option>
+                    <option value="90" selected>Last 90 Days</option>
+                    <option value="180">Last 6 Months</option>
+                    <option value="365">Last 12 Months</option>
+                    <option value="all">All Time</option>
+                </select>
+            </div>
+            <div class="filter-group">
+                <label>Product</label>
+                <select id="product-filter" onchange="dashboard.applyFilters()">
+                    <option value="all">All Products</option>
+                </select>
+            </div>
+        </div>
+    </header>
+
+    <!-- KPI ROW -->
+    <div class="kpi-row">
+        <div class="kpi-card"><div class="kpi-label">Total Revenue</div><div class="kpi-value" id="kpi-rev">--</div><div class="kpi-change" id="kpi-rev-chg"></div></div>
+        <div class="kpi-card"><div class="kpi-label">Units Sold</div><div class="kpi-value" id="kpi-units">--</div><div class="kpi-change" id="kpi-units-chg"></div></div>
+        <div class="kpi-card"><div class="kpi-label">Net Profit</div><div class="kpi-value" id="kpi-profit">--</div><div class="kpi-change" id="kpi-profit-chg"></div></div>
+        <div class="kpi-card"><div class="kpi-label">Profit Margin</div><div class="kpi-value" id="kpi-margin">--</div><div class="kpi-change" id="kpi-margin-note"></div></div>
+        <div class="kpi-card"><div class="kpi-label">Ad Spend (TACOS)</div><div class="kpi-value" id="kpi-tacos">--</div><div class="kpi-change" id="kpi-acos-note"></div></div>
+        <div class="kpi-card"><div class="kpi-label">Avg Order Value</div><div class="kpi-value" id="kpi-aov">--</div><div class="kpi-change" id="kpi-conv"></div></div>
+    </div>
+
+    <!-- REVENUE & PROFIT CHARTS -->
+    <div class="section-title">Revenue & Profitability</div>
+    <div class="chart-grid">
+        <div class="chart-card"><h3>Daily Revenue (Last 90 Days)</h3><canvas id="chart-daily-rev"></canvas></div>
+        <div class="chart-card"><h3>Monthly Revenue vs Net Profit</h3><canvas id="chart-monthly"></canvas></div>
+    </div>
+
+    <!-- AD PERFORMANCE -->
+    <div class="section-title">Advertising Performance</div>
+    <div class="chart-grid">
+        <div class="chart-card"><h3>Monthly Ad Spend vs Ad-Attributed Sales</h3><canvas id="chart-ads"></canvas></div>
+        <div class="chart-card"><h3>Profit Waterfall (Where the Money Goes)</h3><canvas id="chart-waterfall"></canvas></div>
+    </div>
+
+    <!-- PRODUCT TABLE -->
+    <div class="table-card">
+        <h3>Product Performance</h3>
+        <div id="product-table"></div>
+    </div>
+
+    <!-- INVENTORY -->
+    <div class="section-title">FBA Inventory Status</div>
+    <div class="table-card">
+        <h3>Current Inventory Levels</h3>
+        <div id="inventory-table"></div>
+    </div>
+
+    <footer>
+        GolfGen Amazon Dashboard | Data as of <span id="data-date"></span> | Auto-refreshes hourly via SP-API
+    </footer>
+</div>
+
+<script>
+const DASHBOARD_DATA = {"kpis": {"total_revenue": 357426.34, "total_units": 2464, "total_ad_spend": 0, "total_net_profit": 0.0, "total_sessions": 77802, "avg_order_value": 145.06, "overall_acos": 0, "overall_margin": 0.0, "conversion_rate": 3.17, "refund_rate": 0, "total_amazon_fees": 0.0, "total_fba_fees": 0.0, "total_cogs": 0, "order_count": 100}, "trends": {"rev_change": 45.7, "units_change": 30.1, "profit_change": 0}, "monthly": [{"month": "2025-12", "revenue": 200138.83, "units": 1397, "net_profit": 0.0, "sessions": 49686, "fba_fees": 0.0, "commission": 0.0}], "daily": [{"date": "2025-12-10", "revenue": 19528.83, "units": 119, "sessions": 2805, "net_profit": 0}, {"date": "2025-12-11", "revenue": 17231.93, "units": 108, "sessions": 2378, "net_profit": 0}, {"date": "2025-12-12", "revenue": 18367.35, "units": 117, "sessions": 2335, "net_profit": 0}, {"date": "2025-12-13", "revenue": 16562.41, "units": 100, "sessions": 2596, "net_profit": 0}, {"date": "2025-12-14", "revenue": 17190.02, "units": 125, "sessions": 2553, "net_profit": 0}, {"date": "2025-12-15", "revenue": 11686.13, "units": 89, "sessions": 2205, "net_profit": 0}, {"date": "2025-12-16", "revenue": 18745.51, "units": 124, "sessions": 2436, "net_profit": 0}, {"date": "2025-12-17", "revenue": 15526.27, "units": 99, "sessions": 2438, "net_profit": 0}, {"date": "2025-12-18", "revenue": 12932.9, "units": 85, "sessions": 1781, "net_profit": 0}, {"date": "2025-12-19", "revenue": 8002.14, "units": 62, "sessions": 1640, "net_profit": 0}, {"date": "2025-12-20", "revenue": 12196.35, "units": 80, "sessions": 1803, "net_profit": 0}, {"date": "2025-12-21", "revenue": 5559.99, "units": 51, "sessions": 1550, "net_profit": 0}, {"date": "2025-12-22", "revenue": 5664.7, "units": 30, "sessions": 1170, "net_profit": 0}, {"date": "2025-12-23", "revenue": 3359.76, "units": 24, "sessions": 863, "net_profit": 0}, {"date": "2025-12-24", "revenue": 2524.87, "units": 15, "sessions": 671, "net_profit": 0}, {"date": "2025-12-25", "revenue": 4619.66, "units": 34, "sessions": 1019, "net_profit": 0}, {"date": "2025-12-26", "revenue": 4348.48, "units": 27, "sessions": 979, "net_profit": 0}, {"date": "2025-12-27", "revenue": 2861.8, "units": 20, "sessions": 1144, "net_profit": 0}, {"date": "2025-12-28", "revenue": 2789.85, "units": 16, "sessions": 541, "net_profit": 0}, {"date": "2025-12-29", "revenue": 2742.33, "units": 18, "sessions": 406, "net_profit": 0}, {"date": "2025-12-30", "revenue": 1739.88, "units": 12, "sessions": 405, "net_profit": 0}, {"date": "2025-12-31", "revenue": 1549.89, "units": 11, "sessions": 420, "net_profit": 0}, {"date": "2026-01-01", "revenue": 789.94, "units": 6, "sessions": 360, "net_profit": 0}, {"date": "2026-01-02", "revenue": 1056.9, "units": 10, "sessions": 665, "net_profit": 0}, {"date": "2026-01-03", "revenue": 2126.82, "units": 18, "sessions": 710, "net_profit": 0}, {"date": "2026-01-04", "revenue": 2796.82, "units": 19, "sessions": 932, "net_profit": 0}, {"date": "2026-01-05", "revenue": 2524.82, "units": 18, "sessions": 744, "net_profit": 0}, {"date": "2026-01-06", "revenue": 3640.86, "units": 29, "sessions": 724, "net_profit": 0}, {"date": "2026-01-07", "revenue": 3082.78, "units": 22, "sessions": 630, "net_profit": 0}, {"date": "2026-01-08", "revenue": 3103.77, "units": 23, "sessions": 604, "net_profit": 0}, {"date": "2026-01-09", "revenue": 2921.8, "units": 20, "sessions": 581, "net_profit": 0}, {"date": "2026-01-10", "revenue": 2214.88, "units": 12, "sessions": 614, "net_profit": 0}, {"date": "2026-01-11", "revenue": 1267.59, "units": 12, "sessions": 641, "net_profit": 0}, {"date": "2026-01-12", "revenue": 2552.36, "units": 14, "sessions": 545, "net_profit": 0}, {"date": "2026-01-13", "revenue": 2153.1, "units": 20, "sessions": 501, "net_profit": 0}, {"date": "2026-01-14", "revenue": 2792.82, "units": 18, "sessions": 421, "net_profit": 0}, {"date": "2026-01-15", "revenue": 1198.63, "units": 12, "sessions": 415, "net_profit": 0}, {"date": "2026-01-16", "revenue": 828.78, "units": 12, "sessions": 362, "net_profit": 0}, {"date": "2026-01-17", "revenue": 628.69, "units": 6, "sessions": 516, "net_profit": 0}, {"date": "2026-01-18", "revenue": 2014.87, "units": 13, "sessions": 660, "net_profit": 0}, {"date": "2026-01-19", "revenue": 1608.38, "units": 12, "sessions": 659, "net_profit": 0}, {"date": "2026-01-20", "revenue": 904.94, "units": 6, "sessions": 458, "net_profit": 0}, {"date": "2026-01-21", "revenue": 1199.9, "units": 10, "sessions": 488, "net_profit": 0}, {"date": "2026-01-22", "revenue": 737.93, "units": 7, "sessions": 316, "net_profit": 0}, {"date": "2026-01-23", "revenue": 896.91, "units": 9, "sessions": 296, "net_profit": 0}, {"date": "2026-01-24", "revenue": 1854.86, "units": 14, "sessions": 364, "net_profit": 0}, {"date": "2026-01-25", "revenue": 1864.86, "units": 15, "sessions": 473, "net_profit": 0}, {"date": "2026-01-26", "revenue": 909.94, "units": 7, "sessions": 401, "net_profit": 0}, {"date": "2026-01-27", "revenue": 1746.86, "units": 14, "sessions": 451, "net_profit": 0}, {"date": "2026-01-28", "revenue": 1592.89, "units": 11, "sessions": 419, "net_profit": 0}, {"date": "2026-01-29", "revenue": 2096.81, "units": 19, "sessions": 462, "net_profit": 0}, {"date": "2026-01-30", "revenue": 1292.93, "units": 7, "sessions": 380, "net_profit": 0}, {"date": "2026-01-31", "revenue": 1779.87, "units": 13, "sessions": 504, "net_profit": 0}, {"date": "2026-02-01", "revenue": 1714.55, "units": 20, "sessions": 527, "net_profit": 0}, {"date": "2026-02-02", "revenue": 1603.91, "units": 9, "sessions": 408, "net_profit": 0}, {"date": "2026-02-03", "revenue": 499.93, "units": 7, "sessions": 339, "net_profit": 0}, {"date": "2026-02-04", "revenue": 1035.87, "units": 13, "sessions": 464, "net_profit": 0}, {"date": "2026-02-05", "revenue": 827.21, "units": 9, "sessions": 520, "net_profit": 0}, {"date": "2026-02-06", "revenue": 1002.92, "units": 8, "sessions": 426, "net_profit": 0}, {"date": "2026-02-07", "revenue": 1581.9, "units": 10, "sessions": 741, "net_profit": 0}, {"date": "2026-02-08", "revenue": 629.96, "units": 4, "sessions": 618, "net_profit": 0}, {"date": "2026-02-09", "revenue": 704.95, "units": 5, "sessions": 419, "net_profit": 0}, {"date": "2026-02-10", "revenue": 479.96, "units": 4, "sessions": 470, "net_profit": 0}, {"date": "2026-02-11", "revenue": 520.1, "units": 5, "sessions": 511, "net_profit": 0}, {"date": "2026-02-12", "revenue": 1066.92, "units": 8, "sessions": 509, "net_profit": 0}, {"date": "2026-02-13", "revenue": 756.93, "units": 7, "sessions": 518, "net_profit": 0}, {"date": "2026-02-14", "revenue": 834.93, "units": 7, "sessions": 699, "net_profit": 0}, {"date": "2026-02-15", "revenue": 1584.87, "units": 13, "sessions": 844, "net_profit": 0}, {"date": "2026-02-16", "revenue": 1959.86, "units": 14, "sessions": 771, "net_profit": 0}, {"date": "2026-02-17", "revenue": 944.93, "units": 7, "sessions": 703, "net_profit": 0}, {"date": "2026-02-18", "revenue": 1055.08, "units": 7, "sessions": 523, "net_profit": 0}, {"date": "2026-02-19", "revenue": 1336.85, "units": 15, "sessions": 610, "net_profit": 0}, {"date": "2026-02-20", "revenue": 1009.92, "units": 8, "sessions": 488, "net_profit": 0}, {"date": "2026-02-21", "revenue": 2179.85, "units": 15, "sessions": 831, "net_profit": 0}, {"date": "2026-02-22", "revenue": 1719.88, "units": 12, "sessions": 963, "net_profit": 0}, {"date": "2026-02-23", "revenue": 2473.79, "units": 21, "sessions": 850, "net_profit": 0}, {"date": "2026-02-24", "revenue": 1923.84, "units": 17, "sessions": 683, "net_profit": 0}, {"date": "2026-02-25", "revenue": 3297.29, "units": 21, "sessions": 687, "net_profit": 0}, {"date": "2026-02-26", "revenue": 2602.35, "units": 15, "sessions": 663, "net_profit": 0}, {"date": "2026-02-27", "revenue": 3372.83, "units": 32, "sessions": 766, "net_profit": 0}, {"date": "2026-02-28", "revenue": 3351.73, "units": 27, "sessions": 1034, "net_profit": 0}, {"date": "2026-03-01", "revenue": 3597.77, "units": 23, "sessions": 1248, "net_profit": 0}, {"date": "2026-03-02", "revenue": 3779.8, "units": 20, "sessions": 803, "net_profit": 0}, {"date": "2026-03-03", "revenue": 2376.81, "units": 20, "sessions": 1028, "net_profit": 0}, {"date": "2026-03-04", "revenue": 4050.38, "units": 27, "sessions": 1074, "net_profit": 0}, {"date": "2026-03-05", "revenue": 3184.8, "units": 20, "sessions": 799, "net_profit": 0}, {"date": "2026-03-06", "revenue": 3346.78, "units": 22, "sessions": 875, "net_profit": 0}, {"date": "2026-03-07", "revenue": 4915.18, "units": 32, "sessions": 1186, "net_profit": 0}, {"date": "2026-03-08", "revenue": 6967.11, "units": 39, "sessions": 0, "net_profit": 0}, {"date": "2026-03-09", "revenue": 0.0, "units": 0, "sessions": 0, "net_profit": 0}], "products": [{"asin": "B0DPBHKHV7", "revenue": 44968.76, "units": 174, "net_profit": 0, "sessions": 5067, "name": "", "sku": ""}, {"asin": "B0FCJZJMWJ", "revenue": 24736.52, "units": 149, "net_profit": 0, "sessions": 6844, "name": "", "sku": ""}, {"asin": "B0DPBKJGVK", "revenue": 20418.79, "units": 122, "net_profit": 0, "sessions": 5929, "name": "", "sku": ""}, {"asin": "B0CQKQ3VRK", "revenue": 17966.3, "units": 70, "net_profit": 0, "sessions": 2810, "name": "", "sku": ""}, {"asin": "B0DPBGG8GY", "revenue": 17721.81, "units": 69, "net_profit": 0, "sessions": 2653, "name": "", "sku": ""}, {"asin": "B0B2SBQ2R7", "revenue": 16589.36, "units": 64, "net_profit": 0, "sessions": 4162, "name": "", "sku": ""}, {"asin": "B0CQKP7332", "revenue": 15479.4, "units": 61, "net_profit": 0, "sessions": 3983, "name": "", "sku": ""}, {"asin": "B0B2YLNSV2", "revenue": 9469.62, "units": 238, "net_profit": 0, "sessions": 1776, "name": "", "sku": ""}, {"asin": "B0B2SHX1BB", "revenue": 6469.75, "units": 26, "net_profit": 0, "sessions": 884, "name": "", "sku": ""}, {"asin": "B0BRT8TV8H", "revenue": 3519.79, "units": 21, "net_profit": 0, "sessions": 2809, "name": "", "sku": ""}, {"asin": "B0B2SKZ38L", "revenue": 3254.17, "units": 74, "net_profit": 0, "sessions": 1320, "name": "", "sku": ""}, {"asin": "B0DC1TJ21F", "revenue": 3199.96, "units": 4, "net_profit": 0, "sessions": 851, "name": "", "sku": ""}, {"asin": "B0B2Z3L3H4", "revenue": 2117.67, "units": 58, "net_profit": 0, "sessions": 881, "name": "", "sku": ""}, {"asin": "B0B2SYDXTJ", "revenue": 2049.14, "units": 46, "net_profit": 0, "sessions": 1613, "name": "", "sku": ""}, {"asin": "B0B2T894VG", "revenue": 1829.59, "units": 41, "net_profit": 0, "sessions": 647, "name": "", "sku": ""}, {"asin": "B0B2YBWKL8", "revenue": 1799.6, "units": 40, "net_profit": 0, "sessions": 673, "name": "", "sku": ""}, {"asin": "B0FCCY94RG", "revenue": 1739.59, "units": 41, "net_profit": 0, "sessions": 443, "name": "", "sku": ""}, {"asin": "B0BC9YT1XV", "revenue": 1499.7, "units": 30, "net_profit": 0, "sessions": 1521, "name": "", "sku": ""}, {"asin": "B0B2SFX1V7", "revenue": 939.93, "units": 7, "net_profit": 0, "sessions": 135, "name": "", "sku": ""}, {"asin": "B0B2SL7HBQ", "revenue": 819.95, "units": 5, "net_profit": 0, "sessions": 180, "name": "", "sku": ""}], "inventory": [{"asin": "B0CV6VLJYN", "sku": "GG2SS2226BM-CA", "product_name": "PGA Tour G1 Series Kids Green Golf Club Set with 3 Clubs, Golf Bag & 5 Total Pieces | Golf Clubs and Sets for Heights 3'6\" - 4'1\" | Complete Youth Golf Club Set", "fulfillable": 220, "inbound_shipped": 0, "inbound_receiving": 0, "reserved": 0, "unfulfillable": 0, "total": 220, "avg_daily_units": 0, "days_of_supply": 999, "restock_alert": "EXCESS"}, {"asin": "B0DPBKJGVK", "sku": "GGRTNW21176-CA", "product_name": "PGA TOUR Youth Golf Club Set \u2013 6-Piece Right-Handed Kids Golf Set for Ages 8-12 (4\u20198\u201d-5\u20192\u201d) \u2013 Beginner Junior Golf Clubs with Lightweight Stand Bag, Mallet Putter, 7 Iron, Driver by Golfgen", "fulfillable": 159, "inbound_shipped": 0, "inbound_receiving": 0, "reserved": 0, "unfulfillable": 0, "total": 159, "avg_daily_units": 0, "days_of_supply": 999, "restock_alert": "EXCESS"}, {"asin": "B0DS6L39MG", "sku": "GGRTNW21165-CA", "product_name": "PGA Tour Youth Golf Club Set Ages 5-8 (4\u20191\u201d-4'8\") Right Handed Beginner Junior Complete Golf Club Set with Lightweight Bag, Driver, 7 Iron, and Putter by Golfgen", "fulfillable": 104, "inbound_shipped": 0, "inbound_receiving": 0, "reserved": 0, "unfulfillable": 0, "total": 104, "avg_daily_units": 0, "days_of_supply": 999, "restock_alert": "EXCESS"}, {"asin": "B0B2SDT1HW", "sku": "GGAZSS2116BM", "product_name": "PGA Tour G1 Series Kids Red Golf Set with 3 Clubs, Carry Bag & 5 Pieces | Complete Golf Set for Heights 4'1\" - 4'8\" | Young Men & Women Ages 5-8", "fulfillable": 96, "inbound_shipped": 0, "inbound_receiving": 0, "reserved": 0, "unfulfillable": 0, "total": 96, "avg_daily_units": 0, "days_of_supply": 999, "restock_alert": "EXCESS"}, {"asin": "B0DS6JC25Y", "sku": "GGLTNW22265-CA", "product_name": "PGA Tour Kids Golf Club Set for Ages 3-5 (3\u20196\u201d-4\u20191\u201d) \u2013 Left Handed Junior Beginner Starter Set with Driver, 7 Iron, Putter & Lightweight Stand Bag \u2013 Youth Golf Clubs for Boys & Girls by Golfgen", "fulfillable": 83, "inbound_shipped": 0, "inbound_receiving": 0, "reserved": 0, "unfulfillable": 0, "total": 83, "avg_daily_units": 0, "days_of_supply": 999, "restock_alert": "EXCESS"}, {"asin": "B0FCJZJMWJ", "sku": "GGRTNW21196-CA", "product_name": "PGA Tour Youth Golf Club Set \u2013 6-Piece Right-Handed Kids Golf Set for Ages 12+ (5\u20192\u201d+) \u2013 Beginner Junior Golf Clubs with Lightweight Stand Bag, Mallet Putter, 7 Iron, Driver by Golfgen", "fulfillable": 65, "inbound_shipped": 0, "inbound_receiving": 0, "reserved": 0, "unfulfillable": 0, "total": 65, "avg_daily_units": 0, "days_of_supply": 999, "restock_alert": "EXCESS"}, {"asin": "B0B2Z3L3H4", "sku": "GGAZSS2234BM", "product_name": "PGA Tour Golf Practice Aids by Golfgen: Premium Chipping Nets, Putting Rings, & Targets, Indoor & Outdoor Training, Improve Accuracy & Control, Master Putting and Chipping, Portable for On The Go", "fulfillable": 36, "inbound_shipped": 0, "inbound_receiving": 0, "reserved": 0, "unfulfillable": 0, "total": 36, "avg_daily_units": 0, "days_of_supply": 999, "restock_alert": "EXCESS"}, {"asin": "B0CQKQ3VRK", "sku": "GGLFTSS222910-CA", "product_name": "PGA TOUR Youth Golf Club Set \u2013 10-Piece Left-Handed Junior Golf Club Set for Ages Ages 12-17 (5\u20192\u201d-5\u201910\u201d) \u2013 Beginner Golf Clubs for Kids by Golfgen", "fulfillable": 34, "inbound_shipped": 0, "inbound_receiving": 0, "reserved": 0, "unfulfillable": 0, "total": 34, "avg_daily_units": 0, "days_of_supply": 999, "restock_alert": "EXCESS"}, {"asin": "B0B2T894VG", "sku": "GGAZSS2237BM", "product_name": "GOLFGEN | PGA Tour Tee-Up 3-Piece Set, Medium, Orange, Right Handed, Use for Indoor/Outdoor Practice, Junior Golf Training Set, Training Clubs", "fulfillable": 24, "inbound_shipped": 0, "inbound_receiving": 0, "reserved": 0, "unfulfillable": 0, "total": 24, "avg_daily_units": 0, "days_of_supply": 999, "restock_alert": "EXCESS"}, {"asin": "B0CQKQZFCH", "sku": "GGLFTSS222710", "product_name": "PGA Tour Left Handed Red 10 Piece Set - Ideal for Golfers Between 4'1\" - 4'8\" | New Bag, Half Mallet Putter, Driver, Hydrid, 2 Headcovers, 7 Iron, 9 Iron, Wedge, Stand Bag by Golfgen", "fulfillable": 11, "inbound_shipped": 0, "inbound_receiving": 0, "reserved": 0, "unfulfillable": 0, "total": 11, "avg_daily_units": 0, "days_of_supply": 999, "restock_alert": "EXCESS"}, {"asin": "B0CQKP7332", "sku": "GGLFTSS222810-CA", "product_name": "PGA TOUR Youth Golf Club Set \u2013 10-Piece Left-Handed Junior Golf Club Set for Ages 8-12 \u2013 Beginner Golf Clubs for Kids with Lightweight Stand Bag, Hybrid, Wedge & Mallet Putter by Golfgen", "fulfillable": 6, "inbound_shipped": 0, "inbound_receiving": 0, "reserved": 0, "unfulfillable": 0, "total": 6, "avg_daily_units": 0, "days_of_supply": 999, "restock_alert": "EXCESS"}, {"asin": "B0DC1TJ21F", "sku": "GGP1X2000", "product_name": "PGA Tour P1 Extreme 17-Piece Complete Golf Club Set \u2013 Youth Junior Right-Handed Golf Clubs for Boys & Girls \u2013 Full Titanium Driver, Stainless Steel Irons, High MOI Putter, Stand Bag & More by Golfgen", "fulfillable": 3, "inbound_shipped": 0, "inbound_receiving": 0, "reserved": 0, "unfulfillable": 0, "total": 3, "avg_daily_units": 0, "days_of_supply": 999, "restock_alert": "EXCESS"}, {"asin": "B0DPBGG8GY", "sku": "GGRTNW222810-CA", "product_name": "PGA Tour Youth Golf Club Set \u2013 10-Piece Right-Handed Kids Golf Set for Ages 8-12 (4\u20198\u201d-5\u20192\u201d) \u2013 Beginner Junior Golf Clubs with Lightweight Stand Bag, Mallet Putter, Hybrid, Driver & More by Golfgen", "fulfillable": 2, "inbound_shipped": 0, "inbound_receiving": 0, "reserved": 0, "unfulfillable": 0, "total": 2, "avg_daily_units": 0, "days_of_supply": 999, "restock_alert": "EXCESS"}, {"asin": "B0DHVJCF5X", "sku": "860012546725-FBA", "product_name": "The Handless Handle \u2013 Hands-Free Garbage Drawer Foot Pull Handle, Touchless Opener for Drawers, Bins, & Cabinets (Gray, 1 Pack)", "fulfillable": 0, "inbound_shipped": 0, "inbound_receiving": 0, "reserved": 0, "unfulfillable": 0, "total": 0, "avg_daily_units": 0, "days_of_supply": 999, "restock_alert": "EXCESS"}, {"asin": "B0B2YLNSV2", "sku": "GGAZSS2235BM-FBM", "product_name": "PGA Tour Golf Practice Aids by Golfgen: Premium Chipping Nets, Putting Rings, & Targets, Indoor & Outdoor Training, Improve Accuracy & Control, Master Putting and Chipping, Portable for On The Go", "fulfillable": 0, "inbound_shipped": 0, "inbound_receiving": 0, "reserved": 0, "unfulfillable": 0, "total": 0, "avg_daily_units": 0, "days_of_supply": 999, "restock_alert": "EXCESS"}, {"asin": "B0B2YBWKL8", "sku": "GGAZSS2236BM", "product_name": "GOLFGEN | PGA Tour Tee-Up 3-Piece Set, Small, Red, Right Handed, Use for Indoor/Outdoor Practice, Junior Golf Training Set, Training Clubs", "fulfillable": 0, "inbound_shipped": 0, "inbound_receiving": 0, "reserved": 0, "unfulfillable": 0, "total": 0, "avg_daily_units": 0, "days_of_supply": 999, "restock_alert": "EXCESS"}, {"asin": "B0B2YYRGWP", "sku": "GGAZSS2105BM-stickerless", "product_name": "PGA Tour Golf Practice Aids by Golfgen: Premium Chipping Nets, Putting Rings, & Targets, Indoor & Outdoor Training, Improve Accuracy & Control, Master Putting and Chipping, Portable for On The Go", "fulfillable": 0, "inbound_shipped": 0, "inbound_receiving": 0, "reserved": 0, "unfulfillable": 0, "total": 0, "avg_daily_units": 0, "days_of_supply": 999, "restock_alert": "EXCESS"}, {"asin": "B0B2SLTZNG", "sku": "GGAZSS2238BM", "product_name": "GOLFGEN | PGA TOUR Tee-Up 3-Piece Set, Large, Green, Right Handed, Use for Indoor/Outdoor Practice, Junior Golf Training Clubs Set", "fulfillable": 0, "inbound_shipped": 0, "inbound_receiving": 0, "reserved": 0, "unfulfillable": 0, "total": 0, "avg_daily_units": 0, "days_of_supply": 999, "restock_alert": "EXCESS"}, {"asin": "B0B2SKB7ND", "sku": "GGAZSS2239BM", "product_name": "PGA Tour Tee-Up 3-Piece Set, Small, Red, Left Handed, Use for Indoor and Outdoor Practice, Junior Golf Training Set, Training Clubs", "fulfillable": 0, "inbound_shipped": 0, "inbound_receiving": 0, "reserved": 0, "unfulfillable": 0, "total": 0, "avg_daily_units": 0, "days_of_supply": 999, "restock_alert": "EXCESS"}, {"asin": "B0B2SKZ38L", "sku": "GGAZSS2240BM", "product_name": "GOLFGEN | PGA TOUR Tee-Up 3-Piece Set, Medium, Orange, Left Handed, Use for Indoor/Outdoor Practice, Junior Golf Training Set, Training Clubs", "fulfillable": 0, "inbound_shipped": 0, "inbound_receiving": 0, "reserved": 0, "unfulfillable": 0, "total": 0, "avg_daily_units": 0, "days_of_supply": 999, "restock_alert": "EXCESS"}, {"asin": "B0B2SYDXTJ", "sku": "GGAZSS2241BM", "product_name": "PGA Tour Tee-Up 3-Piece Set, Large, Green, Left Handed, Use for Indoor and Outdoor Practice, Junior Golf Training Set, Training Clubs", "fulfillable": 0, "inbound_shipped": 0, "inbound_receiving": 0, "reserved": 0, "unfulfillable": 0, "total": 0, "avg_daily_units": 0, "days_of_supply": 999, "restock_alert": "EXCESS"}, {"asin": "B0B2SBQ2R7", "sku": "GGAZSS2229BM-FBM", "product_name": "Golfgen G1 Series Orange Kids Youth Golf Set with 6 Clubs, Stand Golf Bag & 10 Pcs | Golf Clubs and Sets for Heights 5'2\"-5'10\" Complete Golf Club Sets Ages 12-18 by Golfgen", "fulfillable": 0, "inbound_shipped": 0, "inbound_receiving": 0, "reserved": 0, "unfulfillable": 0, "total": 0, "avg_daily_units": 0, "days_of_supply": 999, "restock_alert": "EXCESS"}, {"asin": "B0B2SHX1BB", "sku": "GGRTNW222810-FBA", "product_name": "New Golfgen10 Piece Right Hand Junior Golf Club Set (Blue) (Amazon with Half Mallet Putter and Updated Bag)", "fulfillable": 0, "inbound_shipped": 0, "inbound_receiving": 0, "reserved": 0, "unfulfillable": 0, "total": 0, "avg_daily_units": 0, "days_of_supply": 999, "restock_alert": "EXCESS"}, {"asin": "B0B2SGCMP9", "sku": "GGAZSS2227BM", "product_name": "PGA Tour G1 Series Kids Red Golf Club Set with 5 Clubs, Carry Golf Bag & 8 Total Pieces | Golf Clubs and Sets for Heights 4'1\" - 4'8\" | Complete Golf Club Sets | Young Men & Women Golf Clubs Ages 5-8", "fulfillable": 0, "inbound_shipped": 0, "inbound_receiving": 0, "reserved": 0, "unfulfillable": 0, "total": 0, "avg_daily_units": 0, "days_of_supply": 999, "restock_alert": "EXCESS"}, {"asin": "B0B2Y89HQV", "sku": "GGAZSS2226BM", "product_name": "PGA Tour G1 Series Kids Green Golf Club Set with 3 Clubs, Golf Bag & 5 Total Pieces | Golf Clubs and Sets for Heights 3'6\" - 4'1\" | Complete Golf Club Sets | Golf Clubs Ages 3-5 by Golfgen", "fulfillable": 0, "inbound_shipped": 0, "inbound_receiving": 0, "reserved": 0, "unfulfillable": 0, "total": 0, "avg_daily_units": 0, "days_of_supply": 999, "restock_alert": "EXCESS"}, {"asin": "B0B2SFX1V7", "sku": "GGAZSS2122BM", "product_name": "PGA Tour GS1 Series Junior 7-Piece Golf Club Set, L, Blue, Right Handed, Ages 8-12 Years, Height Range 56-62\", Golf Games for Home, Kids Outdoor Play Equipment", "fulfillable": 0, "inbound_shipped": 0, "inbound_receiving": 0, "reserved": 0, "unfulfillable": 0, "total": 0, "avg_daily_units": 0, "days_of_supply": 999, "restock_alert": "EXCESS"}, {"asin": "B0FCCY8GBM", "sku": "GGREPP1PTR1", "product_name": "PGA Tour P1 Extreme Full Mallet Putter by Golfgen \u2013 Oversized Grip | PVD Finish | Soft Plate Face Insert | Advanced Technology and Performance | Tour Level Precision for Junior Golfers", "fulfillable": 0, "inbound_shipped": 0, "inbound_receiving": 0, "reserved": 0, "unfulfillable": 0, "total": 0, "avg_daily_units": 0, "days_of_supply": 999, "restock_alert": "EXCESS"}, {"asin": "B0B2SL7HBQ", "sku": "GGAZSS2121BM", "product_name": "PGA Tour G1 Series Orange Kids Complete Golf Club Set with 4 Clubs, Stand Golf Bag & 7 Total Pcs | Golf Clubs and Sets for Heights 5'2\"-5'7\" Golf Clubs Ages 12-17 by Golfgen", "fulfillable": 0, "inbound_shipped": 0, "inbound_receiving": 0, "reserved": 0, "unfulfillable": 0, "total": 0, "avg_daily_units": 0, "days_of_supply": 999, "restock_alert": "EXCESS"}, {"asin": "B0B2Z3HDT8", "sku": "GGAZSS2113BM", "product_name": "PGA TOUR Tee Up Set of 3 Rubber Tees, Use with Real or Foam Golf Balls, Practice Tees, Black Rubber Golf Tees", "fulfillable": 0, "inbound_shipped": 0, "inbound_receiving": 0, "reserved": 0, "unfulfillable": 0, "total": 0, "avg_daily_units": 0, "days_of_supply": 999, "restock_alert": "EXCESS"}, {"asin": "B0B2Z2PS78", "sku": "GGAZSS2106BM", "product_name": "PGA Tour Golf Cornhole Yard Game, Chipping Practice Set for All Ages, Chipping Yard Game Boards, Perfect for Tailgates and Backyard Parties, Golf Gifts for Men & Women", "fulfillable": 0, "inbound_shipped": 0, "inbound_receiving": 0, "reserved": 0, "unfulfillable": 0, "total": 0, "avg_daily_units": 0, "days_of_supply": 999, "restock_alert": "EXCESS"}, {"asin": "B0FCCXM3SB", "sku": "GG9IREP1", "product_name": "PGA Tour by Golfgen 9 Iron \u2013 Junior Golf Club for Ages 12+ Over 5\u20192\u201d \u2013 Graphite Shaft, Perimeter Weighted Head, PGA Tour Rubber Grip \u2013 Approach Shots for Kids & Teens", "fulfillable": 0, "inbound_shipped": 0, "inbound_receiving": 0, "reserved": 0, "unfulfillable": 0, "total": 0, "avg_daily_units": 0, "days_of_supply": 999, "restock_alert": "EXCESS"}, {"asin": "B0DPBHKHV7", "sku": "GGRTNW222910-CA", "product_name": "PGA TOUR Youth Golf Club Set \u2013 10-Piece Right-Handed Kids Golf Set for Ages Ages 12-17 (5\u20192\u201d-5\u201910\u201d) \u2013 Beginner Junior Golf Clubs with Lightweight Stand Bag, Mallet Putter, Hybrid, Driver by Golfgen", "fulfillable": 0, "inbound_shipped": 0, "inbound_receiving": 0, "reserved": 0, "unfulfillable": 0, "total": 0, "avg_daily_units": 0, "days_of_supply": 999, "restock_alert": "EXCESS"}, {"asin": "B0FCCY94RG", "sku": "GGWIREP1", "product_name": "PGA TOUR By Golfgen Pitching Wedge; Junior Golf Club for Player Height Over 5'2\"; Graphite Shaft, Perimeter Weighted Head, Rubber Grip; Officially Licensed PGA TOUR product; Approach Shots for Juniors", "fulfillable": 0, "inbound_shipped": 0, "inbound_receiving": 0, "reserved": 0, "unfulfillable": 0, "total": 0, "avg_daily_units": 0, "days_of_supply": 999, "restock_alert": "EXCESS"}, {"asin": "B0BLP8QCW5", "sku": "GGWMSS2101BMC-FBM", "product_name": "PGA Tour Tee-Up Multicolor Golf Balls 12 Pack", "fulfillable": 0, "inbound_shipped": 0, "inbound_receiving": 0, "reserved": 0, "unfulfillable": 0, "total": 0, "avg_daily_units": 0, "days_of_supply": 999, "restock_alert": "EXCESS"}, {"asin": "B0BC9PLQPF", "sku": "GGWMSS2102BM", "product_name": "PGA TOUR Tee Up Set of 4 Launch Pads Red", "fulfillable": 0, "inbound_shipped": 0, "inbound_receiving": 0, "reserved": 0, "unfulfillable": 0, "total": 0, "avg_daily_units": 0, "days_of_supply": 999, "restock_alert": "EXCESS"}]};
+
+const COLORS = ['#2563eb','#059669','#dc2626','#d97706','#7c3aed','#0891b2','#be185d','#65a30d','#c2410c','#4f46e5'];
+
+function fmt(v, type) {
+    if (v == null || isNaN(v)) return '--';
+    switch(type) {
+        case '$': return v >= 1e6 ? '$' + (v/1e6).toFixed(1) + 'M' : v >= 1e3 ? '$' + (v/1e3).toFixed(1) + 'K' : '$' + v.toFixed(0);
+        case '$full': return '$' + v.toLocaleString('en-US', {minimumFractionDigits:2, maximumFractionDigits:2});
+        case '%': return v.toFixed(1) + '%';
+        case 'n': return v >= 1e6 ? (v/1e6).toFixed(1) + 'M' : v >= 1e3 ? (v/1e3).toFixed(1) + 'K' : v.toLocaleString();
+        default: return String(v);
+    }
+}
+
+class Dashboard {
+    constructor(data) {
+        this.data = data;
+        this.charts = {};
+        this.init();
+    }
+
+    init() {
+        this.populateProductFilter();
+        this.render();
+        document.getElementById('data-date').textContent = new Date().toLocaleDateString('en-US', {year:'numeric',month:'long',day:'numeric'});
+    }
+
+    populateProductFilter() {
+        const sel = document.getElementById('product-filter');
+        (this.data.products || []).forEach(p => {
+            const opt = document.createElement('option');
+            opt.value = p.asin;
+            opt.textContent = (p.name || '').substring(0, 50);
+            sel.appendChild(opt);
+        });
+    }
+
+    getFilteredDaily() {
+        const days = document.getElementById('time-filter').value;
+        const prod = document.getElementById('product-filter').value;
+        let d = this.data.daily || [];
+        if (days !== 'all') {
+            const cutoff = new Date();
+            cutoff.setDate(cutoff.getDate() - parseInt(days));
+            const cutStr = cutoff.toISOString().split('T')[0];
+            d = d.filter(r => r.date >= cutStr);
+        }
+        return d;
+    }
+
+    render() {
+        this.renderKPIs();
+        this.renderCharts();
+        this.renderProductTable();
+        this.renderInventoryTable();
+    }
+
+    applyFilters() {
+        this.render();
+    }
+
+    renderKPIs() {
+        const k = this.data.kpis || {};
+        const t = this.data.trends || {};
+        document.getElementById('kpi-rev').textContent = fmt(k.total_revenue, '$');
+        document.getElementById('kpi-units').textContent = fmt(k.total_units, 'n');
+        document.getElementById('kpi-profit').textContent = fmt(k.total_net_profit, '$');
+        document.getElementById('kpi-margin').textContent = fmt(k.overall_margin, '%');
+        document.getElementById('kpi-tacos').textContent = fmt(k.total_ad_spend > 0 ? (k.total_ad_spend / k.total_revenue * 100) : 0, '%');
+        document.getElementById('kpi-aov').textContent = fmt(k.avg_order_value, '$full');
+
+        const setChg = (id, val) => {
+            const el = document.getElementById(id);
+            if (!el) return;
+            const sign = val >= 0 ? '+' : '';
+            el.textContent = sign + val.toFixed(1) + '% vs prior period';
+            el.className = 'kpi-change ' + (val >= 0 ? 'positive' : 'negative');
+        };
+        setChg('kpi-rev-chg', t.rev_change || 0);
+        setChg('kpi-units-chg', t.units_change || 0);
+        setChg('kpi-profit-chg', t.profit_change || 0);
+        document.getElementById('kpi-margin-note').textContent = 'After fees, COGS, ads, refunds';
+        document.getElementById('kpi-margin-note').className = 'kpi-change';
+        document.getElementById('kpi-acos-note').textContent = 'Total Ad Spend / Total Revenue';
+        document.getElementById('kpi-acos-note').className = 'kpi-change';
+        document.getElementById('kpi-conv').textContent = 'Conv: ' + fmt(k.conversion_rate, '%') + ' | Refund: ' + fmt(k.refund_rate, '%');
+        document.getElementById('kpi-conv').className = 'kpi-change';
+    }
+
+    renderCharts() {
+        // Destroy existing charts
+        Object.values(this.charts).forEach(c => c.destroy());
+        this.charts = {};
+
+        const daily = this.getFilteredDaily();
+        const monthly = this.data.monthly || [];
+
+        // Daily Revenue Line Chart
+        this.charts.dailyRev = new Chart(document.getElementById('chart-daily-rev'), {
+            type: 'line',
+            data: {
+                labels: daily.map(d => d.date),
+                datasets: [
+                    { label: 'Revenue', data: daily.map(d => d.revenue), borderColor: COLORS[0], backgroundColor: COLORS[0]+'15', fill: true, tension: 0.3, pointRadius: 0, borderWidth: 2 },
+                    { label: 'Net Profit', data: daily.map(d => d.net_profit), borderColor: COLORS[1], backgroundColor: COLORS[1]+'15', fill: true, tension: 0.3, pointRadius: 0, borderWidth: 2 },
+                ]
+            },
+            options: {
+                responsive: true, maintainAspectRatio: false,
+                interaction: { mode: 'index', intersect: false },
+                plugins: {
+                    legend: { position: 'top', labels: { usePointStyle: true, padding: 16 } },
+                    tooltip: { callbacks: { label: ctx => ctx.dataset.label + ': ' + fmt(ctx.parsed.y, '$') } }
+                },
+                scales: {
+                    x: { grid: { display: false }, ticks: { maxTicksLimit: 12, font: { size: 10 } } },
+                    y: { ticks: { callback: v => fmt(v, '$') } }
+                }
+            }
+        });
+
+        // Monthly Revenue vs Profit Bar Chart
+        this.charts.monthly = new Chart(document.getElementById('chart-monthly'), {
+            type: 'bar',
+            data: {
+                labels: monthly.map(m => m.month),
+                datasets: [
+                    { label: 'Revenue', data: monthly.map(m => m.revenue), backgroundColor: COLORS[0]+'cc', borderRadius: 4 },
+                    { label: 'Net Profit', data: monthly.map(m => m.net_profit), backgroundColor: COLORS[1]+'cc', borderRadius: 4 },
+                ]
+            },
+            options: {
+                responsive: true, maintainAspectRatio: false,
+                plugins: {
+                    legend: { position: 'top', labels: { usePointStyle: true, padding: 16 } },
+                    tooltip: { callbacks: { label: ctx => ctx.dataset.label + ': ' + fmt(ctx.parsed.y, '$') } }
+                },
+                scales: {
+                    x: { grid: { display: false } },
+                    y: { ticks: { callback: v => fmt(v, '$') } }
+                }
+            }
+        });
+
+        // Ad Spend vs Sales
+        this.charts.ads = new Chart(document.getElementById('chart-ads'), {
+            type: 'bar',
+            data: {
+                labels: monthly.map(m => m.month),
+                datasets: [
+                    { label: 'Ad Spend', data: monthly.map(m => m.ad_spend), backgroundColor: COLORS[2]+'cc', borderRadius: 4 },
+                    { label: 'Ad-Attributed Sales', data: monthly.map(m => m.ad_sales), backgroundColor: COLORS[0]+'cc', borderRadius: 4 },
+                ]
+            },
+            options: {
+                responsive: true, maintainAspectRatio: false,
+                plugins: {
+                    legend: { position: 'top', labels: { usePointStyle: true, padding: 16 } },
+                    tooltip: { callbacks: { label: ctx => ctx.dataset.label + ': ' + fmt(ctx.parsed.y, '$') } }
+                },
+                scales: {
+                    x: { grid: { display: false } },
+                    y: { ticks: { callback: v => fmt(v, '$') } }
+                }
+            }
+        });
+
+        // Profit Waterfall (cost breakdown)
+        const k = this.data.kpis || {};
+        this.charts.waterfall = new Chart(document.getElementById('chart-waterfall'), {
+            type: 'bar',
+            data: {
+                labels: ['Revenue', 'COGS', 'Amazon Fees', 'FBA Fees', 'Ad Spend', 'Net Profit'],
+                datasets: [{
+                    data: [k.total_revenue, -k.total_cogs, -k.total_amazon_fees, -k.total_fba_fees, -k.total_ad_spend, k.total_net_profit],
+                    backgroundColor: [COLORS[0]+'cc', COLORS[2]+'cc', COLORS[3]+'cc', COLORS[4]+'cc', COLORS[5]+'cc', k.total_net_profit >= 0 ? COLORS[1]+'cc' : COLORS[2]+'cc'],
+                    borderRadius: 4,
+                }]
+            },
+            options: {
+                responsive: true, maintainAspectRatio: false,
+                indexAxis: 'y',
+                plugins: {
+                    legend: { display: false },
+                    tooltip: { callbacks: { label: ctx => fmt(Math.abs(ctx.parsed.x), '$') + (ctx.parsed.x < 0 ? ' (cost)' : '') } }
+                },
+                scales: {
+                    x: { ticks: { callback: v => fmt(Math.abs(v), '$') } },
+                    y: { grid: { display: false } }
+                }
+            }
+        });
+    }
+
+    renderProductTable() {
+        const prods = this.data.products || [];
+        let html = '<table><thead><tr>';
+        html += '<th>Product</th><th>SKU</th><th class="text-right">Revenue</th><th class="text-right">Units</th>';
+        html += '<th class="text-right">Ad Spend</th><th class="text-right">Net Profit</th><th class="text-right">Margin</th>';
+        html += '<th class="text-right">Rev/Unit</th></tr></thead><tbody>';
+
+        prods.forEach(p => {
+            const margin = p.revenue > 0 ? (p.net_profit / p.revenue * 100) : 0;
+            const revPerUnit = p.units > 0 ? (p.revenue / p.units) : 0;
+            const marginClass = margin >= 20 ? 'positive' : margin >= 0 ? '' : 'negative';
+            html += '<tr>';
+            html += '<td title="' + (p.name||'') + '">' + (p.name||'').substring(0, 45) + '</td>';
+            html += '<td style="font-family:monospace;font-size:11px">' + (p.sku||'') + '</td>';
+            html += '<td class="text-right">' + fmt(p.revenue, '$') + '</td>';
+            html += '<td class="text-right">' + fmt(p.units, 'n') + '</td>';
+            html += '<td class="text-right">' + fmt(p.ad_spend, '$') + '</td>';
+            html += '<td class="text-right kpi-change ' + marginClass + '">' + fmt(p.net_profit, '$') + '</td>';
+            html += '<td class="text-right kpi-change ' + marginClass + '">' + margin.toFixed(1) + '%</td>';
+            html += '<td class="text-right">' + fmt(revPerUnit, '$full') + '</td>';
+            html += '</tr>';
+        });
+
+        html += '</tbody></table>';
+        document.getElementById('product-table').innerHTML = html;
+    }
+
+    renderInventoryTable() {
+        const inv = this.data.inventory || [];
+        if (!inv.length) {
+            document.getElementById('inventory-table').innerHTML = '<p style="color:#6b7280;font-size:13px">No inventory data yet. Run the SP-API pull to populate.</p>';
+            return;
+        }
+
+        let html = '<table><thead><tr>';
+        html += '<th>Product</th><th>SKU</th><th class="text-right">FBA Stock</th>';
+        html += '<th class="text-right">Inbound</th><th class="text-right">Reserved</th>';
+        html += '<th class="text-right">Days Supply</th><th class="text-right">Avg Daily</th><th class="text-center">Status</th>';
+        html += '</tr></thead><tbody>';
+
+        inv.forEach(i => {
+            html += '<tr>';
+            html += '<td title="' + (i.product_name||'') + '">' + (i.product_name||'').substring(0, 40) + '</td>';
+            html += '<td style="font-family:monospace;font-size:11px">' + (i.sku||'') + '</td>';
+            html += '<td class="text-right">' + (i.fulfillable||0) + '</td>';
+            html += '<td class="text-right">' + ((i.inbound_shipped||0) + (i.inbound_receiving||0)) + '</td>';
+            html += '<td class="text-right">' + (i.reserved||0) + '</td>';
+            html += '<td class="text-right">' + (i.days_of_supply||'--') + '</td>';
+            html += '<td class="text-right">' + (i.avg_daily_units||'--') + '</td>';
+            html += '<td class="text-center"><span class="inv-alert ' + (i.restock_alert||'OK') + '">' + (i.restock_alert||'OK') + '</span></td>';
+            html += '</tr>';
+        });
+
+        html += '</tbody></table>';
+        document.getElementById('inventory-table').innerHTML = html;
+    }
+}
+
+const dashboard = new Dashboard(DASHBOARD_DATA);
+</script>
+</body>
+</html>
