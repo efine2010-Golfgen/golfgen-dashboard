@@ -68,10 +68,13 @@ def _load_sp_api_credentials() -> dict | None:
 
 
 def _sync_today_orders():
-    """Fast sync: pull today's orders from Amazon Orders API (takes ~5 seconds).
+    """Fast sync: pull today's orders from Amazon Orders API.
 
     This is the critical path for showing live "Today" data.
     Runs at startup, on /api/sync, and inline if today has no data.
+
+    Key: For orders with no OrderTotal (Pending status), we call
+    getOrderItems to get actual item prices so revenue is accurate.
     """
     try:
         from sp_api.api import Orders as OrdersAPI
@@ -86,6 +89,7 @@ def _sync_today_orders():
 
     logger.info("  Syncing today's orders (real-time)...")
     try:
+        import time as _t
         # Get orders from last 2 days to catch any we missed
         after_date = (datetime.utcnow() - timedelta(days=2)).isoformat()
         orders_api = OrdersAPI(credentials=credentials, marketplace=Marketplaces.US)
@@ -139,6 +143,47 @@ def _sync_today_orders():
                 order.get("IsPrime", False),
             ])
 
+        # For orders with $0 OrderTotal (Pending), fetch order items to get real prices
+        orders_needing_items = []
+        for order in order_list:
+            status = order.get("OrderStatus", "")
+            if status in ("Canceled", "Cancelled"):
+                continue
+            order_total = order.get("OrderTotal", {})
+            amount = float(order_total.get("Amount", 0)) if order_total else 0
+            if amount == 0:
+                orders_needing_items.append(order)
+
+        # Fetch item details for orders missing totals (rate-limited: 1 per second)
+        items_fetched = 0
+        for order in orders_needing_items:
+            order_id = order.get("AmazonOrderId")
+            if not order_id:
+                continue
+            try:
+                items_resp = orders_api.get_order_items(order_id)
+                item_list = items_resp.payload.get("OrderItems", [])
+                total_from_items = 0.0
+                total_qty = 0
+                for item in item_list:
+                    price = item.get("ItemPrice", {})
+                    qty = int(item.get("QuantityOrdered", 0))
+                    item_amount = float(price.get("Amount", 0)) if isinstance(price, dict) else 0
+                    total_from_items += item_amount
+                    total_qty += qty
+                # Patch the order object so aggregation below picks it up
+                order["OrderTotal"] = {"Amount": str(total_from_items), "CurrencyCode": "USD"}
+                order["_items_qty"] = total_qty
+                items_fetched += 1
+                _t.sleep(0.5)  # Respect API rate limit
+            except Exception as e:
+                logger.warning(f"  Could not fetch items for {order_id}: {e}")
+            if items_fetched >= 30:  # Cap to keep it fast
+                break
+
+        if items_fetched > 0:
+            logger.info(f"  Fetched item details for {items_fetched} orders missing totals")
+
         # Aggregate orders by date → update daily_sales
         from collections import defaultdict
         daily_agg = defaultdict(lambda: {"revenue": 0.0, "units": 0, "orders": 0})
@@ -163,7 +208,9 @@ def _sync_today_orders():
 
             order_total = order.get("OrderTotal", {})
             amount = float(order_total.get("Amount", 0)) if order_total else 0
-            n_items = order.get("NumberOfItemsShipped", 0) + order.get("NumberOfItemsUnshipped", 0)
+            # Use item qty if we fetched it, otherwise fall back to shipped+unshipped
+            n_items = order.get("_items_qty",
+                        order.get("NumberOfItemsShipped", 0) + order.get("NumberOfItemsUnshipped", 0))
 
             daily_agg[day_str]["revenue"] += amount
             daily_agg[day_str]["units"] += n_items
@@ -193,7 +240,7 @@ def _sync_today_orders():
                      buy_box_percentage, unit_session_percentage)
                     VALUES (?, 'ALL', ?, ?, 0, 0, 0, 0, 0)
                 """, [day_str, agg["units"], agg["revenue"]])
-                logger.info(f"  Updated {day_str}: ${agg['revenue']:.2f} from {agg['orders']} orders")
+                logger.info(f"  Updated {day_str}: ${agg['revenue']:.2f} rev, {agg['units']} units from {agg['orders']} orders")
 
         con.close()
         logger.info(f"  Today sync done: {len(order_list)} orders processed, dates: {list(daily_agg.keys())}")
@@ -1464,7 +1511,8 @@ def period_comparison(view: str = Query("realtime")):
         })
     else:
         # Default: realtime (Today / WTD / MTD / YTD)
-        week_start = today_start - timedelta(days=today_start.weekday())
+        # WTD: rolling 7 days so it's always meaningful (not empty on Monday)
+        week_start = today_start - timedelta(days=6)
         month_start = today_start.replace(day=1)
         year_start = today_start.replace(month=1, day=1)
 
@@ -1723,7 +1771,8 @@ def profitability(view: str = Query("realtime")):
                             "start": m_start.strftime("%Y-%m-%d"), "end": m_end})
         periods.append({"label": f"{yr} Total", "sub": "YTD", "start": f"{yr}-01-01", "end": tomorrow})
     else:
-        week_start = today_start - timedelta(days=today_start.weekday())
+        # WTD: rolling 7 days so it's always meaningful (not empty on Monday)
+        week_start = today_start - timedelta(days=6)
         month_start = today_start.replace(day=1)
         year_start = today_start.replace(month=1, day=1)
         periods = [
