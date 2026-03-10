@@ -73,15 +73,18 @@ def fmt_date(d) -> str:
 
 
 def get_today(con) -> datetime:
-    """Get 'today' anchored to the latest date in the database.
+    """Get 'today' anchored to the latest date with actual sales data.
 
-    Railway servers run in UTC, so datetime.now() may be tomorrow relative
-    to the latest data.  Use the max date from daily_sales as the anchor
-    so Today / WTD / MTD always show the most recent data.
+    Two issues to handle:
+    1. Railway servers run in UTC, so datetime.now() may be tomorrow.
+    2. The SP-API may have written a row for today with $0 because the
+       data hasn't synced yet.  We want the most recent date that has
+       real revenue so the dashboard never shows an empty "Today".
     """
     try:
         row = con.execute(
-            "SELECT MAX(date) FROM daily_sales WHERE asin = 'ALL'"
+            "SELECT MAX(date) FROM daily_sales "
+            "WHERE asin = 'ALL' AND ordered_product_sales > 0"
         ).fetchone()
         if row and row[0]:
             d = row[0]
@@ -438,12 +441,12 @@ def _build_product_list(con, cutoff: str) -> list:
         actual_commission = fin.get("commission", 0)
         referral_total = round(actual_commission, 2) if actual_commission > 0 else round(revenue * 0.15, 2)
 
-        # Ad spend — pull from ads_product_performance if available
+        # Ad spend — pull from advertising if available
         ad_spend = 0
         try:
             ad_row = con.execute("""
                 SELECT COALESCE(SUM(spend), 0)
-                FROM ads_product_performance
+                FROM advertising
                 WHERE asin = ? AND date >= ?
             """, [asin, cutoff]).fetchone()
             if ad_row and ad_row[0] > 0:
@@ -526,13 +529,13 @@ def ads_summary(days: int = Query(30)):
 
     row = _safe_ads_query(con, """
         SELECT
-            COALESCE(SUM(total_spend), 0) AS spend,
-            COALESCE(SUM(total_sales), 0) AS ad_sales,
-            COALESCE(SUM(total_impressions), 0) AS impressions,
-            COALESCE(SUM(total_clicks), 0) AS clicks,
-            COALESCE(SUM(total_orders), 0) AS orders,
-            COALESCE(SUM(total_units), 0) AS units
-        FROM ads_daily_summary
+            COALESCE(SUM(spend), 0) AS spend,
+            COALESCE(SUM(sales), 0) AS ad_sales,
+            COALESCE(SUM(impressions), 0) AS impressions,
+            COALESCE(SUM(clicks), 0) AS clicks,
+            COALESCE(SUM(orders), 0) AS ad_orders,
+            COALESCE(SUM(units), 0) AS ad_units
+        FROM advertising
         WHERE date >= ?
     """, [cutoff])
 
@@ -588,10 +591,16 @@ def ads_daily(days: int = Query(30)):
     cutoff = (datetime.now() - timedelta(days=days)).strftime("%Y-%m-%d")
 
     rows = _safe_ads_query(con, """
-        SELECT date, total_spend, total_sales, total_impressions,
-               total_clicks, total_orders, acos, roas, tacos, avg_cpc, avg_ctr
-        FROM ads_daily_summary
+        SELECT date,
+               COALESCE(SUM(spend), 0),
+               COALESCE(SUM(sales), 0),
+               COALESCE(SUM(impressions), 0),
+               COALESCE(SUM(clicks), 0),
+               COALESCE(SUM(orders), 0),
+               0, 0, 0, 0, 0
+        FROM advertising
         WHERE date >= ?
+        GROUP BY date
         ORDER BY date
     """, [cutoff])
 
@@ -954,8 +963,8 @@ def period_comparison(view: str = Query("realtime")):
         ad_spend = 0
         try:
             ad_row = con.execute("""
-                SELECT COALESCE(SUM(total_spend), 0)
-                FROM ads_daily_summary
+                SELECT COALESCE(SUM(spend), 0)
+                FROM advertising
                 WHERE date >= ? AND date < ?
             """, [p["start"], p["end"]]).fetchone()
             ad_spend = round(ad_row[0], 2) if ad_row else 0
@@ -990,8 +999,8 @@ def period_comparison(view: str = Query("realtime")):
         ly_ad = 0
         try:
             ly_ad_row = con.execute("""
-                SELECT COALESCE(SUM(total_spend), 0)
-                FROM ads_daily_summary
+                SELECT COALESCE(SUM(spend), 0)
+                FROM advertising
                 WHERE date >= ? AND date < ?
             """, [ly_start.strftime("%Y-%m-%d"), ly_end.strftime("%Y-%m-%d")]).fetchone()
             ly_ad = round(ly_ad_row[0], 2) if ly_ad_row else 0
@@ -1172,6 +1181,40 @@ def profitability_items(days: int = Query(365)):
     cutoff = (datetime.now() - timedelta(days=days)).strftime("%Y-%m-%d")
     products = _build_product_list(con, cutoff)
 
+    # Get per-ASIN financial event data for the period
+    fin_by_asin = {}
+    try:
+        fin_rows = con.execute("""
+            SELECT asin,
+                   SUM(ABS(promotion_amount)) AS promo,
+                   SUM(ABS(shipping_charges)) AS shipping,
+                   SUM(ABS(other_fees)) AS other,
+                   SUM(CASE WHEN event_type LIKE '%Refund%' OR event_type LIKE '%Return%'
+                       THEN ABS(product_charges) ELSE 0 END) AS refund_amt,
+                   COUNT(CASE WHEN event_type LIKE '%Refund%' OR event_type LIKE '%Return%'
+                       THEN 1 END) AS refund_count
+            FROM financial_events
+            WHERE date >= ?
+            GROUP BY asin
+        """, [cutoff]).fetchall()
+        fin_by_asin = {r[0]: {"promo": r[1], "shipping": r[2], "other": r[3],
+                                "refund_amt": r[4], "refund_count": r[5]} for r in fin_rows}
+    except Exception:
+        pass
+
+    # Get per-ASIN ad spend from advertising table
+    ad_by_asin = {}
+    try:
+        ad_rows = con.execute("""
+            SELECT asin, COALESCE(SUM(spend), 0) AS spend
+            FROM advertising
+            WHERE date >= ?
+            GROUP BY asin
+        """, [cutoff]).fetchall()
+        ad_by_asin = {r[0]: r[1] for r in ad_rows}
+    except Exception:
+        pass
+
     # Enhance with Sellerboard-style metrics
     items = []
     for p in products:
@@ -1182,19 +1225,28 @@ def profitability_items(days: int = Query(365)):
         margin = round(net / rev * 100, 1) if rev > 0 else 0
         roi = round(net / cogs_total * 100, 1) if cogs_total > 0 else 0
 
+        asin = p["asin"]
+        fin = fin_by_asin.get(asin, {})
+        ad_spend = ad_by_asin.get(asin, p["adSpend"])
+        refund_units = fin.get("refund_count", 0)
+        return_pct = round(refund_units / p["units"] * 100, 1) if p["units"] > 0 else 0
+
         items.append({
-            "asin": p["asin"],
+            "asin": asin,
             "sku": p["sku"],
             "name": p["name"],
             "units": p["units"],
             "sales": rev,
-            "promo": 0,       # Not available from API yet
-            "adSpend": p["adSpend"],
-            "shipping": 0,    # Not available from API yet
-            "refunds": 0,     # Not available from API yet
+            "promo": round(fin.get("promo", 0), 2),
+            "adSpend": round(ad_spend, 2),
+            "shipping": round(fin.get("shipping", 0), 2),
+            "refunds": round(fin.get("refund_amt", 0), 2),
+            "refundUnits": refund_units,
+            "returnPct": return_pct,
             "amazonFees": round(amazon_fees, 2),
             "fbaFees": p["fbaTotal"],
             "referralFees": p["referralTotal"],
+            "otherFees": round(fin.get("other", 0), 2),
             "cogs": cogs_total,
             "cogsPerUnit": p["cogsPerUnit"],
             "indirect": 0,
@@ -1230,22 +1282,51 @@ def _build_waterfall(con, cogs_data, start: str, end: str) -> dict:
         GROUP BY asin
     """, [start, end]).fetchall()
 
-    # Financial data
+    # Financial data (date-filtered for the period)
     fin_rows = []
     try:
         fin_rows = con.execute("""
-            SELECT asin, SUM(ABS(fba_fees)) AS fba, SUM(ABS(commission)) AS comm
-            FROM financial_events GROUP BY asin
-        """).fetchall()
+            SELECT asin,
+                   SUM(ABS(fba_fees)) AS fba,
+                   SUM(ABS(commission)) AS comm,
+                   SUM(ABS(promotion_amount)) AS promo,
+                   SUM(ABS(shipping_charges)) AS shipping,
+                   SUM(ABS(other_fees)) AS other,
+                   SUM(CASE WHEN event_type LIKE '%Refund%' OR event_type LIKE '%Return%'
+                       THEN ABS(product_charges) ELSE 0 END) AS refund_amt,
+                   COUNT(CASE WHEN event_type LIKE '%Refund%' OR event_type LIKE '%Return%'
+                       THEN 1 END) AS refund_count
+            FROM financial_events
+            WHERE date >= ? AND date < ?
+            GROUP BY asin
+        """, [start, end]).fetchall()
     except Exception:
         pass
-    fin_by_asin = {r[0]: {"fba": r[1], "comm": r[2]} for r in fin_rows}
+    fin_by_asin = {r[0]: {"fba": r[1], "comm": r[2], "promo": r[3],
+                           "shipping": r[4], "other": r[5],
+                           "refund_amt": r[6], "refund_count": r[7]} for r in fin_rows}
+
+    # Ad spend from the *advertising* table (the actual table name in this DB)
+    total_ad = 0
+    try:
+        ad_row = con.execute("""
+            SELECT COALESCE(SUM(spend), 0)
+            FROM advertising
+            WHERE date >= ? AND date < ?
+        """, [start, end]).fetchone()
+        total_ad = ad_row[0] if ad_row else 0
+    except Exception:
+        pass
 
     # Compute costs
     total_cogs = 0
     total_fba = 0
     total_referral = 0
-    total_ad = 0
+    total_promo = 0
+    total_shipping = 0
+    total_refunds = 0
+    total_other_fees = 0
+    total_refund_units = 0
     prod_rev = 0
 
     for ar in asin_rows:
@@ -1262,28 +1343,30 @@ def _build_waterfall(con, cogs_data, start: str, end: str) -> dict:
             cpu = round(aur * 0.35, 2)
         total_cogs += u * cpu
 
-        # FBA fees
+        # Financial data for this ASIN
         fin = fin_by_asin.get(asin, {})
         actual_fba = fin.get("fba", 0)
-        # Scale actual_fba to period (approximation based on revenue ratio)
-        # For simplicity, use estimate if financial_events aren't date-filtered
-        est_fba = u * round(5.0 + aur * 0.03, 2)
-        total_fba += est_fba if actual_fba == 0 else est_fba  # use estimate for period
+        actual_comm = fin.get("comm", 0)
 
-        # Referral
-        total_referral += rev * 0.15
+        # FBA fees: use actual if available, else estimate
+        if actual_fba > 0:
+            total_fba += actual_fba
+        else:
+            est_fba = u * round(5.0 + aur * 0.03, 2)
+            total_fba += est_fba
 
-        # Ad spend
-        try:
-            ad_row = con.execute("""
-                SELECT COALESCE(SUM(spend), 0)
-                FROM ads_product_performance
-                WHERE asin = ? AND date >= ? AND date < ?
-            """, [asin, start, end]).fetchone()
-            if ad_row and ad_row[0] > 0:
-                total_ad += ad_row[0]
-        except Exception:
-            pass
+        # Referral fees: use actual commission if available, else 15%
+        if actual_comm > 0:
+            total_referral += actual_comm
+        else:
+            total_referral += rev * 0.15
+
+        # Promo, shipping, refunds from financial events
+        total_promo += fin.get("promo", 0)
+        total_shipping += fin.get("shipping", 0)
+        total_refunds += fin.get("refund_amt", 0)
+        total_other_fees += fin.get("other", 0)
+        total_refund_units += fin.get("refund_count", 0)
 
     # Scale to actual sales if per-ASIN data is partial
     scale = sales / prod_rev if prod_rev > 0 else 1
@@ -1291,22 +1374,13 @@ def _build_waterfall(con, cogs_data, start: str, end: str) -> dict:
     fba_fees = round(total_fba * scale, 2)
     referral_fees = round(total_referral * scale, 2)
     amazon_fees = round(fba_fees + referral_fees, 2)
-    ad_spend = round(total_ad * scale, 2)
-
-    # Account-level ad spend fallback from ads_daily_summary
-    if ad_spend == 0:
-        try:
-            ads_row = con.execute("""
-                SELECT COALESCE(SUM(total_spend), 0)
-                FROM ads_daily_summary WHERE date >= ? AND date < ?
-            """, [start, end]).fetchone()
-            ad_spend = round(ads_row[0], 2) if ads_row else 0
-        except Exception:
-            pass
-
-    promo = 0       # Not yet available from API
-    shipping = 0    # Not yet available from API
-    refunds = 0     # Not yet available from API
+    ad_spend = round(total_ad, 2)  # already account-level, no scaling needed
+    promo = round(total_promo * scale, 2)
+    shipping = round(total_shipping * scale, 2)
+    refunds = round(total_refunds * scale, 2)
+    other_fees = round(total_other_fees * scale, 2)
+    refund_units = total_refund_units
+    return_pct = round(refund_units / units * 100, 1) if units > 0 else 0
     indirect = 0    # Not configured
 
     gross_profit = round(sales - promo - ad_spend - shipping - refunds - amazon_fees - cogs, 2)
@@ -1322,9 +1396,12 @@ def _build_waterfall(con, cogs_data, start: str, end: str) -> dict:
         "adSpend": ad_spend,
         "shipping": shipping,
         "refunds": refunds,
+        "refundUnits": refund_units,
+        "returnPct": return_pct,
         "amazonFees": amazon_fees,
         "fbaFees": fba_fees,
         "referralFees": referral_fees,
+        "otherFees": other_fees,
         "cogs": cogs,
         "indirect": indirect,
         "grossProfit": gross_profit,

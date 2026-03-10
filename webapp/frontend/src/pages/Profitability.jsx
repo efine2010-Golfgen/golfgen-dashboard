@@ -148,6 +148,7 @@ export default function Profitability() {
               <KPI label="Ad Spend" value={fmt$(primary.adSpend)} />
               <KPI label="COGS" value={fmt$(primary.cogs)} />
               <KPI label="Amazon Fees" value={fmt$(primary.amazonFees)} />
+              <KPI label="Returns" value={`${primary.refundUnits || 0} (${primary.returnPct || 0}%)`} className={(primary.refundUnits || 0) > 0 ? "neg" : ""} />
               <KPI label="Real ACOS" value={`${primary.realAcos}%`} />
             </div>
           )}
@@ -175,7 +176,12 @@ export default function Profitability() {
                     <WaterfallRow label="Ad Spend" periods={periods} field="adSpend" negative />
                     <WaterfallRow label="Shipping" periods={periods} field="shipping" negative />
                     <WaterfallRow label="Refunds" periods={periods} field="refunds" negative />
-                    <WaterfallRow label="Amazon Fees" periods={periods} field="amazonFees" negative />
+                    <WaterfallRow label="Amazon Fees" periods={periods} field="amazonFees" negative bold />
+                    <WaterfallRow label="  FBA Fees" periods={periods} field="fbaFees" negative sub />
+                    <WaterfallRow label="  Referral Fees" periods={periods} field="referralFees" negative sub />
+                    <WaterfallRow label="  Other Fees" periods={periods} field="otherFees" negative sub />
+                    <WaterfallRow label="Refund Units" periods={periods} field="refundUnits" isUnit />
+                    <WaterfallRow label="Return %" periods={periods} field="returnPct" isSuffix="%" />
                     <tr className="divider-row"><td colSpan={periods.length + 1} style={{ padding: 0 }} /></tr>
                     <WaterfallRow label="COGS" periods={periods} field="cogs" negative />
                     <WaterfallRow label="Indirect" periods={periods} field="indirect" negative />
@@ -324,6 +330,8 @@ export default function Profitability() {
                     <SortTh label="Ad Spend" col="adSpend" sortCol={sortCol} sortDir={sortDir} onClick={handleSort} />
                     <SortTh label="Amazon Fees" col="amazonFees" sortCol={sortCol} sortDir={sortDir} onClick={handleSort} />
                     <SortTh label="COGS" col="cogs" sortCol={sortCol} sortDir={sortDir} onClick={handleSort} />
+                    <SortTh label="Returns" col="refundUnits" sortCol={sortCol} sortDir={sortDir} onClick={handleSort} />
+                    <SortTh label="Return %" col="returnPct" sortCol={sortCol} sortDir={sortDir} onClick={handleSort} />
                     <SortTh label="Net Profit" col="netProfit" sortCol={sortCol} sortDir={sortDir} onClick={handleSort} />
                     <SortTh label="Margin" col="margin" sortCol={sortCol} sortDir={sortDir} onClick={handleSort} />
                     <SortTh label="ROI" col="roi" sortCol={sortCol} sortDir={sortDir} onClick={handleSort} />
@@ -343,6 +351,8 @@ export default function Profitability() {
                       <td style={cellStyle}>{fmt$(item.adSpend)}</td>
                       <td style={cellStyle}>{fmt$(item.amazonFees)}</td>
                       <td style={cellStyle}>{fmt$(item.cogs)}</td>
+                      <td style={{ ...cellStyle, color: (item.refundUnits || 0) > 0 ? "var(--neg)" : undefined }}>{(item.refundUnits || 0).toLocaleString()}</td>
+                      <td style={{ ...cellStyle, color: (item.returnPct || 0) > 0 ? "var(--neg)" : undefined }}>{(item.returnPct || 0)}%</td>
                       <td style={{ ...cellStyle, color: item.netProfit >= 0 ? "var(--pos)" : "var(--neg)", fontWeight: 700 }}>
                         {fmt$(item.netProfit)}
                       </td>
@@ -363,9 +373,11 @@ export default function Profitability() {
                       amazonFees: acc.amazonFees + i.amazonFees,
                       cogs: acc.cogs + i.cogs,
                       netProfit: acc.netProfit + i.netProfit,
-                    }), { units: 0, sales: 0, adSpend: 0, amazonFees: 0, cogs: 0, netProfit: 0 });
+                      refundUnits: acc.refundUnits + (i.refundUnits || 0),
+                    }), { units: 0, sales: 0, adSpend: 0, amazonFees: 0, cogs: 0, netProfit: 0, refundUnits: 0 });
                     const totalMargin = totals.sales > 0 ? round(totals.netProfit / totals.sales * 100, 1) : 0;
                     const totalRoi = totals.cogs > 0 ? round(totals.netProfit / totals.cogs * 100, 1) : 0;
+                    const totalReturnPct = totals.units > 0 ? round(totals.refundUnits / totals.units * 100, 1) : 0;
                     return (
                       <tr style={{ background: "rgba(14,31,45,0.04)", fontWeight: 700, borderTop: "2px solid var(--border)" }}>
                         <td style={{ padding: "12px 12px", color: "var(--navy)" }}>TOTAL ({sortedItems.length} products)</td>
@@ -374,6 +386,8 @@ export default function Profitability() {
                         <td style={cellStyle}>{fmt$(totals.adSpend)}</td>
                         <td style={cellStyle}>{fmt$(totals.amazonFees)}</td>
                         <td style={cellStyle}>{fmt$(totals.cogs)}</td>
+                        <td style={{ ...cellStyle, color: totals.refundUnits > 0 ? "var(--neg)" : undefined }}>{totals.refundUnits.toLocaleString()}</td>
+                        <td style={{ ...cellStyle, color: totalReturnPct > 0 ? "var(--neg)" : undefined }}>{totalReturnPct}%</td>
                         <td style={{ ...cellStyle, color: totals.netProfit >= 0 ? "var(--pos)" : "var(--neg)" }}>{fmt$(totals.netProfit)}</td>
                         <td style={{ ...cellStyle, color: totalMargin >= 0 ? "var(--pos)" : "var(--neg)" }}>{totalMargin}%</td>
                         <td style={{ ...cellStyle, color: totalRoi >= 0 ? "var(--pos)" : "var(--neg)" }}>{totalRoi}%</td>
@@ -415,21 +429,30 @@ function KPI({ label, value, className = "" }) {
   );
 }
 
-function WaterfallRow({ label, periods, field, negative = false, cls = "", isPnl = false, isSuffix = "" }) {
+function WaterfallRow({ label, periods, field, negative = false, cls = "", isPnl = false, isSuffix = "", bold = false, sub = false, isUnit = false }) {
   return (
-    <tr className={cls}>
-      <td className="comp-metric" style={{ fontWeight: 600 }}>{label}</td>
+    <tr className={cls} style={sub ? { background: "rgba(14,31,45,0.02)" } : undefined}>
+      <td className="comp-metric" style={{
+        fontWeight: bold ? 700 : sub ? 400 : 600,
+        color: sub ? "var(--muted)" : undefined,
+        fontSize: sub ? 12 : undefined,
+        paddingLeft: sub ? 28 : undefined,
+      }}>{label}</td>
       {periods.map((p, i) => {
         const val = p[field] ?? 0;
-        const display = isSuffix ? `${val}${isSuffix}` : fmt$(Math.abs(val));
+        const display = isUnit ? val.toLocaleString() : isSuffix ? `${val}${isSuffix}` : fmt$(Math.abs(val));
         const prefix = negative && val > 0 ? "-" : "";
         const color = isPnl ? (val >= 0 ? "var(--pos)" : "var(--neg)") :
                       isSuffix ? (field === "margin" || field === "roi" ? (val >= 0 ? "var(--pos)" : "var(--neg)") : "var(--body-text)") :
-                      undefined;
+                      sub ? "var(--muted)" : undefined;
         return (
           <td key={i} style={{ textAlign: "center" }}>
-            <span className="comp-value" style={color ? { color } : undefined}>
-              {isSuffix ? display : `${prefix}${display}`}
+            <span className="comp-value" style={{
+              ...(color ? { color } : {}),
+              ...(sub ? { fontSize: 12 } : {}),
+              ...(bold ? { fontWeight: 700 } : {}),
+            }}>
+              {isUnit ? display : isSuffix ? display : `${prefix}${display}`}
             </span>
           </td>
         );
