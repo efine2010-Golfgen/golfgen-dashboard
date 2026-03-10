@@ -1846,9 +1846,12 @@ def backfill_historical(
     This is a SLOW endpoint (each chunk takes 2-5 minutes for polling)."""
     from datetime import date as dt_date
     import gzip as gz
+    import requests as req
+    from sp_api.api import Reports
+    from sp_api.base import Marketplaces, ReportType
 
     creds = _load_sp_api_credentials()
-    reports = Reports(credentials=creds, marketplace=_Mp.US)
+    reports = Reports(credentials=creds, marketplace=Marketplaces.US)
 
     start_dt = dt_date.fromisoformat(start)
     end_dt = dt_date.fromisoformat(end)
