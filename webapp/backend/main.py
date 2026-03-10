@@ -1495,8 +1495,12 @@ def debug_financial_events():
     """Call Financial Events API directly and return raw summary for debugging."""
     try:
         from sp_api.api import Finances as FinancesAPI
+        from sp_api.base import Marketplaces as _Mp
+        creds = _load_sp_api_credentials()
+        if not creds:
+            return {"error": "No SP-API credentials found"}
         fin_start = (datetime.utcnow() - timedelta(days=90)).strftime("%Y-%m-%dT%H:%M:%SZ")
-        finances = FinancesAPI(credentials=credentials, marketplace=Marketplaces.US)
+        finances = FinancesAPI(credentials=creds, marketplace=_Mp.US)
 
         resp = finances.list_financial_events(PostedAfter=fin_start, MaxResultsPerPage=100)
         payload = resp.payload if hasattr(resp, 'payload') else (resp if isinstance(resp, dict) else {})
