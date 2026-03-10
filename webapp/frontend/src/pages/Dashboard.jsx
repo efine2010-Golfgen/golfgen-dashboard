@@ -1,7 +1,7 @@
 import { useState, useEffect } from "react";
 import {
   AreaChart, Area, BarChart, Bar, LineChart, Line, XAxis, YAxis, CartesianGrid,
-  Tooltip, ResponsiveContainer, Legend, PieChart, Pie, Cell, ComposedChart
+  Tooltip, ResponsiveContainer, Legend, PieChart, Pie, Cell, ComposedChart,
 } from "recharts";
 import { api, fmt$ } from "../lib/api";
 
@@ -91,16 +91,6 @@ export default function Dashboard() {
     ma7: ma7[i],
     ma30: ma30[i],
   }));
-
-  // P&L waterfall
-  const waterfall = pnl ? [
-    { name: "Revenue", value: pnl.revenue, fill: "#2ECFAA" },
-    { name: "COGS", value: -pnl.cogs, fill: "#E87830" },
-    { name: "FBA Fees", value: -pnl.fbaFees, fill: "#3E658C" },
-    { name: "Referral", value: -pnl.referralFees, fill: "#7BAED0" },
-    { name: "Ad Spend", value: -pnl.adSpend, fill: "#F5B731" },
-    { name: "Net Profit", value: pnl.netProfit, fill: pnl.netProfit >= 0 ? "#2ECFAA" : "#D03030" },
-  ] : [];
 
   // Monthly YoY chart data
   const yoyData = monthlyYoY.data || [];
@@ -330,29 +320,7 @@ export default function Dashboard() {
 
       {/* ── Charts: Row 4 ──────────────────────────────── */}
       <div className="chart-grid">
-        {/* 7. P&L Waterfall */}
-        <div className="chart-card">
-          <h3>Revenue → Net Profit Breakdown</h3>
-          <p className="sub">P&L waterfall for selected period</p>
-          <ResponsiveContainer width="100%" height={300}>
-            <BarChart data={waterfall}>
-              <CartesianGrid strokeDasharray="3 3" stroke="rgba(14,31,45,0.08)" />
-              <XAxis dataKey="name" tick={{ fill: "#6B8090", fontSize: 11 }} />
-              <YAxis tick={{ fill: "#6B8090", fontSize: 11 }} tickFormatter={v => `$${(Math.abs(v)/1000).toFixed(0)}k`} />
-              <Tooltip
-                contentStyle={TOOLTIP_STYLE}
-                formatter={(v) => [fmt$(Math.abs(v)), v < 0 ? "Cost" : "Amount"]}
-              />
-              <Bar dataKey="value" radius={[4,4,0,0]}>
-                {waterfall.map((entry, i) => (
-                  <Cell key={i} fill={entry.fill} />
-                ))}
-              </Bar>
-            </BarChart>
-          </ResponsiveContainer>
-        </div>
-
-        {/* 8. Conversion Rate Trend */}
+        {/* 7. Conversion Rate Trend */}
         <div className="chart-card">
           <h3>Conversion Rate</h3>
           <p className="sub">{days <= 90 ? "Daily" : "Weekly"} session-to-order rate</p>

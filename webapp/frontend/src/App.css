@@ -48,31 +48,40 @@ body {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 16px 32px;
+  padding: 20px 32px;
   max-width: 1400px;
   margin: 0 auto;
 }
 
-.header-left {
+.header-brand {
   display: flex;
-  align-items: center;
-  gap: 16px;
+  flex-direction: column;
+  align-items: flex-start;
 }
 
 .brand-logo {
   font-family: 'DM Serif Display', Georgia, serif;
-  font-size: 32px;
-  letter-spacing: -0.5px;
+  font-size: 52px;
+  letter-spacing: -1px;
   line-height: 1;
 }
 
 .golf { color: #FFFFFF; }
 .gen { color: var(--teal); }
 
-.brand-divider {
-  width: 1px;
-  height: 32px;
-  background: rgba(255,255,255,0.2);
+.brand-tagline {
+  font-family: 'Sora', sans-serif;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 3px;
+  color: var(--orange);
+  margin-top: 4px;
+}
+
+.header-meta {
+  display: flex;
+  align-items: center;
+  gap: 16px;
 }
 
 .brand-title h1 {
@@ -81,22 +90,14 @@ body {
   font-weight: 600;
   color: #fff;
   margin-bottom: 0;
+  text-align: right;
 }
 
 .brand-title p {
   font-size: 11px;
   color: var(--silver);
   letter-spacing: 0.5px;
-}
-
-.brand-tagline {
-  font-family: 'Sora', sans-serif;
-  font-size: 11px;
-  font-weight: 700;
-  letter-spacing: 2.5px;
-  color: var(--orange);
-  text-transform: uppercase;
-  margin-top: 2px;
+  text-align: right;
 }
 
 .live-badge {
@@ -146,13 +147,13 @@ body {
 }
 
 .nav-tab:hover {
-  background: rgba(245,183,49,0.12);
-  color: var(--body-text);
+  background: rgba(14,31,45,0.08);
+  color: var(--navy);
 }
 
 .nav-tab.active {
   background: var(--navy);
-  color: var(--gold);
+  color: #fff;
 }
 
 /* ── Main Content ──────────────────────────────────────── */
@@ -192,7 +193,7 @@ body {
   display: flex;
   gap: 4px;
   margin-bottom: 24px;
-  background: rgba(14,31,45,0.06);
+  background: rgba(14,31,45,0.08);
   padding: 4px;
   border-radius: 10px;
   width: fit-content;
@@ -203,7 +204,7 @@ body {
   border-radius: 8px;
   border: none;
   background: transparent;
-  color: var(--muted);
+  color: var(--navy);
   font-size: 13px;
   font-weight: 600;
   cursor: pointer;
@@ -211,8 +212,8 @@ body {
   font-family: 'Sora', sans-serif;
 }
 
-.range-tab:hover { color: var(--body-text); background: rgba(14,31,45,0.06); }
-.range-tab.active { background: var(--navy); color: var(--gold); font-weight: 600; }
+.range-tab:hover { color: #fff; background: var(--navy-mid); }
+.range-tab.active { background: var(--navy); color: #fff; font-weight: 600; }
 
 /* ── KPI Cards ─────────────────────────────────────────── */
 .kpi-grid {
@@ -369,7 +370,7 @@ tr:hover td { background: var(--teal-bg); }
   border-radius: 8px;
   border: none;
   background: transparent;
-  color: var(--muted);
+  color: var(--navy);
   font-size: 12px;
   font-weight: 600;
   cursor: pointer;
@@ -378,8 +379,8 @@ tr:hover td { background: var(--teal-bg); }
   white-space: nowrap;
 }
 
-.comp-tab:hover { color: var(--body-text); background: rgba(14,31,45,0.06); }
-.comp-tab.active { background: var(--navy); color: var(--gold); font-weight: 700; }
+.comp-tab:hover { color: #fff; background: var(--navy-mid); }
+.comp-tab.active { background: var(--navy); color: #fff; font-weight: 700; }
 
 .comp-table {
   width: 100%;
@@ -495,11 +496,12 @@ tr:hover td { background: var(--teal-bg); }
 
 /* ── Responsive ────────────────────────────────────────── */
 @media (max-width: 900px) {
-  .header-inner { padding: 12px 16px; }
-  .brand-logo { font-size: 24px; }
+  .header-inner { padding: 12px 16px; flex-wrap: wrap; gap: 8px; }
+  .brand-logo { font-size: 32px; }
+  .brand-tagline { font-size: 9px; letter-spacing: 2px; }
   .brand-title h1 { font-size: 14px; }
   .brand-title p { display: none; }
-  .brand-divider { display: none; }
+  .header-meta { gap: 8px; }
   .nav-inner { padding: 6px 16px; overflow-x: auto; }
   .nav-tab { padding: 8px 12px; font-size: 12px; white-space: nowrap; }
   .main-content { padding: 16px; }

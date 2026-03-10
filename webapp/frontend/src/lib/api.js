@@ -21,6 +21,10 @@ export const api = {
   monthlyYoY: () => fetchJSON(`/api/monthly-yoy`),
   productMix: (days = 365) => fetchJSON(`/api/product-mix?days=${days}`),
 
+  // Profitability (Sellerboard-style)
+  profitability: (view = "realtime") => fetchJSON(`/api/profitability?view=${view}`),
+  profitabilityItems: (days = 365) => fetchJSON(`/api/profitability/items?days=${days}`),
+
   // Advertising endpoints
   adsSummary: (days = 30) => fetchJSON(`/api/ads/summary?days=${days}`),
   adsDaily: (days = 30) => fetchJSON(`/api/ads/daily?days=${days}`),

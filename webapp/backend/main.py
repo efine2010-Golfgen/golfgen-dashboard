@@ -1057,6 +1057,262 @@ def product_mix(days: int = Query(365)):
     return {"products": result}
 
 
+# ── Profitability (Sellerboard-style) ─────────────────────
+
+@app.get("/api/profitability")
+def profitability(view: str = Query("realtime")):
+    """Sellerboard-style profit waterfall with same period views as comparison.
+
+    Waterfall: Sales - Promo - Ads - Shipping - Refunds - Amazon Fees - COGS - Indirect = Net Profit
+    Returns both account-level waterfall and per-ASIN item breakdown.
+    """
+    con = get_db()
+    cogs_data = load_cogs()
+
+    now = datetime.now()
+    today_start = now.replace(hour=0, minute=0, second=0, microsecond=0)
+    tomorrow = (today_start + timedelta(days=1)).strftime("%Y-%m-%d")
+    yr = today_start.year
+    month_names = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec']
+
+    # Build periods (same logic as comparison endpoint)
+    if view == "weekly":
+        wd = today_start.weekday()
+        last_week_start = today_start - timedelta(days=wd + 7)
+        last_week_end = today_start - timedelta(days=wd)
+        periods = [
+            {"label": "Last Week", "start": last_week_start.strftime("%Y-%m-%d"), "end": last_week_end.strftime("%Y-%m-%d")},
+            {"label": "4 Weeks", "start": (today_start - timedelta(days=28)).strftime("%Y-%m-%d"), "end": tomorrow},
+            {"label": "13 Weeks", "start": (today_start - timedelta(days=91)).strftime("%Y-%m-%d"), "end": tomorrow},
+            {"label": "26 Weeks", "start": (today_start - timedelta(days=182)).strftime("%Y-%m-%d"), "end": tomorrow},
+        ]
+    elif view == "monthly":
+        periods = []
+        for i in range(1, 4):
+            m_start = today_start.replace(day=1)
+            m = m_start.month - i
+            y = m_start.year
+            while m <= 0:
+                m += 12; y -= 1
+            m_start_actual = datetime(y, m, 1)
+            m_end_actual = datetime(y if m < 12 else y + 1, m + 1 if m < 12 else 1, 1)
+            label = "Last Month" if i == 1 else f"{i} Mo Ago" if i == 2 else "3 Mo Ago"
+            periods.append({"label": label, "sub": month_names[m-1] + " " + str(y),
+                            "start": m_start_actual.strftime("%Y-%m-%d"), "end": m_end_actual.strftime("%Y-%m-%d")})
+        periods.append({"label": "Last 12 Mo", "start": (today_start - timedelta(days=365)).strftime("%Y-%m-%d"), "end": tomorrow})
+    elif view == "yearly":
+        try:
+            ytd_comp_end = datetime(yr - 1, today_start.month, today_start.day) + timedelta(days=1)
+        except ValueError:
+            ytd_comp_end = datetime(yr - 1, today_start.month, 28) + timedelta(days=1)
+        periods = [
+            {"label": f"{yr} YTD", "start": f"{yr}-01-01", "end": tomorrow},
+            {"label": f"{yr-1} YTD", "sub": "same window comp", "start": f"{yr-1}-01-01", "end": ytd_comp_end.strftime("%Y-%m-%d")},
+            {"label": f"{yr-1} Full", "start": f"{yr-1}-01-01", "end": f"{yr}-01-01"},
+            {"label": f"{yr-2} Full", "start": f"{yr-2}-01-01", "end": f"{yr-1}-01-01"},
+        ]
+    elif view == "monthly2026":
+        periods = []
+        for m in range(1, today_start.month + 1):
+            m_start = datetime(yr, m, 1)
+            m_end = tomorrow if m == today_start.month else datetime(yr, m + 1, 1).strftime("%Y-%m-%d")
+            if isinstance(m_end, datetime):
+                m_end = m_end.strftime("%Y-%m-%d")
+            periods.append({"label": month_names[m-1], "sub": str(yr),
+                            "start": m_start.strftime("%Y-%m-%d"), "end": m_end})
+        periods.append({"label": f"{yr} Total", "sub": "YTD", "start": f"{yr}-01-01", "end": tomorrow})
+    else:
+        week_start = today_start - timedelta(days=today_start.weekday())
+        month_start = today_start.replace(day=1)
+        year_start = today_start.replace(month=1, day=1)
+        periods = [
+            {"label": "Today", "start": today_start.strftime("%Y-%m-%d"), "end": tomorrow},
+            {"label": "WTD", "start": week_start.strftime("%Y-%m-%d"), "end": tomorrow},
+            {"label": "MTD", "start": month_start.strftime("%Y-%m-%d"), "end": tomorrow},
+            {"label": "YTD", "start": year_start.strftime("%Y-%m-%d"), "end": tomorrow},
+        ]
+
+    results = []
+    for p in periods:
+        wf = _build_waterfall(con, cogs_data, p["start"], p["end"])
+        wf["label"] = p["label"]
+        wf["sub"] = p.get("sub", "")
+        results.append(wf)
+
+    con.close()
+    return {"view": view, "periods": results}
+
+
+@app.get("/api/profitability/items")
+def profitability_items(days: int = Query(365)):
+    """Per-ASIN profitability breakdown matching Sellerboard item view."""
+    con = get_db()
+    cutoff = (datetime.now() - timedelta(days=days)).strftime("%Y-%m-%d")
+    products = _build_product_list(con, cutoff)
+
+    # Enhance with Sellerboard-style metrics
+    items = []
+    for p in products:
+        rev = p["rev"]
+        cogs_total = p["cogsTotal"]
+        net = p["net"]
+        amazon_fees = p["fbaTotal"] + p["referralTotal"]
+        margin = round(net / rev * 100, 1) if rev > 0 else 0
+        roi = round(net / cogs_total * 100, 1) if cogs_total > 0 else 0
+
+        items.append({
+            "asin": p["asin"],
+            "sku": p["sku"],
+            "name": p["name"],
+            "units": p["units"],
+            "sales": rev,
+            "promo": 0,       # Not available from API yet
+            "adSpend": p["adSpend"],
+            "shipping": 0,    # Not available from API yet
+            "refunds": 0,     # Not available from API yet
+            "amazonFees": round(amazon_fees, 2),
+            "fbaFees": p["fbaTotal"],
+            "referralFees": p["referralTotal"],
+            "cogs": cogs_total,
+            "cogsPerUnit": p["cogsPerUnit"],
+            "indirect": 0,
+            "netProfit": net,
+            "margin": margin,
+            "roi": roi,
+            "aur": p["price"],
+        })
+
+    items.sort(key=lambda x: x["sales"], reverse=True)
+    con.close()
+    return {"days": days, "items": items}
+
+
+def _build_waterfall(con, cogs_data, start: str, end: str) -> dict:
+    """Build Sellerboard-style waterfall for a single period."""
+    # Account-level revenue
+    row = con.execute("""
+        SELECT COALESCE(SUM(ordered_product_sales), 0),
+               COALESCE(SUM(units_ordered), 0)
+        FROM daily_sales
+        WHERE date >= ? AND date < ? AND asin = 'ALL'
+    """, [start, end]).fetchone()
+    sales, units = row[0], row[1]
+
+    # Per-ASIN cost breakdown
+    asin_rows = con.execute("""
+        SELECT asin, MAX(sku) AS sku,
+               COALESCE(SUM(ordered_product_sales), 0) AS revenue,
+               COALESCE(SUM(units_ordered), 0) AS units
+        FROM daily_sales
+        WHERE date >= ? AND date < ? AND asin <> 'ALL'
+        GROUP BY asin
+    """, [start, end]).fetchall()
+
+    # Financial data
+    fin_rows = []
+    try:
+        fin_rows = con.execute("""
+            SELECT asin, SUM(ABS(fba_fees)) AS fba, SUM(ABS(commission)) AS comm
+            FROM financial_events GROUP BY asin
+        """).fetchall()
+    except Exception:
+        pass
+    fin_by_asin = {r[0]: {"fba": r[1], "comm": r[2]} for r in fin_rows}
+
+    # Compute costs
+    total_cogs = 0
+    total_fba = 0
+    total_referral = 0
+    total_ad = 0
+    prod_rev = 0
+
+    for ar in asin_rows:
+        asin, sku, rev, u = ar
+        if u == 0:
+            continue
+        prod_rev += rev
+        aur = rev / u if u else 0
+
+        # COGS
+        ci = cogs_data.get(asin) or cogs_data.get(sku or "") or {}
+        cpu = ci.get("cogs", 0)
+        if cpu == 0:
+            cpu = round(aur * 0.35, 2)
+        total_cogs += u * cpu
+
+        # FBA fees
+        fin = fin_by_asin.get(asin, {})
+        actual_fba = fin.get("fba", 0)
+        # Scale actual_fba to period (approximation based on revenue ratio)
+        # For simplicity, use estimate if financial_events aren't date-filtered
+        est_fba = u * round(5.0 + aur * 0.03, 2)
+        total_fba += est_fba if actual_fba == 0 else est_fba  # use estimate for period
+
+        # Referral
+        total_referral += rev * 0.15
+
+        # Ad spend
+        try:
+            ad_row = con.execute("""
+                SELECT COALESCE(SUM(spend), 0)
+                FROM ads_product_performance
+                WHERE asin = ? AND date >= ? AND date < ?
+            """, [asin, start, end]).fetchone()
+            if ad_row and ad_row[0] > 0:
+                total_ad += ad_row[0]
+        except Exception:
+            pass
+
+    # Scale to actual sales if per-ASIN data is partial
+    scale = sales / prod_rev if prod_rev > 0 else 1
+    cogs = round(total_cogs * scale, 2)
+    fba_fees = round(total_fba * scale, 2)
+    referral_fees = round(total_referral * scale, 2)
+    amazon_fees = round(fba_fees + referral_fees, 2)
+    ad_spend = round(total_ad * scale, 2)
+
+    # Account-level ad spend fallback from ads_daily_summary
+    if ad_spend == 0:
+        try:
+            ads_row = con.execute("""
+                SELECT COALESCE(SUM(total_spend), 0)
+                FROM ads_daily_summary WHERE date >= ? AND date < ?
+            """, [start, end]).fetchone()
+            ad_spend = round(ads_row[0], 2) if ads_row else 0
+        except Exception:
+            pass
+
+    promo = 0       # Not yet available from API
+    shipping = 0    # Not yet available from API
+    refunds = 0     # Not yet available from API
+    indirect = 0    # Not configured
+
+    gross_profit = round(sales - promo - ad_spend - shipping - refunds - amazon_fees - cogs, 2)
+    net_profit = round(gross_profit - indirect, 2)
+    margin = round(net_profit / sales * 100, 1) if sales > 0 else 0
+    roi = round(net_profit / cogs * 100, 1) if cogs > 0 else 0
+    real_acos = round(ad_spend / sales * 100, 1) if sales > 0 else 0
+
+    return {
+        "sales": round(sales, 2),
+        "units": units,
+        "promo": promo,
+        "adSpend": ad_spend,
+        "shipping": shipping,
+        "refunds": refunds,
+        "amazonFees": amazon_fees,
+        "fbaFees": fba_fees,
+        "referralFees": referral_fees,
+        "cogs": cogs,
+        "indirect": indirect,
+        "grossProfit": gross_profit,
+        "netProfit": net_profit,
+        "margin": margin,
+        "roi": roi,
+        "realAcos": real_acos,
+    }
+
+
 # ── Static Frontend ────────────────────────────────────────
 # Serve the built React frontend from the same server.
 # The frontend dist/ folder should be at webapp/frontend/dist/
