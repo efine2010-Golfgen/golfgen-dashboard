@@ -24,6 +24,7 @@ COPY webapp/backend/dist/ ./webapp/frontend/dist/
 RUN mkdir -p ./data
 COPY data/golfgen_amazon.duckdb* ./data/
 COPY data/cogs.csv ./data/
+COPY data/item_master.csv ./data/
 
 # Environment
 ENV DB_DIR=/app/data

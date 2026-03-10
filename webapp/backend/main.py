@@ -15,7 +15,7 @@ from typing import Optional
 from contextlib import asynccontextmanager
 
 import duckdb
-from fastapi import FastAPI, Query, Request
+from fastapi import FastAPI, Query, Request, Body, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
@@ -3115,6 +3115,169 @@ def _build_waterfall(con, cogs_data, start: str, end: str) -> dict:
         "roi": roi,
         "realAcos": real_acos,
     }
+
+
+# ── Item Master ────────────────────────────────────────────
+
+ITEM_MASTER_PATH = DB_DIR / "item_master.csv"
+
+
+def load_item_master() -> list:
+    """Load item master from CSV. Returns list of dicts."""
+    items = []
+    if not ITEM_MASTER_PATH.exists():
+        return items
+    with open(ITEM_MASTER_PATH, newline="", encoding="utf-8-sig") as f:
+        reader = csv.DictReader(f)
+        for row in reader:
+            asin = (row.get("asin") or "").strip()
+            if not asin:
+                continue
+            items.append({
+                "asin": asin,
+                "sku": (row.get("sku") or "").strip(),
+                "productName": (row.get("product_name") or "").strip(),
+                "color": (row.get("color") or "").strip(),
+                "brand": (row.get("brand") or "").strip(),
+                "series": (row.get("series") or "").strip(),
+                "productType": (row.get("product_type") or "").strip(),
+                "pieceCount": int(float(row.get("piece_count") or 0)),
+                "orientation": (row.get("orientation") or "").strip(),
+                "category": (row.get("category") or "").strip(),
+                "unitCost": float(row.get("unit_cost") or 0),
+                "fbsStock": int(float(row.get("fba_stock") or 0)),
+                "lyAur": round(float(row.get("ly_aur") or 0), 2),
+                "lyRevenue": round(float(row.get("ly_revenue") or 0), 2),
+                "lyUnits": int(float(row.get("ly_units") or 0)),
+                "lyProfit": round(float(row.get("ly_profit") or 0), 2),
+                "plannedAnnualUnits": int(float(row.get("planned_annual_units") or 0)),
+                "listPrice": float(row.get("list_price") or 0),
+                "salePrice": float(row.get("sale_price") or 0),
+                "referralPct": float(row.get("referral_pct") or 15),
+                "couponType": (row.get("coupon_type") or "").strip(),
+                "couponValue": float(row.get("coupon_value") or 0),
+                "cartonPack": int(float(row.get("carton_pack") or 0)),
+                "cartonLength": float(row.get("carton_length") or 0),
+                "cartonWidth": float(row.get("carton_width") or 0),
+                "cartonHeight": float(row.get("carton_height") or 0),
+                "cartonWeight": float(row.get("carton_weight") or 0),
+            })
+    return items
+
+
+def save_item_master(items: list):
+    """Save item master list back to CSV."""
+    fields = [
+        "asin", "sku", "product_name", "color", "brand", "series",
+        "product_type", "piece_count", "orientation", "category", "unit_cost",
+        "fba_stock", "ly_aur", "ly_revenue", "ly_units", "ly_profit",
+        "planned_annual_units", "list_price", "sale_price", "referral_pct",
+        "coupon_type", "coupon_value", "carton_pack", "carton_length",
+        "carton_width", "carton_height", "carton_weight",
+    ]
+    with open(ITEM_MASTER_PATH, "w", newline="", encoding="utf-8") as f:
+        w = csv.DictWriter(f, fieldnames=fields)
+        w.writeheader()
+        for item in items:
+            w.writerow({
+                "asin": item.get("asin", ""),
+                "sku": item.get("sku", ""),
+                "product_name": item.get("productName", ""),
+                "color": item.get("color", ""),
+                "brand": item.get("brand", ""),
+                "series": item.get("series", ""),
+                "product_type": item.get("productType", ""),
+                "piece_count": item.get("pieceCount", 0),
+                "orientation": item.get("orientation", ""),
+                "category": item.get("category", ""),
+                "unit_cost": item.get("unitCost", 0),
+                "fba_stock": item.get("fbsStock", 0),
+                "ly_aur": item.get("lyAur", 0),
+                "ly_revenue": item.get("lyRevenue", 0),
+                "ly_units": item.get("lyUnits", 0),
+                "ly_profit": item.get("lyProfit", 0),
+                "planned_annual_units": item.get("plannedAnnualUnits", 0),
+                "list_price": item.get("listPrice", 0),
+                "sale_price": item.get("salePrice", 0),
+                "referral_pct": item.get("referralPct", 15),
+                "coupon_type": item.get("couponType", ""),
+                "coupon_value": item.get("couponValue", 0),
+                "carton_pack": item.get("cartonPack", 0),
+                "carton_length": item.get("cartonLength", 0),
+                "carton_width": item.get("cartonWidth", 0),
+                "carton_height": item.get("cartonHeight", 0),
+                "carton_weight": item.get("cartonWeight", 0),
+            })
+
+
+@app.get("/api/item-master")
+def get_item_master():
+    """Return all items from the item master CSV, enriched with live COGS."""
+    items = load_item_master()
+    cogs_data = load_cogs()
+    for item in items:
+        asin = item["asin"]
+        cogs_info = cogs_data.get(asin, {})
+        if cogs_info.get("cogs", 0) > 0 and item["unitCost"] == 0:
+            item["unitCost"] = cogs_info["cogs"]
+        # Compute net price after coupon
+        base = item["salePrice"] if item["salePrice"] > 0 else item["listPrice"]
+        if item["couponType"] == "$" and item["couponValue"] > 0:
+            item["netPrice"] = round(base - item["couponValue"], 2)
+        elif item["couponType"] == "%" and item["couponValue"] > 0:
+            item["netPrice"] = round(base * (1 - item["couponValue"] / 100), 2)
+        else:
+            item["netPrice"] = round(base, 2)
+        # Referral fee estimate
+        item["referralFee"] = round(item["netPrice"] * item["referralPct"] / 100, 2)
+    return {"items": items, "count": len(items)}
+
+
+@app.put("/api/item-master/{asin}")
+def update_item_master(asin: str, body: dict = Body(...)):
+    """Update a single item in the item master by ASIN."""
+    items = load_item_master()
+    found = False
+    for item in items:
+        if item["asin"] == asin:
+            # Only update fields that are provided
+            updatable = [
+                "listPrice", "salePrice", "referralPct", "couponType",
+                "couponValue", "cartonPack", "cartonLength", "cartonWidth",
+                "cartonHeight", "cartonWeight", "unitCost", "plannedAnnualUnits",
+                "color", "series", "productType", "pieceCount", "orientation",
+                "category",
+            ]
+            for key in updatable:
+                if key in body:
+                    item[key] = body[key]
+            found = True
+            break
+    if not found:
+        raise HTTPException(status_code=404, detail=f"ASIN {asin} not found")
+    save_item_master(items)
+    return {"status": "ok", "asin": asin}
+
+
+@app.post("/api/item-master/bulk-update")
+def bulk_update_item_master(body: dict = Body(...)):
+    """Bulk update items. Expects {items: [{asin, ...fields}, ...]}."""
+    updates = body.get("items", [])
+    if not updates:
+        return {"status": "ok", "updated": 0}
+    items = load_item_master()
+    item_map = {i["asin"]: i for i in items}
+    updated = 0
+    for upd in updates:
+        asin = upd.get("asin")
+        if asin and asin in item_map:
+            item = item_map[asin]
+            for key, val in upd.items():
+                if key != "asin" and key in item:
+                    item[key] = val
+            updated += 1
+    save_item_master(items)
+    return {"status": "ok", "updated": updated}
 
 
 # ── Static Frontend ────────────────────────────────────────

@@ -35,6 +35,15 @@ export const api = {
   adsSearchTerms: (days = 30, limit = 50) =>
     fetchJSON(`/api/ads/search-terms?days=${days}&limit=${limit}`),
   adsNegativeKeywords: () => fetchJSON(`/api/ads/negative-keywords`),
+
+  // Item Master
+  itemMaster: () => fetchJSON(`/api/item-master`),
+  updateItem: (asin, data) =>
+    fetch(`${API_BASE}/api/item-master/${asin}`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(data),
+    }).then(r => r.json()),
 };
 
 export function fmt$(n) {
