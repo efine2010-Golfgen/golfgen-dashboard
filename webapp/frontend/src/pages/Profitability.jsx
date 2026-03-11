@@ -325,6 +325,9 @@ export default function Profitability() {
                 <thead>
                   <tr style={{ background: "var(--navy)" }}>
                     <SortTh label="Product" col="name" sortCol={sortCol} sortDir={sortDir} onClick={handleSort} align="left" first />
+                    <th style={staticThStyle}>Coupon</th>
+                    <th style={staticThStyle}>Coupon End</th>
+                    <th style={staticThStyle}>Sale Price</th>
                     <SortTh label="Units" col="units" sortCol={sortCol} sortDir={sortDir} onClick={handleSort} />
                     <SortTh label="Sales" col="sales" sortCol={sortCol} sortDir={sortDir} onClick={handleSort} />
                     <SortTh label="Ad Spend" col="adSpend" sortCol={sortCol} sortDir={sortDir} onClick={handleSort} />
@@ -345,6 +348,26 @@ export default function Profitability() {
                         <div style={{ fontSize: 10, color: "var(--muted)", marginTop: 1, fontFamily: "'Space Grotesk', monospace" }}>
                           {item.asin}{item.sku ? ` · ${item.sku}` : ""}
                         </div>
+                      </td>
+                      <td style={{ ...cellStyle, textAlign: "center" }}>
+                        <CouponPill status={item.couponStatus} discount={item.couponDiscount} type={item.couponType} />
+                      </td>
+                      <td style={{ ...cellStyle, textAlign: "center", fontSize: 11 }}>
+                        {item.couponEndDate ? fmtDate(item.couponEndDate) : <span style={{ color: "var(--muted)" }}>—</span>}
+                      </td>
+                      <td style={{ ...cellStyle, textAlign: "center" }}>
+                        {item.salePrice ? (
+                          <span>
+                            <span style={{ fontWeight: 600, color: "#E87830" }}>${item.salePrice.toFixed(2)}</span>
+                            {item.listPrice && item.listPrice > item.salePrice && (
+                              <span style={{ fontSize: 10, color: "var(--muted)", textDecoration: "line-through", marginLeft: 4 }}>
+                                ${item.listPrice.toFixed(2)}
+                              </span>
+                            )}
+                          </span>
+                        ) : (
+                          <span style={{ color: "var(--muted)" }}>—</span>
+                        )}
                       </td>
                       <td style={cellStyle}>{item.units.toLocaleString()}</td>
                       <td style={cellStyle}>{fmt$(item.sales)}</td>
@@ -381,6 +404,9 @@ export default function Profitability() {
                     return (
                       <tr style={{ background: "rgba(14,31,45,0.04)", fontWeight: 700, borderTop: "2px solid var(--border)" }}>
                         <td style={{ padding: "12px 12px", color: "var(--navy)" }}>TOTAL ({sortedItems.length} products)</td>
+                        <td style={cellStyle}></td>
+                        <td style={cellStyle}></td>
+                        <td style={cellStyle}></td>
                         <td style={cellStyle}>{totals.units.toLocaleString()}</td>
                         <td style={cellStyle}>{fmt$(totals.sales)}</td>
                         <td style={cellStyle}>{fmt$(totals.adSpend)}</td>
@@ -405,6 +431,60 @@ export default function Profitability() {
 }
 
 /* ── Sub-Components ──────────────────────────────────────── */
+
+const staticThStyle = {
+  padding: "12px 12px",
+  textAlign: "center",
+  color: "rgba(255,255,255,0.7)",
+  fontSize: 11,
+  fontWeight: 700,
+  textTransform: "uppercase",
+  letterSpacing: "0.8px",
+  whiteSpace: "nowrap",
+  borderBottom: "none",
+};
+
+const COUPON_COLORS = {
+  ACTIVE: { bg: "#ECFDF5", text: "#065F46", border: "#A7F3D0" },
+  SCHEDULED: { bg: "#EFF6FF", text: "#1E40AF", border: "#BFDBFE" },
+  PAUSED: { bg: "#FEF3C7", text: "#92400E", border: "#FDE68A" },
+  EXPIRED: { bg: "#F3F4F6", text: "#6B7280", border: "#E5E7EB" },
+};
+
+function CouponPill({ status, discount, type }) {
+  if (!status) return <span style={{ color: "var(--muted)", fontSize: 11 }}>—</span>;
+  const colors = COUPON_COLORS[status] || COUPON_COLORS.EXPIRED;
+  const discountLabel = discount
+    ? (type === "PERCENTAGE" ? `${discount}%` : `$${discount}`)
+    : "";
+  return (
+    <span style={{
+      display: "inline-block",
+      padding: "2px 8px",
+      borderRadius: 12,
+      fontSize: 10,
+      fontWeight: 700,
+      letterSpacing: "0.5px",
+      background: colors.bg,
+      color: colors.text,
+      border: `1px solid ${colors.border}`,
+      whiteSpace: "nowrap",
+    }}>
+      {status}{discountLabel ? ` ${discountLabel}` : ""}
+    </span>
+  );
+}
+
+function fmtDate(dateStr) {
+  if (!dateStr) return null;
+  try {
+    const d = new Date(dateStr);
+    if (isNaN(d.getTime())) return dateStr;
+    return d.toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
+  } catch {
+    return dateStr;
+  }
+}
 
 const cellStyle = {
   padding: "10px 12px",

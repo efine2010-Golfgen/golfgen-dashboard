@@ -3860,6 +3860,15 @@ def profitability_items(days: int = Query(365)):
     except Exception:
         pass
 
+    # Load live pricing & coupon cache for enrichment
+    pricing_cache = _load_pricing_cache()
+    live_prices = pricing_cache.get("prices", {})
+    live_coupons = pricing_cache.get("coupons", {})
+
+    # Also load item master for static sale_price / list_price
+    master_items = load_item_master()
+    master_by_asin = {m["asin"]: m for m in master_items}
+
     # Enhance with Sellerboard-style metrics
     items = []
     for p in products:
@@ -3875,6 +3884,42 @@ def profitability_items(days: int = Query(365)):
         ad_spend = ad_by_asin.get(asin, p["adSpend"])
         refund_units = fin.get("refund_count", 0)
         return_pct = round(refund_units / p["units"] * 100, 1) if p["units"] > 0 else 0
+
+        # Coupon data from pricing_sync.json cache
+        coupon = live_coupons.get(asin)
+        coupon_status = None
+        coupon_end_date = None
+        coupon_discount = None
+        coupon_type = None
+        if coupon:
+            raw_state = coupon.get("state")
+            # Map Amazon Ads coupon states to display labels
+            state_map = {"ENABLED": "ACTIVE", "SCHEDULED": "SCHEDULED",
+                         "PAUSED": "PAUSED", "EXPIRED": "EXPIRED"}
+            coupon_status = state_map.get(raw_state, raw_state)
+            coupon_end_date = coupon.get("endDate")
+            coupon_discount = coupon.get("discountValue")
+            coupon_type = coupon.get("discountType")
+
+        # Live pricing data from pricing_sync.json cache
+        live = live_prices.get(asin)
+        sale_price = None
+        sale_price_end_date = None
+        list_price = None
+        if live:
+            list_price = live.get("listingPrice")
+            # If listing price differs from buy box, the lower is likely a sale
+            buy_box = live.get("buyBoxPrice")
+            if list_price and buy_box and buy_box < list_price:
+                sale_price = buy_box
+        # Fall back to static item master sale_price if no live data
+        master = master_by_asin.get(asin, {})
+        if sale_price is None and master.get("salePrice", 0) > 0:
+            sale_price = master["salePrice"]
+        if list_price is None and master.get("listPrice", 0) > 0:
+            list_price = master["listPrice"]
+        # sale_price_end_date: not available from getCompetitivePricing API
+        # Would require SP-API getListingOffers for sale schedule data
 
         items.append({
             "asin": asin,
@@ -3899,6 +3944,14 @@ def profitability_items(days: int = Query(365)):
             "margin": margin,
             "roi": roi,
             "aur": p["price"],
+            # New coupon/pricing fields
+            "couponStatus": coupon_status,
+            "couponEndDate": coupon_end_date,
+            "couponDiscount": coupon_discount,
+            "couponType": coupon_type,
+            "salePrice": sale_price,
+            "listPrice": list_price,
+            "salePriceEndDate": sale_price_end_date,
         })
 
     items.sort(key=lambda x: x["sales"], reverse=True)
