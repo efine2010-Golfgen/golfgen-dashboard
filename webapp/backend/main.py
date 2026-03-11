@@ -4829,6 +4829,7 @@ async def get_logistics(request: Request):
 
 @app.post("/api/logistics/upload")
 async def upload_logistics(request: Request, file: UploadFile = File(...)):
+    """Standalone logistics upload — delegates to the same logic as combined supply-chain upload."""
     _require_auth(request)
     import openpyxl
     from io import BytesIO
@@ -4836,6 +4837,8 @@ async def upload_logistics(request: Request, file: UploadFile = File(...)):
     wb = openpyxl.load_workbook(BytesIO(contents), data_only=True)
     if "Logistics Tracking" not in wb.sheetnames:
         raise HTTPException(400, "Sheet 'Logistics Tracking' not found")
+    # Re-use the combined parser by calling the supply-chain upload logic
+    # For standalone, we just wrap it in an UploadFile-like call
     ws = wb["Logistics Tracking"]
     rows = []
     for row in ws.iter_rows(min_row=1, max_row=ws.max_row):
@@ -4844,48 +4847,112 @@ async def upload_logistics(request: Request, file: UploadFile = File(...)):
             if hasattr(c, 'column_letter') and c.value is not None:
                 r[c.column_letter] = c.value
         rows.append(r)
-    def _to_str(dt):
+
+    def _to_str(v):
+        if v is None: return ""
         from datetime import datetime as _dt, date as _d
-        if isinstance(dt, (_dt, _d)):
-            return dt.strftime("%Y-%m-%d")
-        return str(dt) if dt else None
-    def _sr(v):
-        try: return round(float(v), 2)
+        if isinstance(v, (_dt, _d)):
+            return v.strftime("%Y-%m-%d")
+        return str(v)
+
+    def _sr(v, n=2):
+        try: return round(float(v), n)
         except: return 0
+
+    def _si(v):
+        try: return int(float(v))
+        except: return 0
+
+    _STOP_WORDS = {"SHIPMENT STATUS SUMMARY", "STATUS SUMMARY", "UPCOMING ARRIVALS",
+                    "TOTAL", "TOTALS", "ITEM SUMMARY", "PO#"}
+
+    # ── Parse shipments ──
     shipments = []
-    for i in range(3, len(rows)):
-        cells = rows[i]
-        shipper = cells.get("B")
-        hbl = cells.get("C")
-        if not shipper or not hbl: continue
-        if "STATUS" in str(shipper) or "UPCOMING" in str(shipper): break
-        shipments.append({
-            "shipper": str(shipper), "hbl": str(hbl), "containerType": str(cells.get("D") or ""),
-            "containerNumber": str(cells.get("E") or ""), "vesselVoyage": str(cells.get("F") or ""),
-            "poNumber": str(cells.get("G") or ""), "units": cells.get("H") or 0,
-            "cbm": _sr(cells.get("I")), "factoryInvoice": str(cells.get("J") or ""),
-            "carrier": str(cells.get("K") or ""), "freightForwarder": str(cells.get("L") or ""),
-            "etdOrigin": _to_str(cells.get("N")), "departurePort": str(cells.get("O") or ""),
-            "etaDischarge": _to_str(cells.get("P")), "arrivalPort": str(cells.get("Q") or ""),
-            "etaFinal": _to_str(cells.get("R")), "finalLocation": str(cells.get("S") or ""),
-            "deliveryDate": _to_str(cells.get("T")), "status": str(cells.get("U") or "")
-        })
-    hdr_idx = next((i for i, r in enumerate(rows) if r.get("B") == "Container #" and r.get("F") == "Item Number"), None)
+    header_row = None
+    for i, r in enumerate(rows):
+        vals = [str(v).upper() for v in r.values()]
+        joined = " ".join(vals)
+        if "SHIPPER" in joined and ("HBL" in joined or "MODE" in joined):
+            header_row = i
+            break
+
+    if header_row is not None:
+        empty_count = 0
+        for i in range(header_row + 1, len(rows)):
+            r = rows[i]
+            shipper = r.get("B")
+            if not shipper:
+                empty_count += 1
+                if empty_count >= 2: break
+                continue
+            empty_count = 0
+            shipper_str = str(shipper).strip()
+            shipper_upper = shipper_str.upper()
+            if any(sw in shipper_upper for sw in _STOP_WORDS): break
+            if shipper_upper in ["SHIPPER", "STATUS", ""] or len(shipper_str) <= 3: continue
+            hbl = str(r.get("C") or "").strip()
+            if not hbl or len(hbl) < 5: continue
+            raw_status = str(r.get("U") or "").strip()
+            if raw_status:
+                status = raw_status
+            else:
+                status = "Delivered"
+                for _k, _v in r.items():
+                    if _v and "transit" in str(_v).lower():
+                        status = "In Transit"; break
+            shipments.append({
+                "shipper": shipper_str, "hbl": hbl,
+                "containerType": str(r.get("D") or "").strip(),
+                "containerNumber": str(r.get("E") or "").strip(),
+                "vesselVoyage": str(r.get("F") or "").strip(),
+                "poNumber": str(r.get("G") or "").strip(),
+                "units": _si(r.get("H")), "cbm": _sr(r.get("I"), 1),
+                "factoryInvoice": str(r.get("J") or "").strip(),
+                "carrier": str(r.get("K") or "").strip(),
+                "freightForwarder": str(r.get("L") or "").strip(),
+                "etdOrigin": _to_str(r.get("N")), "departurePort": str(r.get("O") or "").strip(),
+                "etaDischarge": _to_str(r.get("P")), "arrivalPort": str(r.get("Q") or "").strip(),
+                "etaFinal": _to_str(r.get("R")), "finalLocation": str(r.get("S") or "").strip(),
+                "deliveryDate": _to_str(r.get("T")), "status": status,
+                "freightCost": _sr(r.get("V"), 2),
+            })
+
+    # ── Parse items by container ──
+    item_header_row = None
+    for i, r in enumerate(rows):
+        for _k, v in r.items():
+            if v and "container" in str(v).lower() and "item" in str(v).lower():
+                item_header_row = i; break
+        if item_header_row is not None: break
+
     items = []
-    if hdr_idx:
-        cur_cntr = ""
-        for i in range(hdr_idx + 1, len(rows)):
-            cells = rows[i]
-            cntr = cells.get("B")
-            if cntr and len(str(cntr)) > 8: cur_cntr = str(cntr)
-            sku = cells.get("F"); desc = cells.get("G"); qty = cells.get("J")
-            if sku:
-                items.append({"containerNumber": cur_cntr if cntr and len(str(cntr)) > 8 else "",
-                    "invoice": str(cells.get("C") or ""), "eta": _to_str(cells.get("D")),
-                    "po": str(cells.get("E") or ""), "sku": str(sku), "description": str(desc or ""), "qty": qty or 0})
-            elif desc and "Total" in str(desc):
-                items.append({"containerNumber": "", "invoice": "", "eta": "", "po": "",
-                    "sku": "", "description": "Container Total", "qty": qty or 0})
+    if item_header_row is not None:
+        col_hdr = item_header_row + 1
+        for ci in range(item_header_row, min(item_header_row + 4, len(rows))):
+            vals_up = [str(v).upper() for v in rows[ci].values()]
+            joined = " ".join(vals_up)
+            if "CONTAINER" in joined and ("ITEM" in joined or "SKU" in joined):
+                col_hdr = ci; break
+        cur_container = ""
+        for i in range(col_hdr + 1, len(rows)):
+            r = rows[i]
+            container_val = r.get("B"); sku_val = r.get("F"); desc_val = r.get("G"); qty_val = r.get("J")
+            if not container_val and not sku_val and not desc_val: continue
+            container_str = str(container_val or "").strip()
+            sku_str = str(sku_val or "").strip()
+            desc_str = str(desc_val or "").strip()
+            skip_words = ["CONTAINER TOTAL", "GOLF TOTAL", "GRAND TOTAL", "NON-GOLF", "CONTAINER #", "ITEM NUMBER", "ITEM SUMMARY"]
+            combined_upper = f"{container_str} {sku_str} {desc_str}".upper()
+            if any(sw in combined_upper for sw in skip_words): continue
+            if container_val and len(container_str) >= 8 and container_str[0].isalpha():
+                cur_container = container_str
+            if not sku_val or len(sku_str) < 3: continue
+            items.append({
+                "containerNumber": cur_container, "invoice": str(r.get("C") or "").strip(),
+                "eta": _to_str(r.get("D")), "po": str(r.get("E") or "").strip(),
+                "sku": sku_str, "description": desc_str, "qty": _si(qty_val),
+            })
+
     from datetime import date as _date
     data = {"shipments": shipments, "itemsByContainer": items,
         "lastUpload": _date.today().isoformat(), "sourceFile": file.filename}
@@ -4905,7 +4972,6 @@ async def upload_supply_chain(request: Request, file: UploadFile = File(...)):
 
     # Try Factory PO
     if "Factory PO Summary" in wb.sheetnames:
-        # Re-use the factory PO parsing logic
         ws = wb["Factory PO Summary"]
         rows = []
         for row in ws.iter_rows(min_row=1, max_row=ws.max_row):
@@ -4915,75 +4981,185 @@ async def upload_supply_chain(request: Request, file: UploadFile = File(...)):
                     r[c.column_letter] = c.value
             rows.append(r)
 
-        def safe_round(v, n=2):
-            try: return round(float(v), n)
-            except: return 0
+        def safe_float(v, default=0):
+            try: return float(v)
+            except (ValueError, TypeError): return default
 
-        purchase_orders = []
-        # Find header row dynamically (look for row with "PO#" or "Factory")
-        po_header_row = 6  # default
+        def safe_round(v, n=2):
+            return round(safe_float(v), n)
+
+        def _to_date_str(v):
+            from datetime import datetime as _dt, date as _d
+            if isinstance(v, (_dt, _d)):
+                return v.strftime("%Y-%m-%d")
+            s = str(v).strip() if v else ""
+            return s if s else ""
+
+        # ── Parse Purchase Orders (rows 8-18 in current sheet) ──
+        # Find header row: must have BOTH "Factory" AND "PO" in same row
+        po_header_row = None
         for i in range(0, min(15, len(rows))):
-            vals = [str(v).upper() for v in rows[i].values()]
-            if any("PO#" in v or "PO #" in v for v in vals) or any(v == "FACTORY" for v in vals):
+            vals_upper = [str(v).upper() for v in rows[i].values()]
+            joined = " ".join(vals_upper)
+            if "FACTORY" in joined and ("PO#" in joined or "PO #" in joined):
                 po_header_row = i
                 break
+        if po_header_row is None:
+            po_header_row = 6  # fallback
+
+        purchase_orders = []
         for i in range(po_header_row + 1, len(rows)):
             r = rows[i]
-            # Try multiple column mappings: E (current layout) or C/D (legacy)
-            po = r.get("E") or r.get("C") or r.get("D")
-            factory = r.get("A") or r.get("B")
-            units = r.get("F") or r.get("G")
-            if not po or not units: continue
-            po_str = str(po).strip()
-            # Accept PO numbers starting with T-, PO, GG, Z, or any alphanumeric PO-like pattern
-            if po_str[:1].isalpha() or po_str[:2] in ["T-"]:
-                purchase_orders.append({
-                    "factory": str(factory or ""),
-                    "poNumber": po_str,
-                    "units": safe_round(units, 0),
-                    "totalCost": safe_round(r.get("G") or r.get("H") or r.get("I") or 0),
-                    "fobDate": str(r.get("I") or r.get("J") or r.get("K") or ""),
-                    "estArrival": str(r.get("J") or r.get("L") or r.get("M") or ""),
-                    "cbm": safe_round(r.get("K") or r.get("N") or r.get("O") or 0),
-                    "landedCost": safe_round(r.get("U") or r.get("P") or r.get("Q") or 0),
-                })
+            po_val = r.get("E")
+            factory = r.get("B") or r.get("A")
+            units_val = r.get("F")
 
+            # Stop at TOTALS row or empty rows section
+            factory_str = str(factory or "").strip().upper()
+            if factory_str == "TOTALS" or factory_str == "TOTAL":
+                break
+
+            # Skip rows without a PO number in column E
+            if not po_val:
+                continue
+
+            po_str = str(po_val).strip()
+            # PO numbers must start with T- or be a numeric PO like 2100
+            # Skip if it looks like a pure float/money value (from payment calendar)
+            if not (po_str.startswith("T-") or po_str.startswith("Z") or
+                    po_str.startswith("GG") or po_str.startswith("PO") or
+                    (po_str.isdigit() and len(po_str) <= 6)):
+                continue
+
+            # Must have a factory name (not a PO number in col B from payment section)
+            if not factory or str(factory).startswith("T-"):
+                continue
+
+            terms = str(r.get("D") or "").strip()
+            purchase_orders.append({
+                "factory": str(factory),
+                "poNumber": po_str,
+                "paymentTerms": terms,
+                "units": safe_round(units_val, 0),
+                "totalCost": safe_round(r.get("G"), 2),
+                "fobDate": _to_date_str(r.get("I")),
+                "estArrival": _to_date_str(r.get("J")),
+                "cbm": safe_round(r.get("K"), 1),
+                "landedCost": safe_round(r.get("U"), 2),
+            })
+
+        # ── Parse Units by Item (starts at "UNITS BY ITEM" header) ──
         units_by_item = []
-        in_units_section = False
+        units_header_row = None
         for i, r in enumerate(rows):
-            b_val = r.get("B", "")
-            if "UNITS BY ITEM" in str(b_val).upper() or "UNITS BY ITEM" in str(r.get("A", "")).upper():
-                in_units_section = True; continue
-            if in_units_section:
-                sku = r.get("B") or r.get("A")
-                desc = r.get("C") or r.get("B")
-                if not sku or str(sku).upper() in ["SKU", "TOTAL", "", "X-FACTORY"]: continue
-                if "ARRIVAL" in str(sku).upper() or "UNITS BY" in str(sku).upper(): break
-                total = 0
-                by_po = {}
-                for k, v in r.items():
-                    if k not in ["A", "B", "C"] and v:
-                        try:
-                            total += int(float(v))
-                            by_po[k] = int(float(v))
-                        except: pass
-                units_by_item.append({"sku": str(sku), "description": str(desc or ""), "total": total})
+            for v in r.values():
+                if "UNITS BY ITEM" in str(v).upper() and "BY PURCHASE ORDER" in str(v).upper():
+                    units_header_row = i
+                    break
+            if units_header_row is not None:
+                break
 
+        if units_header_row is not None:
+            # Next row is the column header (SKU, Description, PO columns)
+            col_header_row = units_header_row + 1
+            # Build PO column mapping from the header row
+            header_r = rows[col_header_row] if col_header_row < len(rows) else {}
+            po_cols = {}  # col_letter -> PO name
+            for k, v in header_r.items():
+                if k not in ["A", "B", "C"] and v:
+                    po_cols[k] = str(v)
+
+            # Skip X-Factory date row if present
+            start_row = col_header_row + 1
+            if start_row < len(rows):
+                first_b = str(rows[start_row].get("B", "")).upper()
+                if "X-FACTORY" in first_b or "FACTORY" in first_b:
+                    start_row += 1
+
+            for i in range(start_row, len(rows)):
+                r = rows[i]
+                sku = r.get("B")
+                if not sku:
+                    continue
+                sku_str = str(sku).strip()
+                if sku_str.upper() in ["TOTAL", "TOTALS", "", "SKU"]:
+                    break  # end of section
+                desc = str(r.get("C") or "")
+                by_po = {}
+                total = 0
+                for k in po_cols:
+                    val = r.get(k)
+                    if val is not None:
+                        try:
+                            n = int(float(val))
+                            by_po[po_cols[k]] = n
+                            total += n
+                        except (ValueError, TypeError):
+                            pass
+                # Also check col P for TOTAL
+                p_val = r.get("P")
+                if p_val is not None:
+                    try:
+                        total = int(float(p_val))
+                    except (ValueError, TypeError):
+                        pass
+                units_by_item.append({"sku": sku_str, "description": desc, "byPO": by_po, "total": total})
+
+        # ── Parse Arrival Schedule (starts at "EST. ARRIVAL") ──
         arrival_schedule = []
-        in_arrival = False
+        arrival_header_row = None
         for i, r in enumerate(rows):
-            for k, v in r.items():
+            for v in r.values():
                 vup = str(v).upper()
-                if ("ARRIVAL" in vup and "SCHEDULE" in vup) or ("EST" in vup and "ARRIVAL" in vup):
-                    in_arrival = True; break
-            if in_arrival:
-                sku = r.get("B") or r.get("A")
-                if not sku or str(sku).upper() in ["SKU", "TOTAL", "", "X-FACTORY"]: continue
-                if "ARRIVAL" in str(sku).upper() or "EST" in str(sku).upper(): continue
+                if "EST" in vup and "ARRIVAL" in vup:
+                    arrival_header_row = i
+                    break
+            if arrival_header_row is not None:
+                break
+
+        if arrival_header_row is not None:
+            # Next row should be column headers: SKU, Description, month names
+            arr_col_row = arrival_header_row + 1
+            arr_header = rows[arr_col_row] if arr_col_row < len(rows) else {}
+            month_cols = {}  # col_letter -> month name
+            for k, v in arr_header.items():
+                if k not in ["A", "B", "C"] and v:
+                    v_str = str(v).strip()
+                    if v_str.upper() not in ["TOTAL", "TOTALS", "SKU"]:
+                        month_cols[k] = v_str
+            total_col = None
+            for k, v in arr_header.items():
+                if str(v).upper() in ["TOTAL", "TOTALS"]:
+                    total_col = k
+
+            for i in range(arr_col_row + 1, len(rows)):
+                r = rows[i]
+                sku = r.get("B")
+                if not sku:
+                    continue
+                sku_str = str(sku).strip()
+                if sku_str.upper() in ["TOTAL", "TOTALS", ""]:
+                    break  # end of section
+                desc = str(r.get("C") or "")
+                monthly = {}
+                for k, mname in month_cols.items():
+                    val = r.get(k)
+                    if val is not None:
+                        try:
+                            monthly[mname] = int(float(val))
+                        except (ValueError, TypeError):
+                            pass
+                total = 0
+                if total_col and r.get(total_col) is not None:
+                    try:
+                        total = int(float(r[total_col]))
+                    except (ValueError, TypeError):
+                        total = sum(monthly.values())
+                else:
+                    total = sum(monthly.values())
                 arrival_schedule.append({
-                    "sku": str(sku),
-                    "description": str(r.get("C") or r.get("B") or ""),
-                    "total": safe_round(sum(float(v) for k, v in r.items() if k not in ["A","B","C"] and v and str(v).replace('.','').replace('-','').isdigit()), 0)
+                    "sku": sku_str, "description": desc,
+                    "monthlyArrivals": monthly, "total": total,
                 })
 
         from datetime import date as _date
@@ -5014,73 +5190,158 @@ async def upload_supply_chain(request: Request, file: UploadFile = File(...)):
                 return v.strftime("%Y-%m-%d")
             return str(v)
 
-        def safe_round(v, n=2):
+        def safe_round_l(v, n=2):
             try: return round(float(v), n)
             except: return 0
 
+        def safe_int(v):
+            try: return int(float(v))
+            except: return 0
+
+        # ── STOP WORDS: these indicate we've left the shipments section ──
+        _STOP_WORDS = {"SHIPMENT STATUS SUMMARY", "STATUS SUMMARY", "UPCOMING ARRIVALS",
+                        "TOTAL", "TOTALS", "ITEM SUMMARY", "PO#"}
+
+        # ── Parse Shipments ──
         shipments = []
         header_row = None
         for i, r in enumerate(rows):
-            vals = list(r.values())
-            if any("shipper" in str(v).lower() for v in vals):
-                header_row = i; break
+            vals = [str(v).upper() for v in r.values()]
+            joined = " ".join(vals)
+            if "SHIPPER" in joined and ("HBL" in joined or "MODE" in joined):
+                header_row = i
+                break
 
         if header_row is not None:
-            # Detect which row marks start of item-detail section so we stop shipment parsing there
-            item_section_row = len(rows)
-            for ii, rr in enumerate(rows):
-                for kk, vv in rr.items():
-                    if vv and "container" in str(vv).lower() and "item" in str(vv).lower():
-                        item_section_row = ii; break
-                if item_section_row < len(rows): break
-
-            for i in range(header_row + 1, item_section_row):
+            empty_count = 0
+            for i in range(header_row + 1, len(rows)):
                 r = rows[i]
-                shipper = r.get("B") or r.get("A")
-                if not shipper: continue
-                if str(shipper).strip().upper() in ["", "SHIPPER"]: continue
-                hbl = r.get("C") or r.get("B") or ""
-                units_val = 0
-                for k in ["H","I","J"]:
-                    try:
-                        units_val = int(float(r.get(k, 0)))
-                        if units_val > 0: break
-                    except: pass
-                status = "Delivered"
-                for k, v in r.items():
-                    if v and "transit" in str(v).lower():
-                        status = "In Transit"; break
+                shipper = r.get("B")
+                if not shipper:
+                    empty_count += 1
+                    if empty_count >= 2:
+                        break  # two empty rows in a row = end of section
+                    continue
+                empty_count = 0
+
+                shipper_str = str(shipper).strip()
+                shipper_upper = shipper_str.upper()
+
+                # Stop at summary/status rows
+                if any(sw in shipper_upper for sw in _STOP_WORDS):
+                    break
+                # Skip re-header rows
+                if shipper_upper in ["SHIPPER", "STATUS", ""]:
+                    continue
+                # A real shipper name should be > 3 chars and not a number
+                if len(shipper_str) <= 3:
+                    continue
+
+                hbl = str(r.get("C") or "").strip()
+                # HBL should look like a tracking number (letters+digits, > 5 chars)
+                if not hbl or len(hbl) < 5:
+                    continue
+
+                # Extract status from column U (DELIVERED, IN TRANSIT, PENDING, etc.)
+                raw_status = str(r.get("U") or "").strip()
+                if raw_status:
+                    status = raw_status
+                else:
+                    # Fallback: scan row for transit/delivered keywords
+                    status = "Delivered"
+                    for _k, _v in r.items():
+                        if _v and "transit" in str(_v).lower():
+                            status = "In Transit"
+                            break
 
                 shipments.append({
-                    "shipper": to_str(shipper), "hbl": to_str(hbl),
-                    "units": units_val, "status": status,
-                    "containerNumber": to_str(r.get("E") or r.get("D") or ""),
-                    "poNumber": to_str(r.get("G") or r.get("F") or ""),
+                    "shipper": shipper_str,
+                    "hbl": hbl,
+                    "containerType": str(r.get("D") or "").strip(),
+                    "containerNumber": str(r.get("E") or "").strip(),
+                    "vesselVoyage": str(r.get("F") or "").strip(),
+                    "poNumber": str(r.get("G") or "").strip(),
+                    "units": safe_int(r.get("H")),
+                    "cbm": safe_round_l(r.get("I"), 1),
+                    "factoryInvoice": str(r.get("J") or "").strip(),
+                    "carrier": str(r.get("K") or "").strip(),
+                    "freightForwarder": str(r.get("L") or "").strip(),
+                    "etdOrigin": to_str(r.get("N")),
+                    "departurePort": str(r.get("O") or "").strip(),
+                    "etaDischarge": to_str(r.get("P")),
+                    "arrivalPort": str(r.get("Q") or "").strip(),
+                    "etaFinal": to_str(r.get("R")),
+                    "finalLocation": str(r.get("S") or "").strip(),
+                    "deliveryDate": to_str(r.get("T")),
+                    "status": status,
+                    "freightCost": safe_round_l(r.get("V"), 2),
                 })
 
-        items = []
-        in_items = False
+        # ── Parse Items by Container ──
+        # Find the "ITEM SUMMARY BY CONTAINER" header row
+        item_header_row = None
         for i, r in enumerate(rows):
-            for k, v in r.items():
+            for _k, v in r.items():
                 if v and "container" in str(v).lower() and "item" in str(v).lower():
-                    in_items = True; break
-            if in_items:
-                cn = r.get("B") or r.get("A")
-                if not cn: continue
-                cn_str = str(cn).strip().lower()
-                if "container" in cn_str and ("item" in cn_str or "unit" in cn_str): continue
-                if cn_str in ["", "container #", "container"]: continue
-                sku = r.get("F") or r.get("C") or r.get("D") or ""
-                qty = 0
-                for k in ["J","K","E","F","G","H"]:
-                    try:
-                        qty = int(float(r.get(k, 0)))
-                        if qty > 0: break
-                    except: pass
+                    item_header_row = i
+                    break
+            if item_header_row is not None:
+                break
+
+        items = []
+        if item_header_row is not None:
+            # Find the column-header row (Container #, Invoice, ETA, PO#, Item Number, Description, ...)
+            col_hdr = item_header_row + 1
+            # Scan for actual column header with "Container" and "Item"
+            for ci in range(item_header_row, min(item_header_row + 4, len(rows))):
+                vals_up = [str(v).upper() for v in rows[ci].values()]
+                joined = " ".join(vals_up)
+                if "CONTAINER" in joined and ("ITEM" in joined or "SKU" in joined):
+                    col_hdr = ci
+                    break
+
+            cur_container = ""
+            for i in range(col_hdr + 1, len(rows)):
+                r = rows[i]
+                container_val = r.get("B")
+                sku_val = r.get("F")
+                desc_val = r.get("G")
+                qty_val = r.get("J")
+
+                # Skip completely empty rows
+                if not container_val and not sku_val and not desc_val:
+                    continue
+
+                # Build string versions for checking
+                container_str = str(container_val or "").strip()
+                sku_str = str(sku_val or "").strip()
+                desc_str = str(desc_val or "").strip()
+
+                # Skip section headers and summary rows
+                skip_words = ["CONTAINER TOTAL", "GOLF TOTAL", "GRAND TOTAL",
+                              "NON-GOLF", "CONTAINER #", "ITEM NUMBER",
+                              "ITEM SUMMARY"]
+                combined_upper = f"{container_str} {sku_str} {desc_str}".upper()
+                if any(sw in combined_upper for sw in skip_words):
+                    # But update current container if this looks like a section header with a container #
+                    continue
+
+                # Update current container number (long alphanumeric string)
+                if container_val and len(container_str) >= 8 and container_str[0].isalpha():
+                    cur_container = container_str
+
+                # Must have an actual SKU to be a valid item row
+                if not sku_val or len(sku_str) < 3:
+                    continue
+
                 items.append({
-                    "containerNumber": to_str(cn), "sku": to_str(sku),
-                    "description": to_str(r.get("G") or r.get("D") or r.get("E") or ""),
-                    "qty": qty
+                    "containerNumber": cur_container,
+                    "invoice": str(r.get("C") or "").strip(),
+                    "eta": to_str(r.get("D")),
+                    "po": str(r.get("E") or "").strip(),
+                    "sku": sku_str,
+                    "description": desc_str,
+                    "qty": safe_int(qty_val),
                 })
 
         from datetime import date as _date
