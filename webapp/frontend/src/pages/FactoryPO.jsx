@@ -5,7 +5,6 @@ import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContaine
 const fmtK = n => n == null ? "0" : n >= 1000 ? (n / 1000).toFixed(1) + "K" : n.toLocaleString();
 const COLORS = ["#2ECFAA", "#3E658C", "#E87830", "#F5B731", "#7BAED0", "#D03030", "#22A387", "#9B59B6", "#1ABC9C", "#E74C3C", "#3498DB"];
 
-// Known Amazon and Walmart SKU sets for channel classification
 const WALMART_PREFIXES = ["GGWMSS", "GGRTFT"];
 const AMAZON_PREFIXES = ["GGLFT", "GGLTN", "GGRTN"];
 
@@ -25,7 +24,7 @@ function classifyCategory(sku, desc) {
   if (!sku && !desc) return "Other";
   const combined = ((sku || "") + " " + (desc || "")).toUpperCase();
   if (combined.includes("CLUB SET") || combined.includes("SS2")) return "Club Sets";
-  if (combined.includes("JUNIOR") || combined.includes("FT") && combined.includes("SET")) return "Junior Sets";
+  if (combined.includes("JUNIOR") || (combined.includes("FT") && combined.includes("SET"))) return "Junior Sets";
   if (combined.includes("NET") || combined.includes("NW")) return "Nets & Training";
   if (combined.includes("KIT")) return "Kits";
   if (combined.includes("IRON") || combined.includes("DRIVER") || combined.includes("PUTTER") || combined.includes("WEDGE")) return "Individual Clubs";
@@ -36,7 +35,7 @@ export default function FactoryPO() {
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
   const [uploading, setUploading] = useState(false);
-  const [view, setView] = useState("summary"); // summary | byItem | arrival
+  const [view, setView] = useState("summary");
   const fileRef = useRef();
 
   const load = () => {
@@ -58,80 +57,31 @@ export default function FactoryPO() {
     if (fileRef.current) fileRef.current.value = "";
   };
 
-  if (loading) return <div className="loading"><div className="spinner" /> Loading Factory PO data...</div>;
-  if (!data) return <div style={{ padding: 40, textAlign: "center", color: "var(--muted)" }}>No Factory PO data. Upload an Excel file to begin.</div>;
-
-  const pos = (data.purchaseOrders || []).filter(p => {
-    // Filter out garbage rows from payment calendar
-    const po = (p.poNumber || "").toString();
-    if (po.includes(".") || po.length > 10) return false;
-    if ((p.factory || "").startsWith("T-") || (p.factory || "").startsWith("TOTAL")) return false;
-    return true;
-  });
-  const skus = (data.unitsByItem || []).filter(u => {
-    const s = (u.sku || "").toUpperCase();
-    return s && s !== "TOTAL" && s !== "TOTALS" && s !== "SKU";
-  });
-  const arrivals = (data.arrivalSchedule || []).filter(a => {
-    const s = (a.sku || "").toUpperCase();
-    return s && s !== "TOTAL" && s !== "TOTALS" && s !== "SKU";
-  });
-
-  // KPI calculations
-  const totalUnits = pos.reduce((s, p) => s + (p.units || 0), 0);
-  const totalCBM = pos.reduce((s, p) => s + (p.cbm || 0), 0);
-  const activePOs = pos.filter(p => (p.units || 0) > 0).length;
-
-  // Channel breakdown from unitsByItem
-  const channelUnits = { Amazon: 0, Walmart: 0, Other: 0 };
-  skus.forEach(u => {
-    const ch = classifySKU(u.sku);
-    const qty = u.total || u.quantity || 0;
-    if (ch === "Both") { channelUnits.Amazon += qty; channelUnits.Walmart += qty; }
-    else if (channelUnits[ch] !== undefined) channelUnits[ch] += qty;
-    else channelUnits.Other += qty;
-  });
-
-  // Category breakdown
-  const categoryMap = {};
-  skus.forEach(u => {
-    const cat = classifyCategory(u.sku, u.description);
-    const qty = u.total || u.quantity || 0;
-    if (!categoryMap[cat]) categoryMap[cat] = 0;
-    categoryMap[cat] += qty;
-  });
-  const categoryPie = Object.entries(categoryMap).map(([name, value]) => ({ name, value })).sort((a, b) => b.value - a.value);
-
-  // Factory breakdown for pie chart
-  const factoryMap = {};
-  pos.forEach(p => {
-    if ((p.units || 0) <= 0) return;
-    const name = p.factory.length > 20 ? p.factory.split(" ").slice(0, 3).join(" ") : p.factory;
-    factoryMap[name] = (factoryMap[name] || 0) + p.units;
-  });
-  const factoryPie = Object.entries(factoryMap).map(([name, value]) => ({ name, value }));
-
-  // Arrival timeline from arrivalSchedule data
-  const monthTotals = {};
-  arrivals.forEach(a => {
-    const monthly = a.monthlyArrivals || {};
-    Object.entries(monthly).forEach(([month, units]) => {
-      if (units > 0) {
-        monthTotals[month] = (monthTotals[month] || 0) + units;
-      }
+  // All derived data via useMemo — MUST be before any early returns
+  const pos = useMemo(() => {
+    return (data?.purchaseOrders || []).filter(p => {
+      const po = (p.poNumber || "").toString();
+      if (po.includes(".") || po.length > 10) return false;
+      if ((p.factory || "").startsWith("T-") || (p.factory || "").startsWith("TOTAL")) return false;
+      if ((p.units || 0) <= 0) return false;
+      return true;
     });
-  });
-  const arrivalBar = Object.entries(monthTotals)
-    .map(([month, units]) => ({ month, units }))
-    .sort((a, b) => {
-      // Sort by date order
-      const months = ["jan", "feb", "mar", "apr", "may", "jun", "jul", "aug", "sep", "oct", "nov", "dec"];
-      const aIdx = months.findIndex(m => a.month.toLowerCase().startsWith(m));
-      const bIdx = months.findIndex(m => b.month.toLowerCase().startsWith(m));
-      return aIdx - bIdx;
-    });
+  }, [data]);
 
-  // Get all unique month columns from arrival data
+  const skus = useMemo(() => {
+    return (data?.unitsByItem || []).filter(u => {
+      const s = (u.sku || "").toUpperCase();
+      return s && s !== "TOTAL" && s !== "TOTALS" && s !== "SKU";
+    });
+  }, [data]);
+
+  const arrivals = useMemo(() => {
+    return (data?.arrivalSchedule || []).filter(a => {
+      const s = (a.sku || "").toUpperCase();
+      return s && s !== "TOTAL" && s !== "TOTALS" && s !== "SKU";
+    });
+  }, [data]);
+
   const allMonthCols = useMemo(() => {
     const months = new Set();
     arrivals.forEach(a => {
@@ -145,12 +95,68 @@ export default function FactoryPO() {
     });
   }, [arrivals]);
 
-  // Get all PO columns from unitsByItem
   const allPOCols = useMemo(() => {
     const poCols = new Set();
     skus.forEach(u => Object.keys(u.byPO || {}).forEach(k => poCols.add(k)));
     return [...poCols].sort();
   }, [skus]);
+
+  const channelUnits = useMemo(() => {
+    const ch = { Amazon: 0, Walmart: 0, Other: 0 };
+    skus.forEach(u => {
+      const c = classifySKU(u.sku);
+      const qty = u.total || u.quantity || 0;
+      if (c === "Both") { ch.Amazon += qty; ch.Walmart += qty; }
+      else if (ch[c] !== undefined) ch[c] += qty;
+      else ch.Other += qty;
+    });
+    return ch;
+  }, [skus]);
+
+  const categoryPie = useMemo(() => {
+    const m = {};
+    skus.forEach(u => {
+      const cat = classifyCategory(u.sku, u.description);
+      const qty = u.total || u.quantity || 0;
+      m[cat] = (m[cat] || 0) + qty;
+    });
+    return Object.entries(m).map(([name, value]) => ({ name, value })).sort((a, b) => b.value - a.value);
+  }, [skus]);
+
+  const factoryPie = useMemo(() => {
+    const m = {};
+    pos.forEach(p => {
+      const name = p.factory.length > 20 ? p.factory.split(" ").slice(0, 3).join(" ") : p.factory;
+      m[name] = (m[name] || 0) + (p.units || 0);
+    });
+    return Object.entries(m).map(([name, value]) => ({ name, value }));
+  }, [pos]);
+
+  const arrivalBar = useMemo(() => {
+    const monthTotals = {};
+    arrivals.forEach(a => {
+      const monthly = a.monthlyArrivals || {};
+      Object.entries(monthly).forEach(([month, units]) => {
+        if (units > 0) monthTotals[month] = (monthTotals[month] || 0) + units;
+      });
+    });
+    const order = ["jan", "feb", "mar", "apr", "may", "jun", "jul", "aug", "sep", "oct", "nov", "dec"];
+    return Object.entries(monthTotals)
+      .map(([month, units]) => ({ month, units }))
+      .sort((a, b) => {
+        const ai = order.findIndex(m => a.month.toLowerCase().startsWith(m));
+        const bi = order.findIndex(m => b.month.toLowerCase().startsWith(m));
+        return ai - bi;
+      });
+  }, [arrivals]);
+
+  // Now safe for early returns
+  if (loading) return <div className="loading"><div className="spinner" /> Loading Factory PO data...</div>;
+  if (!data) return <div style={{ padding: 40, textAlign: "center", color: "var(--muted)" }}>No Factory PO data. Upload an Excel file to begin.</div>;
+
+  const totalUnits = pos.reduce((s, p) => s + (p.units || 0), 0);
+  const totalCBM = pos.reduce((s, p) => s + (p.cbm || 0), 0);
+  const activePOs = pos.length;
 
   return (
     <div>
@@ -180,20 +186,18 @@ export default function FactoryPO() {
           { label: "Total Units On Order", value: fmtK(totalUnits), color: "#2ECFAA" },
           { label: "Amazon On Order", value: fmtK(channelUnits.Amazon), color: "#E87830" },
           { label: "Walmart On Order", value: fmtK(channelUnits.Walmart), color: "#F5B731" },
-          { label: "Total CBM", value: totalCBM.toFixed(0), color: "#7BAED0" },
+          { label: "Total CBM", value: (totalCBM || 0).toFixed(0), color: "#7BAED0" },
           { label: "SKUs Ordered", value: skus.length, color: "#22A387" },
         ].map((kpi, i) => (
           <div key={i} style={{ background: "#fff", borderRadius: 10, padding: "14px 16px", boxShadow: "var(--card-shadow)", borderLeft: `3px solid ${kpi.color}` }}>
             <div style={{ fontSize: 11, color: "var(--muted)", fontWeight: 600, letterSpacing: 0.5 }}>{kpi.label}</div>
             <div style={{ fontSize: 22, fontWeight: 700, fontFamily: "'Space Grotesk', sans-serif", color: "var(--navy)", marginTop: 2 }}>{kpi.value}</div>
-            {kpi.sub && <div style={{ fontSize: 10, color: kpi.color, marginTop: 2 }}>{kpi.sub}</div>}
           </div>
         ))}
       </div>
 
       {/* Charts Row */}
       <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16, marginBottom: 24 }}>
-        {/* Arrival Timeline */}
         <div style={{ background: "#fff", borderRadius: 12, padding: 20, boxShadow: "var(--card-shadow)" }}>
           <h3 style={{ fontSize: 14, fontFamily: "'Space Grotesk', sans-serif", color: "var(--navy)", marginBottom: 16 }}>Estimated Arrival Timeline</h3>
           {arrivalBar.length > 0 ? (
@@ -208,23 +212,28 @@ export default function FactoryPO() {
             </ResponsiveContainer>
           ) : (
             <div style={{ height: 220, display: "flex", alignItems: "center", justifyContent: "center", color: "var(--muted)", fontSize: 13 }}>
-              No arrival data available. Re-upload Excel to populate.
+              No arrival data available
             </div>
           )}
         </div>
 
-        {/* Units by Category */}
         <div style={{ background: "#fff", borderRadius: 12, padding: 20, boxShadow: "var(--card-shadow)" }}>
           <h3 style={{ fontSize: 14, fontFamily: "'Space Grotesk', sans-serif", color: "var(--navy)", marginBottom: 16 }}>Units by Product Category</h3>
-          <ResponsiveContainer width="100%" height={220}>
-            <PieChart>
-              <Pie data={categoryPie} dataKey="value" nameKey="name" cx="50%" cy="50%" innerRadius={45} outerRadius={80}
-                label={({ name, percent }) => `${name} ${(percent * 100).toFixed(0)}%`} labelLine={false} style={{ fontSize: 10 }}>
-                {categoryPie.map((_, i) => <Cell key={i} fill={COLORS[i % COLORS.length]} />)}
-              </Pie>
-              <Tooltip formatter={v => [v.toLocaleString() + " units", "Units"]} />
-            </PieChart>
-          </ResponsiveContainer>
+          {categoryPie.length > 0 ? (
+            <ResponsiveContainer width="100%" height={220}>
+              <PieChart>
+                <Pie data={categoryPie} dataKey="value" nameKey="name" cx="50%" cy="50%" innerRadius={45} outerRadius={80}
+                  label={({ name, percent }) => `${name} ${(percent * 100).toFixed(0)}%`} labelLine={false} style={{ fontSize: 10 }}>
+                  {categoryPie.map((_, i) => <Cell key={i} fill={COLORS[i % COLORS.length]} />)}
+                </Pie>
+                <Tooltip formatter={v => [v.toLocaleString() + " units", "Units"]} />
+              </PieChart>
+            </ResponsiveContainer>
+          ) : (
+            <div style={{ height: 220, display: "flex", alignItems: "center", justifyContent: "center", color: "var(--muted)", fontSize: 13 }}>
+              No SKU data available
+            </div>
+          )}
         </div>
       </div>
 
@@ -253,7 +262,7 @@ export default function FactoryPO() {
               </tr>
             </thead>
             <tbody>
-              {pos.filter(p => (p.units || 0) > 0).map((po, i) => (
+              {pos.map((po, i) => (
                 <tr key={i} style={{ borderBottom: "1px solid var(--border)", background: i % 2 ? "#FAFBFC" : "#fff" }}>
                   <td style={{...td, fontWeight: 700, color: "var(--blue)"}}>{po.poNumber}</td>
                   <td style={{...td, fontSize: 11, maxWidth: 250, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap"}}>{po.factory}</td>
@@ -266,7 +275,7 @@ export default function FactoryPO() {
                 <td style={td} colSpan={2}>TOTAL</td>
                 <td style={{...td, textAlign: "right"}}>{totalUnits.toLocaleString()}</td>
                 <td style={td}></td>
-                <td style={{...td, textAlign: "right"}}>{totalCBM.toFixed(1)}</td>
+                <td style={{...td, textAlign: "right"}}>{(totalCBM || 0).toFixed(1)}</td>
               </tr>
             </tbody>
           </table>
