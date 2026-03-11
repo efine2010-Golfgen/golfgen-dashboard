@@ -50,8 +50,16 @@ function formatPctChange(val) {
 function ExecutiveSummary({ kpis, sections }) {
   const [activeTab, setActiveTab] = useState("salesUnits");
   const section = sections?.[activeTab] || [];
-  const grandTotal = section.find(i => i.type === "grandTotal");
   const categoryTotals = section.filter(i => i.type === "categoryTotal");
+  // Compute grandTotal by summing category totals if not present in data
+  const grandTotal = section.find(i => i.type === "grandTotal") || (() => {
+    const monthly = {};
+    MONTHS.forEach(m => {
+      monthly[m] = categoryTotals.reduce((sum, ct) => sum + (Number(ct.monthly?.[m]) || 0), 0);
+    });
+    const fyTotal = MONTHS.reduce((s, m) => s + (monthly[m] || 0), 0);
+    return { type: "grandTotal", monthly, fyTotal };
+  })();
 
   // Chart data: monthly grand totals
   const chartData = MONTHS.map((m, i) => ({
@@ -659,20 +667,39 @@ function ItemPlanDetail({ plan, overrides, onOverride }) {
                           const cellCls = `num${isEditable ? " ip-editable-cell" : ""}${actual ? " ip-actual-cell" : " ip-proj-cell"}`;
                           return (
                             <td key={m} className={cellCls}>
-                              {isEditable ? (
-                                <input
-                                  type="number"
-                                  className={`ip-cell-input${actual ? " ip-input-actual" : ""}`}
-                                  value={localEdits[row.editable]?.[m] !== undefined
-                                    ? localEdits[row.editable][m]
-                                    : (row.data?.[m] != null ? row.data[m] : "")}
-                                  step={row.fmt === "$d" ? "0.01" : row.fmt === "%" ? "0.001" : "1"}
-                                  onChange={e => handleCellEdit(row.editable, m, e.target.value)}
-                                  onBlur={() => handleCellBlur(row.editable, m)}
-                                  onKeyDown={e => { if (e.key === "Enter") e.target.blur(); }}
-                                  placeholder={row.fmt === "%" ? "0.0%" : row.fmt === "$d" ? "$0.00" : "0"}
-                                />
-                              ) : (
+                              {isEditable ? (() => {
+                                const isPct = row.fmt === "%";
+                                const isDollar = row.fmt === "$d";
+                                const rawVal = localEdits[row.editable]?.[m] !== undefined
+                                  ? localEdits[row.editable][m]
+                                  : (row.data?.[m] != null ? row.data[m] : "");
+                                const displayVal = isPct && rawVal !== "" && rawVal != null
+                                  ? (Number(rawVal) * 100).toFixed(1).replace(/\.0$/, "")
+                                  : rawVal;
+                                return (
+                                  <div style={{ position: "relative" }}>
+                                    {isDollar && <span style={{ position: "absolute", left: 4, top: "50%", transform: "translateY(-50%)", fontSize: 10, color: "#94a3b8", pointerEvents: "none" }}>$</span>}
+                                    <input
+                                      type="number"
+                                      className={`ip-cell-input${actual ? " ip-input-actual" : ""}${isDollar ? " ip-input-dollar" : ""}`}
+                                      value={displayVal}
+                                      step={isDollar ? "0.01" : isPct ? "0.1" : "1"}
+                                      onChange={e => {
+                                        const v = e.target.value;
+                                        if (isPct) {
+                                          handleCellEdit(row.editable, m, v === "" ? "" : (Number(v) / 100));
+                                        } else {
+                                          handleCellEdit(row.editable, m, v);
+                                        }
+                                      }}
+                                      onBlur={() => handleCellBlur(row.editable, m)}
+                                      onKeyDown={e => { if (e.key === "Enter") e.target.blur(); }}
+                                      placeholder={isPct ? "0%" : isDollar ? "0.00" : "0"}
+                                    />
+                                    {isPct && <span style={{ position: "absolute", right: 4, top: "50%", transform: "translateY(-50%)", fontSize: 10, color: "#94a3b8", pointerEvents: "none" }}>%</span>}
+                                  </div>
+                                );
+                              })() : (
                                 fmtCell(row.data?.[m], row.fmt)
                               )}
                             </td>

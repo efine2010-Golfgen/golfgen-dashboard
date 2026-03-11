@@ -836,6 +836,7 @@ tr:hover td { background: var(--teal-bg); }
 .ip-cell-input::placeholder { color: #C4B888; font-style: italic; }
 .ip-edit-hint { font-size: 10px; margin-left: 4px; opacity: 0.5; }
 .ip-cell-input.ip-input-actual { background: #F0F9FF; border-color: #93C5FD; }
+.ip-cell-input.ip-input-dollar { padding-left: 14px; }
 
 /* Actual / Projected column styling */
 .ip-th-actual { background: #EFF6FF; position: relative; }

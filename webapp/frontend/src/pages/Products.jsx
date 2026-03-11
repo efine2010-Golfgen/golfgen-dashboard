@@ -98,40 +98,47 @@ export default function Products() {
         </button>
       </div>
 
-      {/* ── Revenue by Product Donut ──────────────────── */}
-      {productMix.length > 0 && (
-        <div className="chart-grid" style={{ marginBottom: 24 }}>
-          <div className="chart-card">
-            <h3>Revenue by Product (Top 10)</h3>
-            <p className="sub">Product revenue distribution</p>
-            <ResponsiveContainer width="100%" height={320}>
-              <PieChart>
-                <Pie
-                  data={productMix}
-                  cx="50%"
-                  cy="50%"
-                  innerRadius={60}
-                  outerRadius={120}
-                  paddingAngle={2}
-                  dataKey="value"
-                  nameKey="name"
-                >
-                  {productMix.map((_, i) => (
-                    <Cell key={i} fill={COLORS[i % COLORS.length]} />
-                  ))}
-                </Pie>
-                <Tooltip contentStyle={TOOLTIP_STYLE} formatter={v => [fmt$(v), "Revenue"]} />
-                <Legend
-                  layout="vertical"
-                  align="right"
-                  verticalAlign="middle"
-                  formatter={(value) => <span style={{ color: "#2A3D50", fontSize: 11 }}>{value.length > 25 ? value.slice(0, 23) + "…" : value}</span>}
-                />
-              </PieChart>
-            </ResponsiveContainer>
+      {/* ── Product Mix Donuts (Units / Revenue / Ad Spend) ── */}
+      {products.length > 0 && (() => {
+        const top = [...products].sort((a, b) => b.rev - a.rev).slice(0, 10);
+        const unitsMix = top.map(p => ({ name: p.name, value: p.units || 0 }));
+        const revMix   = top.map(p => ({ name: p.name, value: p.rev || 0 }));
+        const adMix    = top.map(p => ({ name: p.name, value: p.adSpend || 0 }));
+        const fmtK = v => v >= 1000 ? `${(v/1000).toFixed(1)}k` : v.toLocaleString();
+        const charts = [
+          { title: "Sales Units", data: unitsMix, fmt: v => [fmtK(v), "Units"] },
+          { title: "Revenue $", data: revMix, fmt: v => [fmt$(v), "Revenue"] },
+          { title: "Ad Spend $", data: adMix, fmt: v => [fmt$(v), "Ad Spend"] },
+        ];
+        return (
+          <div className="chart-card" style={{ marginBottom: 24, padding: "16px 20px 12px" }}>
+            <h3 style={{ margin: "0 0 4px" }}>Product Mix (Top 10)</h3>
+            <div style={{ display: "flex", gap: 0, justifyContent: "center" }}>
+              {charts.map(ch => (
+                <div key={ch.title} style={{ flex: "1 1 0", textAlign: "center", minWidth: 0 }}>
+                  <p style={{ margin: "0 0 2px", fontSize: 12, fontWeight: 600, color: "#3E658C" }}>{ch.title}</p>
+                  <ResponsiveContainer width="100%" height={180}>
+                    <PieChart>
+                      <Pie data={ch.data} cx="50%" cy="50%" innerRadius={38} outerRadius={72} paddingAngle={2} dataKey="value" nameKey="name" strokeWidth={1}>
+                        {ch.data.map((_, i) => <Cell key={i} fill={COLORS[i % COLORS.length]} />)}
+                      </Pie>
+                      <Tooltip contentStyle={TOOLTIP_STYLE} formatter={ch.fmt} />
+                    </PieChart>
+                  </ResponsiveContainer>
+                </div>
+              ))}
+            </div>
+            <div style={{ display: "flex", flexWrap: "wrap", justifyContent: "center", gap: "4px 14px", marginTop: 4, paddingTop: 6, borderTop: "1px solid #f0f0f0" }}>
+              {top.map((p, i) => (
+                <span key={i} style={{ display: "inline-flex", alignItems: "center", gap: 4, fontSize: 10, color: "#2A3D50", whiteSpace: "nowrap" }}>
+                  <span style={{ width: 8, height: 8, borderRadius: 2, background: COLORS[i % COLORS.length], flexShrink: 0 }} />
+                  {p.name.length > 30 ? p.name.slice(0, 28) + "…" : p.name}
+                </span>
+              ))}
+            </div>
           </div>
-        </div>
-      )}
+        );
+      })()}
 
       {/* ── Product Table ────────────────────────────── */}
       <div className="table-card">
