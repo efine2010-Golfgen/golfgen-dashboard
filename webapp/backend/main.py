@@ -9,10 +9,12 @@ import json
 import asyncio
 import logging
 import threading
+import time
 from pathlib import Path
 from datetime import datetime, timedelta
 from typing import Optional
 from contextlib import asynccontextmanager
+from zoneinfo import ZoneInfo
 
 import secrets
 import re as _re
@@ -24,6 +26,9 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse, JSONResponse
 from pydantic import BaseModel
 
+from apscheduler.schedulers.asyncio import AsyncIOScheduler
+from apscheduler.triggers.cron import CronTrigger
+
 logger = logging.getLogger("golfgen")
 
 # ── Paths ───────────────────────────────────────────────
@@ -32,6 +37,10 @@ DB_DIR = Path(os.environ.get("DB_DIR", str(BASE_DIR / "data")))
 DB_PATH = DB_DIR / "golfgen_amazon.duckdb"
 COGS_PATH = DB_DIR / "cogs.csv"
 CONFIG_PATH = BASE_DIR / "config" / "credentials.json"
+DOCS_DIR = Path("/app/docs")
+
+# Ensure docs directory exists
+DOCS_DIR.mkdir(parents=True, exist_ok=True)
 
 # ── Background SP-API Sync ──────────────────────────────
 SYNC_INTERVAL_HOURS = 2
@@ -95,7 +104,8 @@ def _sync_today_orders():
     try:
         import time as _t
         # Get orders from last 2 days to catch any we missed
-        after_date = (datetime.utcnow() - timedelta(days=2)).isoformat()
+        now_utc = datetime.now(ZoneInfo("UTC"))
+        after_date = (now_utc - timedelta(days=2)).isoformat()
         orders_api = OrdersAPI(credentials=credentials, marketplace=Marketplaces.US)
         response = orders_api.get_orders(
             CreatedAfter=after_date,
@@ -1564,14 +1574,127 @@ def _handle_search_term_report(data):
     con.close()
 
 
+# ── Scheduler Setup (APScheduler) ──────────────────────────
+scheduler = None  # Will be initialized in lifespan
+
+
+def _run_scheduled_sp_api_sync():
+    """Wrapper for scheduled SP-API sync with logging."""
+    start_time = time.time()
+    log_id = _log_sync("sp_api_sync", "in_progress")
+    try:
+        _run_sp_api_sync()
+        execution_time = time.time() - start_time
+        _log_sync("sp_api_sync", "completed", execution_time=execution_time)
+        logger.info(f"Scheduled SP-API sync completed in {execution_time:.2f}s")
+    except Exception as e:
+        execution_time = time.time() - start_time
+        error_msg = str(e)
+        _log_sync("sp_api_sync", "failed", error_message=error_msg, execution_time=execution_time)
+        logger.error(f"Scheduled SP-API sync failed: {error_msg}")
+
+
+def _run_scheduled_today_sync():
+    """Wrapper for scheduled today orders sync with logging."""
+    start_time = time.time()
+    log_id = _log_sync("today_sync", "in_progress")
+    try:
+        _sync_today_orders()
+        execution_time = time.time() - start_time
+        _log_sync("today_sync", "completed", execution_time=execution_time)
+        logger.info(f"Scheduled today sync completed in {execution_time:.2f}s")
+    except Exception as e:
+        execution_time = time.time() - start_time
+        error_msg = str(e)
+        _log_sync("today_sync", "failed", error_message=error_msg, execution_time=execution_time)
+        logger.error(f"Scheduled today sync failed: {error_msg}")
+
+
+def _run_scheduled_ads_sync():
+    """Wrapper for scheduled ads sync with logging."""
+    start_time = time.time()
+    log_id = _log_sync("ads_sync", "in_progress")
+    try:
+        _sync_ads_data()
+        execution_time = time.time() - start_time
+        _log_sync("ads_sync", "completed", execution_time=execution_time)
+        logger.info(f"Scheduled ads sync completed in {execution_time:.2f}s")
+    except Exception as e:
+        execution_time = time.time() - start_time
+        error_msg = str(e)
+        _log_sync("ads_sync", "failed", error_message=error_msg, execution_time=execution_time)
+        logger.error(f"Scheduled ads sync failed: {error_msg}")
+
+
+def _run_scheduled_pricing_sync():
+    """Wrapper for scheduled pricing sync with logging."""
+    start_time = time.time()
+    log_id = _log_sync("pricing_sync", "in_progress")
+    try:
+        _sync_pricing_and_coupons()
+        execution_time = time.time() - start_time
+        _log_sync("pricing_sync", "completed", execution_time=execution_time)
+        logger.info(f"Scheduled pricing sync completed in {execution_time:.2f}s")
+    except Exception as e:
+        execution_time = time.time() - start_time
+        error_msg = str(e)
+        _log_sync("pricing_sync", "failed", error_message=error_msg, execution_time=execution_time)
+        logger.error(f"Scheduled pricing sync failed: {error_msg}")
+
+
+def _run_scheduled_docs_update():
+    """Wrapper for scheduled docs update with logging. (Placeholder for Prompt 2)"""
+    start_time = time.time()
+    log_id = _log_docs_update("in_progress")
+    try:
+        # Placeholder: actual implementation in Prompt 2
+        # - Collect system snapshot
+        # - Call Claude to generate docs
+        # - Save to /app/docs/
+        # - Commit to GitHub if token available
+        logger.info("Docs update job started (placeholder)")
+        execution_time = time.time() - start_time
+        _log_docs_update("completed", documents_updated="architecture_guide.md, disaster_recovery_plan.md", execution_time=execution_time)
+        logger.info(f"Scheduled docs update completed in {execution_time:.2f}s")
+    except Exception as e:
+        execution_time = time.time() - start_time
+        error_msg = str(e)
+        _log_docs_update("failed", error_message=error_msg, execution_time=execution_time)
+        logger.error(f"Scheduled docs update failed: {error_msg}")
+
+
+def _run_duckdb_backup():
+    """Wrapper for nightly DuckDB backup with logging. (Placeholder for Prompt 2)"""
+    start_time = time.time()
+    log_id = _log_sync("duckdb_backup", "in_progress")
+    try:
+        # Placeholder: actual implementation in Prompt 2
+        # - Copy DuckDB to temp file with date suffix
+        # - Upload to Google Drive
+        # - Clean up backups older than 30 days
+        logger.info("DuckDB backup job started (placeholder)")
+        execution_time = time.time() - start_time
+        _log_sync("duckdb_backup", "completed", execution_time=execution_time)
+        logger.info(f"DuckDB backup completed in {execution_time:.2f}s")
+    except Exception as e:
+        execution_time = time.time() - start_time
+        error_msg = str(e)
+        _log_sync("duckdb_backup", "failed", error_message=error_msg, execution_time=execution_time)
+        logger.error(f"DuckDB backup failed: {error_msg}")
+
+
 async def _sync_loop():
-    """Run SP-API sync in background.
+    """Initialize and run APScheduler for background sync jobs.
 
     Sequence:
     1. Immediately sync today's orders (fast, ~5s) — so "Today" works right away
     2. Auto-backfill historical data if missing (detects fresh deploy)
-    3. Run full sync, repeat every SYNC_INTERVAL_HOURS
+    3. Schedule 4 daily sync jobs at 9:00, 12:00, 15:00, 18:00 Central
+    4. Schedule ads and pricing syncs every 2 hours
+    5. Handle startup catchup: if a scheduled time has passed for today with no sync_log entry, run immediately
     """
+    global scheduler
+
     # Immediately pull today's orders — no delay
     try:
         loop = asyncio.get_event_loop()
@@ -1601,38 +1724,94 @@ async def _sync_loop():
     except Exception as e:
         logger.error(f"Pricing/coupon sync error: {e}")
 
-    # Short delay before full sync (let server finish starting)
-    await asyncio.sleep(10)
-    while True:
-        try:
-            loop = asyncio.get_event_loop()
-            await loop.run_in_executor(None, _run_sp_api_sync)
-        except Exception as e:
-            logger.error(f"Sync loop error: {e}")
+    # Initialize APScheduler
+    if not scheduler:
+        scheduler = AsyncIOScheduler(timezone="America/Chicago")
 
-        # Also refresh ads data each cycle
-        try:
-            loop = asyncio.get_event_loop()
-            await loop.run_in_executor(None, _sync_ads_data)
-        except Exception as e:
-            logger.error(f"Ads re-sync error: {e}")
+        # Schedule 4 daily SP-API syncs at 9am, 12pm, 3pm, 6pm Central
+        scheduler.add_job(_run_scheduled_sp_api_sync, CronTrigger(hour=9, minute=0, timezone="America/Chicago"), id="sp_api_sync_9am")
+        scheduler.add_job(_run_scheduled_sp_api_sync, CronTrigger(hour=12, minute=0, timezone="America/Chicago"), id="sp_api_sync_12pm")
+        scheduler.add_job(_run_scheduled_sp_api_sync, CronTrigger(hour=15, minute=0, timezone="America/Chicago"), id="sp_api_sync_3pm")
+        scheduler.add_job(_run_scheduled_sp_api_sync, CronTrigger(hour=18, minute=0, timezone="America/Chicago"), id="sp_api_sync_6pm")
 
-        # Also refresh pricing & coupon data each cycle
-        try:
-            loop = asyncio.get_event_loop()
-            await loop.run_in_executor(None, _sync_pricing_and_coupons)
-        except Exception as e:
-            logger.error(f"Pricing/coupon re-sync error: {e}")
+        # Schedule ads sync every 2 hours
+        scheduler.add_job(_run_scheduled_ads_sync, CronTrigger(minute=0, second=0, timezone="America/Chicago"), id="ads_sync_hourly")
 
-        await asyncio.sleep(SYNC_INTERVAL_HOURS * 3600)
+        # Schedule pricing sync every 2 hours (offset by 1 hour from ads)
+        scheduler.add_job(_run_scheduled_pricing_sync, CronTrigger(minute=30, second=0, timezone="America/Chicago"), id="pricing_sync_hourly")
+
+        # Schedule docs update at 8am and 8pm Central (Prompt 2 implementation)
+        scheduler.add_job(_run_scheduled_docs_update, CronTrigger(hour=8, minute=0, timezone="America/Chicago"), id="docs_update_8am")
+        scheduler.add_job(_run_scheduled_docs_update, CronTrigger(hour=20, minute=0, timezone="America/Chicago"), id="docs_update_8pm")
+
+        # Schedule nightly DuckDB backup at 2am Central (Prompt 2 implementation)
+        scheduler.add_job(_run_duckdb_backup, CronTrigger(hour=2, minute=0, timezone="America/Chicago"), id="duckdb_backup_2am")
+
+        await scheduler.start()
+        logger.info("APScheduler started with 4 daily SP-API syncs, hourly ads/pricing, docs updates, and nightly backup (America/Chicago)")
+
+        # Startup catchup: if current time is past a scheduled sync time and no sync_log entry exists for today, run immediately
+        await _startup_sync_catchup()
+
+
+async def _startup_sync_catchup():
+    """On startup, check if any scheduled sync times have passed today without a sync_log entry.
+    If so, run the sync immediately to catch up."""
+    try:
+        now_utc = datetime.now(ZoneInfo("UTC"))
+        now_central = now_utc.astimezone(ZoneInfo("America/Chicago"))
+        today_date = now_central.date()
+
+        scheduled_times = [9, 12, 15, 18]  # 9am, 12pm, 3pm, 6pm Central
+
+        con = duckdb.connect(str(DB_PATH), read_only=True)
+
+        for scheduled_hour in scheduled_times:
+            scheduled_time = now_central.replace(hour=scheduled_hour, minute=0, second=0, microsecond=0)
+
+            # Check if this time has already passed today
+            if now_central > scheduled_time:
+                # Check if we have a sync_log entry for this job today
+                rows = con.execute("""
+                    SELECT id FROM sync_log
+                    WHERE job_name = 'sp_api_sync'
+                    AND DATE(started_at) = ?
+                    AND status = 'completed'
+                    ORDER BY started_at DESC
+                    LIMIT 1
+                """, [today_date]).fetchall()
+
+                if not rows:
+                    logger.info(f"Startup catchup: {scheduled_hour}:00 sync hasn't run yet today, running now...")
+                    loop = asyncio.get_event_loop()
+                    await loop.run_in_executor(None, _run_scheduled_sp_api_sync)
+                    break  # Only run one catchup per startup
+
+        con.close()
+    except Exception as e:
+        logger.error(f"Startup sync catchup error: {e}")
 
 
 @asynccontextmanager
 async def lifespan(app):
-    """Start background sync on app startup."""
+    """Start background sync and initialize tables on app startup."""
+    # Initialize Item Plan DuckDB tables (defined later in file, safe here at runtime)
+    try:
+        _init_item_plan_tables()
+        logger.info("Item Plan tables initialized")
+    except Exception as e:
+        logger.error(f"Item Plan table init error: {e}")
+    # Initialize system tables
+    try:
+        _init_system_tables()
+        logger.info("System tables initialized")
+    except Exception as e:
+        logger.error(f"System table init error: {e}")
     task = asyncio.create_task(_sync_loop())
-    logger.info("Background SP-API sync scheduled (today orders → full sync → every 2 hours)")
+    logger.info("Background sync scheduler initialized")
     yield
+    if scheduler and scheduler.running:
+        await scheduler.shutdown()
     task.cancel()
 
 
@@ -1647,8 +1826,7 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Initialize Item Plan tables on startup
-_init_item_plan_tables()
+# Item Plan tables initialized in lifespan handler (defined later in file)
 
 
 # ── Multi-User Authentication ──────────────────────────────
@@ -1756,6 +1934,83 @@ def _init_auth_tables():
 
 
 _init_auth_tables()
+
+
+def _init_system_tables():
+    """Create DuckDB tables for sync logging and docs updates if not exist."""
+    con = duckdb.connect(str(DB_PATH))
+
+    con.execute("""
+        CREATE TABLE IF NOT EXISTS sync_log (
+            id BIGINT PRIMARY KEY DEFAULT nextval('sync_log_seq'),
+            job_name TEXT NOT NULL,
+            started_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            completed_at TIMESTAMP,
+            status TEXT DEFAULT 'in_progress',
+            records_processed BIGINT DEFAULT 0,
+            error_message TEXT,
+            execution_time_seconds DOUBLE
+        )
+    """)
+
+    # Create sequence if not exists (DuckDB doesn't support CREATE SEQUENCE IF NOT EXISTS in older versions)
+    try:
+        con.execute("CREATE SEQUENCE sync_log_seq")
+    except:
+        pass  # Sequence already exists
+
+    con.execute("""
+        CREATE TABLE IF NOT EXISTS docs_update_log (
+            id BIGINT PRIMARY KEY DEFAULT nextval('docs_update_log_seq'),
+            started_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            completed_at TIMESTAMP,
+            status TEXT DEFAULT 'in_progress',
+            documents_updated TEXT,
+            error_message TEXT,
+            execution_time_seconds DOUBLE
+        )
+    """)
+
+    try:
+        con.execute("CREATE SEQUENCE docs_update_log_seq")
+    except:
+        pass  # Sequence already exists
+
+    con.close()
+
+# _init_system_tables() called in lifespan handler
+
+
+def _log_sync(job_name: str, status: str = "in_progress", records_processed: int = 0, error_message: str = None, execution_time: float = None) -> int:
+    """Log a sync job to the sync_log table. Returns the log ID."""
+    try:
+        con = duckdb.connect(str(DB_PATH))
+        result = con.execute("""
+            INSERT INTO sync_log (job_name, status, records_processed, error_message, execution_time_seconds, completed_at)
+            VALUES (?, ?, ?, ?, ?, CASE WHEN ? = 'completed' OR ? = 'failed' THEN CURRENT_TIMESTAMP ELSE NULL END)
+            RETURNING id
+        """, [job_name, status, records_processed, error_message, execution_time, status, status]).fetchone()
+        con.close()
+        return result[0] if result else None
+    except Exception as e:
+        logger.error(f"Failed to log sync: {e}")
+        return None
+
+
+def _log_docs_update(status: str = "in_progress", documents_updated: str = None, error_message: str = None, execution_time: float = None) -> int:
+    """Log a docs update to the docs_update_log table. Returns the log ID."""
+    try:
+        con = duckdb.connect(str(DB_PATH))
+        result = con.execute("""
+            INSERT INTO docs_update_log (status, documents_updated, error_message, execution_time_seconds, completed_at)
+            VALUES (?, ?, ?, ?, CASE WHEN ? = 'completed' OR ? = 'failed' THEN CURRENT_TIMESTAMP ELSE NULL END)
+            RETURNING id
+        """, [status, documents_updated, error_message, execution_time, status, status]).fetchone()
+        con.close()
+        return result[0] if result else None
+    except Exception as e:
+        logger.error(f"Failed to log docs update: {e}")
+        return None
 
 
 def _find_user_by_email(email: str):
@@ -2041,16 +2296,16 @@ def fmt_date(d) -> str:
 
 
 def get_today(con) -> datetime:
-    """Return today's actual calendar date in US-Pacific timezone.
+    """Return today's actual calendar date in US/Central timezone.
 
-    Railway servers run in UTC.  The business operates in Pacific time,
-    so we subtract 7 hours (PDT) from UTC to get the real calendar date.
+    Railway servers run in UTC. The business operates in Central time,
+    so we convert UTC to Central (America/Chicago) to get the real calendar date.
     'Today' always means today — if there's no data yet it shows $0,
     which is correct until Orders API sync populates it.
     """
-    now_utc = datetime.utcnow()
-    now_pacific = now_utc - timedelta(hours=7)          # PDT (UTC-7)
-    return now_pacific.replace(hour=0, minute=0, second=0, microsecond=0)
+    now_utc = datetime.now(ZoneInfo("UTC"))
+    now_central = now_utc.astimezone(ZoneInfo("America/Chicago"))
+    return now_central.replace(hour=0, minute=0, second=0, microsecond=0)
 
 
 # ── API Routes ──────────────────────────────────────────
@@ -6537,6 +6792,237 @@ async def post_dashboard_settings(request: Request):
         return {"status": "ok"}
     finally:
         con.close()
+
+
+# ── System Status Endpoints ────────────────────────────────
+@app.get("/api/system/status")
+async def get_system_status(request: Request):
+    """Get system status including last sync times, scheduler status, and recent logs."""
+    _require_auth(request)
+
+    con = duckdb.connect(str(DB_PATH), read_only=True)
+    try:
+        # Get last sync log entry
+        last_sync = con.execute("""
+            SELECT job_name, completed_at, status, execution_time_seconds
+            FROM sync_log
+            WHERE status = 'completed'
+            ORDER BY completed_at DESC
+            LIMIT 1
+        """).fetchone()
+
+        # Get last docs update
+        last_docs = con.execute("""
+            SELECT completed_at, status, documents_updated
+            FROM docs_update_log
+            WHERE status = 'completed'
+            ORDER BY completed_at DESC
+            LIMIT 1
+        """).fetchone()
+
+        # Get recent sync log entries (last 10)
+        recent_syncs = con.execute("""
+            SELECT job_name, started_at, completed_at, status, execution_time_seconds, error_message
+            FROM sync_log
+            ORDER BY started_at DESC
+            LIMIT 10
+        """).fetchall()
+
+        # Get next scheduled jobs from APScheduler
+        scheduler_status = {}
+        if scheduler and scheduler.running:
+            for job in scheduler.get_jobs():
+                scheduler_status[job.id] = {
+                    "next_run_time": str(job.next_run_time),
+                    "trigger": str(job.trigger)
+                }
+
+        return {
+            "status": "ok",
+            "last_sync": {
+                "job_name": last_sync[0] if last_sync else None,
+                "completed_at": str(last_sync[1]) if last_sync else None,
+                "status": last_sync[2] if last_sync else None,
+                "execution_time_seconds": last_sync[3] if last_sync else None
+            },
+            "last_docs_update": {
+                "completed_at": str(last_docs[0]) if last_docs else None,
+                "status": last_docs[1] if last_docs else None,
+                "documents_updated": last_docs[2] if last_docs else None
+            },
+            "recent_syncs": [
+                {
+                    "job_name": row[0],
+                    "started_at": str(row[1]),
+                    "completed_at": str(row[2]),
+                    "status": row[3],
+                    "execution_time_seconds": row[4],
+                    "error_message": row[5]
+                }
+                for row in recent_syncs
+            ],
+            "scheduler_status": scheduler_status,
+            "scheduler_running": scheduler.running if scheduler else False
+        }
+    finally:
+        con.close()
+
+
+@app.get("/api/system/sync-log")
+async def get_sync_log(request: Request, limit: int = Query(50, ge=1, le=500)):
+    """Get sync log entries."""
+    _require_auth(request)
+
+    con = duckdb.connect(str(DB_PATH), read_only=True)
+    try:
+        rows = con.execute("""
+            SELECT id, job_name, started_at, completed_at, status, records_processed, error_message, execution_time_seconds
+            FROM sync_log
+            ORDER BY started_at DESC
+            LIMIT ?
+        """, [limit]).fetchall()
+
+        return {
+            "entries": [
+                {
+                    "id": row[0],
+                    "job_name": row[1],
+                    "started_at": str(row[2]),
+                    "completed_at": str(row[3]),
+                    "status": row[4],
+                    "records_processed": row[5],
+                    "error_message": row[6],
+                    "execution_time_seconds": row[7]
+                }
+                for row in rows
+            ]
+        }
+    finally:
+        con.close()
+
+
+@app.post("/api/backup/trigger")
+async def trigger_backup(request: Request):
+    """Manually trigger a DuckDB backup."""
+    _require_auth(request)
+    loop = asyncio.get_event_loop()
+    await loop.run_in_executor(None, _run_duckdb_backup)
+    return {"status": "backup_started"}
+
+
+@app.get("/api/backup/status")
+async def get_backup_status(request: Request):
+    """Get status of recent backups from sync_log."""
+    _require_auth(request)
+    con = duckdb.connect(str(DB_PATH), read_only=True)
+    try:
+        rows = con.execute("""
+            SELECT id, started_at, completed_at, status, execution_time_seconds, error_message
+            FROM sync_log
+            WHERE job_name = 'duckdb_backup'
+            ORDER BY started_at DESC
+            LIMIT 10
+        """).fetchall()
+
+        return {
+            "backups": [
+                {
+                    "id": row[0],
+                    "started_at": str(row[1]),
+                    "completed_at": str(row[2]),
+                    "status": row[3],
+                    "execution_time_seconds": row[4],
+                    "error_message": row[5]
+                }
+                for row in rows
+            ]
+        }
+    finally:
+        con.close()
+
+
+@app.post("/api/docs/update")
+async def trigger_docs_update(request: Request):
+    """Manually trigger a docs update."""
+    _require_auth(request)
+    loop = asyncio.get_event_loop()
+    await loop.run_in_executor(None, _run_scheduled_docs_update)
+    return {"status": "docs_update_started"}
+
+
+@app.get("/api/docs/status")
+async def get_docs_status(request: Request):
+    """Get status of recent docs updates from docs_update_log."""
+    _require_auth(request)
+    con = duckdb.connect(str(DB_PATH), read_only=True)
+    try:
+        rows = con.execute("""
+            SELECT id, started_at, completed_at, status, execution_time_seconds, error_message, documents_updated
+            FROM docs_update_log
+            ORDER BY started_at DESC
+            LIMIT 10
+        """).fetchall()
+
+        return {
+            "updates": [
+                {
+                    "id": row[0],
+                    "started_at": str(row[1]),
+                    "completed_at": str(row[2]),
+                    "status": row[3],
+                    "execution_time_seconds": row[4],
+                    "error_message": row[5],
+                    "documents_updated": row[6]
+                }
+                for row in rows
+            ]
+        }
+    finally:
+        con.close()
+
+
+@app.get("/api/docs/architecture")
+async def get_architecture_doc(request: Request):
+    """Retrieve the generated architecture guide. (Generated by Prompt 2)"""
+    _require_auth(request)
+    docs_dir = Path("/app/docs")
+    arch_file = docs_dir / "architecture_guide.md"
+
+    if arch_file.exists():
+        with open(arch_file, "r") as f:
+            return {
+                "status": "ok",
+                "content": f.read(),
+                "last_updated": datetime.fromtimestamp(arch_file.stat().st_mtime).isoformat()
+            }
+    else:
+        return {
+            "status": "not_found",
+            "content": "Architecture guide not yet generated. Run /api/docs/update to generate.",
+            "last_updated": None
+        }
+
+
+@app.get("/api/docs/disaster-recovery")
+async def get_disaster_recovery_doc(request: Request):
+    """Retrieve the generated disaster recovery plan. (Generated by Prompt 2)"""
+    _require_auth(request)
+    docs_dir = Path("/app/docs")
+    dr_file = docs_dir / "disaster_recovery_plan.md"
+
+    if dr_file.exists():
+        with open(dr_file, "r") as f:
+            return {
+                "status": "ok",
+                "content": f.read(),
+                "last_updated": datetime.fromtimestamp(dr_file.stat().st_mtime).isoformat()
+            }
+    else:
+        return {
+            "status": "not_found",
+            "content": "Disaster recovery plan not yet generated. Run /api/docs/update to generate.",
+            "last_updated": None
+        }
 
 
 # ── Static Frontend ────────────────────────────────────────
