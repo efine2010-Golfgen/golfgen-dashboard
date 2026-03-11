@@ -887,3 +887,74 @@ tr:hover td { background: var(--teal-bg); }
   .ip-kpi-grid { grid-template-columns: 1fr; }
   .ip-page { padding: 0 12px 24px; }
 }
+
+/* ── User Info / Permissions ──────────────────────────── */
+.user-info {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+.user-name {
+  font-size: 13px;
+  color: rgba(255,255,255,0.85);
+  font-weight: 500;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.admin-badge {
+  background: var(--gold);
+  color: var(--navy);
+  font-size: 10px;
+  font-weight: 700;
+  padding: 2px 6px;
+  border-radius: 4px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+.permissions-link {
+  font-size: 12px;
+  color: var(--teal);
+  text-decoration: none;
+  padding: 4px 10px;
+  border: 1px solid rgba(46,207,170,0.4);
+  border-radius: 6px;
+  transition: all 0.2s;
+}
+.permissions-link:hover {
+  background: rgba(46,207,170,0.15);
+  border-color: var(--teal);
+}
+
+/* ── Permission Toggle Buttons ────────────────────────── */
+.perm-toggle {
+  width: 32px;
+  height: 32px;
+  border-radius: 6px;
+  border: 2px solid;
+  font-size: 14px;
+  font-weight: 700;
+  cursor: pointer;
+  transition: all 0.15s;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+.perm-on {
+  background: var(--teal-light);
+  border-color: var(--teal);
+  color: var(--teal-dark);
+}
+.perm-on:hover {
+  background: var(--teal);
+  color: #fff;
+}
+.perm-off {
+  background: #fef2f2;
+  border-color: #f5c6cb;
+  color: #c00;
+}
+.perm-off:hover {
+  background: #fde8e8;
+  border-color: #e57373;
+}

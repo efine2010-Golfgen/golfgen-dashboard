@@ -2,6 +2,7 @@ import { useState } from "react";
 import { api } from "../lib/api";
 
 export default function Login({ onLogin }) {
+  const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
@@ -11,10 +12,10 @@ export default function Login({ onLogin }) {
     setError("");
     setLoading(true);
     try {
-      await api.login(password);
+      await api.login(email, password);
       onLogin();
     } catch {
-      setError("Invalid password. Please try again.");
+      setError("Invalid email or password.");
     } finally {
       setLoading(false);
     }
@@ -30,15 +31,25 @@ export default function Login({ onLogin }) {
         <p style={{ color: "var(--muted)", fontSize: 14, textAlign: "center", marginBottom: 24 }}>Dashboard Login</p>
         <form onSubmit={handleSubmit}>
           <input
+            type="email"
+            className="login-input"
+            placeholder="Email address"
+            value={email}
+            onChange={(e) => setEmail(e.target.value)}
+            autoFocus
+            autoComplete="email"
+          />
+          <input
             type="password"
             className="login-input"
-            placeholder="Enter password"
+            placeholder="Password"
             value={password}
             onChange={(e) => setPassword(e.target.value)}
-            autoFocus
+            style={{ marginTop: 12 }}
+            autoComplete="current-password"
           />
           {error && <div className="login-error">{error}</div>}
-          <button type="submit" className="login-btn" disabled={loading || !password}>
+          <button type="submit" className="login-btn" disabled={loading || !email || !password}>
             {loading ? "Signing in..." : "Sign In"}
           </button>
         </form>

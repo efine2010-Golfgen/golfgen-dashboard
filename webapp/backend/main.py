@@ -1648,49 +1648,261 @@ app.add_middleware(
 )
 
 
-# ── Authentication ─────────────────────────────────────────
-DASHBOARD_PASSWORD = os.environ.get("DASHBOARD_PASSWORD", "Golfgen2026")
-_sessions: set = set()
+# ── Multi-User Authentication ──────────────────────────────
+import bcrypt as _bcrypt
+
+# All dashboard tabs (tab_key -> display label)
+ALL_TABS = {
+    "dashboard": "Dashboard",
+    "products": "Products",
+    "profitability": "Profitability",
+    "advertising": "Advertising",
+    "inventory": "Amazon FBA",
+    "golfgen-inventory": "GolfGen Inventory",
+    "item-master": "Item Master",
+    "factory-po": "Factory PO",
+    "logistics": "OTW / Logistics",
+    "fba-shipments": "Shipments to FBA",
+    "item-planning": "Item Planning",
+}
+
+# Tab key -> list of API path prefixes that belong to that tab
+TAB_API_PREFIXES = {
+    "dashboard": ["/api/summary", "/api/daily", "/api/comparison", "/api/monthly-yoy", "/api/product-mix", "/api/color-mix"],
+    "products": ["/api/products", "/api/product/"],
+    "profitability": ["/api/pnl", "/api/profitability"],
+    "advertising": ["/api/ads/"],
+    "inventory": ["/api/inventory"],
+    "golfgen-inventory": ["/api/warehouse"],
+    "item-master": ["/api/item-master", "/api/pricing"],
+    "factory-po": ["/api/factory-po"],
+    "logistics": ["/api/logistics", "/api/supply-chain"],
+    "fba-shipments": ["/api/fba-shipments"],
+    "item-planning": ["/api/item-planning"],
+}
+
+USERS = {
+    "eric": {
+        "name": "Eric",
+        "emails": ["eric@golfgen.com", "eric@egbrands.com"],
+        "password_hash": "$2b$12$CXwF3gjnEyEPwej2qV9trem4AXZi4tUVR50ifvb2dUTiNVBhHAneu",
+        "role": "admin",
+    },
+    "ty": {
+        "name": "Ty",
+        "emails": ["ty@golfgen.com", "tysams@egbrands.com"],
+        "password_hash": "$2b$12$jurM2OMgL16XIFjNBQu3JeZsq.phyEea08ABqvNMIxZt3ZzgFBjs6",
+        "role": "staff",
+    },
+    "kim": {
+        "name": "Kim",
+        "emails": ["kim@golfgen.com", "kim@egbrands.com"],
+        "password_hash": "$2b$12$84EhMgFJ072dxgZ3ChICj.K.vwVRix2tDPGcb7uqMa3haswq8zdSK",
+        "role": "staff",
+    },
+    "ryan": {
+        "name": "Ryan",
+        "emails": ["ryan@golfgen.com", "ryan@egbrands.com"],
+        "password_hash": "$2b$12$oP6sxNocG4Hzrek3R/SU5eWUFR/EM3bqjZFf58RhgZHC35zuKLAEC",
+        "role": "staff",
+    },
+    "mckay": {
+        "name": "McKay",
+        "emails": ["riseecom21@gmail.com"],
+        "password_hash": "$2b$12$XvwYb1CZMG78FpD5AXy3FOT8WgiJhuBQyUg/tbgBmMrokA6z.LJya",
+        "role": "staff",
+    },
+}
+
+# Build email -> user_key lookup (case-insensitive)
+_EMAIL_TO_USER = {}
+for _ukey, _udata in USERS.items():
+    for _em in _udata["emails"]:
+        _EMAIL_TO_USER[_em.lower()] = _ukey
 
 
-class LoginRequest(BaseModel):
+def _init_auth_tables():
+    """Create DuckDB tables for sessions and permissions if not exist."""
+    con = duckdb.connect(str(DB_PATH))
+    con.execute("""
+        CREATE TABLE IF NOT EXISTS sessions (
+            token       TEXT PRIMARY KEY,
+            user_email  TEXT NOT NULL,
+            user_name   TEXT NOT NULL,
+            role        TEXT NOT NULL,
+            created_at  TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+    """)
+    con.execute("""
+        CREATE TABLE IF NOT EXISTS user_permissions (
+            user_name   TEXT NOT NULL,
+            tab_key     TEXT NOT NULL,
+            enabled     BOOLEAN DEFAULT TRUE,
+            PRIMARY KEY (user_name, tab_key)
+        )
+    """)
+    # Seed default permissions for staff users (all enabled)
+    for ukey, udata in USERS.items():
+        if udata["role"] == "staff":
+            for tab_key in ALL_TABS:
+                con.execute("""
+                    INSERT OR IGNORE INTO user_permissions (user_name, tab_key, enabled)
+                    VALUES (?, ?, TRUE)
+                """, [ukey, tab_key])
+    con.close()
+
+
+_init_auth_tables()
+
+
+def _find_user_by_email(email: str):
+    """Look up user key by email (case-insensitive)."""
+    return _EMAIL_TO_USER.get(email.lower().strip())
+
+
+def _get_session(token: str):
+    """Look up session from DuckDB. Returns dict or None."""
+    if not token:
+        return None
+    con = duckdb.connect(str(DB_PATH), read_only=True)
+    rows = con.execute("SELECT token, user_email, user_name, role FROM sessions WHERE token = ?", [token]).fetchall()
+    con.close()
+    if rows:
+        return {"token": rows[0][0], "user_email": rows[0][1], "user_name": rows[0][2], "role": rows[0][3]}
+    return None
+
+
+def _get_user_permissions(user_name: str):
+    """Return set of enabled tab_keys for a user."""
+    con = duckdb.connect(str(DB_PATH), read_only=True)
+    rows = con.execute("SELECT tab_key FROM user_permissions WHERE user_name = ? AND enabled = TRUE", [user_name]).fetchall()
+    con.close()
+    return {r[0] for r in rows}
+
+
+class MultiLoginRequest(BaseModel):
+    email: str
     password: str
 
 
 @app.post("/api/auth/login")
-def login(req: LoginRequest):
-    """Validate password and return a session token."""
-    if req.password == DASHBOARD_PASSWORD:
-        token = secrets.token_hex(32)
-        _sessions.add(token)
-        response = JSONResponse({"ok": True})
-        response.set_cookie(
-            key="golfgen_session",
-            value=token,
-            httponly=True,
-            samesite="lax",
-            max_age=60 * 60 * 24 * 7,  # 7 days
-        )
-        return response
-    raise HTTPException(status_code=401, detail="Invalid password")
+def login(req: MultiLoginRequest):
+    """Validate email + password and create a DuckDB session."""
+    user_key = _find_user_by_email(req.email)
+    if not user_key:
+        raise HTTPException(status_code=401, detail="Invalid email or password.")
+    user = USERS[user_key]
+    if not _bcrypt.checkpw(req.password.encode("utf-8"), user["password_hash"].encode("utf-8")):
+        raise HTTPException(status_code=401, detail="Invalid email or password.")
+    token = secrets.token_hex(32)
+    con = duckdb.connect(str(DB_PATH))
+    con.execute("INSERT INTO sessions (token, user_email, user_name, role) VALUES (?, ?, ?, ?)",
+                [token, req.email.lower().strip(), user["name"], user["role"]])
+    con.close()
+    response = JSONResponse({"ok": True, "name": user["name"], "role": user["role"]})
+    response.set_cookie(
+        key="golfgen_session",
+        value=token,
+        httponly=True,
+        samesite="none",
+        secure=True,
+        max_age=60 * 60 * 24 * 7,
+    )
+    return response
 
 
 @app.get("/api/auth/check")
 def auth_check(golfgen_session: Optional[str] = Cookie(None)):
     """Check if the current session is valid."""
-    if golfgen_session and golfgen_session in _sessions:
-        return {"authenticated": True}
+    sess = _get_session(golfgen_session)
+    if sess:
+        return {"authenticated": True, "name": sess["user_name"], "role": sess["role"]}
     raise HTTPException(status_code=401, detail="Not authenticated")
 
 
 @app.post("/api/auth/logout")
 def logout(golfgen_session: Optional[str] = Cookie(None)):
-    """Clear the session."""
+    """Clear the session from DuckDB."""
     if golfgen_session:
-        _sessions.discard(golfgen_session)
+        con = duckdb.connect(str(DB_PATH))
+        con.execute("DELETE FROM sessions WHERE token = ?", [golfgen_session])
+        con.close()
     response = JSONResponse({"ok": True})
     response.delete_cookie("golfgen_session")
     return response
+
+
+@app.get("/api/me")
+def get_me(request: Request):
+    """Return current user info."""
+    sess = _get_session(request.cookies.get("golfgen_session"))
+    if not sess:
+        raise HTTPException(status_code=401, detail="Not authenticated")
+    return {"name": sess["user_name"], "email": sess["user_email"], "role": sess["role"]}
+
+
+@app.get("/api/permissions/me")
+def get_my_permissions(request: Request):
+    """Return list of tab keys the current user can access."""
+    sess = _get_session(request.cookies.get("golfgen_session"))
+    if not sess:
+        raise HTTPException(status_code=401, detail="Not authenticated")
+    if sess["role"] == "admin":
+        return {"tabs": list(ALL_TABS.keys()), "role": "admin", "allTabs": ALL_TABS}
+    user_key = _find_user_by_email(sess["user_email"])
+    if not user_key:
+        return {"tabs": list(ALL_TABS.keys()), "role": sess["role"], "allTabs": ALL_TABS}
+    enabled = _get_user_permissions(user_key)
+    return {"tabs": [t for t in ALL_TABS if t in enabled], "role": sess["role"], "allTabs": ALL_TABS}
+
+
+@app.get("/api/permissions")
+def get_all_permissions(request: Request):
+    """Admin only: return full permissions grid."""
+    sess = _get_session(request.cookies.get("golfgen_session"))
+    if not sess or sess["role"] != "admin":
+        raise HTTPException(status_code=403, detail="Admin access required")
+    con = duckdb.connect(str(DB_PATH), read_only=True)
+    rows = con.execute("SELECT user_name, tab_key, enabled FROM user_permissions ORDER BY user_name, tab_key").fetchall()
+    con.close()
+    grid = {}
+    for user_name, tab_key, enabled in rows:
+        if user_name not in grid:
+            grid[user_name] = {}
+        grid[user_name][tab_key] = enabled
+    # Include user display names
+    users_list = []
+    for ukey, udata in USERS.items():
+        if udata["role"] == "staff":
+            users_list.append({
+                "key": ukey, "name": udata["name"],
+                "emails": udata["emails"],
+                "permissions": grid.get(ukey, {}),
+            })
+    return {"users": users_list, "allTabs": ALL_TABS}
+
+
+class PermissionUpdate(BaseModel):
+    user: str
+    tab: str
+    enabled: bool
+
+
+@app.post("/api/permissions")
+def update_permission(req: PermissionUpdate, request: Request):
+    """Admin only: update one toggle."""
+    sess = _get_session(request.cookies.get("golfgen_session"))
+    if not sess or sess["role"] != "admin":
+        raise HTTPException(status_code=403, detail="Admin access required")
+    if req.user not in USERS or req.tab not in ALL_TABS:
+        raise HTTPException(status_code=400, detail="Invalid user or tab")
+    con = duckdb.connect(str(DB_PATH))
+    # Upsert
+    con.execute("DELETE FROM user_permissions WHERE user_name = ? AND tab_key = ?", [req.user, req.tab])
+    con.execute("INSERT INTO user_permissions (user_name, tab_key, enabled) VALUES (?, ?, ?)",
+                [req.user, req.tab, req.enabled])
+    con.close()
+    return {"ok": True}
 
 
 # ── Helpers ─────────────────────────────────────────────
@@ -1698,8 +1910,68 @@ def logout(golfgen_session: Optional[str] = Cookie(None)):
 def _require_auth(request: Request):
     """Validate session cookie or raise 401."""
     token = request.cookies.get("golfgen_session")
-    if not token or token not in _sessions:
+    sess = _get_session(token)
+    if not sess:
         raise HTTPException(status_code=401, detail="Not authenticated")
+    return sess
+
+
+def _require_tab_access(request: Request, tab_key: str):
+    """Validate session + tab permission. Returns session dict."""
+    sess = _require_auth(request)
+    if sess["role"] == "admin":
+        return sess
+    user_key = _find_user_by_email(sess["user_email"])
+    if user_key:
+        enabled = _get_user_permissions(user_key)
+        if tab_key not in enabled:
+            raise HTTPException(status_code=403, detail="You do not have access to this page")
+    return sess
+
+
+def _tab_key_for_path(path: str):
+    """Return the tab_key for a given API path, or None if not tab-gated."""
+    for tab_key, prefixes in TAB_API_PREFIXES.items():
+        for prefix in prefixes:
+            if path == prefix or path.startswith(prefix + "/") or path.startswith(prefix + "?"):
+                return tab_key
+    return None
+
+
+@app.middleware("http")
+async def tab_permission_middleware(request: Request, call_next):
+    """Enforce tab-based permissions on all /api/* data endpoints."""
+    path = request.url.path
+    # Skip auth endpoints, health, sync, debug, and static files
+    if (not path.startswith("/api/") or
+        path.startswith("/api/auth/") or
+        path.startswith("/api/me") or
+        path.startswith("/api/permissions") or
+        path in ("/api/health", "/api/sync", "/api/backfill") or
+        path.startswith("/api/debug/")):
+        return await call_next(request)
+
+    tab_key = _tab_key_for_path(path)
+    if tab_key is None:
+        # Not a tab-gated endpoint, still require auth
+        token = request.cookies.get("golfgen_session")
+        sess = _get_session(token)
+        if not sess:
+            return JSONResponse(status_code=401, content={"detail": "Not authenticated"})
+        return await call_next(request)
+
+    # Tab-gated endpoint: check session + permissions
+    token = request.cookies.get("golfgen_session")
+    sess = _get_session(token)
+    if not sess:
+        return JSONResponse(status_code=401, content={"detail": "Not authenticated"})
+    if sess["role"] != "admin":
+        user_key = _find_user_by_email(sess["user_email"])
+        if user_key:
+            enabled = _get_user_permissions(user_key)
+            if tab_key not in enabled:
+                return JSONResponse(status_code=403, content={"detail": "You do not have access to this page"})
+    return await call_next(request)
 
 
 def get_db():

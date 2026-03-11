@@ -8,16 +8,26 @@ async function fetchJSON(path) {
 
 export const api = {
   // Auth
-  login: (password) =>
+  login: (email, password) =>
     fetch(`${API_BASE}/api/auth/login`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ password }),
+      body: JSON.stringify({ email, password }),
       credentials: "include",
     }).then(r => { if (!r.ok) throw new Error("Login failed"); return r.json(); }),
   authCheck: () => fetchJSON("/api/auth/check"),
   logout: () =>
     fetch(`${API_BASE}/api/auth/logout`, { method: "POST", credentials: "include" }).then(r => r.json()),
+  me: () => fetchJSON("/api/me"),
+  myPermissions: () => fetchJSON("/api/permissions/me"),
+  allPermissions: () => fetchJSON("/api/permissions"),
+  updatePermission: (user, tab, enabled) =>
+    fetch(`${API_BASE}/api/permissions`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ user, tab, enabled }),
+      credentials: "include",
+    }).then(r => { if (!r.ok) throw new Error("Permission update failed"); return r.json(); }),
 
   // Existing endpoints
   summary: (days = 365) => fetchJSON(`/api/summary?days=${days}`),

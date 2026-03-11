@@ -1,5 +1,5 @@
 import { useState, useEffect } from "react";
-import { BrowserRouter, Routes, Route, NavLink, useLocation } from "react-router-dom";
+import { BrowserRouter, Routes, Route, NavLink, useLocation, Navigate } from "react-router-dom";
 import { api } from "./lib/api";
 import Login from "./pages/Login";
 import Dashboard from "./pages/Dashboard";
@@ -13,74 +13,99 @@ import FactoryPO from "./pages/FactoryPO";
 import LogisticsTracking from "./pages/LogisticsTracking";
 import ItemPlanning from "./pages/ItemPlanning";
 import FBAShipments from "./pages/FBAShipments";
+import Permissions from "./pages/Permissions";
 import "./App.css";
 
-const ANALYTICS_PATHS = ["/", "/products", "/profitability", "/advertising"];
-const LOGISTICS_PATHS = ["/inventory", "/golfgen-inventory", "/item-master", "/factory-po", "/logistics", "/fba-shipments", "/item-planning"];
+/* ── Tab definitions keyed by tab_key matching backend ALL_TABS ── */
+const ANALYTICS_TABS = [
+  { key: "dashboard", path: "/", label: "Dashboard", icon: "📊", end: true },
+  { key: "products", path: "/products", label: "Products", icon: "📦" },
+  { key: "profitability", path: "/profitability", label: "Profitability", icon: "💰" },
+  { key: "advertising", path: "/advertising", label: "Advertising", icon: "📣" },
+];
 
-function NavBars() {
+const LOGISTICS_TABS = [
+  { key: "inventory", path: "/inventory", label: "Amazon FBA", icon: "🏭" },
+  { key: "golfgen-inventory", path: "/golfgen-inventory", label: "GolfGen Inventory", icon: "📦" },
+  { key: "item-master", path: "/item-master", label: "Item Master", icon: "📋" },
+  { key: "factory-po", path: "/factory-po", label: "Factory PO", icon: "🏭" },
+  { key: "logistics", path: "/logistics", label: "OTW / Logistics", icon: "🚢" },
+  { key: "fba-shipments", path: "/fba-shipments", label: "Shipments to FBA", icon: "📦" },
+  { key: "item-planning", path: "/item-planning", label: "Item Planning", icon: "📋" },
+];
+
+const LOGISTICS_PATHS = LOGISTICS_TABS.map(t => t.path);
+
+function NavBars({ permissions }) {
   const location = useLocation();
   const path = location.pathname;
   const isLogistics = LOGISTICS_PATHS.some(p => path === p || path.startsWith(p + "/"));
 
+  // Filter tabs based on permissions (allowed object: { tab_key: true/false })
+  const allowed = permissions || {};
+  const visibleAnalytics = ANALYTICS_TABS.filter(t => allowed[t.key] !== false);
+  const visibleLogistics = LOGISTICS_TABS.filter(t => allowed[t.key] !== false);
+
   return (
     <>
-      {/* ── Row 1: Analytics ── */}
-      <nav className={`nav-bar ${!isLogistics ? "" : "nav-bar-inactive"}`}>
-        <div className="nav-inner">
-          <div className="nav-section-label">Analytics</div>
-          <NavLink to="/" end className={({ isActive }) => isActive ? "nav-tab active" : "nav-tab"}>
-            <span>📊</span> Dashboard
-          </NavLink>
-          <NavLink to="/products" className={({ isActive }) => isActive ? "nav-tab active" : "nav-tab"}>
-            <span>📦</span> Products
-          </NavLink>
-          <NavLink to="/profitability" className={({ isActive }) => isActive ? "nav-tab active" : "nav-tab"}>
-            <span>💰</span> Profitability
-          </NavLink>
-          <NavLink to="/advertising" className={({ isActive }) => isActive ? "nav-tab active" : "nav-tab"}>
-            <span>📣</span> Advertising
-          </NavLink>
-        </div>
-      </nav>
+      {visibleAnalytics.length > 0 && (
+        <nav className={`nav-bar ${!isLogistics ? "" : "nav-bar-inactive"}`}>
+          <div className="nav-inner">
+            <div className="nav-section-label">Analytics</div>
+            {visibleAnalytics.map(t => (
+              <NavLink key={t.key} to={t.path} end={t.end} className={({ isActive }) => isActive ? "nav-tab active" : "nav-tab"}>
+                <span>{t.icon}</span> {t.label}
+              </NavLink>
+            ))}
+          </div>
+        </nav>
+      )}
 
-      {/* ── Row 2: Logistics & Inventory ── */}
-      <nav className={`nav-bar nav-bar-logistics ${isLogistics ? "" : "nav-bar-inactive"}`}>
-        <div className="nav-inner">
-          <div className="nav-section-label">Logistics &amp; Inventory</div>
-          <NavLink to="/inventory" className={({ isActive }) => isActive ? "nav-tab active" : "nav-tab"}>
-            <span>🏭</span> Amazon FBA
-          </NavLink>
-          <NavLink to="/golfgen-inventory" className={({ isActive }) => isActive ? "nav-tab active" : "nav-tab"}>
-            <span>📦</span> GolfGen Inventory
-          </NavLink>
-          <NavLink to="/item-master" className={({ isActive }) => isActive ? "nav-tab active" : "nav-tab"}>
-            <span>📋</span> Item Master
-          </NavLink>
-          <NavLink to="/factory-po" className={({ isActive }) => isActive ? "nav-tab active" : "nav-tab"}>
-            <span>🏭</span> Factory PO
-          </NavLink>
-          <NavLink to="/logistics" className={({ isActive }) => isActive ? "nav-tab active" : "nav-tab"}>
-            <span>🚢</span> OTW / Logistics
-          </NavLink>
-          <NavLink to="/fba-shipments" className={({ isActive }) => isActive ? "nav-tab active" : "nav-tab"}>
-            <span>📦</span> Shipments to FBA
-          </NavLink>
-          <NavLink to="/item-planning" className={({ isActive }) => isActive ? "nav-tab active" : "nav-tab"}>
-            <span>📋</span> Item Planning
-          </NavLink>
-        </div>
-      </nav>
+      {visibleLogistics.length > 0 && (
+        <nav className={`nav-bar nav-bar-logistics ${isLogistics ? "" : "nav-bar-inactive"}`}>
+          <div className="nav-inner">
+            <div className="nav-section-label">Logistics &amp; Inventory</div>
+            {visibleLogistics.map(t => (
+              <NavLink key={t.key} to={t.path} className={({ isActive }) => isActive ? "nav-tab active" : "nav-tab"}>
+                <span>{t.icon}</span> {t.label}
+              </NavLink>
+            ))}
+          </div>
+        </nav>
+      )}
     </>
   );
 }
 
 export default function App() {
   const [authed, setAuthed] = useState(null); // null = checking, true/false
+  const [user, setUser] = useState(null);     // { name, email, role }
+  const [permissions, setPermissions] = useState(null); // { tab_key: true/false }
+
+  const loadUserData = async () => {
+    try {
+      const [meData, permData] = await Promise.all([api.me(), api.myPermissions()]);
+      setUser(meData);
+      // permData.tabs is an array of allowed tab keys; convert to { key: true } map
+      // For admins, all tabs are allowed
+      const tabList = permData.tabs || [];
+      const allTabs = permData.allTabs || {};
+      const permMap = {};
+      for (const k of Object.keys(allTabs)) {
+        permMap[k] = tabList.includes(k);
+      }
+      setPermissions(permMap);
+      setAuthed(true);
+    } catch {
+      setAuthed(false);
+      setUser(null);
+      setPermissions(null);
+    }
+  };
 
   useEffect(() => {
     api.authCheck()
-      .then(() => setAuthed(true))
+      .then(() => loadUserData())
       .catch(() => setAuthed(false));
   }, []);
 
@@ -89,13 +114,18 @@ export default function App() {
   }
 
   if (!authed) {
-    return <Login onLogin={() => setAuthed(true)} />;
+    return <Login onLogin={() => loadUserData()} />;
   }
 
   const handleLogout = async () => {
     await api.logout();
     setAuthed(false);
+    setUser(null);
+    setPermissions(null);
   };
+
+  const isAdmin = user?.role === "admin";
+  const allowed = permissions || {};
 
   return (
     <BrowserRouter>
@@ -116,29 +146,37 @@ export default function App() {
                 <p>PGA TOUR Licensed &bull; SP-API Analytics</p>
               </div>
               <span className="live-badge">LIVE DATA</span>
-              <button className="logout-btn" onClick={handleLogout}>Sign Out</button>
+              <div className="user-info">
+                {user && <span className="user-name">{user.name}{isAdmin && <span className="admin-badge">Admin</span>}</span>}
+                {isAdmin && (
+                  <NavLink to="/permissions" className="permissions-link">Permissions</NavLink>
+                )}
+                <button className="logout-btn" onClick={handleLogout}>Sign Out</button>
+              </div>
             </div>
           </div>
           <div className="gradient-bar" />
         </header>
 
         {/* ── Navigation Tabs (Two Rows) ── */}
-        <NavBars />
+        <NavBars permissions={allowed} />
 
         {/* ── Main Content ── */}
         <main className="main-content">
           <Routes>
-            <Route path="/" element={<Dashboard />} />
-            <Route path="/products" element={<Products />} />
-            <Route path="/profitability" element={<Profitability />} />
-            <Route path="/inventory" element={<Inventory />} />
-            <Route path="/golfgen-inventory" element={<GolfGenInventory />} />
-            <Route path="/advertising" element={<Advertising />} />
-            <Route path="/item-master" element={<ItemMaster />} />
-            <Route path="/factory-po" element={<FactoryPO />} />
-            <Route path="/logistics" element={<LogisticsTracking />} />
-            <Route path="/fba-shipments" element={<FBAShipments />} />
-            <Route path="/item-planning" element={<ItemPlanning />} />
+            {allowed["dashboard"] !== false && <Route path="/" element={<Dashboard />} />}
+            {allowed["products"] !== false && <Route path="/products" element={<Products />} />}
+            {allowed["profitability"] !== false && <Route path="/profitability" element={<Profitability />} />}
+            {allowed["inventory"] !== false && <Route path="/inventory" element={<Inventory />} />}
+            {allowed["golfgen-inventory"] !== false && <Route path="/golfgen-inventory" element={<GolfGenInventory />} />}
+            {allowed["advertising"] !== false && <Route path="/advertising" element={<Advertising />} />}
+            {allowed["item-master"] !== false && <Route path="/item-master" element={<ItemMaster />} />}
+            {allowed["factory-po"] !== false && <Route path="/factory-po" element={<FactoryPO />} />}
+            {allowed["logistics"] !== false && <Route path="/logistics" element={<LogisticsTracking />} />}
+            {allowed["fba-shipments"] !== false && <Route path="/fba-shipments" element={<FBAShipments />} />}
+            {allowed["item-planning"] !== false && <Route path="/item-planning" element={<ItemPlanning />} />}
+            {isAdmin && <Route path="/permissions" element={<Permissions />} />}
+            <Route path="*" element={<Navigate to="/" replace />} />
           </Routes>
         </main>
       </div>
