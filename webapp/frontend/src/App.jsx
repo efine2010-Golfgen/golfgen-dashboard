@@ -11,10 +11,11 @@ import Advertising from "./pages/Advertising";
 import ItemMaster from "./pages/ItemMaster";
 import FactoryPO from "./pages/FactoryPO";
 import LogisticsTracking from "./pages/LogisticsTracking";
+import ItemPlanning from "./pages/ItemPlanning";
 import "./App.css";
 
 const ANALYTICS_PATHS = ["/", "/products", "/profitability", "/advertising"];
-const LOGISTICS_PATHS = ["/inventory", "/golfgen-inventory", "/item-master", "/factory-po", "/logistics"];
+const LOGISTICS_PATHS = ["/inventory", "/golfgen-inventory", "/item-master", "/factory-po", "/logistics", "/item-planning"];
 
 function NavBars() {
   const location = useLocation();
@@ -60,6 +61,9 @@ function NavBars() {
           </NavLink>
           <NavLink to="/logistics" className={({ isActive }) => isActive ? "nav-tab active" : "nav-tab"}>
             <span>🚢</span> OTW / Logistics
+          </NavLink>
+          <NavLink to="/item-planning" className={({ isActive }) => isActive ? "nav-tab active" : "nav-tab"}>
+            <span>📋</span> Item Planning
           </NavLink>
         </div>
       </nav>
@@ -129,6 +133,7 @@ export default function App() {
             <Route path="/item-master" element={<ItemMaster />} />
             <Route path="/factory-po" element={<FactoryPO />} />
             <Route path="/logistics" element={<LogisticsTracking />} />
+            <Route path="/item-planning" element={<ItemPlanning />} />
           </Routes>
         </main>
       </div>

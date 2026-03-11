@@ -4876,6 +4876,225 @@ async def upload_logistics(request: Request, file: UploadFile = File(...)):
     return {"status": "ok", "shipments": len(shipments), "items": len(items), "lastUpload": data["lastUpload"]}
 
 
+# ── Item Planning ─────────────────────────────────────────
+
+_ITEM_PLANNING_PATH = DATA_DIR / "item_planning.json"
+_RAW_PRODUCT_SALES_PATH = DATA_DIR / "raw_product_sales.json"
+_RAW_DAILY_DATA_PATH = DATA_DIR / "raw_daily_data.json"
+_ITEM_PLANNING_OVERRIDES_PATH = DATA_DIR / "item_planning_overrides.json"
+
+def _load_item_planning():
+    if _ITEM_PLANNING_PATH.exists():
+        return json.loads(_ITEM_PLANNING_PATH.read_text())
+    return {"kpis": [], "sections": {}, "itemPlans": [], "lastUpload": None}
+
+def _save_item_planning(data):
+    _ITEM_PLANNING_PATH.write_text(json.dumps(data, indent=2, default=str))
+
+def _load_overrides():
+    if _ITEM_PLANNING_OVERRIDES_PATH.exists():
+        return json.loads(_ITEM_PLANNING_OVERRIDES_PATH.read_text())
+    return {}
+
+def _save_overrides(data):
+    _ITEM_PLANNING_OVERRIDES_PATH.write_text(json.dumps(data, indent=2, default=str))
+
+def _load_raw_product_sales():
+    if _RAW_PRODUCT_SALES_PATH.exists():
+        return json.loads(_RAW_PRODUCT_SALES_PATH.read_text())
+    return {"products": []}
+
+def _load_raw_daily_data():
+    if _RAW_DAILY_DATA_PATH.exists():
+        return json.loads(_RAW_DAILY_DATA_PATH.read_text())
+    return {"daily": []}
+
+@app.get("/api/item-planning")
+async def get_item_planning():
+    data = _load_item_planning()
+    overrides = _load_overrides()
+    data["overrides"] = overrides
+    return data
+
+@app.get("/api/item-planning/raw-product-sales")
+async def get_raw_product_sales():
+    return _load_raw_product_sales()
+
+@app.get("/api/item-planning/raw-daily-data")
+async def get_raw_daily_data():
+    return _load_raw_daily_data()
+
+@app.post("/api/item-planning/override")
+async def save_item_override(request: Request):
+    """Save an override for a specific item's field"""
+    body = await request.json()
+    sku = body.get("sku", "")
+    field = body.get("field", "")
+    values = body.get("values", {})
+    overrides = _load_overrides()
+    if sku not in overrides:
+        overrides[sku] = {}
+    overrides[sku][field] = values
+    _save_overrides(overrides)
+    return {"status": "ok"}
+
+@app.post("/api/item-planning/upload")
+async def upload_item_planning(file: UploadFile = File(...)):
+    """Upload updated Amazon Ladder Plan Excel"""
+    import openpyxl
+    from io import BytesIO
+    from datetime import date as _date
+    contents = await file.read()
+    wb = openpyxl.load_workbook(BytesIO(contents), data_only=True)
+
+    def safe_num(v, decimals=2):
+        if v is None: return 0
+        try: return round(float(v), decimals)
+        except: return 0
+
+    months = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec","Jan27"]
+
+    # === KPIs ===
+    ws = wb["Executive Summary"]
+    kpis = []
+    for r in range(6, 14):
+        name = ws.cell(r, 1).value
+        if name:
+            kpis.append({
+                "metric": str(name),
+                "tyPlan": safe_num(ws.cell(r, 2).value, 2),
+                "lyActual": safe_num(ws.cell(r, 3).value, 2),
+                "vsLyPct": safe_num(ws.cell(r, 4).value, 4),
+                "llyActual": safe_num(ws.cell(r, 5).value, 2),
+                "vsLlyPct": safe_num(ws.cell(r, 6).value, 4)
+            })
+
+    # === Sections ===
+    def read_section(start_row, end_row):
+        items = []
+        current_category = None
+        for r in range(start_row + 2, end_row + 1):
+            a = ws.cell(r, 1).value
+            b = ws.cell(r, 2).value
+            if b is None: continue
+            b_str = str(b)
+            if a is None and b_str in ["GREEN","RED","BLUE","ORANGE","ACCESSORIES","INDIVIDUAL CLUBS"]:
+                current_category = b_str; continue
+            if "Total" in b_str:
+                t = "grandTotal" if "GRAND" in b_str else "categoryTotal"
+                items.append({"type": t, "category": current_category, "name": b_str,
+                    "monthly": {months[i]: safe_num(ws.cell(r, 4+i).value) for i in range(13)},
+                    "fyTotal": safe_num(ws.cell(r, 17).value)})
+                continue
+            sku = ws.cell(r, 3).value
+            if sku:
+                items.append({"type": "item", "index": safe_num(a, 0), "name": b_str, "sku": str(sku),
+                    "category": current_category,
+                    "monthly": {months[i]: safe_num(ws.cell(r, 4+i).value) for i in range(13)},
+                    "fyTotal": safe_num(ws.cell(r, 17).value)})
+        return items
+
+    sections = {
+        "salesUnits": read_section(17, 65), "revenue": read_section(67, 115),
+        "grossProfit": read_section(117, 165), "shipments": read_section(167, 215),
+        "returns": read_section(217, 270)
+    }
+
+    # === Per-item plans ===
+    utility_tabs = ["Executive Summary","Item Master","Sales Planning","Warehouse Inventory",
+        "Factory On Order","LY Sales Data","Raw Warehouse Data","Raw Daily Dashboard","Raw Product Sales"]
+    item_tabs = [s for s in wb.sheetnames if s not in utility_tabs]
+
+    item_plans = []
+    row_map = {
+        "tyPlanUnits": 5, "tyOverrideUnits": 6, "lyUnits": 7, "llyUnits": 8, "tyVsLyUnitsPct": 9,
+        "tyPlanRevenue": 12, "tyProjectedRevenue": 13, "lyRevenue": 14, "llyRevenue": 15, "tyVsLyRevPct": 16,
+        "tyAUR": 18, "tyAUROverride": 19, "lyAUR": 20, "llyAUR": 21,
+        "tyPlanGrossProfit": 24, "lyGrossProfit": 25, "llyGrossProfit": 26, "tyVsLyProfitPct": 27,
+        "lyProfitMarginPct": 28, "llyProfitMarginPct": 29,
+        "tyPlanRefundUnits": 32, "tyOverrideRefundUnits": 33, "tyRefundRateOverridePct": 34,
+        "lyRefundUnits": 35, "llyRefundUnits": 36, "lyRefundRatePct": 38, "llyRefundRatePct": 39,
+        "beginFBAInventory": 42, "recommendedShipment": 43, "weeksOfFBACover": 44,
+        "shipmentOverride": 45, "fbaShipmentsIn": 46, "salesUnitsOut": 47,
+        "returnsIn": 48, "endingFBAInventory": 49,
+        "beginWHInventory": 53, "factoryReceiptsIn": 54, "shippedToFBA": 55,
+        "otherOutbound": 56, "endingWHInventory": 57, "whMonthsOfSupply": 58,
+        "effectiveSalesUnits": 61, "effectiveAUR": 62, "effectiveRefundUnits": 63,
+        "forecastedRevenue": 64, "projectedGrossProfit": 65, "projectedCOGS": 66,
+        "endingFBAInvOverride": 67, "endingWHInvOverride": 68
+    }
+
+    for tab_name in item_tabs:
+        ws2 = wb[tab_name]
+        product_name = ws2.cell(1, 1).value or tab_name
+        info_row = str(ws2.cell(2, 1).value or "")
+        sku, asin = "", ""
+        if "SKU:" in info_row:
+            for p in info_row.split("|"):
+                p = p.strip()
+                if p.startswith("SKU:"): sku = p.replace("SKU:", "").strip()
+                elif p.startswith("ASIN:"): asin = p.replace("ASIN:", "").strip()
+
+        plan = {"tabName": tab_name, "productName": str(product_name), "sku": sku, "asin": asin,
+            "curveSelection": str(ws2.cell(2, 7).value or "LY"),
+            "lastActualMonth": int(safe_num(ws2.cell(2, 10).value, 0))}
+
+        for key, row_num in row_map.items():
+            try:
+                vals = {"s1Total": safe_num(ws2.cell(row_num, 2).value),
+                    "s2Total": safe_num(ws2.cell(row_num, 3).value),
+                    "fyTotal": safe_num(ws2.cell(row_num, 4).value)}
+                for i, m in enumerate(months):
+                    vals[m] = safe_num(ws2.cell(row_num, 5+i).value)
+                plan[key] = vals
+            except: pass
+        item_plans.append(plan)
+
+    data = {"kpis": kpis, "sections": sections, "itemPlans": item_plans,
+        "lastUpload": _date.today().isoformat(), "sourceFile": file.filename}
+    _save_item_planning(data)
+
+    # Also update raw data if tabs exist
+    if "Raw Product Sales" in wb.sheetnames:
+        ws3 = wb["Raw Product Sales"]
+        month_starts = []
+        for c in range(6, ws3.max_column+1):
+            v = ws3.cell(2, c).value
+            if v and isinstance(v, str) and ("20" in str(v) or "Total" in str(v)):
+                month_starts.append((c, str(v)))
+        raw_products = []
+        for r in range(4, ws3.max_row):
+            name = ws3.cell(r, 1).value
+            if not name or name == "Totals": continue
+            pd = {"name": str(name)[:100], "sku": str(ws3.cell(r, 2).value or ""),
+                "asin": str(ws3.cell(r, 3).value or ""), "monthly": {}}
+            for col_start, month_name in month_starts:
+                if "Total" in month_name: continue
+                qty_off = 1 if col_start == 6 else 2
+                pd["monthly"][month_name] = {
+                    "sales": safe_num(ws3.cell(r, col_start).value),
+                    "quantity": int(safe_num(ws3.cell(r, col_start + qty_off).value, 0))}
+            raw_products.append(pd)
+        _RAW_PRODUCT_SALES_PATH.write_text(json.dumps({"products": raw_products, "sourceFile": file.filename}, indent=2, default=str))
+
+    if "Raw Daily Dashboard" in wb.sheetnames:
+        ws4 = wb["Raw Daily Dashboard"]
+        headers = [ws4.cell(2, c).value for c in range(1, ws4.max_column+1)]
+        headers = [h for h in headers if h]
+        daily = []
+        for r in range(3, ws4.max_row+1):
+            d = ws4.cell(r, 1).value
+            if not d: continue
+            row_d = {"date": str(d)}
+            for c in range(2, len(headers)+1):
+                h = headers[c-1] if c-1 < len(headers) else None
+                if h: row_d[h] = safe_num(ws4.cell(r, c).value)
+            daily.append(row_d)
+        _RAW_DAILY_DATA_PATH.write_text(json.dumps({"daily": daily, "sourceFile": file.filename}, indent=2, default=str))
+
+    return {"status": "ok", "items": len(item_plans), "kpis": len(kpis), "lastUpload": data["lastUpload"]}
+
+
 # ── Static Frontend ────────────────────────────────────────
 # Serve the built React frontend from the same server.
 # Check local dist/ first (Docker), then ../frontend/dist/ (local dev)

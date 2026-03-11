@@ -101,6 +101,23 @@ export const api = {
     fd.append("file", file);
     return fetch(`${API_BASE}/api/logistics/upload`, { method: "POST", body: fd, credentials: "include" }).then(r => r.json());
   },
+
+  // Item Planning
+  itemPlanning: () => fetchJSON(`/api/item-planning`),
+  itemPlanningRawSales: () => fetchJSON(`/api/item-planning/raw-product-sales`),
+  itemPlanningRawDaily: () => fetchJSON(`/api/item-planning/raw-daily-data`),
+  itemPlanningOverride: (sku, field, values) =>
+    fetch(`${API_BASE}/api/item-planning/override`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ sku, field, values }),
+      credentials: "include",
+    }).then(r => r.json()),
+  uploadItemPlanning: (file) => {
+    const fd = new FormData();
+    fd.append("file", file);
+    return fetch(`${API_BASE}/api/item-planning/upload`, { method: "POST", body: fd, credentials: "include" }).then(r => r.json());
+  },
 };
 
 export function fmt$(n) {
