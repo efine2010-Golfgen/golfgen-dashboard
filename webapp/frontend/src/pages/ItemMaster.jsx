@@ -62,6 +62,26 @@ function EditableCell({ value, onSave, type = "number", prefix = "", suffix = ""
 
 const MASTER_TABS = ["Amazon", "Walmart", "Other"];
 
+function CouponBadge({ state }) {
+  if (!state) return null;
+  const map = {
+    ENABLED: { bg: "#dcfce7", color: "#166534", label: "Active" },
+    SCHEDULED: { bg: "#dbeafe", color: "#1e40af", label: "Scheduled" },
+    PAUSED: { bg: "#fef3c7", color: "#92400e", label: "Paused" },
+    EXPIRED: { bg: "#f3f4f6", color: "#6b7280", label: "Expired" },
+    ERRORED: { bg: "#fee2e2", color: "#991b1b", label: "Error" },
+  };
+  const style = map[state] || { bg: "#f3f4f6", color: "#6b7280", label: state };
+  return (
+    <span style={{
+      display: "inline-block", padding: "2px 8px", borderRadius: 10,
+      fontSize: 10, fontWeight: 600, background: style.bg, color: style.color,
+    }}>
+      {style.label}
+    </span>
+  );
+}
+
 export default function ItemMaster() {
   const [masterTab, setMasterTab] = useState("Amazon");
   const [items, setItems] = useState([]);
@@ -74,16 +94,40 @@ export default function ItemMaster() {
   const [sortKey, setSortKey] = useState("lyRevenue");
   const [sortDir, setSortDir] = useState("desc");
   const [expandedAsin, setExpandedAsin] = useState(null);
+  const [pricingStatus, setPricingStatus] = useState(null);
+  const [syncing, setSyncing] = useState(false);
+  const [pricingLastSync, setPricingLastSync] = useState(null);
 
   const load = useCallback(() => {
     setLoading(true);
     api.itemMaster().then(d => {
       setItems(d.items || []);
+      setPricingLastSync(d.pricingLastSync || null);
       setLoading(false);
     }).catch(() => setLoading(false));
   }, []);
 
   useEffect(() => { load(); }, [load]);
+
+  useEffect(() => {
+    api.pricingStatus().then(setPricingStatus).catch(() => {});
+  }, []);
+
+  const handlePricingSync = async () => {
+    setSyncing(true);
+    try {
+      await api.triggerPricingSync();
+      // Poll for completion after a short delay
+      setTimeout(() => {
+        api.pricingStatus().then(setPricingStatus).catch(() => {});
+        load(); // Reload items with fresh pricing data
+        setSyncing(false);
+      }, 15000);
+    } catch (e) {
+      console.error("Pricing sync failed:", e);
+      setSyncing(false);
+    }
+  };
 
   useEffect(() => {
     if (masterTab === "Walmart" && walmartItems === null) {
@@ -384,12 +428,49 @@ export default function ItemMaster() {
   const totalPlanned = items.reduce((s, i) => s + (i.plannedAnnualUnits || 0), 0);
   const totalLyRev = items.reduce((s, i) => s + (i.lyRevenue || 0), 0);
   const colorsCount = [...new Set(items.map(i => i.color).filter(Boolean))].length;
+  const livePricedCount = items.filter(i => i.liveBuyBoxPrice != null).length;
+  const activeCouponCount = items.filter(i => i.liveCouponState === "ENABLED").length;
+
+  const formatSyncTime = (iso) => {
+    if (!iso) return "Never";
+    const d = new Date(iso);
+    const now = new Date();
+    const diffMs = now - d;
+    const diffMin = Math.round(diffMs / 60000);
+    if (diffMin < 1) return "Just now";
+    if (diffMin < 60) return `${diffMin}m ago`;
+    const diffHr = Math.round(diffMin / 60);
+    if (diffHr < 24) return `${diffHr}h ago`;
+    return d.toLocaleDateString("en-US", { month: "short", day: "numeric" });
+  };
 
   return (
     <>
-      <div className="page-header">
-        <h1>Item Master</h1>
-        <p>{totalItems} SKUs &middot; {colorsCount} colors &middot; Source of truth for product attributes</p>
+      <div className="page-header" style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
+        <div>
+          <h1>Item Master</h1>
+          <p>{totalItems} SKUs &middot; {colorsCount} colors &middot; Source of truth for product attributes</p>
+        </div>
+        <div style={{ display: "flex", gap: 12, alignItems: "center" }}>
+          {pricingLastSync && (
+            <span style={{ fontSize: 11, color: "var(--muted)" }}>
+              Pricing: {formatSyncTime(pricingLastSync)}
+            </span>
+          )}
+          <button
+            onClick={handlePricingSync}
+            disabled={syncing}
+            style={{
+              padding: "6px 14px", borderRadius: 8, fontSize: 12, fontWeight: 600,
+              background: syncing ? "rgba(14,31,45,0.05)" : "var(--teal)",
+              color: syncing ? "var(--muted)" : "#fff",
+              border: "none", cursor: syncing ? "default" : "pointer",
+              opacity: syncing ? 0.6 : 1,
+            }}
+          >
+            {syncing ? "Syncing..." : "Sync Pricing"}
+          </button>
+        </div>
       </div>
 
       <div className="range-tabs" style={{ marginBottom: 20 }}>
@@ -417,6 +498,20 @@ export default function ItemMaster() {
           <div className="kpi-label">Color Groups</div>
           <div className="kpi-value" style={{ color: "#7BAED0" }}>{colorsCount}</div>
         </div>
+        {livePricedCount > 0 && (
+          <div className="kpi-card">
+            <div className="kpi-label">Live Prices</div>
+            <div className="kpi-value" style={{ color: "#16a34a" }}>{livePricedCount}</div>
+            <div style={{ fontSize: 10, color: "var(--muted)", marginTop: 2 }}>from SP-API</div>
+          </div>
+        )}
+        {activeCouponCount > 0 && (
+          <div className="kpi-card">
+            <div className="kpi-label">Active Coupons</div>
+            <div className="kpi-value" style={{ color: "#dc2626" }}>{activeCouponCount}</div>
+            <div style={{ fontSize: 10, color: "var(--muted)", marginTop: 2 }}>from Ads API</div>
+          </div>
+        )}
       </div>
 
       {/* Filters */}
@@ -492,7 +587,16 @@ export default function ItemMaster() {
                       onSave={v => handleUpdate(item.asin, "salePrice", v)} />
                   </td>
                   <td style={{ textAlign: "right" }}>
-                    {item.couponValue > 0 ? (
+                    {item.liveCouponState ? (
+                      <span style={{ display: "flex", alignItems: "center", justifyContent: "flex-end", gap: 4 }}>
+                        {item.couponValue > 0 && (
+                          <span style={{ color: "#dc2626", fontSize: 12 }}>
+                            {item.couponType === "%" ? `${item.couponValue}%` : `$${item.couponValue}`}
+                          </span>
+                        )}
+                        <CouponBadge state={item.liveCouponState} />
+                      </span>
+                    ) : item.couponValue > 0 ? (
                       <span style={{ color: "#dc2626" }}>
                         {item.couponType === "%" ? `${item.couponValue}%` : `$${item.couponValue}`} off
                       </span>
@@ -522,6 +626,86 @@ export default function ItemMaster() {
                 {expandedAsin === item.asin && (
                   <tr key={item.asin + "-detail"}>
                     <td colSpan={15} style={{ background: "rgba(14,31,45,0.02)", padding: 16 }}>
+                      {/* Live Pricing & Coupon Section */}
+                      {(item.liveBuyBoxPrice != null || item.liveCouponState) && (
+                        <div style={{
+                          display: "flex", gap: 16, marginBottom: 16, padding: 12,
+                          background: "rgba(46,207,170,0.06)", borderRadius: 8, border: "1px solid rgba(46,207,170,0.15)",
+                          flexWrap: "wrap",
+                        }}>
+                          <div style={{ fontSize: 12, fontWeight: 600, color: "var(--navy)", width: "100%", marginBottom: 4 }}>
+                            Live Amazon Data
+                            {item.priceFetchedAt && (
+                              <span style={{ fontWeight: 400, fontSize: 10, color: "var(--muted)", marginLeft: 8 }}>
+                                Updated {formatSyncTime(item.priceFetchedAt)}
+                              </span>
+                            )}
+                          </div>
+                          {item.liveBuyBoxPrice != null && (
+                            <div style={{ minWidth: 100 }}>
+                              <div style={{ fontSize: 10, color: "var(--muted)", marginBottom: 2 }}>Buy Box Price</div>
+                              <div style={{ fontSize: 16, fontWeight: 700, color: "#16a34a", fontFamily: "'Space Grotesk', monospace" }}>
+                                ${item.liveBuyBoxPrice.toFixed(2)}
+                              </div>
+                            </div>
+                          )}
+                          {item.liveListingPrice != null && (
+                            <div style={{ minWidth: 100 }}>
+                              <div style={{ fontSize: 10, color: "var(--muted)", marginBottom: 2 }}>Listing Price</div>
+                              <div style={{ fontSize: 16, fontWeight: 700, color: "var(--navy)", fontFamily: "'Space Grotesk', monospace" }}>
+                                ${item.liveListingPrice.toFixed(2)}
+                              </div>
+                            </div>
+                          )}
+                          {item.liveLandedPrice != null && (
+                            <div style={{ minWidth: 100 }}>
+                              <div style={{ fontSize: 10, color: "var(--muted)", marginBottom: 2 }}>Landed Price</div>
+                              <div style={{ fontSize: 14, fontWeight: 600, color: "var(--muted)", fontFamily: "'Space Grotesk', monospace" }}>
+                                ${item.liveLandedPrice.toFixed(2)}
+                              </div>
+                            </div>
+                          )}
+                          {item.liveCouponState && (
+                            <>
+                              <div style={{ borderLeft: "1px solid rgba(14,31,45,0.1)", paddingLeft: 16, minWidth: 100 }}>
+                                <div style={{ fontSize: 10, color: "var(--muted)", marginBottom: 2 }}>Coupon Status</div>
+                                <CouponBadge state={item.liveCouponState} />
+                                {item.liveCouponType && item.liveCouponValue != null && (
+                                  <div style={{ fontSize: 12, marginTop: 4, color: "#dc2626", fontWeight: 600 }}>
+                                    {item.liveCouponType === "PERCENTAGE" ? `${item.liveCouponValue}% off` : `$${item.liveCouponValue} off`}
+                                  </div>
+                                )}
+                              </div>
+                              {(item.couponBudget != null || item.couponRedemptions != null) && (
+                                <div style={{ minWidth: 100 }}>
+                                  <div style={{ fontSize: 10, color: "var(--muted)", marginBottom: 2 }}>Budget / Redemptions</div>
+                                  <div style={{ fontSize: 13, fontFamily: "'Space Grotesk', monospace" }}>
+                                    {item.couponBudget != null ? `$${item.couponBudget.toLocaleString()}` : "—"}
+                                    {item.couponBudgetUsed != null && (
+                                      <span style={{ color: "var(--muted)", fontSize: 11 }}> ({Math.round((item.couponBudgetUsed / item.couponBudget) * 100)}% used)</span>
+                                    )}
+                                  </div>
+                                  <div style={{ fontSize: 12, color: "var(--muted)", marginTop: 2 }}>
+                                    {item.couponRedemptions != null ? `${item.couponRedemptions.toLocaleString()} redeemed` : ""}
+                                  </div>
+                                </div>
+                              )}
+                              {(item.couponStartDate || item.couponEndDate) && (
+                                <div style={{ minWidth: 120 }}>
+                                  <div style={{ fontSize: 10, color: "var(--muted)", marginBottom: 2 }}>Coupon Dates</div>
+                                  <div style={{ fontSize: 12 }}>
+                                    {item.couponStartDate ? new Date(item.couponStartDate).toLocaleDateString("en-US", { month: "short", day: "numeric" }) : "—"}
+                                    {" → "}
+                                    {item.couponEndDate ? new Date(item.couponEndDate).toLocaleDateString("en-US", { month: "short", day: "numeric" }) : "—"}
+                                  </div>
+                                </div>
+                              )}
+                            </>
+                          )}
+                        </div>
+                      )}
+
+                      {/* Existing Detail Grid */}
                       <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))", gap: 16 }}>
                         <div>
                           <div style={{ fontSize: 11, color: "var(--muted)", marginBottom: 4 }}>Brand / Series</div>

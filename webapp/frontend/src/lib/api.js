@@ -79,6 +79,9 @@ export const api = {
       body: JSON.stringify(data),
       credentials: "include",
     }).then(r => r.json()),
+  pricingStatus: () => fetchJSON(`/api/pricing/status`),
+  triggerPricingSync: () =>
+    fetch(`${API_BASE}/api/pricing/sync`, { method: "POST", credentials: "include" }).then(r => r.json()),
   itemMasterAmazon: () => fetchJSON(`/api/item-master/amazon`),
   itemMasterOther: () => fetchJSON(`/api/item-master/other`),
 };

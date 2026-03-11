@@ -815,6 +815,238 @@ def _run_sp_api_sync():
     logger.info("SP-API background sync complete.")
 
 
+# ── Pricing & Coupon Sync ────────────────────────────────
+
+PRICING_CACHE_PATH = DB_DIR / "pricing_sync.json"
+
+
+def _load_pricing_cache() -> dict:
+    """Load cached pricing/coupon data."""
+    if PRICING_CACHE_PATH.exists():
+        with open(PRICING_CACHE_PATH, encoding="utf-8") as f:
+            return json.load(f)
+    return {"prices": {}, "coupons": {}, "lastSync": None}
+
+
+def _save_pricing_cache(data: dict):
+    """Save pricing/coupon cache."""
+    with open(PRICING_CACHE_PATH, "w", encoding="utf-8") as f:
+        json.dump(data, f, indent=2, ensure_ascii=False)
+
+
+def _sync_pricing_data():
+    """Pull current listing prices from SP-API Product Pricing API.
+
+    Uses getCompetitivePricing to get Buy Box and listed prices per ASIN.
+    Falls back gracefully if SP-API is not configured.
+    """
+    try:
+        from sp_api.api import Products as ProductsAPI
+        from sp_api.base import Marketplaces
+    except ImportError:
+        logger.info("Pricing sync: sp_api not installed, skipping")
+        return
+
+    credentials = _load_sp_api_credentials()
+    if not credentials:
+        logger.info("Pricing sync: no SP-API credentials, skipping")
+        return
+
+    # Get all ASINs from item master
+    items = load_item_master()
+    asins = [i["asin"] for i in items if i.get("asin")]
+    if not asins:
+        return
+
+    logger.info(f"Pricing sync: fetching prices for {len(asins)} ASINs...")
+    import time as _t
+
+    cache = _load_pricing_cache()
+    prices = cache.get("prices", {})
+
+    # SP-API allows up to 20 ASINs per getCompetitivePricing call
+    products_api = ProductsAPI(credentials=credentials, marketplace=Marketplaces.US)
+    batch_size = 20
+
+    for i in range(0, len(asins), batch_size):
+        batch = asins[i:i + batch_size]
+        try:
+            result = products_api.get_competitive_pricing(
+                Asins=batch,
+                MarketplaceId="ATVPDKIKX0DER",
+            )
+            for item_data in (result.payload or []):
+                asin = item_data.get("ASIN", "")
+                if not asin:
+                    continue
+                comp_prices = item_data.get("Product", {}).get("CompetitivePricing", {})
+                number_of_offers = comp_prices.get("NumberOfOfferListings", [])
+                comp_price_list = comp_prices.get("CompetitivePrices", [])
+
+                listing_price = None
+                landed_price = None
+                buy_box_price = None
+
+                for cp in comp_price_list:
+                    condition = cp.get("condition", "")
+                    belongs_to = cp.get("belongsToRequester", False)
+                    price_info = cp.get("Price", {})
+                    lp = price_info.get("ListingPrice", {})
+                    landed = price_info.get("LandedPrice", {})
+
+                    if lp.get("Amount"):
+                        listing_price = float(lp["Amount"])
+                    if landed.get("Amount"):
+                        landed_price = float(landed["Amount"])
+
+                    comp_type = cp.get("CompetitivePriceId", "")
+                    if comp_type == "1":  # Buy Box price
+                        if landed.get("Amount"):
+                            buy_box_price = float(landed["Amount"])
+                        elif lp.get("Amount"):
+                            buy_box_price = float(lp["Amount"])
+
+                prices[asin] = {
+                    "listingPrice": listing_price,
+                    "landedPrice": landed_price,
+                    "buyBoxPrice": buy_box_price,
+                    "fetchedAt": datetime.utcnow().isoformat(),
+                }
+
+            # Rate limit: SP-API throttles at ~10 calls/sec for pricing
+            if i + batch_size < len(asins):
+                _t.sleep(0.5)
+
+        except Exception as e:
+            logger.error(f"Pricing sync batch error (ASINs {i}-{i+batch_size}): {e}")
+            _t.sleep(2)
+
+    cache["prices"] = prices
+    cache["lastSync"] = datetime.utcnow().isoformat()
+    _save_pricing_cache(cache)
+    logger.info(f"Pricing sync complete: {len(prices)} ASINs cached")
+
+
+def _sync_coupon_data():
+    """Pull active coupon data from Amazon Ads Coupons API.
+
+    Uses the Coupons API (part of python-amazon-ad-api) to list all coupons
+    and their statuses. Maps coupon ASINs back to item master entries.
+    """
+    ads_creds = _load_ads_credentials()
+    if not ads_creds:
+        logger.info("Coupon sync: no Ads API credentials, skipping")
+        return
+
+    profile_id = ads_creds.get("profile_id", "")
+    if not profile_id:
+        logger.info("Coupon sync: no profile_id, skipping")
+        return
+
+    try:
+        from ad_api.api import Coupons
+    except ImportError:
+        logger.info("Coupon sync: ad_api Coupons not available, skipping")
+        return
+
+    logger.info("Coupon sync: fetching coupons from Amazon Ads API...")
+
+    cache = _load_pricing_cache()
+    coupons_by_asin = {}
+
+    try:
+        coupons_api = Coupons(credentials=ads_creds)
+
+        # List coupons with pagination
+        page_token = None
+        total_fetched = 0
+        max_pages = 10
+
+        for page in range(max_pages):
+            body = {
+                "stateFilter": {
+                    "includes": ["ENABLED", "SCHEDULED"]
+                },
+                "pageSize": 100,
+            }
+            if page_token:
+                body["pageToken"] = page_token
+
+            result = coupons_api.list_coupons(body=json.dumps(body))
+            payload = result.payload or {}
+            coupon_list = payload.get("coupons", [])
+            total_fetched += len(coupon_list)
+
+            for coupon in coupon_list:
+                coupon_id = coupon.get("couponId", "")
+                state = coupon.get("state", "UNKNOWN")
+                discount = coupon.get("discount", {})
+                disc_type = discount.get("discountType", "")  # PERCENTAGE or AMOUNT
+                disc_value = float(discount.get("discountValue", 0))
+
+                # Budget and redemption info
+                budget = coupon.get("budget", {})
+                budget_amount = float(budget.get("budgetAmount", 0))
+                budget_used = float(budget.get("budgetConsumed", 0))
+                redemptions = coupon.get("totalRedemptions", 0)
+
+                start_date = coupon.get("startDate", "")
+                end_date = coupon.get("endDate", "")
+
+                # Map to ASINs
+                asin_list = coupon.get("asins", [])
+                product_criteria = coupon.get("productCriteria", {})
+                if not asin_list and product_criteria:
+                    asin_list = product_criteria.get("asins", [])
+
+                coupon_info = {
+                    "couponId": coupon_id,
+                    "state": state,
+                    "discountType": "%" if disc_type == "PERCENTAGE" else "$",
+                    "discountValue": disc_value,
+                    "budgetAmount": budget_amount,
+                    "budgetUsed": budget_used,
+                    "redemptions": redemptions,
+                    "startDate": start_date,
+                    "endDate": end_date,
+                    "fetchedAt": datetime.utcnow().isoformat(),
+                }
+
+                for asin in asin_list:
+                    if isinstance(asin, str) and asin:
+                        # Keep the most recently fetched coupon per ASIN
+                        # If multiple coupons exist, prefer ENABLED over SCHEDULED
+                        existing = coupons_by_asin.get(asin)
+                        if not existing or (state == "ENABLED" and existing.get("state") != "ENABLED"):
+                            coupons_by_asin[asin] = coupon_info
+
+            # Check for next page
+            page_token = payload.get("nextPageToken")
+            if not page_token or not coupon_list:
+                break
+
+        logger.info(f"Coupon sync: {total_fetched} coupons fetched, mapped to {len(coupons_by_asin)} ASINs")
+
+    except Exception as e:
+        logger.error(f"Coupon sync error: {e}")
+
+    cache["coupons"] = coupons_by_asin
+    cache["lastSync"] = datetime.utcnow().isoformat()
+    _save_pricing_cache(cache)
+
+
+def _sync_pricing_and_coupons():
+    """Run both pricing and coupon syncs. Called from the sync loop."""
+    try:
+        _sync_pricing_data()
+    except Exception as e:
+        logger.error(f"Pricing sync error: {e}")
+    try:
+        _sync_coupon_data()
+    except Exception as e:
+        logger.error(f"Coupon sync error: {e}")
+
+
 def _auto_backfill_if_needed():
     """Check if historical data is missing and backfill automatically.
     This prevents data loss when Railway redeploys (ephemeral filesystem).
@@ -1362,6 +1594,13 @@ async def _sync_loop():
     except Exception as e:
         logger.error(f"Ads sync error: {e}")
 
+    # Sync pricing & coupon data
+    try:
+        loop = asyncio.get_event_loop()
+        await loop.run_in_executor(None, _sync_pricing_and_coupons)
+    except Exception as e:
+        logger.error(f"Pricing/coupon sync error: {e}")
+
     # Short delay before full sync (let server finish starting)
     await asyncio.sleep(10)
     while True:
@@ -1377,6 +1616,13 @@ async def _sync_loop():
             await loop.run_in_executor(None, _sync_ads_data)
         except Exception as e:
             logger.error(f"Ads re-sync error: {e}")
+
+        # Also refresh pricing & coupon data each cycle
+        try:
+            loop = asyncio.get_event_loop()
+            await loop.run_in_executor(None, _sync_pricing_and_coupons)
+        except Exception as e:
+            logger.error(f"Pricing/coupon re-sync error: {e}")
 
         await asyncio.sleep(SYNC_INTERVAL_HOURS * 3600)
 
@@ -3382,14 +3628,58 @@ def save_item_master(items: list):
 
 @app.get("/api/item-master")
 def get_item_master():
-    """Return all items from the item master CSV, enriched with live COGS."""
+    """Return all items from the item master CSV, enriched with live COGS and pricing/coupon data."""
     items = load_item_master()
     cogs_data = load_cogs()
+
+    # Load live pricing & coupon cache (from SP-API / Ads API syncs)
+    pricing_cache = _load_pricing_cache()
+    live_prices = pricing_cache.get("prices", {})
+    live_coupons = pricing_cache.get("coupons", {})
+    pricing_last_sync = pricing_cache.get("lastSync")
+
     for item in items:
         asin = item["asin"]
         cogs_info = cogs_data.get(asin, {})
         if cogs_info.get("cogs", 0) > 0 and item["unitCost"] == 0:
             item["unitCost"] = cogs_info["cogs"]
+
+        # Merge live pricing data if available
+        live = live_prices.get(asin)
+        if live:
+            item["liveListingPrice"] = live.get("listingPrice")
+            item["liveBuyBoxPrice"] = live.get("buyBoxPrice")
+            item["liveLandedPrice"] = live.get("landedPrice")
+            item["priceFetchedAt"] = live.get("fetchedAt")
+        else:
+            item["liveListingPrice"] = None
+            item["liveBuyBoxPrice"] = None
+            item["liveLandedPrice"] = None
+            item["priceFetchedAt"] = None
+
+        # Merge live coupon data if available
+        coupon = live_coupons.get(asin)
+        if coupon:
+            item["liveCouponState"] = coupon.get("state")
+            item["liveCouponType"] = coupon.get("discountType")
+            item["liveCouponValue"] = coupon.get("discountValue")
+            item["liveCouponId"] = coupon.get("couponId")
+            item["couponBudget"] = coupon.get("budgetAmount")
+            item["couponBudgetUsed"] = coupon.get("budgetUsed")
+            item["couponRedemptions"] = coupon.get("redemptions")
+            item["couponStartDate"] = coupon.get("startDate")
+            item["couponEndDate"] = coupon.get("endDate")
+        else:
+            item["liveCouponState"] = None
+            item["liveCouponType"] = None
+            item["liveCouponValue"] = None
+            item["liveCouponId"] = None
+            item["couponBudget"] = None
+            item["couponBudgetUsed"] = None
+            item["couponRedemptions"] = None
+            item["couponStartDate"] = None
+            item["couponEndDate"] = None
+
         # Compute net price after coupon
         base = item["salePrice"] if item["salePrice"] > 0 else item["listPrice"]
         if item["couponType"] == "$" and item["couponValue"] > 0:
@@ -3400,7 +3690,30 @@ def get_item_master():
             item["netPrice"] = round(base, 2)
         # Referral fee estimate
         item["referralFee"] = round(item["netPrice"] * item["referralPct"] / 100, 2)
-    return {"items": items, "count": len(items)}
+    return {"items": items, "count": len(items), "pricingLastSync": pricing_last_sync}
+
+
+@app.get("/api/pricing/status")
+def get_pricing_status():
+    """Return pricing & coupon sync status and summary."""
+    cache = _load_pricing_cache()
+    prices = cache.get("prices", {})
+    coupons = cache.get("coupons", {})
+    return {
+        "lastSync": cache.get("lastSync"),
+        "pricedAsins": len(prices),
+        "couponAsins": len(coupons),
+        "activeCoupons": sum(1 for c in coupons.values() if c.get("state") == "ENABLED"),
+        "scheduledCoupons": sum(1 for c in coupons.values() if c.get("state") == "SCHEDULED"),
+    }
+
+
+@app.post("/api/pricing/sync")
+def trigger_pricing_sync():
+    """Manually trigger a pricing & coupon data sync."""
+    import threading
+    threading.Thread(target=_sync_pricing_and_coupons, daemon=True).start()
+    return {"status": "started", "message": "Pricing & coupon sync started in background"}
 
 
 @app.put("/api/item-master/{asin}")
