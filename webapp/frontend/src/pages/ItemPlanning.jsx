@@ -185,34 +185,58 @@ function ExecutiveSummary({ kpis, sections }) {
 // ═══════════════════════════════════════════════════════════
 // ITEM PLAN DETAIL COMPONENT
 // ═══════════════════════════════════════════════════════════
+// Jan & Feb are actualized months; Mar onward are projected
+const ACTUAL_MONTHS = new Set(["Jan", "Feb"]);
+function isActual(m) { return ACTUAL_MONTHS.has(m); }
+
+const Q1M = ["Jan","Feb","Mar"], Q2M = ["Apr","May","Jun"];
+const Q3M = ["Jul","Aug","Sep"], Q4M = ["Oct","Nov","Dec"];
+const S1M = [...Q1M,...Q2M], S2M = [...Q3M,...Q4M], FYM = [...S1M,...S2M];
+const PERIOD_COLS = [
+  { key:"q1", label:"Q1", months:Q1M, cls:"ip-th-quarter" },
+  { key:"q2", label:"Q2", months:Q2M, cls:"ip-th-quarter" },
+  { key:"q3", label:"Q3", months:Q3M, cls:"ip-th-quarter" },
+  { key:"q4", label:"Q4", months:Q4M, cls:"ip-th-quarter" },
+  { key:"s1", label:"S1", months:S1M, cls:"ip-th-half" },
+  { key:"s2", label:"S2", months:S2M, cls:"ip-th-half" },
+  { key:"fy", label:"FY", months:FYM, cls:"fy-total" },
+];
+// reduce modes: "sum" (default), "first" (beg inventory), "last" (end inventory), "avg" (rates/AUR)
+function periodVal(data, months, reduce) {
+  if (!data || !months.length) return 0;
+  if (reduce === "first") return Number(data[months[0]]) || 0;
+  if (reduce === "last") return Number(data[months[months.length - 1]]) || 0;
+  if (reduce === "avg") {
+    const s = months.reduce((a, m) => a + (Number(data[m]) || 0), 0);
+    return months.length ? s / months.length : 0;
+  }
+  return months.reduce((a, m) => a + (Number(data[m]) || 0), 0);
+}
+
 function ItemPlanDetail({ plan, overrides, onOverride }) {
   if (!plan) return <div className="ip-empty">Select an item above to view its plan.</div>;
 
   const sku = plan.sku;
   const ov = overrides?.[sku] || {};
 
-  // Local state for editable override fields — keyed by overrideKey, value = { Jan: ..., Feb: ... }
+  // Local state for editable override fields
   const [localEdits, setLocalEdits] = useState({});
   const [saving, setSaving] = useState({});
 
-  // Reset local edits when plan/sku changes
-  useEffect(() => {
-    setLocalEdits({});
-  }, [sku]);
+  useEffect(() => { setLocalEdits({}); }, [sku]);
 
   // Helper to get row data with override support
   function getRow(key, overrideKey) {
     const base = plan[key] || {};
     const serverOv = ov[overrideKey];
     const local = localEdits[overrideKey];
-    // Merge: base ← server override ← local edits
     const merged = { ...base };
     if (serverOv) Object.assign(merged, serverOv);
     if (local) Object.assign(merged, local);
     return merged;
   }
 
-  // Get the "effective" value for a month given overrides
+  // ── Effective value helpers ──
   function getEffectiveUnits(m) {
     const ovUnits = getRow("tyOverrideUnits", "overrideUnits");
     const v = ovUnits[m];
@@ -227,23 +251,57 @@ function ItemPlanDetail({ plan, overrides, onOverride }) {
     return plan.tyAUR?.[m] || 0;
   }
 
-  function getEffectiveRefundUnits(m) {
-    const ovRefunds = getRow("tyOverrideRefundUnits", "refundOverride");
-    const v = ovRefunds[m];
+  // Refund rate override drives refund units: if rate override set, refunds = units × rate
+  function getEffectiveRefundRate(m) {
+    const ovRate = getRow("tyRefundRateOverridePct", "refundRateOverride");
+    const v = ovRate[m];
     if (v != null && v !== "" && v !== 0) return Number(v);
+    return plan.lyRefundRatePct?.[m] || 0; // fallback to LY rate if no override
+  }
+
+  function getEffectiveRefundUnits(m, effectiveUnitsVal) {
+    // Priority: direct refund unit override > rate-driven > plan refund units
+    const ovRefunds = getRow("tyOverrideRefundUnits", "refundOverride");
+    const directVal = ovRefunds[m];
+    if (directVal != null && directVal !== "" && directVal !== 0) return Number(directVal);
+
+    // If refund rate override is set, calculate from rate × effective units
+    const ovRate = getRow("tyRefundRateOverridePct", "refundRateOverride");
+    const rateVal = ovRate[m];
+    if (rateVal != null && rateVal !== "" && rateVal !== 0) {
+      return Math.round(effectiveUnitsVal * Number(rateVal));
+    }
+
     return plan.tyPlanRefundUnits?.[m] || 0;
   }
 
-  // Recompute projections locally based on overrides
+  function getEffectiveShipments(m) {
+    const ovShip = getRow("shipmentOverride", "shipmentOverride");
+    const v = ovShip[m];
+    if (v != null && v !== "" && v !== 0) return Number(v);
+    return plan.fbaShipmentsIn?.[m] || plan.recommendedShipment?.[m] || 0;
+  }
+
+  // ── Full projection engine ──
   const projections = useMemo(() => {
     const effectiveUnits = {};
     const effectiveAUR = {};
     const effectiveRefunds = {};
+    const effectiveRefundRate = {};
     const forecastedRevenue = {};
     const projectedProfit = {};
+
+    // Projected FBA inventory (rolling balance)
+    const projBegFBA = {};
+    const projEndFBA = {};
+    const projShipmentsIn = {};
+    const projSalesOut = {};
+    const projReturnsIn = {};
+    const projWeeksCover = {};
+
+    // COGS per unit estimate from plan
     const cogs = plan.tyPlanGrossProfit && plan.tyPlanRevenue
       ? (() => {
-          // Estimate COGS per unit from plan data
           const fyRev = plan.tyPlanRevenue?.fyTotal || 1;
           const fyProfit = plan.tyPlanGrossProfit?.fyTotal || 0;
           const fyUnits = plan.tyPlanUnits?.fyTotal || 1;
@@ -257,35 +315,97 @@ function ItemPlanDetail({ plan, overrides, onOverride }) {
     let s1Ref = 0, s2Ref = 0, fyRef = 0;
     let s1AUR = 0, s2AUR = 0;
     let s1Cnt = 0, s2Cnt = 0;
+    let q1Units=0,q2Units=0,q3Units=0,q4Units=0;
+    let q1Rev=0,q2Rev=0,q3Rev=0,q4Rev=0;
+    let q1Prof=0,q2Prof=0,q3Prof=0,q4Prof=0;
+    let q1Ref=0,q2Ref=0,q3Ref=0,q4Ref=0;
+
+    // Starting FBA for rolling calc: use plan's beginning FBA for Jan
+    let prevEndFBA = plan.beginFBAInventory?.["Jan"] || 0;
 
     MONTHS.forEach((m, i) => {
       const units = getEffectiveUnits(m);
       const aur = getEffectiveAUR(m);
-      const refunds = getEffectiveRefundUnits(m);
+      const refunds = getEffectiveRefundUnits(m, units);
+      const refundRate = units > 0 ? refunds / units : 0;
       const rev = units * aur;
       const profit = rev - (units * cogs);
+      const shipmentsIn = getEffectiveShipments(m);
 
       effectiveUnits[m] = units;
       effectiveAUR[m] = aur;
       effectiveRefunds[m] = refunds;
+      effectiveRefundRate[m] = refundRate;
       forecastedRevenue[m] = rev;
       projectedProfit[m] = profit;
 
-      fyUnits += units; fyRev += rev; fyProf += profit; fyRef += refunds;
-      if (i < 6) { s1Units += units; s1Rev += rev; s1Prof += profit; s1Ref += refunds; s1AUR += aur; s1Cnt++; }
-      else { s2Units += units; s2Rev += rev; s2Prof += profit; s2Ref += refunds; s2AUR += aur; s2Cnt++; }
+      // FBA inventory rolling balance
+      // For actual months (Jan, Feb), use plan data as-is
+      if (isActual(m)) {
+        projBegFBA[m] = plan.beginFBAInventory?.[m] || 0;
+        projShipmentsIn[m] = plan.fbaShipmentsIn?.[m] || 0;
+        projSalesOut[m] = plan.salesUnitsOut?.[m] || 0;
+        projReturnsIn[m] = plan.returnsIn?.[m] || 0;
+        projEndFBA[m] = plan.endingFBAInventory?.[m] || 0;
+        prevEndFBA = projEndFBA[m];
+      } else {
+        // Projected months: rolling calc from overrides
+        projBegFBA[m] = prevEndFBA;
+        projShipmentsIn[m] = shipmentsIn;
+        projSalesOut[m] = units;
+        projReturnsIn[m] = refunds;
+        projEndFBA[m] = projBegFBA[m] + shipmentsIn - units + refunds;
+        prevEndFBA = projEndFBA[m];
+      }
+
+      // Weeks of FBA cover: ending inventory / (next month's projected weekly sales)
+      // Approximate: weekly sales = units / 4.33
+      const weeklySales = units / 4.33;
+      projWeeksCover[m] = weeklySales > 0 ? projEndFBA[m] / weeklySales : 0;
+
+      // Only accumulate Jan-Dec (exclude Jan27 at index 12) for period totals
+      if (i < 12) {
+        fyUnits += units; fyRev += rev; fyProf += profit; fyRef += refunds;
+        if (i < 6) { s1Units += units; s1Rev += rev; s1Prof += profit; s1Ref += refunds; s1AUR += aur; s1Cnt++; }
+        else { s2Units += units; s2Rev += rev; s2Prof += profit; s2Ref += refunds; s2AUR += aur; s2Cnt++; }
+        if (i < 3) { q1Units += units; q1Rev += rev; q1Prof += profit; q1Ref += refunds; }
+        else if (i < 6) { q2Units += units; q2Rev += rev; q2Prof += profit; q2Ref += refunds; }
+        else if (i < 9) { q3Units += units; q3Rev += rev; q3Prof += profit; q3Ref += refunds; }
+        else { q4Units += units; q4Rev += rev; q4Prof += profit; q4Ref += refunds; }
+      }
     });
 
+    // Totals (Jan-Dec only, excluding Jan27)
     effectiveUnits.s1Total = s1Units; effectiveUnits.s2Total = s2Units; effectiveUnits.fyTotal = fyUnits;
-    effectiveAUR.s1Total = s1Cnt ? s1AUR / s1Cnt : 0; effectiveAUR.s2Total = s2Cnt ? s2AUR / s2Cnt : 0; effectiveAUR.fyTotal = (s1Cnt + s2Cnt) ? (s1AUR + s2AUR) / (s1Cnt + s2Cnt) : 0;
+    effectiveUnits.q1Total = q1Units; effectiveUnits.q2Total = q2Units; effectiveUnits.q3Total = q3Units; effectiveUnits.q4Total = q4Units;
+    effectiveAUR.s1Total = s1Cnt ? s1AUR / s1Cnt : 0; effectiveAUR.s2Total = s2Cnt ? s2AUR / s2Cnt : 0;
+    effectiveAUR.fyTotal = (s1Cnt + s2Cnt) ? (s1AUR + s2AUR) / (s1Cnt + s2Cnt) : 0;
     effectiveRefunds.s1Total = s1Ref; effectiveRefunds.s2Total = s2Ref; effectiveRefunds.fyTotal = fyRef;
+    effectiveRefunds.q1Total = q1Ref; effectiveRefunds.q2Total = q2Ref; effectiveRefunds.q3Total = q3Ref; effectiveRefunds.q4Total = q4Ref;
     forecastedRevenue.s1Total = s1Rev; forecastedRevenue.s2Total = s2Rev; forecastedRevenue.fyTotal = fyRev;
+    forecastedRevenue.q1Total = q1Rev; forecastedRevenue.q2Total = q2Rev; forecastedRevenue.q3Total = q3Rev; forecastedRevenue.q4Total = q4Rev;
     projectedProfit.s1Total = s1Prof; projectedProfit.s2Total = s2Prof; projectedProfit.fyTotal = fyProf;
+    projectedProfit.q1Total = q1Prof; projectedProfit.q2Total = q2Prof; projectedProfit.q3Total = q3Prof; projectedProfit.q4Total = q4Prof;
 
-    return { effectiveUnits, effectiveAUR, effectiveRefunds, forecastedRevenue, projectedProfit };
+    // Sum helpers for FBA (exclude Jan27 from S2 and FY)
+    const fySum = (obj) => { let t = 0; MONTHS.slice(0,12).forEach(m => t += (obj[m] || 0)); return t; };
+    const s1Sum = (obj) => { let t = 0; MONTHS.slice(0, 6).forEach(m => t += (obj[m] || 0)); return t; };
+    const s2Sum = (obj) => { let t = 0; MONTHS.slice(6, 12).forEach(m => t += (obj[m] || 0)); return t; };
+
+    projBegFBA.s1Total = projBegFBA["Jan"] || 0; projBegFBA.s2Total = projBegFBA["Jul"] || 0; projBegFBA.fyTotal = projBegFBA["Jan"] || 0;
+    projEndFBA.s1Total = projEndFBA["Jun"] || 0; projEndFBA.s2Total = projEndFBA["Dec"] || 0; projEndFBA.fyTotal = projEndFBA["Dec"] || 0;
+    projShipmentsIn.s1Total = s1Sum(projShipmentsIn); projShipmentsIn.s2Total = s2Sum(projShipmentsIn); projShipmentsIn.fyTotal = fySum(projShipmentsIn);
+    projSalesOut.s1Total = s1Sum(projSalesOut); projSalesOut.s2Total = s2Sum(projSalesOut); projSalesOut.fyTotal = fySum(projSalesOut);
+    projReturnsIn.s1Total = s1Sum(projReturnsIn); projReturnsIn.s2Total = s2Sum(projReturnsIn); projReturnsIn.fyTotal = fySum(projReturnsIn);
+
+    return {
+      effectiveUnits, effectiveAUR, effectiveRefunds, effectiveRefundRate,
+      forecastedRevenue, projectedProfit,
+      projBegFBA, projEndFBA, projShipmentsIn, projSalesOut, projReturnsIn, projWeeksCover,
+    };
   }, [plan, ov, localEdits]);
 
-  // Handle edit in an override cell
+  // ── Edit handlers ──
   function handleCellEdit(overrideKey, month, rawValue) {
     setLocalEdits(prev => ({
       ...prev,
@@ -293,16 +413,12 @@ function ItemPlanDetail({ plan, overrides, onOverride }) {
     }));
   }
 
-  // Save override to server
   async function handleCellBlur(overrideKey, month) {
     const localVal = localEdits[overrideKey]?.[month];
-    if (localVal === undefined) return; // nothing changed
-    const numVal = localVal === "" ? null : Number(localVal);
-    // Merge local with server overrides to send full field
+    if (localVal === undefined) return;
     const serverVals = ov[overrideKey] || {};
     const localFieldEdits = localEdits[overrideKey] || {};
     const merged = { ...serverVals, ...localFieldEdits };
-    // Convert all to numbers
     const cleaned = {};
     MONTHS.forEach(m => {
       const v = merged[m];
@@ -317,7 +433,7 @@ function ItemPlanDetail({ plan, overrides, onOverride }) {
     setSaving(prev => ({ ...prev, [overrideKey + month]: false }));
   }
 
-  // Build display rows — using projections for EFFECTIVE PROJECTIONS section
+  // ── Section rows ──
   const sections = [
     {
       title: "SALES UNITS",
@@ -340,10 +456,10 @@ function ItemPlanDetail({ plan, overrides, onOverride }) {
     {
       title: "AUR ($)",
       rows: [
-        { label: "TY AUR", data: plan.tyAUR, cls: "", fmt: "$d" },
-        { label: "TY AUR Override", data: getRow("tyAUROverride", "aurOverride"), cls: "override-row", editable: "aurOverride", fmt: "$d" },
-        { label: "LY AUR", data: plan.lyAUR, cls: "ly-row", fmt: "$d" },
-        { label: "LLY AUR", data: plan.llyAUR, cls: "lly-row", fmt: "$d" },
+        { label: "TY AUR Plan", data: plan.tyAUR, cls: "", fmt: "$d", reduce: "avg" },
+        { label: "TY AUR Override", data: getRow("tyAUROverride", "aurOverride"), cls: "override-row", editable: "aurOverride", fmt: "$d", reduce: "avg" },
+        { label: "LY AUR", data: plan.lyAUR, cls: "ly-row", fmt: "$d", reduce: "avg" },
+        { label: "LLY AUR", data: plan.llyAUR, cls: "lly-row", fmt: "$d", reduce: "avg" },
       ]
     },
     {
@@ -352,47 +468,54 @@ function ItemPlanDetail({ plan, overrides, onOverride }) {
         { label: "TY Plan Gross Profit", data: plan.tyPlanGrossProfit, cls: "", fmt: "$" },
         { label: "Projected Gross Profit", data: projections.projectedProfit, cls: "projected-row", fmt: "$" },
         { label: "LY Gross Profit", data: plan.lyGrossProfit, cls: "ly-row", fmt: "$" },
-        { label: "LY Profit Margin %", data: plan.lyProfitMarginPct, cls: "ly-row", fmt: "%" },
+        { label: "LY Profit Margin %", data: plan.lyProfitMarginPct, cls: "ly-row", fmt: "%", reduce: "avg" },
       ]
     },
     {
       title: "RETURNS / REFUNDS",
       rows: [
         { label: "TY Plan Refund Units", data: plan.tyPlanRefundUnits, cls: "" },
-        { label: "TY Override Refunds", data: getRow("tyOverrideRefundUnits", "refundOverride"), cls: "override-row", editable: "refundOverride" },
-        { label: "TY Refund Rate % Override", data: getRow("tyRefundRateOverridePct", "refundRateOverride"), cls: "override-row pct-row", editable: "refundRateOverride", fmt: "%" },
+        { label: "TY Override Refund Units", data: getRow("tyOverrideRefundUnits", "refundOverride"), cls: "override-row", editable: "refundOverride" },
+        { label: "Refund Rate % Override", data: getRow("tyRefundRateOverridePct", "refundRateOverride"), cls: "override-row pct-row", editable: "refundRateOverride", fmt: "%", reduce: "avg" },
+        { label: "Projected Refund Units", data: projections.effectiveRefunds, cls: "projected-row" },
+        { label: "Effective Refund Rate %", data: projections.effectiveRefundRate, cls: "projected-row", fmt: "%", reduce: "avg" },
         { label: "LY Refund Units", data: plan.lyRefundUnits, cls: "ly-row" },
-        { label: "LY Refund Rate %", data: plan.lyRefundRatePct, cls: "ly-row", fmt: "%" },
+        { label: "LY Refund Rate %", data: plan.lyRefundRatePct, cls: "ly-row", fmt: "%", reduce: "avg" },
       ]
     },
     {
       title: "FBA INVENTORY & SHIPMENTS",
       rows: [
-        { label: "Beginning FBA Inventory", data: plan.beginFBAInventory, cls: "" },
-        { label: "Recommended Shipment", data: plan.recommendedShipment, cls: "projected-row" },
+        { label: "Beg. FBA Inventory (Plan)", data: plan.beginFBAInventory, cls: "", reduce: "first" },
+        { label: "Beg. FBA Inventory (Projected)", data: projections.projBegFBA, cls: "projected-row", reduce: "first" },
+        { label: "Recommended Shipment", data: plan.recommendedShipment, cls: "" },
         { label: "Shipment Override", data: getRow("shipmentOverride", "shipmentOverride"), cls: "override-row", editable: "shipmentOverride" },
-        { label: "FBA Shipments In", data: plan.fbaShipmentsIn, cls: "" },
-        { label: "Sales (Units Out)", data: plan.salesUnitsOut, cls: "" },
-        { label: "Returns In", data: plan.returnsIn, cls: "" },
-        { label: "Ending FBA Inventory", data: plan.endingFBAInventory, cls: "total-row" },
-        { label: "Weeks of FBA Cover", data: plan.weeksOfFBACover, cls: "", fmt: "d1" },
+        { label: "FBA Shipments In (Plan)", data: plan.fbaShipmentsIn, cls: "" },
+        { label: "FBA Shipments In (Projected)", data: projections.projShipmentsIn, cls: "projected-row" },
+        { label: "Sales Units Out (Plan)", data: plan.salesUnitsOut, cls: "" },
+        { label: "Sales Units Out (Projected)", data: projections.projSalesOut, cls: "projected-row" },
+        { label: "Returns In (Plan)", data: plan.returnsIn, cls: "" },
+        { label: "Returns In (Projected)", data: projections.projReturnsIn, cls: "projected-row" },
+        { label: "End FBA Inventory (Plan)", data: plan.endingFBAInventory, cls: "total-row", reduce: "last" },
+        { label: "End FBA Inventory (Projected)", data: projections.projEndFBA, cls: "projected-row total-row", reduce: "last" },
+        { label: "Weeks of FBA Cover (Projected)", data: projections.projWeeksCover, cls: "projected-row", fmt: "d1", reduce: "last" },
       ]
     },
     {
       title: "WAREHOUSE INVENTORY",
       rows: [
-        { label: "Beginning WH Inventory", data: plan.beginWHInventory, cls: "" },
+        { label: "Beginning WH Inventory", data: plan.beginWHInventory, cls: "", reduce: "first" },
         { label: "Factory Receipts In", data: plan.factoryReceiptsIn, cls: "" },
         { label: "Shipped to FBA", data: plan.shippedToFBA, cls: "" },
-        { label: "Ending WH Inventory", data: plan.endingWHInventory, cls: "total-row" },
-        { label: "WH Months of Supply", data: plan.whMonthsOfSupply, cls: "", fmt: "d1" },
+        { label: "Ending WH Inventory", data: plan.endingWHInventory, cls: "total-row", reduce: "last" },
+        { label: "WH Months of Supply", data: plan.whMonthsOfSupply, cls: "", fmt: "d1", reduce: "last" },
       ]
     },
     {
       title: "EFFECTIVE PROJECTIONS",
       rows: [
         { label: "Effective Sales Units", data: projections.effectiveUnits, cls: "total-row" },
-        { label: "Effective AUR ($)", data: projections.effectiveAUR, cls: "", fmt: "$d" },
+        { label: "Effective AUR ($)", data: projections.effectiveAUR, cls: "", fmt: "$d", reduce: "avg" },
         { label: "Effective Refund Units", data: projections.effectiveRefunds, cls: "" },
         { label: "Forecasted Revenue $", data: projections.forecastedRevenue, cls: "total-row", fmt: "$" },
         { label: "Projected Gross Profit $", data: projections.projectedProfit, cls: "", fmt: "$" },
@@ -413,17 +536,25 @@ function ItemPlanDetail({ plan, overrides, onOverride }) {
     return Math.round(val).toLocaleString();
   }
 
-  // Chart: Revenue + Units comparison — use projections
+  // Chart data using projections
   const chartData = MONTHS.map((m, i) => ({
     month: MONTH_LABELS[i],
     tyUnits: projections.effectiveUnits[m] || 0,
     lyUnits: plan.lyUnits?.[m] || 0,
     tyRevenue: projections.forecastedRevenue[m] || 0,
     lyRevenue: plan.lyRevenue?.[m] || 0,
+    isActual: isActual(m),
   }));
 
   return (
     <div className="ip-item-detail">
+      {/* Actual/Projected legend */}
+      <div className="ip-legend">
+        <span className="ip-legend-item"><span className="ip-legend-dot ip-actual-dot" /> Actual (Jan–Feb)</span>
+        <span className="ip-legend-item"><span className="ip-legend-dot ip-projected-dot" /> Projected (Mar+)</span>
+        <span className="ip-legend-item"><span className="ip-legend-swatch ip-override-swatch" /> Override (editable)</span>
+      </div>
+
       {/* Item Header */}
       <div className="ip-item-header">
         <div>
@@ -463,7 +594,16 @@ function ItemPlanDetail({ plan, overrides, onOverride }) {
               <XAxis dataKey="month" fontSize={11} />
               <YAxis fontSize={11} />
               <Tooltip />
-              <Bar dataKey="tyUnits" fill="#3E658C" name="TY Units" radius={[3,3,0,0]} />
+              <Bar dataKey="tyUnits" name="TY Units" radius={[3,3,0,0]}
+                fill="#3E658C"
+                shape={(props) => {
+                  const { x, y, width, height, payload } = props;
+                  const fill = payload.isActual ? "#1A5276" : "#3E658C";
+                  const strokeDash = payload.isActual ? "" : "3 2";
+                  return <rect x={x} y={y} width={width} height={height} fill={fill} rx={3} ry={3}
+                    stroke={payload.isActual ? "none" : "#3E658C55"} strokeDasharray={strokeDash} />;
+                }}
+              />
               <Line type="monotone" dataKey="lyUnits" stroke="#E87830" name="LY Units" strokeWidth={2} dot={false} />
             </ComposedChart>
           </ResponsiveContainer>
@@ -493,10 +633,15 @@ function ItemPlanDetail({ plan, overrides, onOverride }) {
                 <thead>
                   <tr>
                     <th className="sticky-col metric-col">Metric</th>
-                    <th>S1</th>
-                    <th>S2</th>
-                    <th className="fy-total">FY</th>
-                    {MONTH_LABELS.map(m => <th key={m}>{m}</th>)}
+                    {MONTH_LABELS.map((ml, mi) => (
+                      <th key={ml} className={isActual(MONTHS[mi]) ? "ip-th-actual" : "ip-th-projected"}>
+                        {ml}
+                        {isActual(MONTHS[mi]) && <span className="ip-actual-badge">A</span>}
+                      </th>
+                    ))}
+                    {PERIOD_COLS.map(pc => (
+                      <th key={pc.key} className={pc.cls}>{pc.label}</th>
+                    ))}
                   </tr>
                 </thead>
                 <tbody>
@@ -509,29 +654,40 @@ function ItemPlanDetail({ plan, overrides, onOverride }) {
                           {row.label}
                           {isEditable && <span className="ip-edit-hint">✏️</span>}
                         </td>
-                        <td className="num">{fmtCell(row.data?.s1Total, row.fmt)}</td>
-                        <td className="num">{fmtCell(row.data?.s2Total, row.fmt)}</td>
-                        <td className="num fy-total"><strong>{fmtCell(row.data?.fyTotal, row.fmt)}</strong></td>
-                        {MONTHS.map(m => (
-                          <td key={m} className={`num${isEditable ? " ip-editable-cell" : ""}`}>
-                            {isEditable ? (
-                              <input
-                                type="number"
-                                className="ip-cell-input"
-                                value={localEdits[row.editable]?.[m] !== undefined
-                                  ? localEdits[row.editable][m]
-                                  : (row.data?.[m] != null ? row.data[m] : "")}
-                                step={row.fmt === "$d" ? "0.01" : row.fmt === "%" ? "0.001" : "1"}
-                                onChange={e => handleCellEdit(row.editable, m, e.target.value)}
-                                onBlur={() => handleCellBlur(row.editable, m)}
-                                onKeyDown={e => { if (e.key === "Enter") e.target.blur(); }}
-                                placeholder={row.fmt === "%" ? "0.0%" : row.fmt === "$d" ? "$0.00" : "0"}
-                              />
-                            ) : (
-                              fmtCell(row.data?.[m], row.fmt)
-                            )}
-                          </td>
-                        ))}
+                        {MONTHS.map(m => {
+                          const actual = isActual(m);
+                          const cellCls = `num${isEditable ? " ip-editable-cell" : ""}${actual ? " ip-actual-cell" : " ip-proj-cell"}`;
+                          return (
+                            <td key={m} className={cellCls}>
+                              {isEditable ? (
+                                <input
+                                  type="number"
+                                  className={`ip-cell-input${actual ? " ip-input-actual" : ""}`}
+                                  value={localEdits[row.editable]?.[m] !== undefined
+                                    ? localEdits[row.editable][m]
+                                    : (row.data?.[m] != null ? row.data[m] : "")}
+                                  step={row.fmt === "$d" ? "0.01" : row.fmt === "%" ? "0.001" : "1"}
+                                  onChange={e => handleCellEdit(row.editable, m, e.target.value)}
+                                  onBlur={() => handleCellBlur(row.editable, m)}
+                                  onKeyDown={e => { if (e.key === "Enter") e.target.blur(); }}
+                                  placeholder={row.fmt === "%" ? "0.0%" : row.fmt === "$d" ? "$0.00" : "0"}
+                                />
+                              ) : (
+                                fmtCell(row.data?.[m], row.fmt)
+                              )}
+                            </td>
+                          );
+                        })}
+                        {PERIOD_COLS.map(pc => {
+                          const pv = periodVal(row.data, pc.months, row.reduce);
+                          const isFY = pc.key === "fy";
+                          const cellCls = `num ${pc.cls === "fy-total" ? "fy-total" : pc.cls === "ip-th-quarter" ? "ip-quarter-cell" : "ip-half-cell"}`;
+                          return (
+                            <td key={pc.key} className={cellCls}>
+                              {isFY ? <strong>{fmtCell(pv, row.fmt)}</strong> : fmtCell(pv, row.fmt)}
+                            </td>
+                          );
+                        })}
                       </tr>
                     );
                   })}
