@@ -6171,9 +6171,17 @@ async def get_fba_shipment_items(request: Request, shipment_id: str):
 
 # ── Item Plan Module ───────────────────────────────────────
 
+def _duck_rw():
+    """Return a read-write DuckDB connection for item plan operations."""
+    return duckdb.connect(str(DB_PATH), read_only=False)
+
+def _duck():
+    """Return a read-only DuckDB connection for item plan queries."""
+    return duckdb.connect(str(DB_PATH), read_only=True)
+
 def _init_item_plan_tables():
     """Initialize Item Plan DuckDB tables and seed from JSON if they don't exist."""
-    con = _duck()
+    con = _duck_rw()
     try:
         # Create tables if they don't exist
         con.execute("""
@@ -6611,7 +6619,7 @@ async def post_item_plan_override(request: Request):
     month = body.get("month", 0)
     value = body.get("value")
 
-    con = _duck()
+    con = _duck_rw()
     try:
         if value is None:
             # Delete override
@@ -6637,7 +6645,7 @@ async def post_item_plan_curve(request: Request):
     sku = body.get("sku", "")
     curve_type = body.get("curve_type", "LY")
 
-    con = _duck()
+    con = _duck_rw()
     try:
         con.execute("""
             INSERT OR REPLACE INTO item_plan_curve_selection (sku, curve_type)
@@ -6715,7 +6723,7 @@ async def post_factory_on_order(request: Request):
     _require_auth(request)
     body = await request.json()
 
-    con = _duck()
+    con = _duck_rw()
     try:
         # Determine if this is an order or item
         if "po_number" in body and "factory" in body:
@@ -6782,7 +6790,7 @@ async def post_dashboard_settings(request: Request):
     key = body.get("key", "")
     value = body.get("value", "")
 
-    con = _duck()
+    con = _duck_rw()
     try:
         con.execute("""
             INSERT OR REPLACE INTO item_plan_settings (key, value)
