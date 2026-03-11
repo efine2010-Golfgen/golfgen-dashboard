@@ -78,10 +78,14 @@ export default function GolfGenInventory() {
   const [search, setSearch] = useState("");
   const [sortKey, setSortKey] = useState("totalOnHand");
   const [sortDir, setSortDir] = useState("desc");
+  const [uploading, setUploading] = useState(null); // "golf" or "housewares" or null
+  const [uploadMsg, setUploadMsg] = useState(null);
+  const [uploadMeta, setUploadMeta] = useState({});
 
   // Load overview summary (both divisions)
   useEffect(() => {
     api.warehouseSummary().then(d => setOverviewData(d)).catch(() => null);
+    api.uploadMeta().then(d => setUploadMeta(d || {})).catch(() => {});
   }, []);
 
   // Load division data
@@ -94,6 +98,46 @@ export default function GolfGenInventory() {
       setLoading(false);
     }).catch(() => setLoading(false));
   }, [division, channel]);
+
+  const handleUpload = async (e, div) => {
+    const file = e.target.files[0];
+    if (!file) return;
+    setUploading(div);
+    setUploadMsg(null);
+    try {
+      const formData = new FormData();
+      formData.append("file", file);
+      const API_BASE = import.meta.env.VITE_API_URL || "";
+      const res = await fetch(`${API_BASE}/api/upload/inventory-excel?division=${div}`, {
+        method: "POST",
+        body: formData,
+        credentials: "include",
+      });
+      const result = await res.json();
+      if (res.ok) {
+        setUploadMsg({ type: "success", text: `${div === "golf" ? "Golf" : "Housewares"}: ${result.itemCount} items uploaded from ${file.name}` });
+        // Refresh data and metadata
+        api.uploadMeta().then(d => setUploadMeta(d || {})).catch(() => {});
+        api.warehouseSummary().then(d => setOverviewData(d)).catch(() => null);
+        // Reload current division data
+        const curDiv = division === "Golf" ? "golf" : "housewares";
+        api.warehouseUnified(curDiv, division === "Golf" ? channel : null).then(d => setData(d)).catch(() => {});
+      } else {
+        setUploadMsg({ type: "error", text: result.detail || "Upload failed" });
+      }
+    } catch (err) {
+      setUploadMsg({ type: "error", text: err.message });
+    } finally {
+      setUploading(null);
+      e.target.value = "";
+    }
+  };
+
+  const formatDate = (iso) => {
+    if (!iso) return "Never";
+    const d = new Date(iso);
+    return d.toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
+  };
 
   const handleSort = (key) => {
     if (sortKey === key) setSortDir(d => d === "desc" ? "asc" : "desc");
@@ -133,10 +177,62 @@ export default function GolfGenInventory() {
 
   return (
     <>
-      <div className="page-header">
-        <h1>GolfGen Inventory</h1>
-        <p>3PL Warehouse Inventory &middot; Golf &amp; Housewares divisions</p>
+      <div className="page-header" style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
+        <div>
+          <h1>GolfGen Inventory</h1>
+          <p>3PL Warehouse Inventory &middot; Golf &amp; Housewares divisions</p>
+        </div>
+        <div style={{ display: "flex", gap: 12, alignItems: "flex-start" }}>
+          {/* Golf Upload */}
+          <div style={{ textAlign: "center" }}>
+            <label style={{
+              display: "inline-flex", alignItems: "center", gap: 6, padding: "6px 14px",
+              background: "var(--teal)", color: "#fff", borderRadius: 8, cursor: "pointer",
+              fontSize: 12, fontWeight: 600, opacity: uploading === "golf" ? 0.6 : 1,
+              whiteSpace: "nowrap",
+            }}>
+              {uploading === "golf" ? "Uploading..." : "Upload Golf"}
+              <input type="file" accept=".xlsx,.xls" onChange={e => handleUpload(e, "golf")}
+                style={{ display: "none" }} disabled={uploading !== null} />
+            </label>
+            <div style={{ fontSize: 10, color: "var(--muted)", marginTop: 3 }}>
+              Last: {formatDate(uploadMeta.golf?.lastUpload)}
+            </div>
+          </div>
+          {/* Housewares Upload */}
+          <div style={{ textAlign: "center" }}>
+            <label style={{
+              display: "inline-flex", alignItems: "center", gap: 6, padding: "6px 14px",
+              background: "var(--blue-active)", color: "#fff", borderRadius: 8, cursor: "pointer",
+              fontSize: 12, fontWeight: 600, opacity: uploading === "housewares" ? 0.6 : 1,
+              whiteSpace: "nowrap",
+            }}>
+              {uploading === "housewares" ? "Uploading..." : "Upload Housewares"}
+              <input type="file" accept=".xlsx,.xls" onChange={e => handleUpload(e, "housewares")}
+                style={{ display: "none" }} disabled={uploading !== null} />
+            </label>
+            <div style={{ fontSize: 10, color: "var(--muted)", marginTop: 3 }}>
+              Last: {formatDate(uploadMeta.housewares?.lastUpload)}
+            </div>
+          </div>
+        </div>
       </div>
+
+      {/* Upload Status Message */}
+      {uploadMsg && (
+        <div style={{
+          padding: "8px 16px", marginBottom: 12, borderRadius: 8, fontSize: 13,
+          background: uploadMsg.type === "success" ? "#dcfce7" : "#fee2e2",
+          color: uploadMsg.type === "success" ? "#166534" : "#991b1b",
+          display: "flex", justifyContent: "space-between", alignItems: "center",
+        }}>
+          <span>{uploadMsg.text}</span>
+          <button onClick={() => setUploadMsg(null)} style={{
+            background: "none", border: "none", cursor: "pointer", fontSize: 16,
+            color: uploadMsg.type === "success" ? "#166534" : "#991b1b",
+          }}>×</button>
+        </div>
+      )}
 
       {/* ── Overview Summary (both divisions) ── */}
       {overviewData && (

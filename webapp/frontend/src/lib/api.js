@@ -59,6 +59,9 @@ export const api = {
   warehouseUnified: (division = "golf", channel = null) =>
     fetchJSON(`/api/warehouse/unified?division=${division}${channel && channel !== "All" ? `&channel=${encodeURIComponent(channel)}` : ""}`),
 
+  // Upload metadata
+  uploadMeta: () => fetchJSON(`/api/upload/metadata`),
+
   // Item Master
   itemMaster: () => fetchJSON(`/api/item-master`),
   updateItem: (asin, data) =>

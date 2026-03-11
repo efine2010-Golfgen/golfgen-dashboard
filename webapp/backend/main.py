@@ -3546,6 +3546,217 @@ def get_warehouse():
     return {"masters": masters, "count": len(masters)}
 
 
+# ── Golf/Housewares Inventory Excel Upload ──────────────────────
+
+# Upload metadata file path
+UPLOAD_META_PATH = DB_DIR / "upload_metadata.json"
+
+def _load_upload_meta() -> dict:
+    if UPLOAD_META_PATH.exists():
+        with open(UPLOAD_META_PATH, encoding="utf-8") as f:
+            return json.load(f)
+    return {}
+
+def _save_upload_meta(meta: dict):
+    with open(UPLOAD_META_PATH, "w", encoding="utf-8") as f:
+        json.dump(meta, f, indent=2)
+
+
+@app.get("/api/upload/metadata")
+def upload_metadata():
+    """Return last-uploaded timestamps for golf and housewares inventory files."""
+    return _load_upload_meta()
+
+
+def _classify_golf_channel(item_number: str, walmart_skus: set, amazon_skus: set) -> str:
+    """Classify a golf SKU into Amazon, Walmart, Walmart & Amazon, or Other."""
+    import re as _re
+    s = item_number.strip().upper()
+    if s.startswith("T-"):
+        s = s[2:]
+    for suf in ["FBM", "/RB", "/RETD", "/DONATE", "/DMGD", "/CUST", "/HOLD", "/1", "/2"]:
+        if s.endswith(suf):
+            s = s[:-len(suf)]
+    s = _re.sub(r"\s*/DAM.*$", "", s)
+    s = s.strip()
+    in_walmart = s in walmart_skus
+    in_amazon = s in amazon_skus
+    if in_walmart and in_amazon:
+        return "Walmart & Amazon"
+    if in_walmart:
+        return "Walmart"
+    if in_amazon:
+        return "Amazon"
+    return "Other"
+
+
+@app.post("/api/upload/inventory-excel")
+async def upload_inventory_excel(
+    file: UploadFile = File(...),
+    division: str = Query("golf", description="golf or housewares"),
+):
+    """Upload an Excel file to refresh golf or housewares inventory JSON.
+
+    Parses the first sheet with warehouse-like columns
+    (Item Number, Description, Pack, On-Hand, Damage, QC Hold, Pcs On-Hand, Pcs Allocated, Pcs Available).
+    For golf, also classifies each item by channel (Amazon/Walmart/Other).
+    Saves to golf_inventory.json or housewares_inventory.json.
+    """
+    try:
+        import openpyxl
+    except ImportError:
+        raise HTTPException(status_code=500, detail="openpyxl not installed")
+
+    import tempfile
+    tmp_path = None
+    try:
+        contents = await file.read()
+        with tempfile.NamedTemporaryFile(delete=False, suffix=".xlsx") as tmp:
+            tmp.write(contents)
+            tmp_path = tmp.name
+
+        wb = openpyxl.load_workbook(tmp_path, data_only=True)
+
+        # Find the data sheet — first sheet with "item" in header row, or just the first sheet
+        ws = None
+        for sheet_name in wb.sheetnames:
+            candidate = wb[sheet_name]
+            first_row = [str(c or "").strip().lower() for c in next(candidate.iter_rows(min_row=1, max_row=1, values_only=True), [])]
+            if any("item" in h for h in first_row):
+                ws = candidate
+                break
+        if ws is None:
+            ws = wb[wb.sheetnames[0]]
+
+        rows = list(ws.iter_rows(values_only=True))
+        if len(rows) < 2:
+            raise HTTPException(status_code=400, detail="Excel file has no data rows")
+
+        headers = [str(h or "").strip() for h in rows[0]]
+        header_lower = [h.lower().replace(" ", "_").replace("-", "_") for h in headers]
+
+        # Map columns
+        def find_col(*patterns):
+            for i, h in enumerate(header_lower):
+                for p in patterns:
+                    if p in h:
+                        return i
+            return None
+
+        item_col = find_col("item_number", "item_no", "item_#", "item")
+        desc_col = find_col("description", "desc")
+        pack_col = find_col("pack")
+        oh_col = find_col("on_hand", "on hand", "oh")
+        ns_col = find_col("non_standard", "nonstandard", "non_std")
+        dmg_col = find_col("damage", "damaged", "dam")
+        std_col = find_col("standard")
+        qc_col = find_col("qc_hold", "qc hold", "qchold")
+        poh_col = find_col("pcs_on_hand", "pcs on hand")
+        palloc_col = find_col("pcs_allocated", "pcs allocated", "pcs_alloc")
+        pavail_col = find_col("pcs_available", "pcs available", "pcs_avail")
+        ref_col = find_col("item_ref", "item ref", "itemref")
+
+        if item_col is None:
+            raise HTTPException(status_code=400, detail=f"Could not find 'Item Number' column. Headers: {headers}")
+
+        def safe_int(val):
+            try:
+                return int(float(val or 0))
+            except (ValueError, TypeError):
+                return 0
+
+        def safe_str(val):
+            return str(val or "").strip()
+
+        # Build channel lookup for golf
+        walmart_skus_set = set()
+        amazon_skus_set = set()
+        if division == "golf":
+            wm_items = load_json("walmart_item_master.json")
+            for w in wm_items:
+                if w.get("golfgenItem"):
+                    walmart_skus_set.add(w["golfgenItem"].strip().upper())
+            am_items = load_json("amazon_item_master.json")
+            for a in am_items:
+                if a.get("sku"):
+                    amazon_skus_set.add(a["sku"].strip().upper())
+
+        items = []
+        for row in rows[1:]:
+            item_num = safe_str(row[item_col] if item_col is not None else "")
+            if not item_num:
+                continue
+
+            item = {
+                "itemNumber": item_num,
+                "description": safe_str(row[desc_col]) if desc_col is not None else "",
+                "pack": safe_int(row[pack_col]) if pack_col is not None else 1,
+                "onHand": safe_int(row[oh_col]) if oh_col is not None else 0,
+                "nonStandard": safe_int(row[ns_col]) if ns_col is not None else 0,
+                "damage": safe_int(row[dmg_col]) if dmg_col is not None else 0,
+                "standard": safe_int(row[std_col]) if std_col is not None else 0,
+                "qcHold": safe_int(row[qc_col]) if qc_col is not None else 0,
+                "pcsOnHand": safe_int(row[poh_col]) if poh_col is not None else 0,
+                "pcsAllocated": safe_int(row[palloc_col]) if palloc_col is not None else 0,
+                "pcsAvailable": safe_int(row[pavail_col]) if pavail_col is not None else 0,
+                "itemRef": safe_str(row[ref_col]) if ref_col is not None else "",
+            }
+
+            if division == "golf":
+                item["channel"] = _classify_golf_channel(item_num, walmart_skus_set, amazon_skus_set)
+
+            items.append(item)
+
+        if not items:
+            raise HTTPException(status_code=400, detail="No items found in Excel file")
+
+        # Save to JSON
+        filename = "golf_inventory.json" if division == "golf" else "housewares_inventory.json"
+        json_path = DB_DIR / filename
+        with open(json_path, "w", encoding="utf-8") as f:
+            json.dump(items, f, indent=2)
+
+        # Update upload metadata
+        meta = _load_upload_meta()
+        meta[division] = {
+            "lastUpload": datetime.now().isoformat(),
+            "filename": file.filename,
+            "itemCount": len(items),
+        }
+        _save_upload_meta(meta)
+
+        wb.close()
+        logger.info(f"  {division.title()} inventory uploaded: {len(items)} items from {file.filename}")
+
+        return {
+            "status": "success",
+            "division": division,
+            "filename": file.filename,
+            "itemCount": len(items),
+            "columns_mapped": {
+                "item": item_col is not None,
+                "description": desc_col is not None,
+                "pack": pack_col is not None,
+                "pcsOnHand": poh_col is not None,
+                "pcsAllocated": palloc_col is not None,
+                "pcsAvailable": pavail_col is not None,
+            },
+        }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        import traceback
+        logger.error(f"Inventory Excel upload error: {traceback.format_exc()}")
+        raise HTTPException(status_code=500, detail=str(e))
+    finally:
+        if tmp_path:
+            try:
+                os.unlink(tmp_path)
+            except Exception:
+                pass
+
+
 # ── Excel Upload: Refresh Warehouse + Item Master from Excel ────────────
 
 @app.post("/api/upload/warehouse-excel")
