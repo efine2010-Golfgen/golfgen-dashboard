@@ -1463,6 +1463,13 @@ def load_json(filename: str) -> list:
         return json.load(f)
 
 
+def save_json(filename: str, data):
+    """Save data to a JSON file in the data directory."""
+    path = DB_DIR / filename
+    with open(path, "w", encoding="utf-8") as f:
+        json.dump(data, f, indent=2, ensure_ascii=False)
+
+
 def load_cogs() -> dict:
     """Load COGS data from CSV. Returns {asin: {cogs, product_name, sku}}."""
     cogs = {}
@@ -4276,6 +4283,25 @@ def item_master_walmart():
     """Walmart item master data."""
     items = load_json("walmart_item_master.json")
     return {"items": items, "count": len(items)}
+
+
+@app.put("/api/item-master/walmart/{golfgen_item}")
+def update_walmart_item(golfgen_item: str, body: dict = Body(...)):
+    """Update a single Walmart item by golfgenItem identifier."""
+    items = load_json("walmart_item_master.json")
+    found = False
+    updatable = ["plannedAnnualUnits", "unitCost", "unitRetail", "storeCount"]
+    for item in items:
+        if item.get("golfgenItem") == golfgen_item:
+            for key in updatable:
+                if key in body:
+                    item[key] = body[key]
+            found = True
+            break
+    if not found:
+        raise HTTPException(status_code=404, detail=f"Walmart item {golfgen_item} not found")
+    save_json("walmart_item_master.json", items)
+    return {"status": "ok", "golfgenItem": golfgen_item}
 
 
 @app.get("/api/item-master/amazon")

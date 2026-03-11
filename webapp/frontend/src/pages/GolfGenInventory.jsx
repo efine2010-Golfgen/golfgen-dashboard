@@ -341,16 +341,26 @@ export default function GolfGenInventory() {
                 }}>
                   SKUs by Channel
                 </div>
-                <ResponsiveContainer width="100%" height={190}>
+                <ResponsiveContainer width="100%" height={210}>
                   <PieChart>
-                    <Pie data={channelChartData} cx="50%" cy="50%" innerRadius={40} outerRadius={75} dataKey="value"
-                      label={({ name, value }) => `${name} (${value})`}
-                      labelLine={{ strokeWidth: 1, stroke: "#94a3b8" }}>
+                    <Pie data={channelChartData} cx="50%" cy="45%" innerRadius={35} outerRadius={65} dataKey="value"
+                      label={false}
+                      labelLine={false}>
                       {channelChartData.map((_, i) => (
                         <Cell key={i} fill={COLORS[i % COLORS.length]} />
                       ))}
                     </Pie>
                     <Tooltip contentStyle={TOOLTIP_STYLE} />
+                    <Legend
+                      verticalAlign="bottom"
+                      height={36}
+                      iconType="circle"
+                      iconSize={8}
+                      formatter={(value, entry) => {
+                        const item = channelChartData.find(d => d.name === value);
+                        return <span style={{ fontSize: 11, color: "#64748b" }}>{value} ({item?.value || 0})</span>;
+                      }}
+                    />
                   </PieChart>
                 </ResponsiveContainer>
               </div>

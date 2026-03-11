@@ -140,6 +140,17 @@ export default function ItemMaster() {
   if (loading) return <div className="loading"><div className="spinner" /> Loading item master...</div>;
 
   /* ─────────────── Walmart Tab ─────────────── */
+  const handleWalmartUpdate = async (golfgenItem, field, value) => {
+    setSaving(golfgenItem);
+    try {
+      await api.updateWalmartItem(golfgenItem, { [field]: value });
+      setWalmartItems(prev => prev.map(i => i.golfgenItem === golfgenItem ? { ...i, [field]: value } : i));
+    } catch (e) {
+      console.error("Save failed:", e);
+    }
+    setSaving(null);
+  };
+
   if (masterTab === "Walmart") {
     const simpleItems = walmartItems || [];
     const simpleFiltered = simpleItems.filter(i => {
@@ -154,6 +165,7 @@ export default function ItemMaster() {
     const totalStores = simpleItems.reduce((s, i) => s + (i.storeCount || 0), 0);
     const avgCost = totalSkus > 0 ? simpleItems.reduce((s, i) => s + (i.unitCost || 0), 0) / totalSkus : 0;
     const avgRetail = totalSkus > 0 ? simpleItems.reduce((s, i) => s + (i.unitRetail || 0), 0) / totalSkus : 0;
+    const totalPlannedWm = simpleItems.reduce((s, i) => s + (i.plannedAnnualUnits || 0), 0);
     const categories = [...new Set(simpleItems.map(i => i.subcategory || i.category).filter(Boolean))];
 
     return (
@@ -189,6 +201,10 @@ export default function ItemMaster() {
             <div className="kpi-value" style={{ color: "var(--orange)" }}>${avgRetail.toFixed(2)}</div>
           </div>
           <div className="kpi-card">
+            <div className="kpi-label">FY26 Planned Units</div>
+            <div className="kpi-value" style={{ color: "var(--orange)" }}>{totalPlannedWm.toLocaleString()}</div>
+          </div>
+          <div className="kpi-card">
             <div className="kpi-label">Categories</div>
             <div className="kpi-value">{categories.length}</div>
             <div style={{ fontSize: 11, color: "var(--muted)", marginTop: 4 }}>{categories.join(", ")}</div>
@@ -199,7 +215,7 @@ export default function ItemMaster() {
           <input type="text" placeholder="Search..." value={search} onChange={e => setSearch(e.target.value)}
             style={{ padding: "6px 14px", border: "1px solid rgba(14,31,45,0.15)", borderRadius: 8, fontSize: 13, width: 260 }} />
           <span style={{ fontSize: 12, color: "var(--muted)", marginLeft: "auto" }}>
-            {simpleFiltered.length} of {totalSkus}
+            {simpleFiltered.length} of {totalSkus} &middot; Click values to edit
           </span>
         </div>
 
@@ -213,11 +229,12 @@ export default function ItemMaster() {
                 <th style={{ textAlign: "right" }}>Unit Retail</th>
                 <th style={{ textAlign: "right" }}>Carton Size</th>
                 <th style={{ textAlign: "right" }}>Store Count</th>
+                <th style={{ textAlign: "right" }}>FY26 Plan</th>
               </tr>
             </thead>
             <tbody>
               {simpleFiltered.map((item, i) => (
-                <tr key={i}>
+                <tr key={i} style={{ background: saving === item.golfgenItem ? "rgba(46,207,170,0.08)" : undefined }}>
                   <td>
                     <div style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", maxWidth: 300 }} title={item.description}>
                       {item.description || "—"}
@@ -232,10 +249,18 @@ export default function ItemMaster() {
                   <td style={{ textAlign: "right" }}>{item.unitRetail ? `$${item.unitRetail.toFixed(2)}` : "—"}</td>
                   <td style={{ textAlign: "right" }}>{item.cartonSize || "—"}</td>
                   <td style={{ textAlign: "right", fontWeight: 600 }}>{(item.storeCount || 0).toLocaleString()}</td>
+                  <td style={{ textAlign: "right" }}>
+                    <EditableCell value={item.plannedAnnualUnits || 0}
+                      onSave={v => handleWalmartUpdate(item.golfgenItem, "plannedAnnualUnits", Math.round(v))} />
+                  </td>
                 </tr>
               ))}
             </tbody>
           </table>
+        </div>
+
+        <div style={{ marginTop: 16, padding: 12, background: "rgba(14,31,45,0.03)", borderRadius: 8, fontSize: 12, color: "var(--muted)" }}>
+          <strong>Tip:</strong> Click any blue-underlined value in the FY26 Plan column to edit it inline. Changes save automatically.
         </div>
       </>
     );
@@ -433,9 +458,9 @@ export default function ItemMaster() {
               <SortHeader label="Coupon" field="couponValue" style={{ textAlign: "right" }} />
               <SortHeader label="Net $" field="netPrice" style={{ textAlign: "right" }} />
               <SortHeader label="Ref Fee" field="referralFee" style={{ textAlign: "right" }} />
+              <SortHeader label="FY26 Plan" field="plannedAnnualUnits" style={{ textAlign: "right" }} />
               <SortHeader label="LY Rev" field="lyRevenue" style={{ textAlign: "right" }} />
               <SortHeader label="LY Units" field="lyUnits" style={{ textAlign: "right" }} />
-              <SortHeader label="FY26 Plan" field="plannedAnnualUnits" style={{ textAlign: "right" }} />
               <th style={{ width: 30 }}></th>
             </tr>
           </thead>
@@ -479,12 +504,12 @@ export default function ItemMaster() {
                   <td style={{ textAlign: "right", color: "var(--muted)" }}>
                     {item.referralFee > 0 ? `$${item.referralFee.toFixed(2)}` : "—"}
                   </td>
-                  <td style={{ textAlign: "right" }}>{fmt$(item.lyRevenue)}</td>
-                  <td style={{ textAlign: "right" }}>{(item.lyUnits || 0).toLocaleString()}</td>
                   <td style={{ textAlign: "right" }}>
                     <EditableCell value={item.plannedAnnualUnits}
                       onSave={v => handleUpdate(item.asin, "plannedAnnualUnits", Math.round(v))} />
                   </td>
+                  <td style={{ textAlign: "right" }}>{fmt$(item.lyRevenue)}</td>
+                  <td style={{ textAlign: "right" }}>{(item.lyUnits || 0).toLocaleString()}</td>
                   <td>
                     <button
                       onClick={() => setExpandedAsin(expandedAsin === item.asin ? null : item.asin)}

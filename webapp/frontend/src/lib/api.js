@@ -72,6 +72,13 @@ export const api = {
       credentials: "include",
     }).then(r => r.json()),
   itemMasterWalmart: () => fetchJSON(`/api/item-master/walmart`),
+  updateWalmartItem: (golfgenItem, data) =>
+    fetch(`${API_BASE}/api/item-master/walmart/${encodeURIComponent(golfgenItem)}`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(data),
+      credentials: "include",
+    }).then(r => r.json()),
   itemMasterAmazon: () => fetchJSON(`/api/item-master/amazon`),
   itemMasterOther: () => fetchJSON(`/api/item-master/other`),
 };
