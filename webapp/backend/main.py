@@ -4903,22 +4903,32 @@ async def upload_supply_chain(request: Request, file: UploadFile = File(...)):
             except: return 0
 
         purchase_orders = []
-        for i in range(7, len(rows)):
+        # Find header row dynamically (look for row with "PO#" or "Factory")
+        po_header_row = 6  # default
+        for i in range(0, min(15, len(rows))):
+            vals = [str(v).upper() for v in rows[i].values()]
+            if any("PO#" in v or "PO #" in v for v in vals) or any(v == "FACTORY" for v in vals):
+                po_header_row = i
+                break
+        for i in range(po_header_row + 1, len(rows)):
             r = rows[i]
-            po = r.get("C") or r.get("D")
+            # Try multiple column mappings: E (current layout) or C/D (legacy)
+            po = r.get("E") or r.get("C") or r.get("D")
             factory = r.get("A") or r.get("B")
             units = r.get("F") or r.get("G")
             if not po or not units: continue
-            if str(po).startswith("PO") or str(po).startswith("GG"):
+            po_str = str(po).strip()
+            # Accept PO numbers starting with T-, PO, GG, Z, or any alphanumeric PO-like pattern
+            if po_str[:1].isalpha() or po_str[:2] in ["T-"]:
                 purchase_orders.append({
                     "factory": str(factory or ""),
-                    "poNumber": str(po),
+                    "poNumber": po_str,
                     "units": safe_round(units, 0),
-                    "totalCost": safe_round(r.get("H") or r.get("I") or 0),
-                    "fobDate": str(r.get("J") or r.get("K") or ""),
-                    "estArrival": str(r.get("L") or r.get("M") or ""),
-                    "cbm": safe_round(r.get("N") or r.get("O") or 0),
-                    "landedCost": safe_round(r.get("P") or r.get("Q") or 0),
+                    "totalCost": safe_round(r.get("G") or r.get("H") or r.get("I") or 0),
+                    "fobDate": str(r.get("I") or r.get("J") or r.get("K") or ""),
+                    "estArrival": str(r.get("J") or r.get("L") or r.get("M") or ""),
+                    "cbm": safe_round(r.get("K") or r.get("N") or r.get("O") or 0),
+                    "landedCost": safe_round(r.get("U") or r.get("P") or r.get("Q") or 0),
                 })
 
         units_by_item = []
@@ -4928,10 +4938,10 @@ async def upload_supply_chain(request: Request, file: UploadFile = File(...)):
             if "UNITS BY ITEM" in str(b_val).upper() or "UNITS BY ITEM" in str(r.get("A", "")).upper():
                 in_units_section = True; continue
             if in_units_section:
-                sku = r.get("A") or r.get("B")
-                desc = r.get("B") or r.get("C")
-                if not sku or str(sku).upper() in ["SKU", "TOTAL", ""]: continue
-                if "ARRIVAL" in str(sku).upper(): break
+                sku = r.get("B") or r.get("A")
+                desc = r.get("C") or r.get("B")
+                if not sku or str(sku).upper() in ["SKU", "TOTAL", "", "X-FACTORY"]: continue
+                if "ARRIVAL" in str(sku).upper() or "UNITS BY" in str(sku).upper(): break
                 total = 0
                 by_po = {}
                 for k, v in r.items():
@@ -4946,15 +4956,16 @@ async def upload_supply_chain(request: Request, file: UploadFile = File(...)):
         in_arrival = False
         for i, r in enumerate(rows):
             for k, v in r.items():
-                if "ARRIVAL" in str(v).upper() and "SCHEDULE" in str(v).upper():
+                vup = str(v).upper()
+                if ("ARRIVAL" in vup and "SCHEDULE" in vup) or ("EST" in vup and "ARRIVAL" in vup):
                     in_arrival = True; break
             if in_arrival:
-                sku = r.get("A") or r.get("B")
-                if not sku or str(sku).upper() in ["SKU", ""]: continue
-                if "ARRIVAL" in str(sku).upper(): continue
+                sku = r.get("B") or r.get("A")
+                if not sku or str(sku).upper() in ["SKU", "TOTAL", "", "X-FACTORY"]: continue
+                if "ARRIVAL" in str(sku).upper() or "EST" in str(sku).upper(): continue
                 arrival_schedule.append({
                     "sku": str(sku),
-                    "description": str(r.get("B") or r.get("C") or ""),
+                    "description": str(r.get("C") or r.get("B") or ""),
                     "total": safe_round(sum(float(v) for k, v in r.items() if k not in ["A","B","C"] and v and str(v).replace('.','').replace('-','').isdigit()), 0)
                 })
 
@@ -4994,15 +5005,24 @@ async def upload_supply_chain(request: Request, file: UploadFile = File(...)):
         header_row = None
         for i, r in enumerate(rows):
             vals = list(r.values())
-            if any("Shipper" in str(v) for v in vals):
+            if any("shipper" in str(v).lower() for v in vals):
                 header_row = i; break
 
         if header_row is not None:
-            for i in range(header_row + 1, len(rows)):
+            # Detect which row marks start of item-detail section so we stop shipment parsing there
+            item_section_row = len(rows)
+            for ii, rr in enumerate(rows):
+                for kk, vv in rr.items():
+                    if vv and "container" in str(vv).lower() and "item" in str(vv).lower():
+                        item_section_row = ii; break
+                if item_section_row < len(rows): break
+
+            for i in range(header_row + 1, item_section_row):
                 r = rows[i]
-                shipper = r.get("A") or r.get("B")
+                shipper = r.get("B") or r.get("A")
                 if not shipper: continue
-                hbl = r.get("B") or r.get("C") or ""
+                if str(shipper).strip().upper() in ["", "SHIPPER"]: continue
+                hbl = r.get("C") or r.get("B") or ""
                 units_val = 0
                 for k in ["H","I","J"]:
                     try:
@@ -5017,8 +5037,8 @@ async def upload_supply_chain(request: Request, file: UploadFile = File(...)):
                 shipments.append({
                     "shipper": to_str(shipper), "hbl": to_str(hbl),
                     "units": units_val, "status": status,
-                    "containerNumber": to_str(r.get("D") or r.get("E") or ""),
-                    "poNumber": to_str(r.get("F") or r.get("G") or ""),
+                    "containerNumber": to_str(r.get("E") or r.get("D") or ""),
+                    "poNumber": to_str(r.get("G") or r.get("F") or ""),
                 })
 
         items = []
@@ -5028,19 +5048,21 @@ async def upload_supply_chain(request: Request, file: UploadFile = File(...)):
                 if v and "container" in str(v).lower() and "item" in str(v).lower():
                     in_items = True; break
             if in_items:
-                cn = r.get("A") or r.get("B")
+                cn = r.get("B") or r.get("A")
                 if not cn: continue
-                if "container" in str(cn).lower() and "item" in str(cn).lower(): continue
-                sku = r.get("C") or r.get("D") or ""
+                cn_str = str(cn).strip().lower()
+                if "container" in cn_str and ("item" in cn_str or "unit" in cn_str): continue
+                if cn_str in ["", "container #", "container"]: continue
+                sku = r.get("F") or r.get("C") or r.get("D") or ""
                 qty = 0
-                for k in ["E","F","G","H"]:
+                for k in ["J","K","E","F","G","H"]:
                     try:
                         qty = int(float(r.get(k, 0)))
                         if qty > 0: break
                     except: pass
                 items.append({
                     "containerNumber": to_str(cn), "sku": to_str(sku),
-                    "description": to_str(r.get("D") or r.get("E") or ""),
+                    "description": to_str(r.get("G") or r.get("D") or r.get("E") or ""),
                     "qty": qty
                 })
 
