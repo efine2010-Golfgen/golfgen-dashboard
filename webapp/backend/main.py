@@ -47,14 +47,19 @@ SYNC_INTERVAL_HOURS = 2
 
 
 def _load_sp_api_credentials() -> dict | None:
-    """Load SP-API credentials from env vars (Railway) or config file (local dev)."""
+    """Load SP-API credentials from env vars (Railway) or config file (local dev).
+
+    Supports both naming conventions for env vars:
+      - New: SP_API_REFRESH_TOKEN, SP_API_LWA_APP_ID, SP_API_LWA_CLIENT_SECRET, ...
+      - Legacy: SP_API_REFRESH_TOKEN, LWA_APP_ID, LWA_CLIENT_SECRET, ...
+    """
     # Priority 1: Environment variables (used on Railway)
     env_refresh = os.environ.get("SP_API_REFRESH_TOKEN", "")
     if env_refresh:
         return {
             "refresh_token": env_refresh,
-            "lwa_app_id": os.environ.get("SP_API_LWA_APP_ID", ""),
-            "lwa_client_secret": os.environ.get("SP_API_LWA_CLIENT_SECRET", ""),
+            "lwa_app_id": os.environ.get("SP_API_LWA_APP_ID") or os.environ.get("LWA_APP_ID", ""),
+            "lwa_client_secret": os.environ.get("SP_API_LWA_CLIENT_SECRET") or os.environ.get("LWA_CLIENT_SECRET", ""),
             "aws_access_key": os.environ.get("SP_API_AWS_ACCESS_KEY", ""),
             "aws_secret_key": os.environ.get("SP_API_AWS_SECRET_KEY", ""),
             "role_arn": os.environ.get("SP_API_ROLE_ARN", ""),
@@ -1214,14 +1219,19 @@ def _auto_backfill_if_needed():
 # ── Amazon Ads API Sync ──────────────────────────────────
 
 def _load_ads_credentials() -> dict | None:
-    """Load Amazon Ads API credentials from env vars or config file."""
-    env_client_id = os.environ.get("AMAZON_ADS_CLIENT_ID", "")
+    """Load Amazon Ads API credentials from env vars or config file.
+
+    Supports both naming conventions for env vars:
+      - New: AMAZON_ADS_CLIENT_ID, AMAZON_ADS_CLIENT_SECRET, AMAZON_ADS_REFRESH_TOKEN, AMAZON_ADS_PROFILE_ID
+      - Legacy: ADS_CLIENT_ID, ADS_CLIENT_SECRET, ADS_REFRESH_TOKEN, ADS_PROFILE_ID
+    """
+    env_client_id = os.environ.get("AMAZON_ADS_CLIENT_ID") or os.environ.get("ADS_CLIENT_ID", "")
     if env_client_id:
         creds = {
-            "refresh_token": os.environ.get("AMAZON_ADS_REFRESH_TOKEN", ""),
+            "refresh_token": os.environ.get("AMAZON_ADS_REFRESH_TOKEN") or os.environ.get("ADS_REFRESH_TOKEN", ""),
             "client_id": env_client_id,
-            "client_secret": os.environ.get("AMAZON_ADS_CLIENT_SECRET", ""),
-            "profile_id": os.environ.get("AMAZON_ADS_PROFILE_ID", ""),
+            "client_secret": os.environ.get("AMAZON_ADS_CLIENT_SECRET") or os.environ.get("ADS_CLIENT_SECRET", ""),
+            "profile_id": os.environ.get("AMAZON_ADS_PROFILE_ID") or os.environ.get("ADS_PROFILE_ID", ""),
         }
         if creds["refresh_token"] and creds["client_secret"]:
             return creds
