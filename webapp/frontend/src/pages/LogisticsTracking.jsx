@@ -6,9 +6,10 @@ const fmtK = n => n == null ? "0" : n >= 1000 ? (n / 1000).toFixed(1) + "K" : n.
 const COLORS = ["#22A387", "#3E658C", "#E87830", "#F5B731", "#7BAED0", "#D03030", "#2ECFAA", "#9B59B6"];
 
 const STATUS_BADGE = (status) => {
+  if (!status) return <span style={{ color: "#C4CDD0", fontSize: 10 }}>—</span>;
   const s = (status || "").toUpperCase();
   const bg = s.includes("DELIVER") ? "#22A387" : s.includes("TRANSIT") ? "#3E658C" : s.includes("PENDING") ? "#F5B731" : "#C4CDD0";
-  return <span style={{ display: "inline-block", padding: "2px 10px", borderRadius: 12, background: bg, color: "#fff", fontSize: 10, fontWeight: 700, letterSpacing: 0.5 }}>{status || "—"}</span>;
+  return <span style={{ display: "inline-block", padding: "2px 10px", borderRadius: 12, background: bg, color: "#fff", fontSize: 10, fontWeight: 700, letterSpacing: 0.5 }}>{status}</span>;
 };
 
 export default function LogisticsTracking() {
@@ -39,7 +40,6 @@ export default function LogisticsTracking() {
   };
 
   const shipments = useMemo(() => {
-    // Filter out any remaining bad data
     return (data?.shipments || []).filter(s => {
       const shipper = (s.shipper || "").toUpperCase();
       if (shipper.includes("STATUS") || shipper.includes("UPCOMING") || shipper === "TOTAL" || shipper === "PO#") return false;
@@ -89,8 +89,8 @@ export default function LogisticsTracking() {
     return shipments.filter(s => (s.status || "").toUpperCase().includes(statusFilter));
   }, [shipments, statusFilter]);
 
-  if (loading) return <div className="loading"><div className="spinner" /> Loading Logistics data...</div>;
-  if (!data) return <div style={{ padding: 40, textAlign: "center", color: "var(--muted)" }}>No Logistics data. Upload an Excel file to begin.</div>;
+  if (loading) return <div className="loading"><div className="spinner" /> Loading OTW data...</div>;
+  if (!data) return <div style={{ padding: 40, textAlign: "center", color: "var(--muted)" }}>No OTW data. Upload an Excel file to begin.</div>;
 
   const totalUnits = shipments.reduce((s, sh) => s + (sh.units || 0), 0);
   const totalCBM = shipments.reduce((s, sh) => s + (sh.cbm || 0), 0);
@@ -107,7 +107,7 @@ export default function LogisticsTracking() {
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 20 }}>
         <div>
           <h2 style={{ fontFamily: "'Space Grotesk', sans-serif", fontSize: 22, color: "var(--navy)", margin: 0 }}>
-            OTW / Logistics Tracking
+            On The Water (OTW)
           </h2>
           <p style={{ fontSize: 12, color: "var(--muted)", marginTop: 4 }}>
             {data.lastUpload ? `Last updated: ${data.lastUpload}` : "No upload date"}{data.sourceFile ? ` • ${data.sourceFile}` : ""}
@@ -142,7 +142,6 @@ export default function LogisticsTracking() {
 
       {/* Charts Row */}
       <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16, marginBottom: 24 }}>
-        {/* Units by Delivery Port */}
         <div style={{ background: "#fff", borderRadius: 12, padding: 20, boxShadow: "var(--card-shadow)" }}>
           <h3 style={{ fontSize: 14, fontFamily: "'Space Grotesk', sans-serif", color: "var(--navy)", marginBottom: 16 }}>Units by Delivery Port</h3>
           <ResponsiveContainer width="100%" height={220}>
@@ -156,7 +155,6 @@ export default function LogisticsTracking() {
           </ResponsiveContainer>
         </div>
 
-        {/* Units by Shipper */}
         <div style={{ background: "#fff", borderRadius: 12, padding: 20, boxShadow: "var(--card-shadow)" }}>
           <h3 style={{ fontSize: 14, fontFamily: "'Space Grotesk', sans-serif", color: "var(--navy)", marginBottom: 16 }}>Units by Shipper</h3>
           <ResponsiveContainer width="100%" height={220}>
@@ -173,7 +171,7 @@ export default function LogisticsTracking() {
 
       {/* View Toggle + Status Filter */}
       <div style={{ display: "flex", gap: 8, marginBottom: 16, flexWrap: "wrap", alignItems: "center" }}>
-        {[["shipments", "Shipment Log"], ["containers", "Items by Container"]].map(([k, l]) => (
+        {[["shipments", "Shipment Log"], ["containers", "PO Items by Container"]].map(([k, l]) => (
           <button key={k} onClick={() => setView(k)}
             style={{ padding: "6px 16px", borderRadius: 6, border: "1px solid " + (view === k ? "var(--blue)" : "var(--border)"),
               background: view === k ? "var(--blue)" : "#fff", color: view === k ? "#fff" : "var(--body-text)",
@@ -202,7 +200,7 @@ export default function LogisticsTracking() {
             <thead>
               <tr style={{ background: "var(--navy)", color: "#fff" }}>
                 <th style={th}>Container #</th>
-                <th style={th}>Container Type</th>
+                <th style={th}>Type</th>
                 <th style={th}>Delivery Port</th>
                 <th style={th}>ETD</th>
                 <th style={th}>ETA</th>
@@ -238,16 +236,17 @@ export default function LogisticsTracking() {
         </div>
       )}
 
-      {/* Items by Container Table */}
+      {/* PO Items by Container Table — now with Status column */}
       {view === "containers" && (
         <div style={{ background: "#fff", borderRadius: 12, overflow: "auto", boxShadow: "var(--card-shadow)" }}>
           <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 11 }}>
             <thead>
               <tr style={{ background: "var(--navy)", color: "#fff" }}>
+                <th style={th}>Container #</th>
+                <th style={th}>Status</th>
                 <th style={th}>SKU</th>
                 <th style={th}>Description</th>
                 <th style={{...th, textAlign: "right"}}>Units</th>
-                <th style={th}>Container #</th>
                 <th style={th}>ETA</th>
                 <th style={th}>Invoice</th>
                 <th style={th}>PO #</th>
@@ -255,7 +254,6 @@ export default function LogisticsTracking() {
             </thead>
             <tbody>
               {items.filter(item => {
-                // Filter out any remaining Container Total or summary rows
                 const desc = (item.description || "").toUpperCase();
                 const sku = (item.sku || "").toUpperCase();
                 if (desc.includes("CONTAINER TOTAL") || desc.includes("GRAND TOTAL")) return false;
@@ -264,13 +262,14 @@ export default function LogisticsTracking() {
               }).map((item, i) => (
                 <tr key={i} style={{ borderBottom: "1px solid var(--border)",
                   background: item.containerNumber ? (i % 2 ? "#FAFBFC" : "#fff") : "#fff" }}>
+                  <td style={{...td, fontFamily: "monospace", fontSize: 10, color: item.containerNumber ? "var(--blue)" : "transparent", fontWeight: 600}}>{item.containerNumber || ""}</td>
+                  <td style={td}>{STATUS_BADGE(item.status)}</td>
                   <td style={{...td, fontFamily: "monospace", fontSize: 10, fontWeight: 600}}>{item.sku}</td>
                   <td style={{...td, fontSize: 10, maxWidth: 220, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap"}}>{item.description}</td>
                   <td style={{...td, textAlign: "right", fontWeight: 600}}>{(item.qty || 0).toLocaleString()}</td>
-                  <td style={{...td, fontFamily: "monospace", fontSize: 10, color: item.containerNumber ? "var(--blue)" : "transparent"}}>{item.containerNumber || ""}</td>
                   <td style={{...td, fontSize: 10}}>{item.eta || "—"}</td>
                   <td style={{...td, fontSize: 10}}>{item.invoice || "—"}</td>
-                  <td style={{...td, fontSize: 10, color: "var(--blue)"}}>{item.po || "—"}</td>
+                  <td style={{...td, fontSize: 10, color: "var(--blue)"}}>{item.po || item.poNumber || "—"}</td>
                 </tr>
               ))}
             </tbody>

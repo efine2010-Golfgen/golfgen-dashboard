@@ -31,6 +31,13 @@ function classifyCategory(sku, desc) {
   return "Golf Accessories";
 }
 
+const STATUS_BADGE = (status) => {
+  if (!status) return <span style={{ color: "#C4CDD0", fontSize: 10 }}>—</span>;
+  const s = (status || "").toUpperCase();
+  const bg = s.includes("DELIVER") ? "#22A387" : s.includes("TRANSIT") ? "#3E658C" : s.includes("PENDING") ? "#F5B731" : "#C4CDD0";
+  return <span style={{ display: "inline-block", padding: "2px 10px", borderRadius: 12, background: bg, color: "#fff", fontSize: 10, fontWeight: 700, letterSpacing: 0.5 }}>{status}</span>;
+};
+
 export default function FactoryPO() {
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
@@ -82,6 +89,25 @@ export default function FactoryPO() {
     });
   }, [data]);
 
+  // Merge SKU data with arrival data for the combined view
+  const combinedItems = useMemo(() => {
+    const arrivalMap = {};
+    arrivals.forEach(a => { arrivalMap[a.sku] = a; });
+    // Start from skus list; add arrival info where available
+    const items = skus.map(u => {
+      const arr = arrivalMap[u.sku] || {};
+      return { ...u, monthlyArrivals: arr.monthlyArrivals || {}, arrivalTotal: arr.total || 0 };
+    });
+    // Add any SKUs that appear only in arrivals but not in skus
+    arrivals.forEach(a => {
+      if (!skus.find(u => u.sku === a.sku)) {
+        items.push({ sku: a.sku, description: a.description, byPO: {}, total: 0,
+          monthlyArrivals: a.monthlyArrivals || {}, arrivalTotal: a.total || 0 });
+      }
+    });
+    return items;
+  }, [skus, arrivals]);
+
   const allMonthCols = useMemo(() => {
     const months = new Set();
     arrivals.forEach(a => {
@@ -122,15 +148,6 @@ export default function FactoryPO() {
     });
     return Object.entries(m).map(([name, value]) => ({ name, value })).sort((a, b) => b.value - a.value);
   }, [skus]);
-
-  const factoryPie = useMemo(() => {
-    const m = {};
-    pos.forEach(p => {
-      const name = p.factory.length > 20 ? p.factory.split(" ").slice(0, 3).join(" ") : p.factory;
-      m[name] = (m[name] || 0) + (p.units || 0);
-    });
-    return Object.entries(m).map(([name, value]) => ({ name, value }));
-  }, [pos]);
 
   const arrivalBar = useMemo(() => {
     const monthTotals = {};
@@ -237,9 +254,9 @@ export default function FactoryPO() {
         </div>
       </div>
 
-      {/* View Toggle */}
+      {/* View Toggle — now 2 tabs: PO Summary + Units & Arrivals by Item */}
       <div style={{ display: "flex", gap: 8, marginBottom: 16 }}>
-        {[["summary", "PO Summary"], ["byItem", "Units by Item"], ["arrival", "Arrival Schedule"]].map(([k, l]) => (
+        {[["summary", "PO Summary"], ["byItem", "Units & Arrivals by Item"]].map(([k, l]) => (
           <button key={k} onClick={() => setView(k)}
             style={{ padding: "6px 16px", borderRadius: 6, border: "1px solid " + (view === k ? "var(--teal)" : "var(--border)"),
               background: view === k ? "var(--teal)" : "#fff", color: view === k ? "#fff" : "var(--body-text)",
@@ -249,31 +266,44 @@ export default function FactoryPO() {
         ))}
       </div>
 
-      {/* PO Summary Table */}
+      {/* PO Summary Table — with Container(s), Arrival Date, Status */}
       {view === "summary" && (
-        <div style={{ background: "#fff", borderRadius: 12, overflow: "hidden", boxShadow: "var(--card-shadow)" }}>
+        <div style={{ background: "#fff", borderRadius: 12, overflow: "auto", boxShadow: "var(--card-shadow)" }}>
           <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12 }}>
             <thead>
               <tr style={{ background: "var(--navy)", color: "#fff" }}>
-                <th style={th}>PO #</th><th style={th}>Factory</th>
+                <th style={th}>PO #</th>
+                <th style={th}>Factory</th>
                 <th style={{...th, textAlign: "right"}}>Units</th>
+                <th style={th}>Container(s)</th>
                 <th style={th}>Est. Arrival</th>
+                <th style={th}>Status</th>
                 <th style={{...th, textAlign: "right"}}>CBM</th>
               </tr>
             </thead>
             <tbody>
-              {pos.map((po, i) => (
-                <tr key={i} style={{ borderBottom: "1px solid var(--border)", background: i % 2 ? "#FAFBFC" : "#fff" }}>
-                  <td style={{...td, fontWeight: 700, color: "var(--blue)"}}>{po.poNumber}</td>
-                  <td style={{...td, fontSize: 11, maxWidth: 250, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap"}}>{po.factory}</td>
-                  <td style={{...td, textAlign: "right", fontWeight: 600}}>{(po.units || 0).toLocaleString()}</td>
-                  <td style={{...td, fontSize: 11}}>{po.estArrival || "—"}</td>
-                  <td style={{...td, textAlign: "right"}}>{(po.cbm || 0).toFixed(1)}</td>
-                </tr>
-              ))}
+              {pos.map((po, i) => {
+                const containers = po.containers || [];
+                const containerStr = containers.length > 0
+                  ? containers.map(c => c.containerNumber).join(", ")
+                  : "—";
+                return (
+                  <tr key={i} style={{ borderBottom: "1px solid var(--border)", background: i % 2 ? "#FAFBFC" : "#fff" }}>
+                    <td style={{...td, fontWeight: 700, color: "var(--blue)"}}>{po.poNumber}</td>
+                    <td style={{...td, fontSize: 11, maxWidth: 250, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap"}}>{po.factory}</td>
+                    <td style={{...td, textAlign: "right", fontWeight: 600}}>{(po.units || 0).toLocaleString()}</td>
+                    <td style={{...td, fontFamily: "monospace", fontSize: 10, maxWidth: 280, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap"}}>{containerStr}</td>
+                    <td style={{...td, fontSize: 11}}>{po.estArrival || "—"}</td>
+                    <td style={td}>{STATUS_BADGE(po.containerStatus)}</td>
+                    <td style={{...td, textAlign: "right"}}>{(po.cbm || 0).toFixed(1)}</td>
+                  </tr>
+                );
+              })}
               <tr style={{ background: "var(--teal-bg)", fontWeight: 700 }}>
                 <td style={td} colSpan={2}>TOTAL</td>
                 <td style={{...td, textAlign: "right"}}>{totalUnits.toLocaleString()}</td>
+                <td style={td}></td>
+                <td style={td}></td>
                 <td style={td}></td>
                 <td style={{...td, textAlign: "right"}}>{(totalCBM || 0).toFixed(1)}</td>
               </tr>
@@ -282,19 +312,26 @@ export default function FactoryPO() {
         </div>
       )}
 
-      {/* Units by Item Table */}
+      {/* Combined Units & Arrivals by Item Table */}
       {view === "byItem" && (
         <div style={{ background: "#fff", borderRadius: 12, overflow: "auto", boxShadow: "var(--card-shadow)" }}>
-          <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 11 }}>
+          <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 11, minWidth: 900 }}>
             <thead>
               <tr style={{ background: "var(--navy)", color: "#fff" }}>
-                <th style={th}>SKU</th><th style={th}>Description</th><th style={th}>Channel</th>
-                {allPOCols.map(po => <th key={po} style={{...th, textAlign: "right", fontSize: 10}}>{po}</th>)}
-                <th style={{...th, textAlign: "right"}}>Total</th>
+                <th style={th}>SKU</th>
+                <th style={th}>Description</th>
+                <th style={th}>Channel</th>
+                <th style={{...th, textAlign: "right", borderLeft: "2px solid rgba(255,255,255,0.15)"}}>Total Ordered</th>
+                {allMonthCols.length > 0 && allMonthCols.map(m => (
+                  <th key={m} style={{...th, textAlign: "right", fontSize: 10}}>{m}</th>
+                ))}
+                {allMonthCols.length > 0 && (
+                  <th style={{...th, textAlign: "right", borderLeft: "2px solid rgba(255,255,255,0.15)"}}>Arrival Total</th>
+                )}
               </tr>
             </thead>
             <tbody>
-              {skus.map((row, i) => {
+              {combinedItems.map((row, i) => {
                 const channel = classifySKU(row.sku);
                 const total = row.total || row.quantity || 0;
                 return (
@@ -308,63 +345,27 @@ export default function FactoryPO() {
                         {channel}
                       </span>
                     </td>
-                    {allPOCols.map(po => {
-                      const v = (row.byPO || {})[po] || 0;
-                      return <td key={po} style={{...td, textAlign: "right", color: v > 0 ? "var(--body-text)" : "#ddd", fontSize: 10}}>{v > 0 ? v.toLocaleString() : "—"}</td>;
-                    })}
-                    <td style={{...td, textAlign: "right", fontWeight: 700}}>{total.toLocaleString()}</td>
-                  </tr>
-                );
-              })}
-              <tr style={{ background: "var(--teal-bg)", fontWeight: 700 }}>
-                <td style={td} colSpan={3 + allPOCols.length}>TOTAL</td>
-                <td style={{...td, textAlign: "right"}}>{skus.reduce((s, r) => s + (r.total || r.quantity || 0), 0).toLocaleString()}</td>
-              </tr>
-            </tbody>
-          </table>
-        </div>
-      )}
-
-      {/* Arrival Schedule Table */}
-      {view === "arrival" && (
-        <div style={{ background: "#fff", borderRadius: 12, overflow: "auto", boxShadow: "var(--card-shadow)" }}>
-          <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12 }}>
-            <thead>
-              <tr style={{ background: "var(--navy)", color: "#fff" }}>
-                <th style={th}>SKU</th><th style={th}>Description</th><th style={th}>Channel</th>
-                {allMonthCols.map(m => <th key={m} style={{...th, textAlign: "right", fontSize: 10}}>{m}</th>)}
-                <th style={{...th, textAlign: "right"}}>Total</th>
-              </tr>
-            </thead>
-            <tbody>
-              {arrivals.map((row, i) => {
-                const channel = classifySKU(row.sku);
-                return (
-                  <tr key={i} style={{ borderBottom: "1px solid var(--border)", background: i % 2 ? "#FAFBFC" : "#fff" }}>
-                    <td style={{...td, fontWeight: 600, fontSize: 11, fontFamily: "monospace"}}>{row.sku}</td>
-                    <td style={{...td, fontSize: 11, maxWidth: 200, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap"}}>{row.description}</td>
-                    <td style={td}>
-                      <span style={{ display: "inline-block", padding: "1px 8px", borderRadius: 10, fontSize: 9, fontWeight: 700,
-                        background: channel === "Amazon" ? "#FF990022" : channel === "Walmart" ? "#0071CE22" : "#eee",
-                        color: channel === "Amazon" ? "#E87830" : channel === "Walmart" ? "#0071CE" : "#999" }}>
-                        {channel}
-                      </span>
-                    </td>
+                    <td style={{...td, textAlign: "right", fontWeight: 700, borderLeft: "2px solid var(--border)"}}>{total > 0 ? total.toLocaleString() : "—"}</td>
                     {allMonthCols.map(m => {
                       const v = (row.monthlyArrivals || {})[m] || 0;
                       return <td key={m} style={{...td, textAlign: "right", color: v > 0 ? "var(--body-text)" : "#ddd"}}>{v > 0 ? v.toLocaleString() : "—"}</td>;
                     })}
-                    <td style={{...td, textAlign: "right", fontWeight: 700}}>{(row.total || 0).toLocaleString()}</td>
+                    {allMonthCols.length > 0 && (
+                      <td style={{...td, textAlign: "right", fontWeight: 700, borderLeft: "2px solid var(--border)"}}>{(row.arrivalTotal || 0) > 0 ? row.arrivalTotal.toLocaleString() : "—"}</td>
+                    )}
                   </tr>
                 );
               })}
               <tr style={{ background: "var(--teal-bg)", fontWeight: 700 }}>
                 <td style={td} colSpan={3}>TOTAL</td>
+                <td style={{...td, textAlign: "right", borderLeft: "2px solid var(--border)"}}>{combinedItems.reduce((s, r) => s + (r.total || r.quantity || 0), 0).toLocaleString()}</td>
                 {allMonthCols.map(m => {
-                  const colTotal = arrivals.reduce((s, r) => s + ((r.monthlyArrivals || {})[m] || 0), 0);
+                  const colTotal = combinedItems.reduce((s, r) => s + ((r.monthlyArrivals || {})[m] || 0), 0);
                   return <td key={m} style={{...td, textAlign: "right"}}>{colTotal > 0 ? colTotal.toLocaleString() : "—"}</td>;
                 })}
-                <td style={{...td, textAlign: "right"}}>{arrivals.reduce((s, r) => s + (r.total || 0), 0).toLocaleString()}</td>
+                {allMonthCols.length > 0 && (
+                  <td style={{...td, textAlign: "right", borderLeft: "2px solid var(--border)"}}>{combinedItems.reduce((s, r) => s + (r.arrivalTotal || 0), 0).toLocaleString()}</td>
+                )}
               </tr>
             </tbody>
           </table>

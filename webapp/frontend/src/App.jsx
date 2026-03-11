@@ -29,7 +29,7 @@ const LOGISTICS_TABS = [
   { key: "golfgen-inventory", path: "/golfgen-inventory", label: "GolfGen Inventory", icon: "📦" },
   { key: "item-master", path: "/item-master", label: "Item Master", icon: "📋" },
   { key: "factory-po", path: "/factory-po", label: "Factory PO", icon: "🏭" },
-  { key: "logistics", path: "/logistics", label: "OTW / Logistics", icon: "🚢" },
+  { key: "logistics", path: "/logistics", label: "OTW", icon: "🚢" },
   { key: "fba-shipments", path: "/fba-shipments", label: "Shipments to FBA", icon: "📦" },
   { key: "item-planning", path: "/item-planning", label: "Item Planning", icon: "📋" },
 ];

@@ -5354,6 +5354,68 @@ async def get_factory_po(request: Request):
             a for a in data["arrivalSchedule"]
             if a.get("sku") and str(a["sku"]).upper() not in ("TOTAL", "TOTALS", "SKU", "")
         ]
+
+    # ── Enrich POs with container numbers + status from logistics data ──
+    logistics = _load_logistics()
+    shipments = logistics.get("shipments", [])
+    items_by_container = logistics.get("itemsByContainer", [])
+
+    # Build PO → containers mapping from shipments
+    po_containers: dict[str, list[dict]] = {}  # po -> [{containerNumber, status, eta}]
+    for s in shipments:
+        raw_po = (s.get("poNumber") or "").strip()
+        cn = (s.get("containerNumber") or "").strip()
+        if not raw_po or not cn:
+            continue
+        # PO field may contain multiple POs separated by / or ,
+        for po_part in raw_po.replace(",", "/").split("/"):
+            po_part = po_part.strip()
+            if not po_part:
+                continue
+            po_containers.setdefault(po_part, [])
+            # Avoid duplicate containers per PO
+            existing_cns = [c["containerNumber"] for c in po_containers[po_part]]
+            if cn not in existing_cns:
+                po_containers[po_part].append({
+                    "containerNumber": cn,
+                    "status": s.get("status") or "",
+                    "eta": s.get("etaFinal") or s.get("etaDischarge") or "",
+                })
+
+    # Enrich each PO with its containers
+    for po in data.get("purchaseOrders", []):
+        po_num = (po.get("poNumber") or "").strip()
+        containers = po_containers.get(po_num, [])
+        po["containers"] = containers
+        # Derive overall status: if any In Transit → In Transit, all Delivered → Delivered
+        statuses = [c["status"] for c in containers if c["status"]]
+        if statuses:
+            if any("transit" in st.lower() for st in statuses):
+                po["containerStatus"] = "In Transit"
+            elif any("deliver" in st.lower() for st in statuses):
+                po["containerStatus"] = "Delivered"
+            elif any("pending" in st.lower() for st in statuses):
+                po["containerStatus"] = "Pending"
+            else:
+                po["containerStatus"] = statuses[0]
+        else:
+            po["containerStatus"] = ""
+
+    # Build container → status lookup for items
+    container_status = {}
+    for s in shipments:
+        cn = (s.get("containerNumber") or "").strip()
+        if cn:
+            container_status[cn] = s.get("status") or ""
+
+    # Enrich items by container with status
+    for item in items_by_container:
+        cn = (item.get("containerNumber") or "").strip()
+        item["status"] = container_status.get(cn, "")
+
+    # Also attach items by container to the response for cross-reference
+    data["logisticsItems"] = items_by_container
+
     return data
 
 @app.post("/api/factory-po/upload")
@@ -5482,6 +5544,17 @@ async def get_logistics(request: Request):
             and "CONTAINER TOTAL" not in str(item.get("description", "")).upper()
             and "GRAND TOTAL" not in str(item.get("description", "")).upper()
         ]
+
+    # ── Enrich items with container status from shipments ──
+    container_status = {}
+    for s in data.get("shipments", []):
+        cn = (s.get("containerNumber") or "").strip()
+        if cn:
+            container_status[cn] = s.get("status") or ""
+    for item in data.get("itemsByContainer", []):
+        cn = (item.get("containerNumber") or "").strip()
+        item["status"] = container_status.get(cn, "")
+
     return data
 
 @app.post("/api/logistics/upload")
