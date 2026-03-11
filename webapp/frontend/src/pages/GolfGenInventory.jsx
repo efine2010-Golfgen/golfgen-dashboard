@@ -5,8 +5,8 @@ import {
 } from "recharts";
 import { api } from "../lib/api";
 
-const DIVISIONS = ["Golf", "Housewares"];
-const GOLF_CHANNELS = ["All", "Amazon", "Walmart", "Walmart & Amazon", "Other"];
+const DIVISIONS = ["Golf", "HW"];
+const GOLF_CHANNELS = ["All", "Amazon", "Walmart"];
 const COLORS = ["#2ECFAA", "#3E658C", "#E87830", "#F5B731", "#7BAED0", "#22A387", "#D03030", "#8B5CF6", "#94a3b8"];
 const TOOLTIP_STYLE = { background: "#fff", border: "1px solid rgba(14,31,45,0.1)", borderRadius: 8, color: "#2A3D50", boxShadow: "0 4px 12px rgba(14,31,45,0.1)" };
 
@@ -68,27 +68,41 @@ function ChannelBadge({ channel }) {
   );
 }
 
+/* ── Mini KPI used in the executive summary card ── */
+function MiniKPI({ label, value, color, sub }) {
+  return (
+    <div style={{ textAlign: "center", minWidth: 100 }}>
+      <div style={{ fontSize: 11, color: "var(--muted)", fontWeight: 500, marginBottom: 2 }}>{label}</div>
+      <div style={{
+        fontSize: 22, fontWeight: 700, fontFamily: "'Space Grotesk', sans-serif",
+        color: color || "var(--navy)", lineHeight: 1.1,
+      }}>
+        {typeof value === "number" ? value.toLocaleString() : value}
+      </div>
+      {sub && <div style={{ fontSize: 10, color: "var(--muted)", marginTop: 2 }}>{sub}</div>}
+    </div>
+  );
+}
+
 export default function GolfGenInventory() {
   const [division, setDivision] = useState("Golf");
   const [channel, setChannel] = useState("All");
   const [data, setData] = useState(null);
-  const [overviewData, setOverviewData] = useState(null); // both divisions summary
+  const [overviewData, setOverviewData] = useState(null);
   const [loading, setLoading] = useState(true);
   const [expandedSku, setExpandedSku] = useState(null);
   const [search, setSearch] = useState("");
   const [sortKey, setSortKey] = useState("totalOnHand");
   const [sortDir, setSortDir] = useState("desc");
-  const [uploading, setUploading] = useState(null); // "golf" or "housewares" or null
+  const [uploading, setUploading] = useState(null);
   const [uploadMsg, setUploadMsg] = useState(null);
   const [uploadMeta, setUploadMeta] = useState({});
 
-  // Load overview summary (both divisions)
   useEffect(() => {
     api.warehouseSummary().then(d => setOverviewData(d)).catch(() => null);
     api.uploadMeta().then(d => setUploadMeta(d || {})).catch(() => {});
   }, []);
 
-  // Load division data
   useEffect(() => {
     setLoading(true);
     setExpandedSku(null);
@@ -115,11 +129,9 @@ export default function GolfGenInventory() {
       });
       const result = await res.json();
       if (res.ok) {
-        setUploadMsg({ type: "success", text: `${div === "golf" ? "Golf" : "Housewares"}: ${result.itemCount} items uploaded from ${file.name}` });
-        // Refresh data and metadata
+        setUploadMsg({ type: "success", text: `${div === "golf" ? "Golf" : "HW"}: ${result.itemCount} items uploaded from ${file.name}` });
         api.uploadMeta().then(d => setUploadMeta(d || {})).catch(() => {});
         api.warehouseSummary().then(d => setOverviewData(d)).catch(() => null);
-        // Reload current division data
         const curDiv = division === "Golf" ? "golf" : "housewares";
         api.warehouseUnified(curDiv, division === "Golf" ? channel : null).then(d => setData(d)).catch(() => {});
       } else {
@@ -144,7 +156,6 @@ export default function GolfGenInventory() {
     else { setSortKey(key); setSortDir("desc"); }
   };
 
-  // Filter and sort
   const masters = data?.masters || [];
   const filtered = masters.filter(m => {
     if (!search) return true;
@@ -167,7 +178,7 @@ export default function GolfGenInventory() {
 
   // Chart data
   const suffixChartData = Object.entries(suffixBreakdown)
-    .map(([name, vals]) => ({ name, pcsOnHand: vals.pcsOnHand, skus: vals.skus }))
+    .map(([name, vals]) => ({ name, pcsOnHand: vals.pcsOnHand, pcsAvailable: vals.pcsAvailable, skus: vals.skus }))
     .filter(d => d.pcsOnHand > 0)
     .sort((a, b) => b.pcsOnHand - a.pcsOnHand);
 
@@ -175,15 +186,17 @@ export default function GolfGenInventory() {
     ? Object.entries(channelBreakdown).map(([name, count]) => ({ name, value: count }))
     : [];
 
+  // Division label helper
+  const divLabel = division === "Golf" ? "Golf" : "HW";
+
   return (
     <>
       <div className="page-header" style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
         <div>
           <h1>GolfGen Inventory</h1>
-          <p>3PL Warehouse Inventory &middot; Golf &amp; Housewares divisions</p>
+          <p>3PL Warehouse Inventory &middot; Golf &amp; HW divisions</p>
         </div>
         <div style={{ display: "flex", gap: 12, alignItems: "flex-start" }}>
-          {/* Golf Upload */}
           <div style={{ textAlign: "center" }}>
             <label style={{
               display: "inline-flex", alignItems: "center", gap: 6, padding: "6px 14px",
@@ -199,7 +212,6 @@ export default function GolfGenInventory() {
               Last: {formatDate(uploadMeta.golf?.lastUpload)}
             </div>
           </div>
-          {/* Housewares Upload */}
           <div style={{ textAlign: "center" }}>
             <label style={{
               display: "inline-flex", alignItems: "center", gap: 6, padding: "6px 14px",
@@ -207,7 +219,7 @@ export default function GolfGenInventory() {
               fontSize: 12, fontWeight: 600, opacity: uploading === "housewares" ? 0.6 : 1,
               whiteSpace: "nowrap",
             }}>
-              {uploading === "housewares" ? "Uploading..." : "Upload Housewares"}
+              {uploading === "housewares" ? "Uploading..." : "Upload HW"}
               <input type="file" accept=".xlsx,.xls" onChange={e => handleUpload(e, "housewares")}
                 style={{ display: "none" }} disabled={uploading !== null} />
             </label>
@@ -234,73 +246,128 @@ export default function GolfGenInventory() {
         </div>
       )}
 
-      {/* ── Overview Summary (both divisions) ── */}
-      {overviewData && (
-        <div className="kpi-grid" style={{ marginBottom: 24 }}>
-          <div className="kpi-card">
-            <div className="kpi-label">Golf — On Hand</div>
-            <div className="kpi-value teal">{(overviewData.golf?.pcsOnHand || 0).toLocaleString()}</div>
+      {/* ── Executive Summary — combined KPIs + breakdown chart ── */}
+      {overviewData && !loading && (
+        <div className="table-card" style={{ marginBottom: 24, padding: 0, overflow: "hidden" }}>
+          {/* Top row: division KPI summaries side by side */}
+          <div style={{
+            display: "grid", gridTemplateColumns: "1fr 1fr",
+            borderBottom: "1px solid rgba(14,31,45,0.08)",
+          }}>
+            {/* Golf summary */}
+            <div style={{
+              padding: "20px 24px",
+              borderRight: "1px solid rgba(14,31,45,0.08)",
+              background: division === "Golf" ? "rgba(46,207,170,0.04)" : "transparent",
+            }}>
+              <div style={{
+                fontSize: 12, fontWeight: 600, color: "var(--teal)",
+                textTransform: "uppercase", letterSpacing: "0.5px", marginBottom: 12,
+              }}>
+                ⛳ Golf
+              </div>
+              <div style={{ display: "flex", gap: 24, flexWrap: "wrap" }}>
+                <MiniKPI label="On Hand" value={overviewData.golf?.pcsOnHand || 0} color="var(--teal)" />
+                <MiniKPI label="Allocated" value={overviewData.golf?.pcsAllocated || 0} color="var(--gold)" />
+                <MiniKPI label="Available" value={overviewData.golf?.pcsAvailable || 0} color="#16a34a" />
+                <MiniKPI label="SKUs" value={overviewData.golf?.skus || 0} />
+              </div>
+            </div>
+            {/* HW summary */}
+            <div style={{
+              padding: "20px 24px",
+              background: division === "HW" ? "rgba(62,101,140,0.04)" : "transparent",
+            }}>
+              <div style={{
+                fontSize: 12, fontWeight: 600, color: "var(--blue-active)",
+                textTransform: "uppercase", letterSpacing: "0.5px", marginBottom: 12,
+              }}>
+                🏠 HW
+              </div>
+              <div style={{ display: "flex", gap: 24, flexWrap: "wrap" }}>
+                <MiniKPI label="On Hand" value={overviewData.housewares?.pcsOnHand || 0} color="var(--blue-active)" />
+                <MiniKPI label="Allocated" value={overviewData.housewares?.pcsAllocated || 0} color="var(--gold)" />
+                <MiniKPI label="Available" value={overviewData.housewares?.pcsAvailable || 0} color="#16a34a" />
+                <MiniKPI label="SKUs" value={overviewData.housewares?.skus || 0} />
+              </div>
+            </div>
           </div>
-          <div className="kpi-card">
-            <div className="kpi-label">Golf — Allocated</div>
-            <div className="kpi-value" style={{ color: "var(--gold)" }}>{(overviewData.golf?.pcsAllocated || 0).toLocaleString()}</div>
-          </div>
-          <div className="kpi-card">
-            <div className="kpi-label">Golf — Available</div>
-            <div className="kpi-value pos">{(overviewData.golf?.pcsAvailable || 0).toLocaleString()}</div>
-          </div>
-          <div className="kpi-card">
-            <div className="kpi-label">Housewares — On Hand</div>
-            <div className="kpi-value teal">{(overviewData.housewares?.pcsOnHand || 0).toLocaleString()}</div>
-          </div>
-          <div className="kpi-card">
-            <div className="kpi-label">Housewares — Allocated</div>
-            <div className="kpi-value" style={{ color: "var(--gold)" }}>{(overviewData.housewares?.pcsAllocated || 0).toLocaleString()}</div>
-          </div>
-          <div className="kpi-card">
-            <div className="kpi-label">Housewares — Available</div>
-            <div className="kpi-value pos">{(overviewData.housewares?.pcsAvailable || 0).toLocaleString()}</div>
-          </div>
-        </div>
-      )}
 
-      {/* ── Suffix Breakdown Summary ── */}
-      {Object.keys(suffixBreakdown).length > 0 && (
-        <div className="table-card" style={{ marginBottom: 24, padding: 16 }}>
-          <h3 style={{ fontFamily: "'Space Grotesk', sans-serif", fontSize: 14, fontWeight: 600, color: "var(--navy)", marginBottom: 12 }}>
-            {division} — Breakdown by Type
-          </h3>
-          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(160px, 1fr))", gap: 10 }}>
-            {Object.entries(suffixBreakdown)
-              .sort((a, b) => b[1].pcsOnHand - a[1].pcsOnHand)
-              .map(([suffix, vals]) => (
-                <div key={suffix} style={{
-                  padding: "10px 14px", borderRadius: 10,
-                  background: "rgba(14,31,45,0.02)", border: "1px solid rgba(14,31,45,0.06)",
+          {/* Bottom row: breakdown chart + channel pie */}
+          <div style={{
+            display: "grid",
+            gridTemplateColumns: channelChartData.length > 0 ? "1fr 320px" : "1fr",
+            minHeight: 220,
+          }}>
+            {/* Horizontal bar chart — inventory by type */}
+            {suffixChartData.length > 0 && (
+              <div style={{ padding: "16px 20px" }}>
+                <div style={{
+                  fontSize: 12, fontWeight: 600, color: "var(--navy)", marginBottom: 8,
+                  fontFamily: "'Space Grotesk', sans-serif",
                 }}>
-                  <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 6 }}>
-                    <SuffixBadge suffix={suffix} />
-                    <span style={{ fontSize: 11, color: "var(--muted)" }}>{vals.skus} SKUs</span>
-                  </div>
-                  <div style={{ fontSize: 18, fontWeight: 700, fontFamily: "'Space Grotesk', sans-serif", color: "var(--navy)" }}>
-                    {vals.pcsOnHand.toLocaleString()}
-                  </div>
-                  <div style={{ fontSize: 11, color: "var(--muted)" }}>
-                    Alloc: {vals.pcsAllocated.toLocaleString()} &middot; Avail: {vals.pcsAvailable.toLocaleString()}
-                  </div>
+                  {divLabel} — Inventory by Type
                 </div>
-              ))}
+                <ResponsiveContainer width="100%" height={Math.max(180, suffixChartData.length * 34 + 20)}>
+                  <BarChart data={suffixChartData} layout="vertical" margin={{ top: 0, right: 40, left: 0, bottom: 0 }}>
+                    <CartesianGrid strokeDasharray="3 3" horizontal={false} stroke="rgba(14,31,45,0.06)" />
+                    <XAxis type="number" tick={{ fontSize: 10, fill: "#94a3b8" }}
+                      tickFormatter={v => v >= 1000 ? `${(v / 1000).toFixed(0)}k` : v} />
+                    <YAxis type="category" dataKey="name" tick={{ fontSize: 11, fill: "#64748b" }} width={70} />
+                    <Tooltip
+                      contentStyle={TOOLTIP_STYLE}
+                      formatter={(v, name) => [v.toLocaleString(), name === "pcsOnHand" ? "On Hand" : "Available"]}
+                    />
+                    <Bar dataKey="pcsOnHand" radius={[0, 4, 4, 0]} name="On Hand">
+                      {suffixChartData.map((entry, i) => (
+                        <Cell key={i} fill={SUFFIX_COLORS[entry.name] || COLORS[i % COLORS.length]} />
+                      ))}
+                    </Bar>
+                  </BarChart>
+                </ResponsiveContainer>
+              </div>
+            )}
+
+            {/* Channel pie (Golf only) */}
+            {channelChartData.length > 0 && (
+              <div style={{
+                borderLeft: "1px solid rgba(14,31,45,0.08)",
+                padding: "16px 20px",
+                display: "flex", flexDirection: "column", alignItems: "center",
+              }}>
+                <div style={{
+                  fontSize: 12, fontWeight: 600, color: "var(--navy)", marginBottom: 4,
+                  fontFamily: "'Space Grotesk', sans-serif", alignSelf: "flex-start",
+                }}>
+                  SKUs by Channel
+                </div>
+                <ResponsiveContainer width="100%" height={190}>
+                  <PieChart>
+                    <Pie data={channelChartData} cx="50%" cy="50%" innerRadius={40} outerRadius={75} dataKey="value"
+                      label={({ name, value }) => `${name} (${value})`}
+                      labelLine={{ strokeWidth: 1, stroke: "#94a3b8" }}>
+                      {channelChartData.map((_, i) => (
+                        <Cell key={i} fill={COLORS[i % COLORS.length]} />
+                      ))}
+                    </Pie>
+                    <Tooltip contentStyle={TOOLTIP_STYLE} />
+                  </PieChart>
+                </ResponsiveContainer>
+              </div>
+            )}
           </div>
         </div>
       )}
 
-      {/* ── Division Toggle + Channel Filter ── */}
-      <div style={{ display: "flex", gap: 12, alignItems: "center", marginBottom: 20, flexWrap: "wrap" }}>
+      {/* ── Controls Bar: toggles + search + count — all on one line ── */}
+      <div style={{
+        display: "flex", gap: 10, alignItems: "center", marginBottom: 20, flexWrap: "wrap",
+      }}>
         <div className="range-tabs">
           {DIVISIONS.map(d => (
             <button key={d} className={`range-tab ${division === d ? "active" : ""}`}
               onClick={() => { setDivision(d); setChannel("All"); setSearch(""); }}>
-              {d === "Golf" ? "⛳ Golf" : "🏠 Housewares"}
+              {d === "Golf" ? "⛳ Golf" : "🏠 HW"}
             </button>
           ))}
         </div>
@@ -319,20 +386,22 @@ export default function GolfGenInventory() {
           </div>
         )}
 
+        <div style={{ flex: 1 }} />
+
         <input
           type="text" placeholder="Search SKU or description..."
           value={search} onChange={e => setSearch(e.target.value)}
           style={{
             padding: "6px 14px", border: "1px solid rgba(14,31,45,0.15)", borderRadius: 8,
-            fontSize: 13, width: 260, outline: "none",
+            fontSize: 13, width: 240, outline: "none",
           }}
         />
-        <span style={{ fontSize: 13, color: "var(--muted)", marginLeft: "auto" }}>
-          Showing {sorted.length} of {masters.length} items
+        <span style={{ fontSize: 12, color: "var(--muted)", whiteSpace: "nowrap" }}>
+          {sorted.length} of {masters.length}
         </span>
       </div>
 
-      {/* ── Division KPIs ── */}
+      {/* ── Division KPIs (current filter) ── */}
       {!loading && (
         <div className="kpi-grid" style={{ marginBottom: 24 }}>
           <div className="kpi-card">
@@ -364,54 +433,9 @@ export default function GolfGenInventory() {
         </div>
       )}
 
-      {/* ── Charts Row ── */}
-      {!loading && (
-        <div style={{ display: "grid", gridTemplateColumns: channelChartData.length > 0 ? "1fr 1fr" : "1fr", gap: 20, marginBottom: 28 }}>
-          {/* Suffix breakdown bar chart */}
-          {suffixChartData.length > 0 && (
-            <div className="chart-card">
-              <h3>Inventory by Type</h3>
-              <p className="sub">Pieces on hand by suffix type</p>
-              <ResponsiveContainer width="100%" height={280}>
-                <BarChart data={suffixChartData} margin={{ top: 10, right: 20, left: 10, bottom: 5 }}>
-                  <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="rgba(14,31,45,0.06)" />
-                  <XAxis dataKey="name" tick={{ fontSize: 11, fill: "#64748b" }} />
-                  <YAxis tick={{ fontSize: 11, fill: "#64748b" }} tickFormatter={v => v >= 1000 ? `${(v/1000).toFixed(0)}k` : v} />
-                  <Tooltip contentStyle={TOOLTIP_STYLE} formatter={(v) => [v.toLocaleString(), "Pcs On Hand"]} />
-                  <Bar dataKey="pcsOnHand" radius={[6, 6, 0, 0]}>
-                    {suffixChartData.map((entry, i) => (
-                      <Cell key={i} fill={SUFFIX_COLORS[entry.name] || COLORS[i % COLORS.length]} />
-                    ))}
-                  </Bar>
-                </BarChart>
-              </ResponsiveContainer>
-            </div>
-          )}
-
-          {/* Channel pie chart (Golf only) */}
-          {channelChartData.length > 0 && (
-            <div className="chart-card">
-              <h3>SKUs by Channel</h3>
-              <p className="sub">Golf inventory distribution by sales channel</p>
-              <ResponsiveContainer width="100%" height={280}>
-                <PieChart>
-                  <Pie data={channelChartData} cx="50%" cy="50%" outerRadius={100} dataKey="value"
-                    label={({ name, value }) => `${name} (${value})`}>
-                    {channelChartData.map((_, i) => (
-                      <Cell key={i} fill={COLORS[i % COLORS.length]} />
-                    ))}
-                  </Pie>
-                  <Tooltip contentStyle={TOOLTIP_STYLE} />
-                </PieChart>
-              </ResponsiveContainer>
-            </div>
-          )}
-        </div>
-      )}
-
       {/* ── Loading State ── */}
       {loading && (
-        <div className="loading"><div className="spinner" /> Loading {division.toLowerCase()} inventory...</div>
+        <div className="loading"><div className="spinner" /> Loading {divLabel.toLowerCase()} inventory...</div>
       )}
 
       {/* ── Main Table ── */}
