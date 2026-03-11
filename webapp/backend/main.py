@@ -4730,15 +4730,8 @@ async def debug_factory_po_test():
 
 @app.get("/api/factory-po")
 async def get_factory_po(request: Request):
-    try:
-        _require_auth(request)
-    except Exception:
-        pass  # temporarily allow unauthenticated for debugging
-    try:
-        return _load_factory_po()
-    except Exception as e:
-        import traceback
-        return JSONResponse(status_code=500, content={"error": str(e), "trace": traceback.format_exc()})
+    _require_auth(request)
+    return _load_factory_po()
 
 @app.post("/api/factory-po/upload")
 async def upload_factory_po(request: Request, file: UploadFile = File(...)):
@@ -4831,15 +4824,8 @@ def _save_logistics(data):
 
 @app.get("/api/logistics")
 async def get_logistics(request: Request):
-    try:
-        _require_auth(request)
-    except Exception:
-        pass
-    try:
-        return _load_logistics()
-    except Exception as e:
-        import traceback
-        return JSONResponse(status_code=500, content={"error": str(e), "trace": traceback.format_exc()})
+    _require_auth(request)
+    return _load_logistics()
 
 @app.post("/api/logistics/upload")
 async def upload_logistics(request: Request, file: UploadFile = File(...)):
@@ -5109,6 +5095,223 @@ async def upload_supply_chain(request: Request, file: UploadFile = File(...)):
 
     results["lastUpload"] = _date.today().isoformat()
     return results
+
+
+# ── FBA Shipments (SP-API Fulfillment Inbound) ───────────────
+
+_FBA_SHIPMENTS_CACHE_PATH = DB_DIR / "fba_shipments_cache.json"
+
+
+def _load_fba_shipments_cache():
+    if _FBA_SHIPMENTS_CACHE_PATH.exists():
+        with open(_FBA_SHIPMENTS_CACHE_PATH) as f:
+            return json.load(f)
+    return None
+
+
+def _save_fba_shipments_cache(data):
+    with open(_FBA_SHIPMENTS_CACHE_PATH, "w") as f:
+        json.dump(data, f, indent=2)
+
+
+def _fetch_fba_shipments_from_api(statuses=None, days_back=90):
+    """Fetch FBA inbound shipments from Amazon SP-API."""
+    try:
+        from sp_api.api import FulfillmentInbound
+        from sp_api.base import Marketplaces
+    except ImportError:
+        logger.warning("SP-API library not installed — cannot fetch FBA shipments")
+        return None
+
+    credentials = _load_sp_api_credentials()
+    if not credentials:
+        logger.warning("No SP-API credentials — cannot fetch FBA shipments")
+        return None
+
+    if statuses is None:
+        statuses = ["WORKING", "SHIPPED", "RECEIVING", "CLOSED", "IN_TRANSIT"]
+
+    try:
+        fba = FulfillmentInbound(
+            credentials=credentials,
+            marketplace=Marketplaces.US,
+        )
+
+        all_shipments = []
+
+        # Fetch by status list
+        resp = fba.get_shipments(
+            QueryType="SHIPMENT_STATUS",
+            ShipmentStatusList=",".join(statuses),
+            MarketplaceId="ATVPDKIKX0DER",
+        )
+
+        payload = resp.payload or {}
+        shipment_data = payload.get("ShipmentData", [])
+        all_shipments.extend(shipment_data)
+
+        # Handle pagination
+        next_token = payload.get("NextToken")
+        page = 1
+        while next_token and page < 10:  # safety limit
+            page += 1
+            resp = fba.get_shipments(
+                QueryType="NEXT_TOKEN",
+                NextToken=next_token,
+                MarketplaceId="ATVPDKIKX0DER",
+            )
+            payload = resp.payload or {}
+            shipment_data = payload.get("ShipmentData", [])
+            all_shipments.extend(shipment_data)
+            next_token = payload.get("NextToken")
+
+        logger.info(f"FBA Shipments: fetched {len(all_shipments)} shipments from SP-API")
+
+        # Normalize shipment data for frontend
+        normalized = []
+        for s in all_shipments:
+            ship_id = s.get("ShipmentId", "")
+            ship_name = s.get("ShipmentName", "")
+            status = s.get("ShipmentStatus", "")
+            dest = s.get("DestinationFulfillmentCenterId", "")
+            label_prep = s.get("LabelPrepType", "")
+            are_cases_required = s.get("AreCasesRequired", False)
+
+            # Address info
+            ship_from = s.get("ShipFromAddress", {})
+            ship_from_str = ""
+            if ship_from:
+                parts = [ship_from.get("City", ""), ship_from.get("StateOrProvinceCode", "")]
+                ship_from_str = ", ".join(p for p in parts if p)
+
+            # Items count from InboundShipmentInfo
+            items = s.get("Items", [])
+
+            normalized.append({
+                "shipmentId": ship_id,
+                "shipmentName": ship_name,
+                "status": status,
+                "destination": dest,
+                "labelPrep": label_prep,
+                "casesRequired": are_cases_required,
+                "shipFrom": ship_from_str,
+                "itemCount": len(items) if items else 0,
+            })
+
+        result = {
+            "shipments": normalized,
+            "lastSync": datetime.now().strftime("%m/%d/%Y %I:%M %p"),
+            "totalShipments": len(normalized),
+        }
+
+        _save_fba_shipments_cache(result)
+        return result
+
+    except Exception as e:
+        logger.error(f"FBA Shipments SP-API error: {e}")
+        import traceback
+        logger.error(traceback.format_exc())
+        return None
+
+
+def _enrich_shipment_items(shipment_id):
+    """Fetch items for a specific shipment from SP-API."""
+    try:
+        from sp_api.api import FulfillmentInbound
+        from sp_api.base import Marketplaces
+    except ImportError:
+        return []
+
+    credentials = _load_sp_api_credentials()
+    if not credentials:
+        return []
+
+    try:
+        fba = FulfillmentInbound(
+            credentials=credentials,
+            marketplace=Marketplaces.US,
+        )
+        resp = fba.shipment_items_by_shipment(shipment_id, MarketplaceId="ATVPDKIKX0DER")
+        payload = resp.payload or {}
+        items = payload.get("ItemData", [])
+
+        result = []
+        for item in items:
+            result.append({
+                "sku": item.get("SellerSKU", ""),
+                "fnsku": item.get("FulfillmentNetworkSKU", ""),
+                "quantityShipped": item.get("QuantityShipped", 0),
+                "quantityReceived": item.get("QuantityReceived", 0),
+                "quantityInCase": item.get("QuantityInCase", 0),
+            })
+
+        # Handle pagination
+        next_token = payload.get("NextToken")
+        page = 1
+        while next_token and page < 10:
+            page += 1
+            resp = fba.shipment_items_by_shipment(
+                shipment_id,
+                MarketplaceId="ATVPDKIKX0DER",
+                NextToken=next_token,
+            )
+            payload = resp.payload or {}
+            for item in payload.get("ItemData", []):
+                result.append({
+                    "sku": item.get("SellerSKU", ""),
+                    "fnsku": item.get("FulfillmentNetworkSKU", ""),
+                    "quantityShipped": item.get("QuantityShipped", 0),
+                    "quantityReceived": item.get("QuantityReceived", 0),
+                    "quantityInCase": item.get("QuantityInCase", 0),
+                })
+            next_token = payload.get("NextToken")
+
+        return result
+    except Exception as e:
+        logger.error(f"FBA shipment items error for {shipment_id}: {e}")
+        return []
+
+
+@app.get("/api/fba-shipments")
+async def get_fba_shipments(request: Request, refresh: bool = False):
+    """Get FBA inbound shipments. Uses cache unless refresh=true."""
+    _require_auth(request)
+
+    if not refresh:
+        cached = _load_fba_shipments_cache()
+        if cached:
+            return cached
+
+    # Try fetching fresh data from SP-API
+    data = _fetch_fba_shipments_from_api()
+    if data:
+        return data
+
+    # Fall back to cache even if refresh was requested
+    cached = _load_fba_shipments_cache()
+    if cached:
+        cached["_note"] = "Using cached data — SP-API sync failed"
+        return cached
+
+    return {"shipments": [], "lastSync": None, "totalShipments": 0}
+
+
+@app.post("/api/fba-shipments/sync")
+async def sync_fba_shipments(request: Request):
+    """Force refresh of FBA shipment data from SP-API."""
+    _require_auth(request)
+    data = _fetch_fba_shipments_from_api()
+    if data:
+        return {"ok": True, "totalShipments": data["totalShipments"], "lastSync": data["lastSync"]}
+    return JSONResponse(status_code=500, content={"ok": False, "error": "SP-API sync failed. Check credentials."})
+
+
+@app.get("/api/fba-shipments/{shipment_id}/items")
+async def get_fba_shipment_items(request: Request, shipment_id: str):
+    """Get items for a specific FBA inbound shipment."""
+    _require_auth(request)
+    items = _enrich_shipment_items(shipment_id)
+    return {"shipmentId": shipment_id, "items": items, "totalItems": len(items)}
 
 
 # ── Item Planning ─────────────────────────────────────────

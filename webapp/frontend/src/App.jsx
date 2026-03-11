@@ -12,10 +12,11 @@ import ItemMaster from "./pages/ItemMaster";
 import FactoryPO from "./pages/FactoryPO";
 import LogisticsTracking from "./pages/LogisticsTracking";
 import ItemPlanning from "./pages/ItemPlanning";
+import FBAShipments from "./pages/FBAShipments";
 import "./App.css";
 
 const ANALYTICS_PATHS = ["/", "/products", "/profitability", "/advertising"];
-const LOGISTICS_PATHS = ["/inventory", "/golfgen-inventory", "/item-master", "/factory-po", "/logistics", "/item-planning"];
+const LOGISTICS_PATHS = ["/inventory", "/golfgen-inventory", "/item-master", "/factory-po", "/logistics", "/fba-shipments", "/item-planning"];
 
 function NavBars() {
   const location = useLocation();
@@ -61,6 +62,9 @@ function NavBars() {
           </NavLink>
           <NavLink to="/logistics" className={({ isActive }) => isActive ? "nav-tab active" : "nav-tab"}>
             <span>🚢</span> OTW / Logistics
+          </NavLink>
+          <NavLink to="/fba-shipments" className={({ isActive }) => isActive ? "nav-tab active" : "nav-tab"}>
+            <span>📦</span> Shipments to FBA
           </NavLink>
           <NavLink to="/item-planning" className={({ isActive }) => isActive ? "nav-tab active" : "nav-tab"}>
             <span>📋</span> Item Planning
@@ -133,6 +137,7 @@ export default function App() {
             <Route path="/item-master" element={<ItemMaster />} />
             <Route path="/factory-po" element={<FactoryPO />} />
             <Route path="/logistics" element={<LogisticsTracking />} />
+            <Route path="/fba-shipments" element={<FBAShipments />} />
             <Route path="/item-planning" element={<ItemPlanning />} />
           </Routes>
         </main>

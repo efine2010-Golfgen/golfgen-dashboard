@@ -109,6 +109,12 @@ export const api = {
     return fetch(`${API_BASE}/api/supply-chain/upload`, { method: "POST", body: fd, credentials: "include" }).then(r => r.json());
   },
 
+  // FBA Shipments (SP-API)
+  fbaShipments: (refresh = false) => fetchJSON(`/api/fba-shipments${refresh ? "?refresh=true" : ""}`),
+  fbaShipmentsSync: () =>
+    fetch(`${API_BASE}/api/fba-shipments/sync`, { method: "POST", credentials: "include" }).then(r => r.json()),
+  fbaShipmentItems: (shipmentId) => fetchJSON(`/api/fba-shipments/${encodeURIComponent(shipmentId)}/items`),
+
   // Item Planning
   itemPlanning: () => fetchJSON(`/api/item-planning`),
   itemPlanningRawSales: () => fetchJSON(`/api/item-planning/raw-product-sales`),
