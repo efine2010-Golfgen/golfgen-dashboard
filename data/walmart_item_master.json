@@ -17,10 +17,11 @@
     "color": "Multi",
     "brand": "PGAT",
     "series": "Tee Up",
-    "productType": "Golf Balls",
-    "pieceCount": 4,
-    "orientation": "",
-    "itemCategory": "Practice Aids"
+    "productType": "Sticky Practice Balls",
+    "pieceCount": "4",
+    "orientation": "N/A",
+    "itemCategory": "Practice Balls",
+    "fy26Plan": 0
   },
   {
     "golfgenItem": "GGWMSS2103BM",
@@ -40,10 +41,11 @@
     "color": "Multi",
     "brand": "PGAT",
     "series": "Tee Up",
-    "productType": "Targets",
-    "pieceCount": "",
-    "orientation": "",
-    "itemCategory": "Practice Aids"
+    "productType": "Training Aids",
+    "pieceCount": "4",
+    "orientation": "N/A",
+    "itemCategory": "Training Aids",
+    "fy26Plan": 0
   },
   {
     "golfgenItem": "GGWMSS2114BM",
@@ -62,11 +64,12 @@
     "cartonHeight": 0,
     "color": "White",
     "brand": "PGAT",
-    "series": "Practice Aids",
+    "series": "Tee Up",
     "productType": "Foam Balls",
-    "pieceCount": "",
-    "orientation": "",
-    "itemCategory": "Practice Aids"
+    "pieceCount": "12",
+    "orientation": "N/A",
+    "itemCategory": "Practice Balls",
+    "fy26Plan": 0
   },
   {
     "golfgenItem": "GGWMSS2116BM",
@@ -87,9 +90,10 @@
     "brand": "PGAT",
     "series": "G1",
     "productType": "Golf Club Set",
-    "pieceCount": 5,
-    "orientation": "RH",
-    "itemCategory": "Junior Clubs"
+    "pieceCount": "5",
+    "orientation": "Right",
+    "itemCategory": "Junior Clubs",
+    "fy26Plan": 0
   },
   {
     "golfgenItem": "GGWMSS2115BM",
@@ -108,11 +112,12 @@
     "cartonHeight": 0,
     "color": "Multi",
     "brand": "PGAT",
-    "series": "Practice Aids",
+    "series": "Tee Up",
     "productType": "Foam Balls",
-    "pieceCount": "",
-    "orientation": "",
-    "itemCategory": "Practice Aids"
+    "pieceCount": "12",
+    "orientation": "N/A",
+    "itemCategory": "Practice Balls",
+    "fy26Plan": 0
   },
   {
     "golfgenItem": "GGWMSS2226BM",
@@ -133,9 +138,10 @@
     "brand": "PGAT",
     "series": "G1",
     "productType": "Golf Club Set",
-    "pieceCount": 5,
-    "orientation": "RH",
-    "itemCategory": "Junior Clubs"
+    "pieceCount": "5",
+    "orientation": "Right",
+    "itemCategory": "Junior Clubs",
+    "fy26Plan": 0
   },
   {
     "golfgenItem": "GGWMSS2225BM",
@@ -152,13 +158,14 @@
     "cartonLength": 0,
     "cartonWidth": 0,
     "cartonHeight": 0,
-    "color": "Multi",
+    "color": "White",
     "brand": "PGAT",
-    "series": "Practice Aids",
+    "series": "Tee Up",
     "productType": "Foam Balls",
-    "pieceCount": 4,
-    "orientation": "",
-    "itemCategory": "Practice Aids"
+    "pieceCount": "4",
+    "orientation": "N/A",
+    "itemCategory": "Practice Balls",
+    "fy26Plan": 0
   },
   {
     "golfgenItem": "GGWMSS2122BM",
@@ -179,9 +186,10 @@
     "brand": "PGAT",
     "series": "G1",
     "productType": "Golf Club Set",
-    "pieceCount": 7,
-    "orientation": "RH",
-    "itemCategory": "Junior Clubs"
+    "pieceCount": "7",
+    "orientation": "Right",
+    "itemCategory": "Junior Clubs",
+    "fy26Plan": 0
   },
   {
     "golfgenItem": "GGWMSS2451BM",
@@ -198,13 +206,14 @@
     "cartonLength": 0,
     "cartonWidth": 0,
     "cartonHeight": 0,
-    "color": "Multi",
+    "color": "",
     "brand": "PGAT",
     "series": "Tee Up",
-    "productType": "Starter Set",
-    "pieceCount": "",
-    "orientation": "",
-    "itemCategory": "Practice Aids"
+    "productType": "Practice Set",
+    "pieceCount": "6",
+    "orientation": "Right",
+    "itemCategory": "Pratice Clubs",
+    "fy26Plan": 0
   },
   {
     "golfgenItem": "GGWMSS2452BM",
@@ -221,13 +230,14 @@
     "cartonLength": 0,
     "cartonWidth": 0,
     "cartonHeight": 0,
-    "color": "Multi",
+    "color": "",
     "brand": "PGAT",
     "series": "Tee Up",
-    "productType": "Starter Set",
-    "pieceCount": "",
-    "orientation": "",
-    "itemCategory": "Practice Aids"
+    "productType": "Practice Set",
+    "pieceCount": "6",
+    "orientation": "Right",
+    "itemCategory": "Pratice Clubs",
+    "fy26Plan": 0
   },
   {
     "golfgenItem": "GGRTFTG2228",
@@ -244,13 +254,14 @@
     "cartonLength": 0,
     "cartonWidth": 0,
     "cartonHeight": 0,
-    "color": "Green",
+    "color": "Orange",
     "brand": "PGAT",
-    "series": "1st Tee",
+    "series": "G2",
     "productType": "Golf Club Set",
-    "pieceCount": "",
-    "orientation": "RH",
-    "itemCategory": "Junior Clubs"
+    "pieceCount": "5",
+    "orientation": "Right",
+    "itemCategory": "Junior Clubs",
+    "fy26Plan": 0
   },
   {
     "golfgenItem": "GGRTFTR2168",
@@ -267,13 +278,14 @@
     "cartonLength": 0,
     "cartonWidth": 0,
     "cartonHeight": 0,
-    "color": "Red",
+    "color": "Green",
     "brand": "PGAT",
-    "series": "1st Tee",
+    "series": "G2",
     "productType": "Golf Club Set",
-    "pieceCount": "",
-    "orientation": "RH",
-    "itemCategory": "Junior Clubs"
+    "pieceCount": "5",
+    "orientation": "Right",
+    "itemCategory": "Junior Clubs",
+    "fy26Plan": 0
   },
   {
     "golfgenItem": "GGRTFTB2178",
@@ -290,13 +302,14 @@
     "cartonLength": 0,
     "cartonWidth": 0,
     "cartonHeight": 0,
-    "color": "Blue",
+    "color": "Red",
     "brand": "PGAT",
-    "series": "1st Tee",
+    "series": "G2",
     "productType": "Golf Club Set",
-    "pieceCount": "",
-    "orientation": "RH",
-    "itemCategory": "Junior Clubs"
+    "pieceCount": "7",
+    "orientation": "Right",
+    "itemCategory": "Junior Clubs",
+    "fy26Plan": 0
   },
   {
     "golfgenItem": "GGRTFTO2198",
@@ -313,12 +326,13 @@
     "cartonLength": 0,
     "cartonWidth": 0,
     "cartonHeight": 0,
-    "color": "Orange",
+    "color": "Blue",
     "brand": "PGAT",
-    "series": "1st Tee",
+    "series": "G2",
     "productType": "Golf Club Set",
-    "pieceCount": "",
-    "orientation": "RH",
-    "itemCategory": "Junior Clubs"
+    "pieceCount": "7",
+    "orientation": "Right",
+    "itemCategory": "Junior Clubs",
+    "fy26Plan": 0
   }
 ]
