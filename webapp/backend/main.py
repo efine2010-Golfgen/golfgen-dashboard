@@ -167,8 +167,9 @@ def _sync_today_orders():
         # ── Get item-level prices for ALL non-cancelled orders ──
         # OrderTotal is unreliable.  getOrderItems gives us actual item prices.
         # Rate limit: burst 30, then 0.5/sec.  We handle this with adaptive sleep.
-        today_str = (datetime.utcnow() - timedelta(hours=7)).strftime("%Y-%m-%d")
-        yesterday_str = (datetime.utcnow() - timedelta(hours=7) - timedelta(days=1)).strftime("%Y-%m-%d")
+        now_central = datetime.now(ZoneInfo("America/Chicago"))
+        today_str = now_central.strftime("%Y-%m-%d")
+        yesterday_str = (now_central - timedelta(days=1)).strftime("%Y-%m-%d")
 
         # Build ASIN price lookup from historical data for fallback
         asin_prices = {}
@@ -357,7 +358,7 @@ def _ensure_today_data():
     if now - _last_today_sync < 300:          # 5-minute cooldown
         return
 
-    today_str = (datetime.utcnow() - timedelta(hours=7)).strftime("%Y-%m-%d")
+    today_str = datetime.now(ZoneInfo("America/Chicago")).strftime("%Y-%m-%d")
     try:
         con = duckdb.connect(str(DB_PATH), read_only=False)
         row = con.execute(
@@ -370,7 +371,7 @@ def _ensure_today_data():
         has_data = False
 
     if not has_data:
-        logger.info("Today has no data — triggering quick Orders API sync")
+        logger.info(f"Today ({today_str}) has no data — triggering quick Orders API sync")
         _last_today_sync = now
         _sync_today_orders()
 
@@ -1713,6 +1714,17 @@ async def _sync_loop():
     except Exception as e:
         logger.error(f"Startup today-sync error: {e}")
 
+    # Run full SP-API sync on startup (includes financial events with refunds).
+    # This is critical because Railway's ephemeral filesystem means every deploy
+    # starts with the stale DuckDB snapshot from git.  Without this, refund data
+    # and recent financial events never populate until a scheduled cron fires.
+    try:
+        loop = asyncio.get_event_loop()
+        await loop.run_in_executor(None, _run_sp_api_sync)
+        logger.info("Startup: full SP-API sync completed (orders + financial events + inventory)")
+    except Exception as e:
+        logger.error(f"Startup full-sync error: {e}")
+
     # Auto-backfill if historical data is missing (e.g. after Railway redeploy)
     try:
         loop = asyncio.get_event_loop()
@@ -1950,6 +1962,23 @@ def _init_system_tables():
     """Create DuckDB tables for sync logging and docs updates if not exist."""
     con = duckdb.connect(str(DB_PATH))
 
+    # Create sequences FIRST — tables reference them in DEFAULT expressions
+    try:
+        con.execute("CREATE SEQUENCE IF NOT EXISTS sync_log_seq")
+    except Exception:
+        try:
+            con.execute("CREATE SEQUENCE sync_log_seq")
+        except Exception:
+            pass  # Already exists
+
+    try:
+        con.execute("CREATE SEQUENCE IF NOT EXISTS docs_update_log_seq")
+    except Exception:
+        try:
+            con.execute("CREATE SEQUENCE docs_update_log_seq")
+        except Exception:
+            pass  # Already exists
+
     con.execute("""
         CREATE TABLE IF NOT EXISTS sync_log (
             id BIGINT PRIMARY KEY DEFAULT nextval('sync_log_seq'),
@@ -1963,12 +1992,6 @@ def _init_system_tables():
         )
     """)
 
-    # Create sequence if not exists (DuckDB doesn't support CREATE SEQUENCE IF NOT EXISTS in older versions)
-    try:
-        con.execute("CREATE SEQUENCE sync_log_seq")
-    except:
-        pass  # Sequence already exists
-
     con.execute("""
         CREATE TABLE IF NOT EXISTS docs_update_log (
             id BIGINT PRIMARY KEY DEFAULT nextval('docs_update_log_seq'),
@@ -1980,11 +2003,6 @@ def _init_system_tables():
             execution_time_seconds DOUBLE
         )
     """)
-
-    try:
-        con.execute("CREATE SEQUENCE docs_update_log_seq")
-    except:
-        pass  # Sequence already exists
 
     con.close()
 
@@ -3112,7 +3130,7 @@ def debug_today_orders():
         creds = _load_sp_api_credentials()
         orders_api = OrdersAPI(credentials=creds, marketplace=Marketplaces.US)
 
-        today_str = (datetime.utcnow() - timedelta(hours=7)).strftime("%Y-%m-%d")
+        today_str = datetime.now(ZoneInfo("America/Chicago")).strftime("%Y-%m-%d")
         after_date = (datetime.utcnow() - timedelta(days=1)).isoformat()
 
         response = orders_api.get_orders(
