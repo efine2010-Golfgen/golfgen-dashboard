@@ -85,7 +85,6 @@ export default function ItemMaster() {
 
   useEffect(() => { load(); }, [load]);
 
-  // Load Walmart / Other on first tab switch
   useEffect(() => {
     if (masterTab === "Walmart" && walmartItems === null) {
       setLoading(true);
@@ -140,77 +139,99 @@ export default function ItemMaster() {
 
   if (loading) return <div className="loading"><div className="spinner" /> Loading item master...</div>;
 
-  // Walmart / Other simple table
-  if (masterTab === "Walmart" || masterTab === "Other") {
-    const simpleItems = masterTab === "Walmart" ? (walmartItems || []) : (otherItems || []);
+  /* ─────────────── Walmart Tab ─────────────── */
+  if (masterTab === "Walmart") {
+    const simpleItems = walmartItems || [];
     const simpleFiltered = simpleItems.filter(i => {
       if (!search) return true;
       const q = search.toLowerCase();
-      return (i.itemNumber || i.sku || "").toLowerCase().includes(q) || (i.description || i.productName || "").toLowerCase().includes(q);
+      return (i.golfgenItem || i.itemNumber || "").toLowerCase().includes(q) ||
+             (i.walmartItem || "").toLowerCase().includes(q) ||
+             (i.description || "").toLowerCase().includes(q);
     });
+
+    const totalSkus = simpleItems.length;
+    const totalStores = simpleItems.reduce((s, i) => s + (i.storeCount || 0), 0);
+    const avgCost = totalSkus > 0 ? simpleItems.reduce((s, i) => s + (i.unitCost || 0), 0) / totalSkus : 0;
+    const avgRetail = totalSkus > 0 ? simpleItems.reduce((s, i) => s + (i.unitRetail || 0), 0) / totalSkus : 0;
+    const categories = [...new Set(simpleItems.map(i => i.subcategory || i.category).filter(Boolean))];
+
     return (
       <>
         <div className="page-header">
           <h1>Item Master</h1>
-          <p>{masterTab} items &middot; {simpleItems.length} SKUs</p>
+          <p>Walmart items &middot; {totalSkus} SKUs</p>
         </div>
+
         <div className="range-tabs" style={{ marginBottom: 20 }}>
           {MASTER_TABS.map(t => (
             <button key={t} className={`range-tab ${masterTab === t ? "active" : ""}`}
               onClick={() => { setMasterTab(t); setSearch(""); }}>{t}</button>
           ))}
         </div>
-        <input type="text" placeholder="Search..." value={search} onChange={e => setSearch(e.target.value)}
-          style={{ padding: "6px 14px", border: "1px solid rgba(14,31,45,0.15)", borderRadius: 8, fontSize: 13, width: 260, marginBottom: 16 }} />
+
+        {/* Walmart Summary */}
+        <div className="kpi-grid" style={{ marginBottom: 24 }}>
+          <div className="kpi-card">
+            <div className="kpi-label">Total SKUs</div>
+            <div className="kpi-value teal">{totalSkus}</div>
+          </div>
+          <div className="kpi-card">
+            <div className="kpi-label">Total Stores</div>
+            <div className="kpi-value" style={{ color: "var(--blue-active)" }}>{totalStores.toLocaleString()}</div>
+          </div>
+          <div className="kpi-card">
+            <div className="kpi-label">Avg Unit Cost</div>
+            <div className="kpi-value" style={{ color: "var(--navy)" }}>${avgCost.toFixed(2)}</div>
+          </div>
+          <div className="kpi-card">
+            <div className="kpi-label">Avg Unit Retail</div>
+            <div className="kpi-value" style={{ color: "var(--orange)" }}>${avgRetail.toFixed(2)}</div>
+          </div>
+          <div className="kpi-card">
+            <div className="kpi-label">Categories</div>
+            <div className="kpi-value">{categories.length}</div>
+            <div style={{ fontSize: 11, color: "var(--muted)", marginTop: 4 }}>{categories.join(", ")}</div>
+          </div>
+        </div>
+
+        <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 16 }}>
+          <input type="text" placeholder="Search..." value={search} onChange={e => setSearch(e.target.value)}
+            style={{ padding: "6px 14px", border: "1px solid rgba(14,31,45,0.15)", borderRadius: 8, fontSize: 13, width: 260 }} />
+          <span style={{ fontSize: 12, color: "var(--muted)", marginLeft: "auto" }}>
+            {simpleFiltered.length} of {totalSkus}
+          </span>
+        </div>
+
         <div className="table-card">
           <table>
             <thead>
               <tr>
-                {masterTab === "Walmart" ? (
-                  <>
-                    <th>GolfGen Item #</th>
-                    <th>Walmart Item #</th>
-                    <th>Description</th>
-                    <th>Category</th>
-                    <th>Unit Cost</th>
-                    <th>Unit Retail</th>
-                    <th>Carton Size</th>
-                    <th>Store Count</th>
-                  </>
-                ) : (
-                  <>
-                    <th>Item #</th>
-                    <th>Description</th>
-                    <th>Pack</th>
-                    <th>Pcs On-Hand</th>
-                    <th>Pcs Available</th>
-                  </>
-                )}
+                <th style={{ minWidth: 260, textAlign: "left" }}>Product</th>
+                <th style={{ textAlign: "left" }}>Category</th>
+                <th style={{ textAlign: "right" }}>Unit Cost</th>
+                <th style={{ textAlign: "right" }}>Unit Retail</th>
+                <th style={{ textAlign: "right" }}>Carton Size</th>
+                <th style={{ textAlign: "right" }}>Store Count</th>
               </tr>
             </thead>
             <tbody>
               {simpleFiltered.map((item, i) => (
                 <tr key={i}>
-                  {masterTab === "Walmart" ? (
-                    <>
-                      <td style={{ fontFamily: "'Space Grotesk', monospace", fontSize: 12 }}>{item.golfgenItem || item.itemNumber || "—"}</td>
-                      <td style={{ fontFamily: "'Space Grotesk', monospace", fontSize: 12 }}>{item.walmartItem || "—"}</td>
-                      <td style={{ maxWidth: 280, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{item.description || item.productName}</td>
-                      <td style={{ fontSize: 12, color: "var(--muted)" }}>{item.subcategory || item.category || "—"}</td>
-                      <td style={{ textAlign: "right" }}>{item.unitCost ? `$${item.unitCost.toFixed(2)}` : "—"}</td>
-                      <td style={{ textAlign: "right" }}>{item.unitRetail ? `$${item.unitRetail.toFixed(2)}` : "—"}</td>
-                      <td style={{ textAlign: "right" }}>{item.cartonSize || "—"}</td>
-                      <td style={{ textAlign: "right" }}>{(item.storeCount || 0).toLocaleString()}</td>
-                    </>
-                  ) : (
-                    <>
-                      <td style={{ fontFamily: "'Space Grotesk', monospace", fontSize: 12 }}>{item.itemNumber || item.sku}</td>
-                      <td style={{ maxWidth: 300, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{item.description || item.productName}</td>
-                      <td>{item.pack || "—"}</td>
-                      <td>{(item.pcsOnHand || 0).toLocaleString()}</td>
-                      <td>{(item.pcsAvailable || 0).toLocaleString()}</td>
-                    </>
-                  )}
+                  <td>
+                    <div style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", maxWidth: 300 }} title={item.description}>
+                      {item.description || "—"}
+                    </div>
+                    <div style={{ fontSize: 11, color: "var(--muted)", marginTop: 2, fontFamily: "'Space Grotesk', monospace" }}>
+                      {item.golfgenItem || item.itemNumber || "—"}
+                      {item.walmartItem ? ` · ${item.walmartItem}` : ""}
+                    </div>
+                  </td>
+                  <td style={{ fontSize: 12, color: "var(--muted)" }}>{item.subcategory || item.category || "—"}</td>
+                  <td style={{ textAlign: "right" }}>{item.unitCost ? `$${item.unitCost.toFixed(2)}` : "—"}</td>
+                  <td style={{ textAlign: "right" }}>{item.unitRetail ? `$${item.unitRetail.toFixed(2)}` : "—"}</td>
+                  <td style={{ textAlign: "right" }}>{item.cartonSize || "—"}</td>
+                  <td style={{ textAlign: "right", fontWeight: 600 }}>{(item.storeCount || 0).toLocaleString()}</td>
                 </tr>
               ))}
             </tbody>
@@ -220,7 +241,120 @@ export default function ItemMaster() {
     );
   }
 
-  // Amazon (main) Item Master
+  /* ─────────────── Other Tab ─────────────── */
+  if (masterTab === "Other") {
+    const simpleItems = otherItems || [];
+    const simpleFiltered = simpleItems.filter(i => {
+      if (!search) return true;
+      const q = search.toLowerCase();
+      return (i.itemNumber || "").toLowerCase().includes(q) || (i.description || "").toLowerCase().includes(q);
+    });
+
+    const totalSkus = simpleItems.length;
+    const totalOnHand = simpleItems.reduce((s, i) => s + (i.pcsOnHand || 0), 0);
+    const totalAvailable = simpleItems.reduce((s, i) => s + (i.pcsAvailable || 0), 0);
+    const totalAllocated = simpleItems.reduce((s, i) => s + (i.pcsAllocated || 0), 0);
+    const golfCount = simpleItems.filter(i => i.source === "Golf").length;
+    const hwCount = simpleItems.filter(i => i.source === "Housewares").length;
+
+    return (
+      <>
+        <div className="page-header">
+          <h1>Item Master</h1>
+          <p>Other items (not in Amazon or Walmart master) &middot; {totalSkus} SKUs</p>
+        </div>
+
+        <div className="range-tabs" style={{ marginBottom: 20 }}>
+          {MASTER_TABS.map(t => (
+            <button key={t} className={`range-tab ${masterTab === t ? "active" : ""}`}
+              onClick={() => { setMasterTab(t); setSearch(""); }}>{t}</button>
+          ))}
+        </div>
+
+        {/* Other Summary */}
+        <div className="kpi-grid" style={{ marginBottom: 24 }}>
+          <div className="kpi-card">
+            <div className="kpi-label">Total SKUs</div>
+            <div className="kpi-value teal">{totalSkus}</div>
+          </div>
+          <div className="kpi-card">
+            <div className="kpi-label">Pcs On Hand</div>
+            <div className="kpi-value" style={{ color: "var(--navy)" }}>{totalOnHand.toLocaleString()}</div>
+          </div>
+          <div className="kpi-card">
+            <div className="kpi-label">Pcs Available</div>
+            <div className="kpi-value pos">{totalAvailable.toLocaleString()}</div>
+          </div>
+          <div className="kpi-card">
+            <div className="kpi-label">Pcs Allocated</div>
+            <div className="kpi-value" style={{ color: "var(--gold)" }}>{totalAllocated.toLocaleString()}</div>
+          </div>
+          <div className="kpi-card">
+            <div className="kpi-label">From Golf</div>
+            <div className="kpi-value">{golfCount}</div>
+          </div>
+          <div className="kpi-card">
+            <div className="kpi-label">From HW</div>
+            <div className="kpi-value">{hwCount}</div>
+          </div>
+        </div>
+
+        <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 16 }}>
+          <input type="text" placeholder="Search..." value={search} onChange={e => setSearch(e.target.value)}
+            style={{ padding: "6px 14px", border: "1px solid rgba(14,31,45,0.15)", borderRadius: 8, fontSize: 13, width: 260 }} />
+          <span style={{ fontSize: 12, color: "var(--muted)", marginLeft: "auto" }}>
+            {simpleFiltered.length} of {totalSkus}
+          </span>
+        </div>
+
+        <div className="table-card">
+          <table>
+            <thead>
+              <tr>
+                <th style={{ minWidth: 260, textAlign: "left" }}>Product</th>
+                <th style={{ textAlign: "left" }}>Source</th>
+                <th style={{ textAlign: "right" }}>Pcs On Hand</th>
+                <th style={{ textAlign: "right" }}>Pcs Allocated</th>
+                <th style={{ textAlign: "right" }}>Pcs Available</th>
+              </tr>
+            </thead>
+            <tbody>
+              {simpleFiltered.map((item, i) => (
+                <tr key={i}>
+                  <td>
+                    <div style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", maxWidth: 300 }} title={item.description}>
+                      {item.description || "—"}
+                    </div>
+                    <div style={{ fontSize: 11, color: "var(--muted)", marginTop: 2, fontFamily: "'Space Grotesk', monospace" }}>
+                      {item.itemNumber || item.sku || "—"}
+                    </div>
+                  </td>
+                  <td>
+                    <span style={{
+                      display: "inline-block", padding: "2px 10px", borderRadius: 12, fontSize: 11, fontWeight: 600,
+                      background: item.source === "Golf" ? "rgba(46,207,170,0.1)" : "rgba(62,101,140,0.1)",
+                      color: item.source === "Golf" ? "var(--teal)" : "var(--blue-active)",
+                    }}>
+                      {item.source}
+                    </span>
+                  </td>
+                  <td style={{ textAlign: "right" }}>{(item.pcsOnHand || 0).toLocaleString()}</td>
+                  <td style={{ textAlign: "right", color: (item.pcsAllocated || 0) > 0 ? "var(--gold)" : "var(--muted)" }}>
+                    {(item.pcsAllocated || 0) > 0 ? item.pcsAllocated.toLocaleString() : "—"}
+                  </td>
+                  <td style={{ textAlign: "right", fontWeight: 600, color: (item.pcsAvailable || 0) > 0 ? "#16a34a" : "var(--muted)" }}>
+                    {(item.pcsAvailable || 0).toLocaleString()}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </>
+    );
+  }
+
+  /* ─────────────── Amazon (main) Item Master ─────────────── */
   const totalItems = items.length;
   const totalPlanned = items.reduce((s, i) => s + (i.plannedAnnualUnits || 0), 0);
   const totalLyRev = items.reduce((s, i) => s + (i.lyRevenue || 0), 0);
@@ -241,22 +375,22 @@ export default function ItemMaster() {
       </div>
 
       {/* Summary Cards */}
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))", gap: 16, marginBottom: 24 }}>
-        <div className="card" style={{ padding: 16, textAlign: "center" }}>
-          <div style={{ fontSize: 13, color: "var(--muted)" }}>Total SKUs</div>
-          <div style={{ fontSize: 28, fontWeight: 700, color: "var(--teal)" }}>{totalItems}</div>
+      <div className="kpi-grid" style={{ marginBottom: 24 }}>
+        <div className="kpi-card">
+          <div className="kpi-label">Total SKUs</div>
+          <div className="kpi-value teal">{totalItems}</div>
         </div>
-        <div className="card" style={{ padding: 16, textAlign: "center" }}>
-          <div style={{ fontSize: 13, color: "var(--muted)" }}>LY Revenue</div>
-          <div style={{ fontSize: 28, fontWeight: 700, color: "var(--navy)" }}>{fmt$(totalLyRev)}</div>
+        <div className="kpi-card">
+          <div className="kpi-label">LY Revenue</div>
+          <div className="kpi-value" style={{ color: "var(--navy)" }}>{fmt$(totalLyRev)}</div>
         </div>
-        <div className="card" style={{ padding: 16, textAlign: "center" }}>
-          <div style={{ fontSize: 13, color: "var(--muted)" }}>FY26 Planned Units</div>
-          <div style={{ fontSize: 28, fontWeight: 700, color: "var(--orange)" }}>{totalPlanned.toLocaleString()}</div>
+        <div className="kpi-card">
+          <div className="kpi-label">FY26 Planned Units</div>
+          <div className="kpi-value" style={{ color: "var(--orange)" }}>{totalPlanned.toLocaleString()}</div>
         </div>
-        <div className="card" style={{ padding: 16, textAlign: "center" }}>
-          <div style={{ fontSize: 13, color: "var(--muted)" }}>Color Groups</div>
-          <div style={{ fontSize: 28, fontWeight: 700, color: "#7BAED0" }}>{colorsCount}</div>
+        <div className="kpi-card">
+          <div className="kpi-label">Color Groups</div>
+          <div className="kpi-value" style={{ color: "#7BAED0" }}>{colorsCount}</div>
         </div>
       </div>
 
@@ -269,39 +403,39 @@ export default function ItemMaster() {
             </button>
           ))}
         </div>
+        <div style={{ flex: 1 }} />
         <input
           type="text" placeholder="Search SKU, ASIN, or name..."
           value={search} onChange={e => setSearch(e.target.value)}
           style={{
             padding: "6px 14px", border: "1px solid rgba(14,31,45,0.15)", borderRadius: 8,
-            fontSize: 13, width: 260, outline: "none",
+            fontSize: 13, width: 240, outline: "none",
           }}
         />
-        <span style={{ fontSize: 13, color: "var(--muted)", marginLeft: "auto" }}>
-          Showing {sorted.length} of {totalItems} &middot; Click values to edit
+        <span style={{ fontSize: 12, color: "var(--muted)", whiteSpace: "nowrap" }}>
+          {sorted.length} of {totalItems} &middot; Click values to edit
         </span>
       </div>
 
       {/* Main Table */}
-      <div className="card" style={{ overflowX: "auto" }}>
-        <table className="data-table" style={{ fontSize: 13 }}>
+      <div className="table-card" style={{ overflowX: "auto" }}>
+        <table style={{ fontSize: 13 }}>
           <thead>
             <tr>
-              <SortHeader label="SKU" field="sku" />
-              <SortHeader label="Product Name" field="productName" style={{ minWidth: 220 }} />
-              <SortHeader label="Color" field="color" />
-              <SortHeader label="Type" field="productType" />
-              <SortHeader label="Pcs" field="pieceCount" />
-              <SortHeader label="Hand" field="orientation" />
-              <SortHeader label="COGS" field="unitCost" />
-              <SortHeader label="List $" field="listPrice" />
-              <SortHeader label="Sale $" field="salePrice" />
-              <SortHeader label="Coupon" field="couponValue" />
-              <SortHeader label="Net $" field="netPrice" />
-              <SortHeader label="Ref Fee" field="referralFee" />
-              <SortHeader label="LY Rev" field="lyRevenue" />
-              <SortHeader label="LY Units" field="lyUnits" />
-              <SortHeader label="FY26 Plan" field="plannedAnnualUnits" />
+              <SortHeader label="Product" field="productName" style={{ minWidth: 280, textAlign: "left" }} />
+              <SortHeader label="Color" field="color" style={{ textAlign: "left" }} />
+              <SortHeader label="Type" field="productType" style={{ textAlign: "left" }} />
+              <SortHeader label="Pcs" field="pieceCount" style={{ textAlign: "right" }} />
+              <SortHeader label="Hand" field="orientation" style={{ textAlign: "left" }} />
+              <SortHeader label="COGS" field="unitCost" style={{ textAlign: "right" }} />
+              <SortHeader label="List $" field="listPrice" style={{ textAlign: "right" }} />
+              <SortHeader label="Sale $" field="salePrice" style={{ textAlign: "right" }} />
+              <SortHeader label="Coupon" field="couponValue" style={{ textAlign: "right" }} />
+              <SortHeader label="Net $" field="netPrice" style={{ textAlign: "right" }} />
+              <SortHeader label="Ref Fee" field="referralFee" style={{ textAlign: "right" }} />
+              <SortHeader label="LY Rev" field="lyRevenue" style={{ textAlign: "right" }} />
+              <SortHeader label="LY Units" field="lyUnits" style={{ textAlign: "right" }} />
+              <SortHeader label="FY26 Plan" field="plannedAnnualUnits" style={{ textAlign: "right" }} />
               <th style={{ width: 30 }}></th>
             </tr>
           </thead>
@@ -309,9 +443,13 @@ export default function ItemMaster() {
             {sorted.map(item => (
               <>
                 <tr key={item.asin} style={{ background: saving === item.asin ? "rgba(46,207,170,0.08)" : undefined }}>
-                  <td style={{ fontFamily: "monospace", fontSize: 11 }}>{item.sku}</td>
-                  <td style={{ maxWidth: 240, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}
-                      title={item.productName}>{item.productName}</td>
+                  <td style={{ maxWidth: 280 }}>
+                    <div style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}
+                        title={item.productName}>{item.productName}</div>
+                    <div style={{ fontSize: 11, color: "var(--muted)", marginTop: 2, fontFamily: "'Space Grotesk', monospace" }}>
+                      {item.sku}{item.asin ? ` · ${item.asin}` : ""}
+                    </div>
+                  </td>
                   <td><Badge color={item.color} /></td>
                   <td>{item.productType}</td>
                   <td style={{ textAlign: "right" }}>{item.pieceCount || "—"}</td>
@@ -358,12 +496,8 @@ export default function ItemMaster() {
                 </tr>
                 {expandedAsin === item.asin && (
                   <tr key={item.asin + "-detail"}>
-                    <td colSpan={16} style={{ background: "rgba(14,31,45,0.02)", padding: 16 }}>
+                    <td colSpan={15} style={{ background: "rgba(14,31,45,0.02)", padding: 16 }}>
                       <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))", gap: 16 }}>
-                        <div>
-                          <div style={{ fontSize: 11, color: "var(--muted)", marginBottom: 4 }}>ASIN</div>
-                          <div style={{ fontFamily: "monospace" }}>{item.asin}</div>
-                        </div>
                         <div>
                           <div style={{ fontSize: 11, color: "var(--muted)", marginBottom: 4 }}>Brand / Series</div>
                           <div>{item.brand} &middot; {item.series}</div>
