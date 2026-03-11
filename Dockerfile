@@ -35,6 +35,8 @@ COPY data/logistics_tracking.json ./data/
 COPY data/item_planning.json ./data/
 COPY data/raw_product_sales.json ./data/
 COPY data/raw_daily_data.json ./data/
+COPY data/item_plan_seed.json ./data/
+COPY data/factory_orders_seed.json ./data/
 
 # Environment
 ENV DB_DIR=/app/data

@@ -1647,6 +1647,9 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+# Initialize Item Plan tables on startup
+_init_item_plan_tables()
+
 
 # ── Multi-User Authentication ──────────────────────────────
 import bcrypt as _bcrypt
@@ -1678,7 +1681,7 @@ TAB_API_PREFIXES = {
     "factory-po": ["/api/factory-po"],
     "logistics": ["/api/logistics", "/api/supply-chain"],
     "fba-shipments": ["/api/fba-shipments"],
-    "item-planning": ["/api/item-planning"],
+    "item-planning": ["/api/item-planning", "/api/item-plan", "/api/factory-on-order", "/api/dashboard-settings"],
 }
 
 USERS = {
@@ -5911,223 +5914,629 @@ async def get_fba_shipment_items(request: Request, shipment_id: str):
     return {"shipmentId": shipment_id, "items": items, "totalItems": len(items)}
 
 
-# ── Item Planning ─────────────────────────────────────────
+# ── Item Plan Module ───────────────────────────────────────
 
-_ITEM_PLANNING_PATH = DB_DIR / "item_planning.json"
-_RAW_PRODUCT_SALES_PATH = DB_DIR / "raw_product_sales.json"
-_RAW_DAILY_DATA_PATH = DB_DIR / "raw_daily_data.json"
-_ITEM_PLANNING_OVERRIDES_PATH = DB_DIR / "item_planning_overrides.json"
+def _init_item_plan_tables():
+    """Initialize Item Plan DuckDB tables and seed from JSON if they don't exist."""
+    con = _duck()
+    try:
+        # Create tables if they don't exist
+        con.execute("""
+            CREATE TABLE IF NOT EXISTS monthly_sales_history (
+                sku TEXT,
+                year INTEGER,
+                month INTEGER,
+                units DOUBLE,
+                revenue DOUBLE,
+                profit DOUBLE,
+                refund_units DOUBLE,
+                PRIMARY KEY (sku, year, month)
+            )
+        """)
 
-def _load_item_planning():
-    if _ITEM_PLANNING_PATH.exists():
-        return json.loads(_ITEM_PLANNING_PATH.read_text())
-    return {"kpis": [], "sections": {}, "itemPlans": [], "lastUpload": None}
+        con.execute("""
+            CREATE TABLE IF NOT EXISTS item_plan_overrides (
+                sku TEXT,
+                field TEXT,
+                month INTEGER,
+                value DOUBLE,
+                PRIMARY KEY (sku, field, month)
+            )
+        """)
 
-def _save_item_planning(data):
-    _ITEM_PLANNING_PATH.write_text(json.dumps(data, indent=2, default=str))
+        con.execute("""
+            CREATE TABLE IF NOT EXISTS item_plan_curve_selection (
+                sku TEXT PRIMARY KEY,
+                curve_type TEXT DEFAULT 'LY'
+            )
+        """)
 
-def _load_overrides():
-    if _ITEM_PLANNING_OVERRIDES_PATH.exists():
-        return json.loads(_ITEM_PLANNING_OVERRIDES_PATH.read_text())
-    return {}
+        con.execute("""
+            CREATE TABLE IF NOT EXISTS item_plan_factory_orders (
+                po_number TEXT PRIMARY KEY,
+                factory TEXT,
+                payment_terms TEXT,
+                total_units INTEGER,
+                factory_cost DOUBLE,
+                fob_date TEXT,
+                est_arrival TEXT,
+                wk_received TEXT,
+                wk_available TEXT,
+                cbm DOUBLE,
+                status TEXT DEFAULT 'PENDING'
+            )
+        """)
 
-def _save_overrides(data):
-    _ITEM_PLANNING_OVERRIDES_PATH.write_text(json.dumps(data, indent=2, default=str))
+        con.execute("""
+            CREATE TABLE IF NOT EXISTS item_plan_factory_order_items (
+                id INTEGER PRIMARY KEY,
+                po_number TEXT,
+                sku TEXT,
+                description TEXT,
+                units INTEGER,
+                est_arrival TEXT,
+                wk_received TEXT,
+                wk_available TEXT,
+                status TEXT DEFAULT 'PENDING'
+            )
+        """)
 
-def _load_raw_product_sales():
-    if _RAW_PRODUCT_SALES_PATH.exists():
-        return json.loads(_RAW_PRODUCT_SALES_PATH.read_text())
-    return {"products": []}
+        con.execute("""
+            CREATE TABLE IF NOT EXISTS item_plan_settings (
+                key TEXT PRIMARY KEY,
+                value TEXT
+            )
+        """)
 
-def _load_raw_daily_data():
-    if _RAW_DAILY_DATA_PATH.exists():
-        return json.loads(_RAW_DAILY_DATA_PATH.read_text())
-    return {"daily": []}
+        # Check if we need to seed
+        existing = con.execute("SELECT COUNT(*) FROM monthly_sales_history").fetchall()
+        if existing[0][0] == 0:
+            # Try to load seed data
+            seed_path = DB_DIR / "item_plan_seed.json"
+            factory_seed_path = DB_DIR / "factory_orders_seed.json"
 
-@app.get("/api/item-planning")
-async def get_item_planning():
-    data = _load_item_planning()
-    overrides = _load_overrides()
-    data["overrides"] = overrides
-    return data
+            if seed_path.exists():
+                with open(seed_path) as f:
+                    seed_data = json.load(f)
 
-@app.get("/api/item-planning/raw-product-sales")
-async def get_raw_product_sales():
-    return _load_raw_product_sales()
+                # Seed monthly_sales_history from ly_data (12 months Feb 2025 - Jan 2026)
+                for sku, data in seed_data.get("ly_data", {}).items():
+                    ly_units = data.get("ly_units", [])
+                    ly_revenue = data.get("ly_revenue", [])
+                    ly_profit = data.get("ly_profit", [])
+                    ly_refund = data.get("ly_refund_units", [0] * 12)
 
-@app.get("/api/item-planning/raw-daily-data")
-async def get_raw_daily_data():
-    return _load_raw_daily_data()
+                    # Feb 2025 through Jan 2026 = months 2-13 of 2025-2026
+                    for idx in range(12):
+                        month_num = idx + 2  # Feb=2, Mar=3, ..., Dec=12, Jan=13
+                        if month_num > 12:
+                            year = 2026
+                            month = month_num - 12
+                        else:
+                            year = 2025
+                            month = month_num
 
-@app.post("/api/item-planning/override")
-async def save_item_override(request: Request):
-    """Save an override for a specific item's field"""
+                        try:
+                            con.execute("""
+                                INSERT INTO monthly_sales_history
+                                (sku, year, month, units, revenue, profit, refund_units)
+                                VALUES (?, ?, ?, ?, ?, ?, ?)
+                            """, [
+                                sku,
+                                year,
+                                month,
+                                float(ly_units[idx]) if idx < len(ly_units) else 0,
+                                float(ly_revenue[idx]) if idx < len(ly_revenue) else 0,
+                                float(ly_profit[idx]) if idx < len(ly_profit) else 0,
+                                float(ly_refund[idx]) if idx < len(ly_refund) else 0,
+                            ])
+                        except:
+                            pass
+
+                # Seed curve_selection from skus data
+                for sku_data in seed_data.get("skus", []):
+                    sku = sku_data.get("sku", "")
+                    curve = sku_data.get("curve", "LY")
+                    if sku:
+                        try:
+                            con.execute("""
+                                INSERT OR REPLACE INTO item_plan_curve_selection
+                                (sku, curve_type) VALUES (?, ?)
+                            """, [sku, curve])
+                        except:
+                            pass
+
+                # Seed overrides from skus data
+                month_names = ["jan", "feb", "mar", "apr", "may", "jun", "jul", "aug", "sep", "oct", "nov", "dec", "jan_next"]
+                field_mappings = {
+                    "ty_override_units": "plan_units",
+                    "ty_aur_override": "aur",
+                    "ty_override_refund_units": "refund_units",
+                    "ty_refund_rate_override": "refund_rate",
+                    "shipment_override": "shipment",
+                }
+
+                for sku_data in seed_data.get("skus", []):
+                    sku = sku_data.get("sku", "")
+                    if not sku:
+                        continue
+
+                    # Seed annual plan
+                    annual = sku_data.get("ty_plan_annual", 0)
+                    if annual:
+                        try:
+                            con.execute("""
+                                INSERT OR REPLACE INTO item_plan_overrides
+                                (sku, field, month, value) VALUES (?, ?, ?, ?)
+                            """, [sku, "annual_plan_units", 0, float(annual)])
+                        except:
+                            pass
+
+                    # Seed monthly overrides
+                    for old_field, new_field in field_mappings.items():
+                        override_data = sku_data.get(old_field, {})
+                        if isinstance(override_data, dict):
+                            for month_name, value in override_data.items():
+                                if value and value != 0:
+                                    month_idx = month_names.index(month_name) if month_name in month_names else -1
+                                    if month_idx >= 0:
+                                        try:
+                                            con.execute("""
+                                                INSERT OR REPLACE INTO item_plan_overrides
+                                                (sku, field, month, value) VALUES (?, ?, ?, ?)
+                                            """, [sku, new_field, month_idx + 1, float(value)])
+                                        except:
+                                            pass
+
+            # Seed factory orders if they don't exist
+            if factory_seed_path.exists():
+                with open(factory_seed_path) as f:
+                    factory_data = json.load(f)
+
+                for order in factory_data.get("orders", []):
+                    try:
+                        con.execute("""
+                            INSERT INTO item_plan_factory_orders
+                            (po_number, factory, payment_terms, total_units, factory_cost,
+                             fob_date, est_arrival, wk_received, wk_available, cbm, status)
+                            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        """, [
+                            order.get("po_number", ""),
+                            order.get("factory", ""),
+                            order.get("payment_terms", ""),
+                            int(order.get("units", 0)),
+                            float(order.get("factory_cost", 0)),
+                            order.get("fob_date", ""),
+                            order.get("est_arrival", ""),
+                            order.get("wk_received", ""),
+                            order.get("wk_available", ""),
+                            float(order.get("cbm", 0)),
+                            order.get("status", "PENDING"),
+                        ])
+                    except:
+                        pass
+
+                for idx, item in enumerate(factory_data.get("items", []), start=1):
+                    try:
+                        con.execute("""
+                            INSERT INTO item_plan_factory_order_items
+                            (id, po_number, sku, description, units, est_arrival,
+                             wk_received, wk_available, status)
+                            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        """, [
+                            idx,
+                            item.get("po_number", ""),
+                            item.get("sku", ""),
+                            item.get("description", ""),
+                            int(item.get("units", 0)),
+                            item.get("est_arrival", ""),
+                            item.get("wk_received", ""),
+                            item.get("wk_available", ""),
+                            item.get("status", "PENDING"),
+                        ])
+                    except:
+                        pass
+
+            # Set default settings
+            con.execute("""INSERT OR IGNORE INTO item_plan_settings (key, value)
+                          VALUES ('actualized_through_month', '2')""")
+            con.execute("""INSERT OR IGNORE INTO item_plan_settings (key, value)
+                          VALUES ('fba_cover_weeks', '4')""")
+
+        con.commit()
+    finally:
+        con.close()
+
+
+def _compute_master_curve() -> list:
+    """Compute master sales curve as percentage distribution across 13 months."""
+    con = _duck()
+    try:
+        # Get total units per month across all SKUs for LY (year 2025-2026)
+        result = con.execute("""
+            SELECT month, SUM(units) as total_units
+            FROM monthly_sales_history
+            WHERE year IN (2025, 2026)
+            GROUP BY month
+            ORDER BY CASE WHEN year = 2025 THEN month ELSE month + 12 END
+        """).fetchall()
+
+        # Calculate total annual
+        annual_total = sum(row[1] for row in result)
+
+        if annual_total == 0:
+            return [0] * 13
+
+        # Map to 13-month array
+        curve = [0] * 13
+        for month, total_units in result:
+            if month <= 12:
+                idx = month - 1  # Jan=0, Feb=1, etc. But we need to account for FY
+                # FY is Feb-Jan, so Feb=0, Mar=1, ..., Jan=12
+                fy_idx = (month - 2) % 12
+                if month == 1:
+                    fy_idx = 12  # Jan is month 13 (pre-FY or post-FY)
+                elif month >= 2:
+                    fy_idx = month - 2
+            curve[fy_idx] = round(float(total_units) / annual_total, 4)
+
+        return curve
+    finally:
+        con.close()
+
+
+@app.get("/api/item-plan")
+async def get_item_plan(request: Request):
+    _require_auth(request)
+    con = _duck()
+    try:
+        # Get settings
+        settings = {}
+        for row in con.execute("SELECT key, value FROM item_plan_settings").fetchall():
+            settings[row[0]] = row[1]
+
+        # Load seed data for SKU metadata (asin, product_name, etc.)
+        seed_data = {}
+        seed_path = DB_DIR / "item_plan_seed.json"
+        if seed_path.exists():
+            with open(seed_path) as f:
+                seed_data = json.load(f)
+
+        skus_list = []
+        sku_metadata = {}
+        ly_data_map = seed_data.get("ly_data", {})
+
+        # Build SKU metadata map
+        for sku_info in seed_data.get("skus", []):
+            sku = sku_info.get("sku", "")
+            sku_metadata[sku] = {
+                "asin": sku_info.get("asin", ""),
+                "product_name": sku_info.get("product_name", ""),
+                "fba_beginning": sku_info.get("fba_beginning", {}),
+                "wh_beginning": sku_info.get("wh_beginning", {}),
+                "annual_plan": sku_info.get("ty_plan_annual", 0),
+            }
+
+        # Get all unique SKUs from monthly_sales_history
+        sku_rows = con.execute("""
+            SELECT DISTINCT sku FROM monthly_sales_history
+            ORDER BY sku
+        """).fetchall()
+
+        for (sku,) in sku_rows:
+            # Get LY data (12 months: Feb 2025 - Jan 2026)
+            ly_units = [0] * 12
+            ly_revenue = [0] * 12
+            ly_profit = [0] * 12
+            ly_refund_units = [0] * 12
+
+            for month in range(2, 14):  # Feb (2) through Jan next (13)
+                year = 2025 if month <= 12 else 2026
+                actual_month = month if month <= 12 else month - 12
+                idx = month - 2  # 0-indexed
+
+                row = con.execute("""
+                    SELECT units, revenue, profit, refund_units
+                    FROM monthly_sales_history
+                    WHERE sku = ? AND year = ? AND month = ?
+                """, [sku, year, actual_month]).fetchone()
+
+                if row:
+                    ly_units[idx] = float(row[0]) if row[0] else 0
+                    ly_revenue[idx] = float(row[1]) if row[1] else 0
+                    ly_profit[idx] = float(row[2]) if row[2] else 0
+                    ly_refund_units[idx] = float(row[3]) if row[3] else 0
+
+            # Get curve selection
+            curve_row = con.execute("""
+                SELECT curve_type FROM item_plan_curve_selection WHERE sku = ?
+            """, [sku]).fetchone()
+            curve_type = curve_row[0] if curve_row else "LY"
+
+            # Get overrides
+            overrides = {}
+            override_rows = con.execute("""
+                SELECT field, month, value FROM item_plan_overrides WHERE sku = ?
+                ORDER BY field, month
+            """, [sku]).fetchall()
+
+            for field, month, value in override_rows:
+                if field not in overrides:
+                    overrides[field] = {}
+                overrides[field][str(month)] = float(value)
+
+            # Get inventory from metadata
+            meta = sku_metadata.get(sku, {})
+            fba_beginning_inv = meta.get("fba_beginning", {}).get("jan", 0)
+            wh_beginning_inv = meta.get("wh_beginning", {}).get("feb", 0)
+
+            skus_list.append({
+                "sku": sku,
+                "asin": meta.get("asin", ""),
+                "product_name": meta.get("product_name", ""),
+                "curve_type": curve_type,
+                "annual_plan_units": int(meta.get("annual_plan", 0)),
+                "ly": {
+                    "units": ly_units,
+                    "revenue": ly_revenue,
+                    "profit": ly_profit,
+                    "refund_units": ly_refund_units,
+                },
+                "overrides": overrides,
+                "fba_beginning_inventory": int(fba_beginning_inv),
+                "wh_beginning_inventory": int(wh_beginning_inv),
+            })
+
+        # Get factory orders
+        orders = []
+        order_rows = con.execute("""
+            SELECT po_number, factory, payment_terms, total_units, factory_cost,
+                   fob_date, est_arrival, wk_received, wk_available, cbm, status
+            FROM item_plan_factory_orders
+            ORDER BY po_number
+        """).fetchall()
+
+        for row in order_rows:
+            orders.append({
+                "po_number": row[0],
+                "factory": row[1],
+                "payment_terms": row[2],
+                "units": int(row[3]),
+                "factory_cost": float(row[4]),
+                "fob_date": row[5],
+                "est_arrival": row[6],
+                "wk_received": row[7],
+                "wk_available": row[8],
+                "cbm": float(row[9]),
+                "status": row[10],
+            })
+
+        # Get factory order items
+        items = []
+        item_rows = con.execute("""
+            SELECT id, po_number, sku, description, units, est_arrival,
+                   wk_received, wk_available, status
+            FROM item_plan_factory_order_items
+            ORDER BY id
+        """).fetchall()
+
+        for row in item_rows:
+            items.append({
+                "id": int(row[0]),
+                "po_number": row[1],
+                "sku": row[2],
+                "description": row[3],
+                "units": int(row[4]),
+                "est_arrival": row[5],
+                "wk_received": row[6],
+                "wk_available": row[7],
+                "status": row[8],
+            })
+
+        # Compute master curve
+        master_curve = _compute_master_curve()
+
+        return {
+            "settings": settings,
+            "skus": skus_list,
+            "factory_orders": orders,
+            "factory_order_items": items,
+            "master_curve": master_curve,
+        }
+    finally:
+        con.close()
+
+
+@app.post("/api/item-plan/override")
+async def post_item_plan_override(request: Request):
+    _require_auth(request)
     body = await request.json()
     sku = body.get("sku", "")
     field = body.get("field", "")
-    values = body.get("values", {})
-    overrides = _load_overrides()
-    if sku not in overrides:
-        overrides[sku] = {}
-    overrides[sku][field] = values
-    _save_overrides(overrides)
-    return {"status": "ok"}
+    month = body.get("month", 0)
+    value = body.get("value")
 
-@app.post("/api/item-planning/upload")
-async def upload_item_planning(file: UploadFile = File(...)):
-    """Upload updated Amazon Ladder Plan Excel"""
-    import openpyxl
-    from io import BytesIO
-    from datetime import date as _date
-    contents = await file.read()
-    wb = openpyxl.load_workbook(BytesIO(contents), data_only=True)
+    con = _duck()
+    try:
+        if value is None:
+            # Delete override
+            con.execute("""
+                DELETE FROM item_plan_overrides WHERE sku = ? AND field = ? AND month = ?
+            """, [sku, field, month])
+        else:
+            # Upsert override
+            con.execute("""
+                INSERT OR REPLACE INTO item_plan_overrides (sku, field, month, value)
+                VALUES (?, ?, ?, ?)
+            """, [sku, field, month, float(value)])
+        con.commit()
+        return {"status": "ok"}
+    finally:
+        con.close()
 
-    def safe_num(v, decimals=2):
-        if v is None: return 0
-        try: return round(float(v), decimals)
-        except: return 0
 
-    months = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec","Jan27"]
+@app.post("/api/item-plan/curve")
+async def post_item_plan_curve(request: Request):
+    _require_auth(request)
+    body = await request.json()
+    sku = body.get("sku", "")
+    curve_type = body.get("curve_type", "LY")
 
-    # === KPIs ===
-    ws = wb["Executive Summary"]
-    kpis = []
-    for r in range(6, 14):
-        name = ws.cell(r, 1).value
-        if name:
-            kpis.append({
-                "metric": str(name),
-                "tyPlan": safe_num(ws.cell(r, 2).value, 2),
-                "lyActual": safe_num(ws.cell(r, 3).value, 2),
-                "vsLyPct": safe_num(ws.cell(r, 4).value, 4),
-                "llyActual": safe_num(ws.cell(r, 5).value, 2),
-                "vsLlyPct": safe_num(ws.cell(r, 6).value, 4)
+    con = _duck()
+    try:
+        con.execute("""
+            INSERT OR REPLACE INTO item_plan_curve_selection (sku, curve_type)
+            VALUES (?, ?)
+        """, [sku, curve_type])
+        con.commit()
+        return {"status": "ok"}
+    finally:
+        con.close()
+
+
+@app.get("/api/item-plan/sales-curves")
+async def get_item_plan_sales_curves(request: Request):
+    _require_auth(request)
+    master_curve = _compute_master_curve()
+    return {"master_curve": master_curve}
+
+
+@app.get("/api/factory-on-order")
+async def get_factory_on_order(request: Request):
+    _require_auth(request)
+    con = _duck()
+    try:
+        orders = []
+        order_rows = con.execute("""
+            SELECT po_number, factory, payment_terms, total_units, factory_cost,
+                   fob_date, est_arrival, wk_received, wk_available, cbm, status
+            FROM item_plan_factory_orders
+            ORDER BY po_number
+        """).fetchall()
+
+        for row in order_rows:
+            orders.append({
+                "po_number": row[0],
+                "factory": row[1],
+                "payment_terms": row[2],
+                "units": int(row[3]),
+                "factory_cost": float(row[4]),
+                "fob_date": row[5],
+                "est_arrival": row[6],
+                "wk_received": row[7],
+                "wk_available": row[8],
+                "cbm": float(row[9]),
+                "status": row[10],
             })
 
-    # === Sections ===
-    def read_section(start_row, end_row):
         items = []
-        current_category = None
-        for r in range(start_row + 2, end_row + 1):
-            a = ws.cell(r, 1).value
-            b = ws.cell(r, 2).value
-            if b is None: continue
-            b_str = str(b)
-            if a is None and b_str in ["GREEN","RED","BLUE","ORANGE","ACCESSORIES","INDIVIDUAL CLUBS"]:
-                current_category = b_str; continue
-            if "Total" in b_str:
-                t = "grandTotal" if "GRAND" in b_str else "categoryTotal"
-                items.append({"type": t, "category": current_category, "name": b_str,
-                    "monthly": {months[i]: safe_num(ws.cell(r, 4+i).value) for i in range(13)},
-                    "fyTotal": safe_num(ws.cell(r, 17).value)})
-                continue
-            sku = ws.cell(r, 3).value
-            if sku:
-                items.append({"type": "item", "index": safe_num(a, 0), "name": b_str, "sku": str(sku),
-                    "category": current_category,
-                    "monthly": {months[i]: safe_num(ws.cell(r, 4+i).value) for i in range(13)},
-                    "fyTotal": safe_num(ws.cell(r, 17).value)})
-        return items
+        item_rows = con.execute("""
+            SELECT id, po_number, sku, description, units, est_arrival,
+                   wk_received, wk_available, status
+            FROM item_plan_factory_order_items
+            ORDER BY id
+        """).fetchall()
 
-    sections = {
-        "salesUnits": read_section(17, 65), "revenue": read_section(67, 115),
-        "grossProfit": read_section(117, 165), "shipments": read_section(167, 215),
-        "returns": read_section(217, 270)
-    }
+        for row in item_rows:
+            items.append({
+                "id": int(row[0]),
+                "po_number": row[1],
+                "sku": row[2],
+                "description": row[3],
+                "units": int(row[4]),
+                "est_arrival": row[5],
+                "wk_received": row[6],
+                "wk_available": row[7],
+                "status": row[8],
+            })
 
-    # === Per-item plans ===
-    utility_tabs = ["Executive Summary","Item Master","Sales Planning","Warehouse Inventory",
-        "Factory On Order","LY Sales Data","Raw Warehouse Data","Raw Daily Dashboard","Raw Product Sales"]
-    item_tabs = [s for s in wb.sheetnames if s not in utility_tabs]
+        return {"orders": orders, "items": items}
+    finally:
+        con.close()
 
-    item_plans = []
-    row_map = {
-        "tyPlanUnits": 5, "tyOverrideUnits": 6, "lyUnits": 7, "llyUnits": 8, "tyVsLyUnitsPct": 9,
-        "tyPlanRevenue": 12, "tyProjectedRevenue": 13, "lyRevenue": 14, "llyRevenue": 15, "tyVsLyRevPct": 16,
-        "tyAUR": 18, "tyAUROverride": 19, "lyAUR": 20, "llyAUR": 21,
-        "tyPlanGrossProfit": 24, "lyGrossProfit": 25, "llyGrossProfit": 26, "tyVsLyProfitPct": 27,
-        "lyProfitMarginPct": 28, "llyProfitMarginPct": 29,
-        "tyPlanRefundUnits": 32, "tyOverrideRefundUnits": 33, "tyRefundRateOverridePct": 34,
-        "lyRefundUnits": 35, "llyRefundUnits": 36, "lyRefundRatePct": 38, "llyRefundRatePct": 39,
-        "beginFBAInventory": 42, "recommendedShipment": 43, "weeksOfFBACover": 44,
-        "shipmentOverride": 45, "fbaShipmentsIn": 46, "salesUnitsOut": 47,
-        "returnsIn": 48, "endingFBAInventory": 49,
-        "beginWHInventory": 53, "factoryReceiptsIn": 54, "shippedToFBA": 55,
-        "otherOutbound": 56, "endingWHInventory": 57, "whMonthsOfSupply": 58,
-        "effectiveSalesUnits": 61, "effectiveAUR": 62, "effectiveRefundUnits": 63,
-        "forecastedRevenue": 64, "projectedGrossProfit": 65, "projectedCOGS": 66,
-        "endingFBAInvOverride": 67, "endingWHInvOverride": 68
-    }
 
-    for tab_name in item_tabs:
-        ws2 = wb[tab_name]
-        product_name = ws2.cell(1, 1).value or tab_name
-        info_row = str(ws2.cell(2, 1).value or "")
-        sku, asin = "", ""
-        if "SKU:" in info_row:
-            for p in info_row.split("|"):
-                p = p.strip()
-                if p.startswith("SKU:"): sku = p.replace("SKU:", "").strip()
-                elif p.startswith("ASIN:"): asin = p.replace("ASIN:", "").strip()
+@app.post("/api/factory-on-order")
+async def post_factory_on_order(request: Request):
+    _require_auth(request)
+    body = await request.json()
 
-        plan = {"tabName": tab_name, "productName": str(product_name), "sku": sku, "asin": asin,
-            "curveSelection": str(ws2.cell(2, 7).value or "LY"),
-            "lastActualMonth": int(safe_num(ws2.cell(2, 10).value, 0))}
+    con = _duck()
+    try:
+        # Determine if this is an order or item
+        if "po_number" in body and "factory" in body:
+            # It's an order
+            con.execute("""
+                INSERT OR REPLACE INTO item_plan_factory_orders
+                (po_number, factory, payment_terms, total_units, factory_cost,
+                 fob_date, est_arrival, wk_received, wk_available, cbm, status)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """, [
+                body.get("po_number", ""),
+                body.get("factory", ""),
+                body.get("payment_terms", ""),
+                int(body.get("units", 0)),
+                float(body.get("factory_cost", 0)),
+                body.get("fob_date", ""),
+                body.get("est_arrival", ""),
+                body.get("wk_received", ""),
+                body.get("wk_available", ""),
+                float(body.get("cbm", 0)),
+                body.get("status", "PENDING"),
+            ])
+        else:
+            # It's an item
+            con.execute("""
+                INSERT OR REPLACE INTO item_plan_factory_order_items
+                (po_number, sku, description, units, est_arrival,
+                 wk_received, wk_available, status)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            """, [
+                body.get("po_number", ""),
+                body.get("sku", ""),
+                body.get("description", ""),
+                int(body.get("units", 0)),
+                body.get("est_arrival", ""),
+                body.get("wk_received", ""),
+                body.get("wk_available", ""),
+                body.get("status", "PENDING"),
+            ])
 
-        for key, row_num in row_map.items():
-            try:
-                vals = {"s1Total": safe_num(ws2.cell(row_num, 2).value),
-                    "s2Total": safe_num(ws2.cell(row_num, 3).value),
-                    "fyTotal": safe_num(ws2.cell(row_num, 4).value)}
-                for i, m in enumerate(months):
-                    vals[m] = safe_num(ws2.cell(row_num, 5+i).value)
-                plan[key] = vals
-            except: pass
-        item_plans.append(plan)
+        con.commit()
+        return {"status": "ok"}
+    finally:
+        con.close()
 
-    data = {"kpis": kpis, "sections": sections, "itemPlans": item_plans,
-        "lastUpload": _date.today().isoformat(), "sourceFile": file.filename}
-    _save_item_planning(data)
 
-    # Also update raw data if tabs exist
-    if "Raw Product Sales" in wb.sheetnames:
-        ws3 = wb["Raw Product Sales"]
-        month_starts = []
-        for c in range(6, ws3.max_column+1):
-            v = ws3.cell(2, c).value
-            if v and isinstance(v, str) and ("20" in str(v) or "Total" in str(v)):
-                month_starts.append((c, str(v)))
-        raw_products = []
-        for r in range(4, ws3.max_row):
-            name = ws3.cell(r, 1).value
-            if not name or name == "Totals": continue
-            pd = {"name": str(name)[:100], "sku": str(ws3.cell(r, 2).value or ""),
-                "asin": str(ws3.cell(r, 3).value or ""), "monthly": {}}
-            for col_start, month_name in month_starts:
-                if "Total" in month_name: continue
-                qty_off = 1 if col_start == 6 else 2
-                pd["monthly"][month_name] = {
-                    "sales": safe_num(ws3.cell(r, col_start).value),
-                    "quantity": int(safe_num(ws3.cell(r, col_start + qty_off).value, 0))}
-            raw_products.append(pd)
-        _RAW_PRODUCT_SALES_PATH.write_text(json.dumps({"products": raw_products, "sourceFile": file.filename}, indent=2, default=str))
+@app.get("/api/dashboard-settings")
+async def get_dashboard_settings(request: Request):
+    _require_auth(request)
+    con = _duck()
+    try:
+        settings = {}
+        for row in con.execute("SELECT key, value FROM item_plan_settings").fetchall():
+            settings[row[0]] = row[1]
+        return settings
+    finally:
+        con.close()
 
-    if "Raw Daily Dashboard" in wb.sheetnames:
-        ws4 = wb["Raw Daily Dashboard"]
-        headers = [ws4.cell(2, c).value for c in range(1, ws4.max_column+1)]
-        headers = [h for h in headers if h]
-        daily = []
-        for r in range(3, ws4.max_row+1):
-            d = ws4.cell(r, 1).value
-            if not d: continue
-            row_d = {"date": str(d)}
-            for c in range(2, len(headers)+1):
-                h = headers[c-1] if c-1 < len(headers) else None
-                if h: row_d[h] = safe_num(ws4.cell(r, c).value)
-            daily.append(row_d)
-        _RAW_DAILY_DATA_PATH.write_text(json.dumps({"daily": daily, "sourceFile": file.filename}, indent=2, default=str))
 
-    return {"status": "ok", "items": len(item_plans), "kpis": len(kpis), "lastUpload": data["lastUpload"]}
+@app.post("/api/dashboard-settings")
+async def post_dashboard_settings(request: Request):
+    _require_auth(request)
+    body = await request.json()
+    key = body.get("key", "")
+    value = body.get("value", "")
+
+    con = _duck()
+    try:
+        con.execute("""
+            INSERT OR REPLACE INTO item_plan_settings (key, value)
+            VALUES (?, ?)
+        """, [key, str(value)])
+        con.commit()
+        return {"status": "ok"}
+    finally:
+        con.close()
 
 
 # ── Static Frontend ────────────────────────────────────────

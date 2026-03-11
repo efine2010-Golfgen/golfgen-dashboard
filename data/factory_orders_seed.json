@@ -1,0 +1,420 @@
+{
+  "orders": [
+    {
+      "po_number": "T-857500",
+      "factory": "LONGHUI THREE HUNDRED",
+      "payment_terms": "20%/80% FOB",
+      "units": 6900,
+      "factory_cost": 277244.0,
+      "fob_date": "2025-12-23",
+      "est_arrival": "2026-02-17",
+      "wk_received": "WK07",
+      "wk_available": "WK08",
+      "cbm": 209.0,
+      "status": "DELIVERED"
+    },
+    {
+      "po_number": "T-857600",
+      "factory": "LONGHUI THREE HUNDRED",
+      "payment_terms": "20%/80% FOB",
+      "units": 4200,
+      "factory_cost": 173596.0,
+      "fob_date": "2026-01-20",
+      "est_arrival": "2026-02-17",
+      "wk_received": "WK07",
+      "wk_available": "WK08",
+      "cbm": 134.0,
+      "status": "DELIVERED"
+    },
+    {
+      "po_number": "2100",
+      "factory": "HUI ZHOU CHENG FENG YUAN",
+      "payment_terms": "TT in Advance",
+      "units": 800,
+      "factory_cost": 273977.0,
+      "fob_date": "2026-01-05",
+      "est_arrival": "2026-03-02",
+      "wk_received": "WK09",
+      "wk_available": "WK10",
+      "cbm": 132.0,
+      "status": "IN TRANSIT"
+    },
+    {
+      "po_number": "T-857700",
+      "factory": "LONGHUI THREE HUNDRED",
+      "payment_terms": "20%/80% FOB",
+      "units": 6360,
+      "factory_cost": 262003.0,
+      "fob_date": "2026-02-07",
+      "est_arrival": "2026-02-28",
+      "wk_received": "WK09",
+      "wk_available": "WK10",
+      "cbm": 200.0,
+      "status": "IN TRANSIT"
+    },
+    {
+      "po_number": "T-857800",
+      "factory": "LONGHUI THREE HUNDRED",
+      "payment_terms": "20%/80% FOB",
+      "units": 27500,
+      "factory_cost": 64648.0,
+      "fob_date": "2026-02-07",
+      "est_arrival": "2026-02-28",
+      "wk_received": "WK09",
+      "wk_available": "WK10",
+      "cbm": 40.0,
+      "status": "IN TRANSIT"
+    },
+    {
+      "po_number": "T-857900",
+      "factory": "LONGHUI THREE HUNDRED",
+      "payment_terms": "20%/80% FOB",
+      "units": 8200,
+      "factory_cost": 69285.0,
+      "fob_date": "2026-02-07",
+      "est_arrival": "2026-02-28",
+      "wk_received": "WK09",
+      "wk_available": "WK10",
+      "cbm": 41.0,
+      "status": "IN TRANSIT"
+    },
+    {
+      "po_number": "T-870100",
+      "factory": "LONGHUI THREE HUNDRED",
+      "payment_terms": "TT@Sight",
+      "units": 3084,
+      "factory_cost": 190490.0,
+      "fob_date": "2026-01-28",
+      "est_arrival": "2026-02-18",
+      "wk_received": "WK07",
+      "wk_available": "WK08",
+      "cbm": 128.256,
+      "status": "DELIVERED"
+    },
+    {
+      "po_number": "T-870200",
+      "factory": "LONGHUI THREE HUNDRED",
+      "payment_terms": "20%/80% FOB",
+      "units": 5000,
+      "factory_cost": 293706.0,
+      "fob_date": "2026-04-01",
+      "est_arrival": "2026-04-22",
+      "wk_received": "WK16",
+      "wk_available": "WK17",
+      "cbm": 186.0,
+      "status": "PENDING"
+    }
+  ],
+  "items": [
+    {
+      "sku": "GGRTFTG2228",
+      "description": "PGA TOUR FT 5pc (Orange) Junior Set",
+      "po_number": "T-857500",
+      "units": 1550,
+      "est_arrival": "2026-02-17",
+      "wk_received": "WK07",
+      "wk_available": "WK08",
+      "status": "DELIVERED"
+    },
+    {
+      "sku": "GGRTFTG2228",
+      "description": "PGA TOUR FT 5pc (Orange) Junior Set",
+      "po_number": "T-857600",
+      "units": 1000,
+      "est_arrival": "2026-02-17",
+      "wk_received": "WK07",
+      "wk_available": "WK08",
+      "status": "DELIVERED"
+    },
+    {
+      "sku": "GGRTFTG2228",
+      "description": "PGA TOUR FT 5pc (Orange) Junior Set",
+      "po_number": "T-857700",
+      "units": 1500,
+      "est_arrival": "2026-02-28",
+      "wk_received": "WK09",
+      "wk_available": "WK10",
+      "status": "IN TRANSIT"
+    },
+    {
+      "sku": "GGRTFTR2168",
+      "description": "PGA TOUR FT 5pc (Green) Junior Set",
+      "po_number": "T-857500",
+      "units": 2425,
+      "est_arrival": "2026-02-17",
+      "wk_received": "WK07",
+      "wk_available": "WK08",
+      "status": "DELIVERED"
+    },
+    {
+      "sku": "GGRTFTR2168",
+      "description": "PGA TOUR FT 5pc (Green) Junior Set",
+      "po_number": "T-857600",
+      "units": 1200,
+      "est_arrival": "2026-02-17",
+      "wk_received": "WK07",
+      "wk_available": "WK08",
+      "status": "DELIVERED"
+    },
+    {
+      "sku": "GGRTFTR2168",
+      "description": "PGA TOUR FT 5pc (Green) Junior Set",
+      "po_number": "T-857700",
+      "units": 1920,
+      "est_arrival": "2026-02-28",
+      "wk_received": "WK09",
+      "wk_available": "WK10",
+      "status": "IN TRANSIT"
+    },
+    {
+      "sku": "GGRTFTB2178",
+      "description": "PGA TOUR FT 7pc (Red) Junior Set",
+      "po_number": "T-857500",
+      "units": 2425,
+      "est_arrival": "2026-02-17",
+      "wk_received": "WK07",
+      "wk_available": "WK08",
+      "status": "DELIVERED"
+    },
+    {
+      "sku": "GGRTFTB2178",
+      "description": "PGA TOUR FT 7pc (Red) Junior Set",
+      "po_number": "T-857600",
+      "units": 1200,
+      "est_arrival": "2026-02-17",
+      "wk_received": "WK07",
+      "wk_available": "WK08",
+      "status": "DELIVERED"
+    },
+    {
+      "sku": "GGRTFTB2178",
+      "description": "PGA TOUR FT 7pc (Red) Junior Set",
+      "po_number": "T-857700",
+      "units": 1920,
+      "est_arrival": "2026-02-28",
+      "wk_received": "WK09",
+      "wk_available": "WK10",
+      "status": "IN TRANSIT"
+    },
+    {
+      "sku": "GGRTFTB2178",
+      "description": "PGA TOUR FT 7pc (Red) Junior Set",
+      "po_number": "T-857800",
+      "units": 1200,
+      "est_arrival": "2026-02-28",
+      "wk_received": "WK09",
+      "wk_available": "WK10",
+      "status": "IN TRANSIT"
+    },
+    {
+      "sku": "GGRTFTB2178",
+      "description": "PGA TOUR FT 7pc (Red) Junior Set",
+      "po_number": "T-857900",
+      "units": 1200,
+      "est_arrival": "2026-02-28",
+      "wk_received": "WK09",
+      "wk_available": "WK10",
+      "status": "IN TRANSIT"
+    },
+    {
+      "sku": "GGRTFTO2198",
+      "description": "PGA TOUR FT 7pc (Blue) Junior Set",
+      "po_number": "T-857500",
+      "units": 500,
+      "est_arrival": "2026-02-17",
+      "wk_received": "WK07",
+      "wk_available": "WK08",
+      "status": "DELIVERED"
+    },
+    {
+      "sku": "GGRTFTO2198",
+      "description": "PGA TOUR FT 7pc (Blue) Junior Set",
+      "po_number": "T-857600",
+      "units": 800,
+      "est_arrival": "2026-02-17",
+      "wk_received": "WK07",
+      "wk_available": "WK08",
+      "status": "DELIVERED"
+    },
+    {
+      "sku": "GGWMSS2230BM",
+      "description": "PGA TOUR G1 RH Orange Driver",
+      "po_number": "T-870100",
+      "units": 84,
+      "est_arrival": "2026-02-18",
+      "wk_received": "WK07",
+      "wk_available": "WK08",
+      "status": "DELIVERED"
+    },
+    {
+      "sku": "GGRTFTO2198",
+      "description": "PGA TOUR FT 7pc (Blue) Junior Set",
+      "po_number": "T-857700",
+      "units": 1020,
+      "est_arrival": "2026-02-28",
+      "wk_received": "WK09",
+      "wk_available": "WK10",
+      "status": "IN TRANSIT"
+    },
+    {
+      "sku": "GGRTFTO2198",
+      "description": "PGA TOUR FT 7pc (Blue) Junior Set",
+      "po_number": "T-857800",
+      "units": 800,
+      "est_arrival": "2026-02-28",
+      "wk_received": "WK09",
+      "wk_available": "WK10",
+      "status": "IN TRANSIT"
+    },
+    {
+      "sku": "GGRTFTO2198",
+      "description": "PGA TOUR FT 7pc (Blue) Junior Set",
+      "po_number": "T-857900",
+      "units": 800,
+      "est_arrival": "2026-02-28",
+      "wk_received": "WK09",
+      "wk_available": "WK10",
+      "status": "IN TRANSIT"
+    },
+    {
+      "sku": "GGWMSS2115BM",
+      "description": "PGA TOUR Set of 12 Color Foam Balls",
+      "po_number": "T-857800",
+      "units": 17500,
+      "est_arrival": "2026-02-28",
+      "wk_received": "WK09",
+      "wk_available": "WK10",
+      "status": "IN TRANSIT"
+    },
+    {
+      "sku": "GGWMSS2114BM",
+      "description": "Set of 12 White Foam Balls",
+      "po_number": "T-857800",
+      "units": 8000,
+      "est_arrival": "2026-02-28",
+      "wk_received": "WK09",
+      "wk_available": "WK10",
+      "status": "IN TRANSIT"
+    },
+    {
+      "sku": "GGWMSS2451BM",
+      "description": "PGA TOUR Tee Up Small Golf Club Set",
+      "po_number": "T-857900",
+      "units": 3200,
+      "est_arrival": "2026-02-28",
+      "wk_received": "WK09",
+      "wk_available": "WK10",
+      "status": "IN TRANSIT"
+    },
+    {
+      "sku": "GGWMSS2452BM",
+      "description": "PGA TOUR Tee Up Medium Golf Club Set",
+      "po_number": "T-857900",
+      "units": 3000,
+      "est_arrival": "2026-02-28",
+      "wk_received": "WK09",
+      "wk_available": "WK10",
+      "status": "IN TRANSIT"
+    },
+    {
+      "sku": "GGRTNW222810",
+      "description": "PGA TOUR 10pc Blue Junior Set (RH)",
+      "po_number": "T-870100",
+      "units": 1000,
+      "est_arrival": "2026-02-18",
+      "wk_received": "WK07",
+      "wk_available": "WK08",
+      "status": "DELIVERED"
+    },
+    {
+      "sku": "GGRTNW222810",
+      "description": "PGA TOUR 10pc Blue Junior Set (RH)",
+      "po_number": "T-870200",
+      "units": 1000,
+      "est_arrival": "2026-04-22",
+      "wk_received": "WK16",
+      "wk_available": "WK17",
+      "status": "IN TRANSIT"
+    },
+    {
+      "sku": "GGRTNW222910",
+      "description": "PGA TOUR 10pc Orange Junior Set (RH)",
+      "po_number": "T-870100",
+      "units": 1000,
+      "est_arrival": "2026-02-18",
+      "wk_received": "WK07",
+      "wk_available": "WK08",
+      "status": "DELIVERED"
+    },
+    {
+      "sku": "GGRTNW222910",
+      "description": "PGA TOUR 10pc Orange Junior Set (RH)",
+      "po_number": "T-870200",
+      "units": 1000,
+      "est_arrival": "2026-04-22",
+      "wk_received": "WK16",
+      "wk_available": "WK17",
+      "status": "IN TRANSIT"
+    },
+    {
+      "sku": "GGLFTSS222810",
+      "description": "PGA TOUR 10pc Blue Junior Set (LH)",
+      "po_number": "T-870100",
+      "units": 1000,
+      "est_arrival": "2026-02-18",
+      "wk_received": "WK07",
+      "wk_available": "WK08",
+      "status": "DELIVERED"
+    },
+    {
+      "sku": "GGLTNW22265",
+      "description": "PGA TOUR 5pc Green Junior Set (LH)",
+      "po_number": "T-870200",
+      "units": 1000,
+      "est_arrival": "2026-04-22",
+      "wk_received": "WK16",
+      "wk_available": "WK17",
+      "status": "IN TRANSIT"
+    },
+    {
+      "sku": "GGRTNW21176",
+      "description": "PGA TOUR 6pc Blue Junior Set (RH)",
+      "po_number": "T-870200",
+      "units": 1000,
+      "est_arrival": "2026-04-22",
+      "wk_received": "WK16",
+      "wk_available": "WK17",
+      "status": "IN TRANSIT"
+    },
+    {
+      "sku": "GGLFTSS222910",
+      "description": "PGA TOUR 10pc Orange Junior Set (LH)",
+      "po_number": "T-870200",
+      "units": 1000,
+      "est_arrival": "2026-04-22",
+      "wk_received": "WK16",
+      "wk_available": "WK17",
+      "status": "IN TRANSIT"
+    },
+    {
+      "sku": "KIT 1",
+      "description": "Equipment Kit \u2014 Grades K-5",
+      "po_number": "2100",
+      "units": 600,
+      "est_arrival": "2026-03-02",
+      "wk_received": "WK09",
+      "wk_available": "WK10",
+      "status": "IN TRANSIT"
+    },
+    {
+      "sku": "KIT 2",
+      "description": "Equipment Kit \u2014 Grades 6-8",
+      "po_number": "2100",
+      "units": 200,
+      "est_arrival": "2026-03-02",
+      "wk_received": "WK09",
+      "wk_available": "WK10",
+      "status": "IN TRANSIT"
+    }
+  ]
+}

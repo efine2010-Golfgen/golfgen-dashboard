@@ -125,7 +125,7 @@ export const api = {
     fetch(`${API_BASE}/api/fba-shipments/sync`, { method: "POST", credentials: "include" }).then(r => r.json()),
   fbaShipmentItems: (shipmentId) => fetchJSON(`/api/fba-shipments/${encodeURIComponent(shipmentId)}/items`),
 
-  // Item Planning
+  // Item Planning (legacy)
   itemPlanning: () => fetchJSON(`/api/item-planning`),
   itemPlanningRawSales: () => fetchJSON(`/api/item-planning/raw-product-sales`),
   itemPlanningRawDaily: () => fetchJSON(`/api/item-planning/raw-daily-data`),
@@ -141,6 +141,40 @@ export const api = {
     fd.append("file", file);
     return fetch(`${API_BASE}/api/item-planning/upload`, { method: "POST", body: fd, credentials: "include" }).then(r => r.json());
   },
+
+  // New Item Plan (FY2026 planning module)
+  itemPlan: () => fetchJSON(`/api/item-plan`),
+  itemPlanOverride: (sku, field, month, value) =>
+    fetch(`${API_BASE}/api/item-plan/override`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ sku, field, month, value }),
+      credentials: "include",
+    }).then(r => { if (!r.ok) throw new Error("Override failed"); return r.json(); }),
+  itemPlanCurve: (sku, curve_type) =>
+    fetch(`${API_BASE}/api/item-plan/curve`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ sku, curve_type }),
+      credentials: "include",
+    }).then(r => { if (!r.ok) throw new Error("Curve update failed"); return r.json(); }),
+  itemPlanSalesCurves: () => fetchJSON(`/api/item-plan/sales-curves`),
+  factoryOnOrder: () => fetchJSON(`/api/factory-on-order`),
+  updateFactoryOnOrder: (data) =>
+    fetch(`${API_BASE}/api/factory-on-order`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(data),
+      credentials: "include",
+    }).then(r => r.json()),
+  dashboardSettings: () => fetchJSON(`/api/dashboard-settings`),
+  updateDashboardSetting: (key, value) =>
+    fetch(`${API_BASE}/api/dashboard-settings`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ key, value: String(value) }),
+      credentials: "include",
+    }).then(r => r.json()),
 };
 
 export function fmt$(n) {
