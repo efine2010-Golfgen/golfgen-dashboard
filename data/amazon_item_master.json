@@ -2,580 +2,716 @@
   {
     "sku": "GG2SS2226BM",
     "asin": "B0CV6VLJYN",
-    "productName": "PGA TOUR G1 RH 5pc Green Golf Club Set Junior Sets",
+    "productName": "PGAT G1 RH 5pc Green Golf Club Set Junior Sets",
     "color": "Green",
-    "brand": "PGA TOUR",
+    "brand": "PGAT",
     "series": "G1",
     "productType": "Golf Club Set",
-    "pieceCount": "5",
+    "pieceCount": 5,
     "orientation": "RH",
-    "category": "Junior Sets",
+    "category": "Junior Clubs",
     "unitCost": 0.0,
     "lyAur": 120.57,
     "fbaStock": 124,
     "whOnHand": 2150,
-    "whAvailable": 0
+    "whAvailable": 0,
+    "casepack": 1,
+    "cartonLength": 0,
+    "cartonWidth": 0,
+    "cartonHeight": 0
   },
   {
     "sku": "GGLTNW22265",
     "asin": "B0DS6JC25Y",
-    "productName": "PGA TOUR G1 LH 5pc Green Golf Club Set Clubs",
+    "productName": "PGAT G1 LH 5pc Green Golf Club Set Clubs",
     "color": "Green",
-    "brand": "PGA TOUR",
+    "brand": "PGAT",
     "series": "G1",
     "productType": "Golf Club Set",
-    "pieceCount": "5",
+    "pieceCount": 5,
     "orientation": "LH",
-    "category": "Clubs",
+    "category": "Junior Clubs",
     "unitCost": 0.0,
     "lyAur": 123.05,
     "fbaStock": 54,
     "whOnHand": 369,
-    "whAvailable": 0
+    "whAvailable": 0,
+    "casepack": 1,
+    "cartonLength": 0,
+    "cartonWidth": 0,
+    "cartonHeight": 0
   },
   {
     "sku": "GGWMSS2226BM",
     "asin": "B0B2Y89HQV",
-    "productName": "PGA TOUR G1 RH 5pc Green Golf Club Set Junior Sets",
+    "productName": "PGAT G1 RH 5pc Green Golf Club Set Junior Sets",
     "color": "Green",
-    "brand": "PGA TOUR",
+    "brand": "PGAT",
     "series": "G1",
     "productType": "Golf Club Set",
-    "pieceCount": "5",
+    "pieceCount": 5,
     "orientation": "RH",
-    "category": "Junior Sets",
+    "category": "Junior Clubs",
     "unitCost": 0.0,
     "lyAur": 0.0,
     "fbaStock": 0,
     "whOnHand": 6,
-    "whAvailable": 0
+    "whAvailable": 0,
+    "casepack": 1,
+    "cartonLength": 0,
+    "cartonWidth": 0,
+    "cartonHeight": 0
   },
   {
     "sku": "GGRTNW222810",
     "asin": "B0DPBGG8GY",
-    "productName": "PGA TOUR G1 RH 10pc Blue Golf Club Set Clubs",
+    "productName": "PGAT G1 RH 10pc Blue Golf Club Set Clubs",
     "color": "Blue",
-    "brand": "PGA TOUR",
+    "brand": "PGAT",
     "series": "G1",
     "productType": "Golf Club Set",
-    "pieceCount": "10",
+    "pieceCount": 10,
     "orientation": "RH",
-    "category": "Clubs",
+    "category": "Junior Clubs",
     "unitCost": 0.0,
     "lyAur": 228.76,
     "fbaStock": 0,
     "whOnHand": 20,
-    "whAvailable": 0
+    "whAvailable": 0,
+    "casepack": 1,
+    "cartonLength": 0,
+    "cartonWidth": 0,
+    "cartonHeight": 0
   },
   {
     "sku": "GGWMSS222810",
     "asin": "B0B2SHX1BB",
-    "productName": "PGA TOUR G1 RH 10pc Blue Golf Club Set Clubs",
+    "productName": "PGAT G1 RH 10pc Blue Golf Club Set Clubs",
     "color": "Blue",
-    "brand": "PGA TOUR",
+    "brand": "PGAT",
     "series": "G1",
     "productType": "Golf Club Set",
-    "pieceCount": "10",
+    "pieceCount": 10,
     "orientation": "RH",
-    "category": "Clubs",
+    "category": "Junior Clubs",
     "unitCost": 0.0,
     "lyAur": 223.29,
     "fbaStock": 0,
     "whOnHand": 4,
-    "whAvailable": 0
+    "whAvailable": 0,
+    "casepack": 1,
+    "cartonLength": 0,
+    "cartonWidth": 0,
+    "cartonHeight": 0
   },
   {
     "sku": "GGLFTSS222810",
     "asin": "B0CQKP7332",
-    "productName": "PGA TOUR G1 LH 10pc Blue Golf Club Set Clubs",
+    "productName": "PGAT G1 LH 10pc Blue Golf Club Set Clubs",
     "color": "Blue",
-    "brand": "PGA TOUR",
+    "brand": "PGAT",
     "series": "G1",
     "productType": "Golf Club Set",
-    "pieceCount": "10",
+    "pieceCount": 10,
     "orientation": "LH",
-    "category": "Clubs",
+    "category": "Junior Clubs",
     "unitCost": 0.0,
     "lyAur": 227.14,
     "fbaStock": 13,
     "whOnHand": 27,
-    "whAvailable": 0
+    "whAvailable": 0,
+    "casepack": 1,
+    "cartonLength": 0,
+    "cartonWidth": 0,
+    "cartonHeight": 0
   },
   {
     "sku": "GGRTNW21176",
     "asin": "B0DPBKJGVK",
-    "productName": "PGA TOUR G1 RH 6pc Blue Golf Club Set Clubs",
+    "productName": "PGAT G1 RH 6pc Blue Golf Club Set Clubs",
     "color": "Blue",
-    "brand": "PGA TOUR",
+    "brand": "PGAT",
     "series": "G1",
     "productType": "Golf Club Set",
-    "pieceCount": "6",
+    "pieceCount": 6,
     "orientation": "RH",
-    "category": "Clubs",
+    "category": "Junior Clubs",
     "unitCost": 0.0,
     "lyAur": 139.46,
     "fbaStock": 164,
     "whOnHand": 730,
-    "whAvailable": 0
+    "whAvailable": 0,
+    "casepack": 1,
+    "cartonLength": 0,
+    "cartonWidth": 0,
+    "cartonHeight": 0
   },
   {
     "sku": "GGWMSS2117BM",
     "asin": "B0BRT8TV8H",
-    "productName": "PGA TOUR G1 RH 6pc Blue Golf Club Set Junior Sets",
+    "productName": "PGAT G1 RH 6pc Blue Golf Club Set Junior Sets",
     "color": "Blue",
-    "brand": "PGA TOUR",
+    "brand": "PGAT",
     "series": "G1",
     "productType": "Golf Club Set",
-    "pieceCount": "6",
+    "pieceCount": 6,
     "orientation": "RH",
-    "category": "Junior Sets",
+    "category": "Junior Clubs",
     "unitCost": 0.0,
     "lyAur": 161.6,
     "fbaStock": 28,
     "whOnHand": 29,
-    "whAvailable": 0
+    "whAvailable": 0,
+    "casepack": 1,
+    "cartonLength": 0,
+    "cartonWidth": 0,
+    "cartonHeight": 0
   },
   {
     "sku": "GGWMSS2122BM",
     "asin": "B0B2SFX1V7",
-    "productName": "PGA TOUR G1 RH 7pc Blue Golf Club Set Junior Sets",
+    "productName": "PGAT G1 RH 7pc Blue Golf Club Set Junior Sets",
     "color": "Blue",
-    "brand": "PGA TOUR",
+    "brand": "PGAT",
     "series": "G1",
     "productType": "Golf Club Set",
-    "pieceCount": "7",
+    "pieceCount": 7,
     "orientation": "RH",
-    "category": "Junior Sets",
+    "category": "Junior Clubs",
     "unitCost": 0.0,
     "lyAur": 0.0,
     "fbaStock": 88,
     "whOnHand": 1,
-    "whAvailable": 0
+    "whAvailable": 0,
+    "casepack": 1,
+    "cartonLength": 0,
+    "cartonWidth": 0,
+    "cartonHeight": 0
   },
   {
     "sku": "GGWMSS222710",
     "asin": "B0C6RJXJD7",
-    "productName": "PGA TOUR G1 RH 10pc Red Golf Club Set Junior Sets",
+    "productName": "PGAT G1 RH 10pc Red Golf Club Set Junior Sets",
     "color": "Red",
-    "brand": "PGA TOUR",
+    "brand": "PGAT",
     "series": "G1",
     "productType": "Golf Club Set",
-    "pieceCount": "10",
+    "pieceCount": 10,
     "orientation": "RH",
-    "category": "Junior Sets",
+    "category": "Junior Clubs",
     "unitCost": 0.0,
     "lyAur": 214.17,
     "fbaStock": 11,
     "whOnHand": 7,
-    "whAvailable": 0
+    "whAvailable": 0,
+    "casepack": 1,
+    "cartonLength": 0,
+    "cartonWidth": 0,
+    "cartonHeight": 0
   },
   {
     "sku": "GGRTNW21165",
     "asin": "B0DS6L39MG",
-    "productName": "PGA TOUR G1 RH 5pc Red Golf Club Set Clubs",
+    "productName": "PGAT G1 RH 5pc Red Golf Club Set Clubs",
     "color": "Red",
-    "brand": "PGA TOUR",
+    "brand": "PGAT",
     "series": "G1",
     "productType": "Golf Club Set",
-    "pieceCount": "5",
+    "pieceCount": 5,
     "orientation": "RH",
-    "category": "Clubs",
+    "category": "Junior Clubs",
     "unitCost": 0.0,
     "lyAur": 119.6,
     "fbaStock": 117,
     "whOnHand": 2861,
-    "whAvailable": 0
+    "whAvailable": 0,
+    "casepack": 1,
+    "cartonLength": 0,
+    "cartonWidth": 0,
+    "cartonHeight": 0
   },
   {
     "sku": "GGWMSS222707",
     "asin": "B0C6RJT2LR",
-    "productName": "PGA TOUR G1 RH 7pc Red Golf Club Set Junior Sets",
+    "productName": "PGAT G1 RH 7pc Red Golf Club Set Junior Sets",
     "color": "Red",
-    "brand": "PGA TOUR",
+    "brand": "PGAT",
     "series": "G1",
     "productType": "Golf Club Set",
-    "pieceCount": "7",
+    "pieceCount": 7,
     "orientation": "RH",
-    "category": "Junior Sets",
+    "category": "Junior Clubs",
     "unitCost": 0.0,
     "lyAur": 147.33,
     "fbaStock": 1,
     "whOnHand": 0,
-    "whAvailable": 0
+    "whAvailable": 0,
+    "casepack": 1,
+    "cartonLength": 0,
+    "cartonWidth": 0,
+    "cartonHeight": 0
   },
   {
     "sku": "GGLFTSS222710",
     "asin": "B0CQKQZFCH",
-    "productName": "PGA TOUR G1 LH 10pc Red Golf Club Set Clubs",
+    "productName": "PGAT G1 LH 10pc Red Golf Club Set Clubs",
     "color": "Red",
-    "brand": "PGA TOUR",
+    "brand": "PGAT",
     "series": "G1",
     "productType": "Golf Club Set",
-    "pieceCount": "10",
+    "pieceCount": 10,
     "orientation": "LH",
-    "category": "Clubs",
+    "category": "Junior Clubs",
     "unitCost": 0.0,
     "lyAur": 219.55,
     "fbaStock": 2,
     "whOnHand": 479,
-    "whAvailable": 0
+    "whAvailable": 0,
+    "casepack": 1,
+    "cartonLength": 0,
+    "cartonWidth": 0,
+    "cartonHeight": 0
   },
   {
     "sku": "GGWMSS222708",
     "asin": "B0B2SGCMP9",
-    "productName": "PGA TOUR G1 RH 8pc Red Golf Club Set Junior Sets",
+    "productName": "PGAT G1 RH 8pc Red Golf Club Set Junior Sets",
     "color": "Red",
-    "brand": "PGA TOUR",
+    "brand": "PGAT",
     "series": "G1",
     "productType": "Golf Club Set",
-    "pieceCount": "8",
+    "pieceCount": 8,
     "orientation": "RH",
-    "category": "Junior Sets",
+    "category": "Junior Clubs",
     "unitCost": 0.0,
     "lyAur": 155.16,
     "fbaStock": 0,
     "whOnHand": 1,
-    "whAvailable": 0
+    "whAvailable": 0,
+    "casepack": 1,
+    "cartonLength": 0,
+    "cartonWidth": 0,
+    "cartonHeight": 0
   },
   {
     "sku": "GGWMSS2116BM",
     "asin": "B0B2SDT1HW",
-    "productName": "PGA TOUR G1 RH 5pc Red Golf Club Set Junior Sets",
+    "productName": "PGAT G1 RH 5pc Red Golf Club Set Junior Sets",
     "color": "Red",
-    "brand": "PGA TOUR",
+    "brand": "PGAT",
     "series": "G1",
     "productType": "Golf Club Set",
-    "pieceCount": "5",
+    "pieceCount": 5,
     "orientation": "RH",
-    "category": "Junior Sets",
+    "category": "Junior Clubs",
     "unitCost": 0.0,
     "lyAur": 0.0,
     "fbaStock": 25,
     "whOnHand": 1249,
-    "whAvailable": 0
+    "whAvailable": 0,
+    "casepack": 1,
+    "cartonLength": 0,
+    "cartonWidth": 0,
+    "cartonHeight": 0
   },
   {
     "sku": "GGRTNW222910",
     "asin": "B0DPBHKHV7",
-    "productName": "PGA TOUR G1 RH 10pc Orange Golf Club Set Clubs",
+    "productName": "PGAT G1 RH 10pc Orange Golf Club Set Clubs",
     "color": "Orange",
-    "brand": "PGA TOUR",
+    "brand": "PGAT",
     "series": "G1",
     "productType": "Golf Club Set",
-    "pieceCount": "10",
+    "pieceCount": 10,
     "orientation": "RH",
-    "category": "Clubs",
+    "category": "Junior Clubs",
     "unitCost": 0.0,
     "lyAur": 229.7,
     "fbaStock": 0,
     "whOnHand": 20,
-    "whAvailable": 0
+    "whAvailable": 0,
+    "casepack": 1,
+    "cartonLength": 0,
+    "cartonWidth": 0,
+    "cartonHeight": 0
   },
   {
     "sku": "GGWMSS222910",
     "asin": "B0B2SBQ2R7",
-    "productName": "PGA TOUR G1 RH 10pc Orange Golf Club Set Junior Sets",
+    "productName": "PGAT G1 RH 10pc Orange Golf Club Set Junior Sets",
     "color": "Orange",
-    "brand": "PGA TOUR",
+    "brand": "PGAT",
     "series": "G1",
     "productType": "Golf Club Set",
-    "pieceCount": "10",
+    "pieceCount": 10,
     "orientation": "RH",
-    "category": "Junior Sets",
+    "category": "Junior Clubs",
     "unitCost": 0.0,
     "lyAur": 187.99,
     "fbaStock": 0,
     "whOnHand": 0,
-    "whAvailable": 0
+    "whAvailable": 0,
+    "casepack": 1,
+    "cartonLength": 0,
+    "cartonWidth": 0,
+    "cartonHeight": 0
   },
   {
     "sku": "GGLFTSS222910",
     "asin": "B0CQKQ3VRK",
-    "productName": "PGA TOUR G1 LH 10pc Orange Golf Club Set Junior Sets",
+    "productName": "PGAT G1 LH 10pc Orange Golf Club Set Junior Sets",
     "color": "Orange",
-    "brand": "PGA TOUR",
+    "brand": "PGAT",
     "series": "G1",
     "productType": "Golf Club Set",
-    "pieceCount": "10",
+    "pieceCount": 10,
     "orientation": "LH",
-    "category": "Junior Sets",
+    "category": "Junior Clubs",
     "unitCost": 0.0,
     "lyAur": 230.77,
     "fbaStock": 8,
     "whOnHand": 296,
-    "whAvailable": 0
+    "whAvailable": 0,
+    "casepack": 1,
+    "cartonLength": 0,
+    "cartonWidth": 0,
+    "cartonHeight": 0
   },
   {
     "sku": "GGWMSS2121BM",
     "asin": "B0B2SL7HBQ",
-    "productName": "PGA TOUR G1 RH 7pc Orange Golf Club Set Junior Sets",
+    "productName": "PGAT G1 RH 7pc Orange Golf Club Set Junior Sets",
     "color": "Orange",
-    "brand": "PGA TOUR",
+    "brand": "PGAT",
     "series": "G1",
     "productType": "Golf Club Set",
-    "pieceCount": "7",
+    "pieceCount": 7,
     "orientation": "RH",
-    "category": "Junior Sets",
+    "category": "Junior Clubs",
     "unitCost": 0.0,
     "lyAur": 151.68,
     "fbaStock": 0,
     "whOnHand": 1,
-    "whAvailable": 0
+    "whAvailable": 0,
+    "casepack": 1,
+    "cartonLength": 0,
+    "cartonWidth": 0,
+    "cartonHeight": 0
   },
   {
     "sku": "GGRTNW21196",
     "asin": "B0FCJZJMWJ",
-    "productName": "PGA TOUR G1 RH 6pc Orange Golf Club Set Clubs",
+    "productName": "PGAT G1 RH 6pc Orange Golf Club Set Clubs",
     "color": "Orange",
-    "brand": "PGA TOUR",
+    "brand": "PGAT",
     "series": "G1",
     "productType": "Golf Club Set",
-    "pieceCount": "6",
+    "pieceCount": 6,
     "orientation": "RH",
-    "category": "Clubs",
+    "category": "Junior Clubs",
     "unitCost": 0.0,
     "lyAur": 154.94,
     "fbaStock": 73,
     "whOnHand": 689,
-    "whAvailable": 0
+    "whAvailable": 0,
+    "casepack": 1,
+    "cartonLength": 0,
+    "cartonWidth": 0,
+    "cartonHeight": 0
   },
   {
     "sku": "GGWMSS2230BM",
     "asin": "B0B9CCPBHV",
-    "productName": "PGA TOUR G1 RH Orange Driver Clubs",
+    "productName": "PGAT G1 RH Orange Driver Clubs",
     "color": "Orange",
-    "brand": "PGA TOUR",
+    "brand": "PGAT",
     "series": "G1",
     "productType": "Driver",
     "pieceCount": "",
     "orientation": "RH",
-    "category": "Clubs",
+    "category": "Junior Clubs",
     "unitCost": 0.0,
     "lyAur": 52.58,
     "fbaStock": 13,
     "whOnHand": 2,
-    "whAvailable": 0
+    "whAvailable": 0,
+    "casepack": 1,
+    "cartonLength": 0,
+    "cartonWidth": 0,
+    "cartonHeight": 0
   },
   {
     "sku": "GGWMSS2231BM",
     "asin": "B0BC9YT1XV",
-    "productName": "PGA TOUR G1 RH Orange 7 Iron Clubs",
+    "productName": "PGAT G1 RH Orange 7 Iron Clubs",
     "color": "Orange",
-    "brand": "PGA TOUR",
+    "brand": "PGAT",
     "series": "G1",
     "productType": "7 Iron",
     "pieceCount": "",
     "orientation": "RH",
-    "category": "Clubs",
+    "category": "Junior Clubs",
     "unitCost": 0.0,
     "lyAur": 41.65,
     "fbaStock": 18,
     "whOnHand": 377,
-    "whAvailable": 0
+    "whAvailable": 0,
+    "casepack": 12,
+    "cartonLength": 0,
+    "cartonWidth": 0,
+    "cartonHeight": 0
   },
   {
     "sku": "GG9IREP1",
     "asin": "B0FCCXM3SB",
-    "productName": "PGA TOUR G1 RH Orange 9 Iron Clubs",
+    "productName": "PGAT G1 RH Orange 9 Iron Clubs",
     "color": "Orange",
-    "brand": "PGA TOUR",
+    "brand": "PGAT",
     "series": "G1",
     "productType": "9 Iron",
     "pieceCount": "",
     "orientation": "RH",
-    "category": "Clubs",
+    "category": "Junior Clubs",
     "unitCost": 0.0,
     "lyAur": 0.0,
     "fbaStock": 44,
     "whOnHand": 0,
-    "whAvailable": 0
+    "whAvailable": 0,
+    "casepack": 1,
+    "cartonLength": 0,
+    "cartonWidth": 0,
+    "cartonHeight": 0
   },
   {
     "sku": "GGWIREP1",
     "asin": "B0FCCY94RG",
-    "productName": "PGA TOUR G1 RH Orange Pitching Wedge Clubs",
+    "productName": "PGAT G1 RH Orange Pitching Wedge Clubs",
     "color": "Orange",
-    "brand": "PGA TOUR",
+    "brand": "PGAT",
     "series": "G1",
     "productType": "Pitching Wedge",
     "pieceCount": "",
     "orientation": "RH",
-    "category": "Clubs",
+    "category": "Junior Clubs",
     "unitCost": 0.0,
     "lyAur": 0.0,
     "fbaStock": 41,
     "whOnHand": 0,
-    "whAvailable": 0
+    "whAvailable": 0,
+    "casepack": 1,
+    "cartonLength": 0,
+    "cartonWidth": 0,
+    "cartonHeight": 0
   },
   {
     "sku": "GGWMSS2232BM",
     "asin": "B0BC9W1LSY",
-    "productName": "PGA TOUR G1 RH Orange Putter Clubs",
+    "productName": "PGAT G1 RH Orange Putter Clubs",
     "color": "Orange",
-    "brand": "PGA TOUR",
+    "brand": "PGAT",
     "series": "G1",
     "productType": "Putter",
     "pieceCount": "",
     "orientation": "RH",
-    "category": "Clubs",
+    "category": "Junior Clubs",
     "unitCost": 0.0,
     "lyAur": 39.83,
     "fbaStock": 99,
     "whOnHand": 458,
-    "whAvailable": 0
+    "whAvailable": 0,
+    "casepack": 12,
+    "cartonLength": 0,
+    "cartonWidth": 0,
+    "cartonHeight": 0
   },
   {
     "sku": "GGWMSS2235BM",
     "asin": "B0B2YLNSV2",
-    "productName": "PGA TOUR Practice Aids Putting Rings Practice Aids",
-    "color": "",
-    "brand": "PGA TOUR",
+    "productName": "PGAT Practice Aids Putting Rings Practice Aids",
+    "color": "Multi",
+    "brand": "PGAT",
     "series": "Practice Aids",
     "productType": "Putting Rings",
     "pieceCount": "",
     "orientation": "",
-    "category": "Practice Aids",
+    "category": "Training Aids",
     "unitCost": 0.0,
     "lyAur": 38.93,
     "fbaStock": 0,
     "whOnHand": 520,
-    "whAvailable": 0
+    "whAvailable": 0,
+    "casepack": 6,
+    "cartonLength": 0,
+    "cartonWidth": 0,
+    "cartonHeight": 0
   },
   {
     "sku": "GGWMSS2234BM",
     "asin": "B0B2Z3L3H4",
-    "productName": "PGA TOUR Practice Aids Chipping Net Practice Aids",
-    "color": "",
-    "brand": "PGA TOUR",
+    "productName": "PGAT Practice Aids Chipping Net Practice Aids",
+    "color": "Multi",
+    "brand": "PGAT",
     "series": "Practice Aids",
     "productType": "Chipping Net",
     "pieceCount": "",
     "orientation": "",
-    "category": "Practice Aids",
+    "category": "Training Aids",
     "unitCost": 0.0,
     "lyAur": 38.93,
     "fbaStock": 40,
     "whOnHand": 0,
-    "whAvailable": 0
+    "whAvailable": 0,
+    "casepack": 6,
+    "cartonLength": 0,
+    "cartonWidth": 0,
+    "cartonHeight": 0
   },
   {
     "sku": "GGWMSS2240BM",
     "asin": "B0B2SKZ38L",
-    "productName": "PGA TOUR TU LH 3pc Orange Practice Set Practice Aids",
+    "productName": "PGAT TU LH 3pc Orange Practice Set Practice Aids",
     "color": "Orange",
-    "brand": "PGA TOUR",
-    "series": "TU",
+    "brand": "PGAT",
+    "series": "Tee Up",
     "productType": "Practice Set",
-    "pieceCount": "3",
+    "pieceCount": 3,
     "orientation": "LH",
-    "category": "Practice Aids",
+    "category": "Practice Clubs",
     "unitCost": 0.0,
     "lyAur": 37.74,
     "fbaStock": 5,
     "whOnHand": 71,
-    "whAvailable": 0
+    "whAvailable": 0,
+    "casepack": 6,
+    "cartonLength": 0,
+    "cartonWidth": 0,
+    "cartonHeight": 0
   },
   {
     "sku": "GGWMSS2236BM",
     "asin": "B0B2YBWKL8",
-    "productName": "PGA TOUR TU RH 3pc Red Practice Set Practice Aids",
+    "productName": "PGAT TU RH 3pc Red Practice Set Practice Aids",
     "color": "Red",
-    "brand": "PGA TOUR",
-    "series": "TU",
+    "brand": "PGAT",
+    "series": "Tee Up",
     "productType": "Practice Set",
-    "pieceCount": "3",
+    "pieceCount": 3,
     "orientation": "RH",
-    "category": "Practice Aids",
+    "category": "Practice Clubs",
     "unitCost": 0.0,
     "lyAur": 36.9,
     "fbaStock": 22,
     "whOnHand": 331,
-    "whAvailable": 0
+    "whAvailable": 0,
+    "casepack": 6,
+    "cartonLength": 0,
+    "cartonWidth": 0,
+    "cartonHeight": 0
   },
   {
     "sku": "GGP1X2000",
     "asin": "B0DC1TJ21F",
-    "productName": "PGA TOUR P1 Extreme RH 17pc Black Golf Club Set Clubs",
+    "productName": "PGAT P1 Extreme RH 17pc Black Golf Club Set Clubs",
     "color": "Black",
-    "brand": "PGA TOUR",
+    "brand": "PGAT",
     "series": "P1 Extreme",
     "productType": "Golf Club Set",
-    "pieceCount": "17",
+    "pieceCount": 17,
     "orientation": "RH",
-    "category": "Clubs",
+    "category": "Junior Clubs",
     "unitCost": 0.0,
     "lyAur": 794.73,
     "fbaStock": 2,
     "whOnHand": 317,
-    "whAvailable": 0
+    "whAvailable": 0,
+    "casepack": 1,
+    "cartonLength": 0,
+    "cartonWidth": 0,
+    "cartonHeight": 0
   },
   {
     "sku": "GGWMSS2239BM",
     "asin": "B0B2SKB7ND",
-    "productName": "PGA TOUR TU LH 3pc Red Practice Set Practice Aids",
+    "productName": "PGAT TU LH 3pc Red Practice Set Practice Aids",
     "color": "Red",
-    "brand": "PGA TOUR",
-    "series": "TU",
+    "brand": "PGAT",
+    "series": "Tee Up",
     "productType": "Practice Set",
-    "pieceCount": "3",
+    "pieceCount": 3,
     "orientation": "LH",
-    "category": "Practice Aids",
+    "category": "Practice Clubs",
     "unitCost": 0.0,
     "lyAur": 39.99,
     "fbaStock": 0,
     "whOnHand": 3,
-    "whAvailable": 0
+    "whAvailable": 0,
+    "casepack": 1,
+    "cartonLength": 0,
+    "cartonWidth": 0,
+    "cartonHeight": 0
   },
   {
     "sku": "GGWMSS2237BM",
     "asin": "B0B2T894VG",
-    "productName": "PGA TOUR TU RH 3pc Orange Practice Set Practice Aids",
+    "productName": "PGAT TU RH 3pc Orange Practice Set Practice Aids",
     "color": "Orange",
-    "brand": "PGA TOUR",
-    "series": "TU",
+    "brand": "PGAT",
+    "series": "Tee Up",
     "productType": "Practice Set",
-    "pieceCount": "3",
+    "pieceCount": 3,
     "orientation": "RH",
-    "category": "Practice Aids",
+    "category": "Practice Clubs",
     "unitCost": 0.0,
     "lyAur": 36.98,
     "fbaStock": 6,
     "whOnHand": 259,
-    "whAvailable": 0
+    "whAvailable": 0,
+    "casepack": 6,
+    "cartonLength": 0,
+    "cartonWidth": 0,
+    "cartonHeight": 0
   },
   {
     "sku": "GGWMSS2241BM",
     "asin": "B0B2SYDXTJ",
-    "productName": "PGA TOUR TU LH 3pc Green Practice Set Practice Aids",
+    "productName": "PGAT TU LH 3pc Green Practice Set Practice Aids",
     "color": "Green",
-    "brand": "PGA TOUR",
-    "series": "TU",
+    "brand": "PGAT",
+    "series": "Tee Up",
     "productType": "Practice Set",
-    "pieceCount": "3",
+    "pieceCount": 3,
     "orientation": "LH",
-    "category": "Practice Aids",
+    "category": "Practice Clubs",
     "unitCost": 0.0,
     "lyAur": 38.86,
     "fbaStock": 9,
     "whOnHand": 869,
-    "whAvailable": 0
+    "whAvailable": 0,
+    "casepack": 6,
+    "cartonLength": 0,
+    "cartonWidth": 0,
+    "cartonHeight": 0
   },
   {
     "sku": "GGWMSS2238BM",
     "asin": "B0B2SLTZNG",
-    "productName": "PGA TOUR TU RH 3pc Green Practice Set Practice Aids",
+    "productName": "PGAT TU RH 3pc Green Practice Set Practice Aids",
     "color": "Green",
-    "brand": "PGA TOUR",
-    "series": "TU",
+    "brand": "PGAT",
+    "series": "Tee Up",
     "productType": "Practice Set",
-    "pieceCount": "3",
+    "pieceCount": 3,
     "orientation": "RH",
-    "category": "Practice Aids",
+    "category": "Practice Clubs",
     "unitCost": 0.0,
     "lyAur": 38.33,
     "fbaStock": 12,
     "whOnHand": 1007,
-    "whAvailable": 0
+    "whAvailable": 0,
+    "casepack": 6,
+    "cartonLength": 0,
+    "cartonWidth": 0,
+    "cartonHeight": 0
   },
   {
     "sku": "GG2SS2226BM/RB",
@@ -592,7 +728,11 @@
     "lyAur": 0.0,
     "fbaStock": 0,
     "whOnHand": 0,
-    "whAvailable": 0
+    "whAvailable": 0,
+    "casepack": 1,
+    "cartonLength": 0,
+    "cartonWidth": 0,
+    "cartonHeight": 0
   },
   {
     "sku": "GG2SS2226BMFBM",
@@ -609,7 +749,11 @@
     "lyAur": 0.0,
     "fbaStock": 0,
     "whOnHand": 0,
-    "whAvailable": 0
+    "whAvailable": 0,
+    "casepack": 1,
+    "cartonLength": 0,
+    "cartonWidth": 0,
+    "cartonHeight": 0
   },
   {
     "sku": "T-GG2SS2226BM",
@@ -626,7 +770,11 @@
     "lyAur": 0.0,
     "fbaStock": 0,
     "whOnHand": 0,
-    "whAvailable": 0
+    "whAvailable": 0,
+    "casepack": 1,
+    "cartonLength": 0,
+    "cartonWidth": 0,
+    "cartonHeight": 0
   },
   {
     "sku": "T-GG2SS2226BM/DONATE",
@@ -643,7 +791,11 @@
     "lyAur": 0.0,
     "fbaStock": 0,
     "whOnHand": 0,
-    "whAvailable": 0
+    "whAvailable": 0,
+    "casepack": 1,
+    "cartonLength": 0,
+    "cartonWidth": 0,
+    "cartonHeight": 0
   },
   {
     "sku": "T-GG2SS2226BM/RB",
@@ -660,7 +812,11 @@
     "lyAur": 0.0,
     "fbaStock": 0,
     "whOnHand": 0,
-    "whAvailable": 0
+    "whAvailable": 0,
+    "casepack": 1,
+    "cartonLength": 0,
+    "cartonWidth": 0,
+    "cartonHeight": 0
   },
   {
     "sku": "T-GG2SS2226BM/RETD",
@@ -677,7 +833,11 @@
     "lyAur": 0.0,
     "fbaStock": 0,
     "whOnHand": 0,
-    "whAvailable": 0
+    "whAvailable": 0,
+    "casepack": 1,
+    "cartonLength": 0,
+    "cartonWidth": 0,
+    "cartonHeight": 0
   },
   {
     "sku": "GG2SS2226BM /DAM*",
@@ -694,7 +854,11 @@
     "lyAur": 0.0,
     "fbaStock": 0,
     "whOnHand": 0,
-    "whAvailable": 0
+    "whAvailable": 0,
+    "casepack": 1,
+    "cartonLength": 0,
+    "cartonWidth": 0,
+    "cartonHeight": 0
   },
   {
     "sku": "GGLTNW22265/RB",
@@ -711,7 +875,11 @@
     "lyAur": 0.0,
     "fbaStock": 0,
     "whOnHand": 0,
-    "whAvailable": 0
+    "whAvailable": 0,
+    "casepack": 1,
+    "cartonLength": 0,
+    "cartonWidth": 0,
+    "cartonHeight": 0
   },
   {
     "sku": "T-GGLTNW22265",
@@ -728,7 +896,11 @@
     "lyAur": 0.0,
     "fbaStock": 0,
     "whOnHand": 0,
-    "whAvailable": 0
+    "whAvailable": 0,
+    "casepack": 1,
+    "cartonLength": 0,
+    "cartonWidth": 0,
+    "cartonHeight": 0
   },
   {
     "sku": "T-GGLTNW22265/RB",
@@ -745,7 +917,11 @@
     "lyAur": 0.0,
     "fbaStock": 0,
     "whOnHand": 0,
-    "whAvailable": 0
+    "whAvailable": 0,
+    "casepack": 1,
+    "cartonLength": 0,
+    "cartonWidth": 0,
+    "cartonHeight": 0
   },
   {
     "sku": "GGLTNW22265 /DAM*",
@@ -762,7 +938,11 @@
     "lyAur": 0.0,
     "fbaStock": 0,
     "whOnHand": 0,
-    "whAvailable": 0
+    "whAvailable": 0,
+    "casepack": 1,
+    "cartonLength": 0,
+    "cartonWidth": 0,
+    "cartonHeight": 0
   },
   {
     "sku": "GGWMSS2226BMFBM",
@@ -779,7 +959,11 @@
     "lyAur": 0.0,
     "fbaStock": 0,
     "whOnHand": 0,
-    "whAvailable": 0
+    "whAvailable": 0,
+    "casepack": 1,
+    "cartonLength": 0,
+    "cartonWidth": 0,
+    "cartonHeight": 0
   },
   {
     "sku": "GGWMSS2226BM /DAM*",
@@ -796,7 +980,11 @@
     "lyAur": 0.0,
     "fbaStock": 0,
     "whOnHand": 0,
-    "whAvailable": 0
+    "whAvailable": 0,
+    "casepack": 1,
+    "cartonLength": 0,
+    "cartonWidth": 0,
+    "cartonHeight": 0
   },
   {
     "sku": "GGRTNW222810/RB",
@@ -813,7 +1001,11 @@
     "lyAur": 0.0,
     "fbaStock": 0,
     "whOnHand": 0,
-    "whAvailable": 0
+    "whAvailable": 0,
+    "casepack": 1,
+    "cartonLength": 0,
+    "cartonWidth": 0,
+    "cartonHeight": 0
   },
   {
     "sku": "GGRTNW222810/RETD",
@@ -830,7 +1022,11 @@
     "lyAur": 0.0,
     "fbaStock": 0,
     "whOnHand": 0,
-    "whAvailable": 0
+    "whAvailable": 0,
+    "casepack": 1,
+    "cartonLength": 0,
+    "cartonWidth": 0,
+    "cartonHeight": 0
   },
   {
     "sku": "T-GGRTNW222810",
@@ -847,7 +1043,11 @@
     "lyAur": 0.0,
     "fbaStock": 0,
     "whOnHand": 0,
-    "whAvailable": 0
+    "whAvailable": 0,
+    "casepack": 1,
+    "cartonLength": 0,
+    "cartonWidth": 0,
+    "cartonHeight": 0
   },
   {
     "sku": "T-GGRTNW222810/DONATE",
@@ -864,7 +1064,11 @@
     "lyAur": 0.0,
     "fbaStock": 0,
     "whOnHand": 0,
-    "whAvailable": 0
+    "whAvailable": 0,
+    "casepack": 1,
+    "cartonLength": 0,
+    "cartonWidth": 0,
+    "cartonHeight": 0
   },
   {
     "sku": "T-GGRTNW222810/RB",
@@ -881,7 +1085,11 @@
     "lyAur": 0.0,
     "fbaStock": 0,
     "whOnHand": 0,
-    "whAvailable": 0
+    "whAvailable": 0,
+    "casepack": 1,
+    "cartonLength": 0,
+    "cartonWidth": 0,
+    "cartonHeight": 0
   },
   {
     "sku": "T-GGRTNW222810/RETD",
@@ -898,7 +1106,11 @@
     "lyAur": 0.0,
     "fbaStock": 0,
     "whOnHand": 0,
-    "whAvailable": 0
+    "whAvailable": 0,
+    "casepack": 1,
+    "cartonLength": 0,
+    "cartonWidth": 0,
+    "cartonHeight": 0
   },
   {
     "sku": "GGRTNW222810 /DAM*",
@@ -915,7 +1127,11 @@
     "lyAur": 0.0,
     "fbaStock": 0,
     "whOnHand": 0,
-    "whAvailable": 0
+    "whAvailable": 0,
+    "casepack": 1,
+    "cartonLength": 0,
+    "cartonWidth": 0,
+    "cartonHeight": 0
   },
   {
     "sku": "GGWMSS222810/DONATE",
@@ -932,7 +1148,11 @@
     "lyAur": 0.0,
     "fbaStock": 0,
     "whOnHand": 0,
-    "whAvailable": 0
+    "whAvailable": 0,
+    "casepack": 1,
+    "cartonLength": 0,
+    "cartonWidth": 0,
+    "cartonHeight": 0
   },
   {
     "sku": "GGWMSS222810/RB",
@@ -949,7 +1169,11 @@
     "lyAur": 0.0,
     "fbaStock": 0,
     "whOnHand": 0,
-    "whAvailable": 0
+    "whAvailable": 0,
+    "casepack": 1,
+    "cartonLength": 0,
+    "cartonWidth": 0,
+    "cartonHeight": 0
   },
   {
     "sku": "GGWMSS222810/RETD",
@@ -966,7 +1190,11 @@
     "lyAur": 0.0,
     "fbaStock": 0,
     "whOnHand": 0,
-    "whAvailable": 0
+    "whAvailable": 0,
+    "casepack": 1,
+    "cartonLength": 0,
+    "cartonWidth": 0,
+    "cartonHeight": 0
   },
   {
     "sku": "GGWMSS222810 /DAM*",
@@ -983,7 +1211,11 @@
     "lyAur": 0.0,
     "fbaStock": 0,
     "whOnHand": 0,
-    "whAvailable": 0
+    "whAvailable": 0,
+    "casepack": 1,
+    "cartonLength": 0,
+    "cartonWidth": 0,
+    "cartonHeight": 0
   },
   {
     "sku": "GGLFTSS222810/DONATE",
@@ -1000,7 +1232,11 @@
     "lyAur": 0.0,
     "fbaStock": 0,
     "whOnHand": 0,
-    "whAvailable": 0
+    "whAvailable": 0,
+    "casepack": 1,
+    "cartonLength": 0,
+    "cartonWidth": 0,
+    "cartonHeight": 0
   },
   {
     "sku": "GGLFTSS222810/RB",
@@ -1017,7 +1253,11 @@
     "lyAur": 0.0,
     "fbaStock": 0,
     "whOnHand": 0,
-    "whAvailable": 0
+    "whAvailable": 0,
+    "casepack": 1,
+    "cartonLength": 0,
+    "cartonWidth": 0,
+    "cartonHeight": 0
   },
   {
     "sku": "GGLFTSS222810 /DAM*",
@@ -1034,7 +1274,11 @@
     "lyAur": 0.0,
     "fbaStock": 0,
     "whOnHand": 0,
-    "whAvailable": 0
+    "whAvailable": 0,
+    "casepack": 1,
+    "cartonLength": 0,
+    "cartonWidth": 0,
+    "cartonHeight": 0
   },
   {
     "sku": "GGRTNW21176/DONATE",
@@ -1051,7 +1295,11 @@
     "lyAur": 0.0,
     "fbaStock": 0,
     "whOnHand": 0,
-    "whAvailable": 0
+    "whAvailable": 0,
+    "casepack": 1,
+    "cartonLength": 0,
+    "cartonWidth": 0,
+    "cartonHeight": 0
   },
   {
     "sku": "GGRTNW21176/RB",
@@ -1068,7 +1316,11 @@
     "lyAur": 0.0,
     "fbaStock": 0,
     "whOnHand": 0,
-    "whAvailable": 0
+    "whAvailable": 0,
+    "casepack": 1,
+    "cartonLength": 0,
+    "cartonWidth": 0,
+    "cartonHeight": 0
   },
   {
     "sku": "GGRTNW21176FBM",
@@ -1085,7 +1337,11 @@
     "lyAur": 0.0,
     "fbaStock": 0,
     "whOnHand": 0,
-    "whAvailable": 0
+    "whAvailable": 0,
+    "casepack": 1,
+    "cartonLength": 0,
+    "cartonWidth": 0,
+    "cartonHeight": 0
   },
   {
     "sku": "T-GGRTNW21176",
@@ -1102,7 +1358,11 @@
     "lyAur": 0.0,
     "fbaStock": 0,
     "whOnHand": 0,
-    "whAvailable": 0
+    "whAvailable": 0,
+    "casepack": 1,
+    "cartonLength": 0,
+    "cartonWidth": 0,
+    "cartonHeight": 0
   },
   {
     "sku": "T-GGRTNW21176/RB",
@@ -1119,7 +1379,11 @@
     "lyAur": 0.0,
     "fbaStock": 0,
     "whOnHand": 0,
-    "whAvailable": 0
+    "whAvailable": 0,
+    "casepack": 1,
+    "cartonLength": 0,
+    "cartonWidth": 0,
+    "cartonHeight": 0
   },
   {
     "sku": "GGRTNW21176 /DAM*",
@@ -1136,7 +1400,11 @@
     "lyAur": 0.0,
     "fbaStock": 0,
     "whOnHand": 0,
-    "whAvailable": 0
+    "whAvailable": 0,
+    "casepack": 1,
+    "cartonLength": 0,
+    "cartonWidth": 0,
+    "cartonHeight": 0
   },
   {
     "sku": "T-GGWMSS2122BM",
@@ -1153,7 +1421,11 @@
     "lyAur": 0.0,
     "fbaStock": 0,
     "whOnHand": 0,
-    "whAvailable": 0
+    "whAvailable": 0,
+    "casepack": 1,
+    "cartonLength": 0,
+    "cartonWidth": 0,
+    "cartonHeight": 0
   },
   {
     "sku": "GGWMSS2122BM /DAM*",
@@ -1170,7 +1442,11 @@
     "lyAur": 0.0,
     "fbaStock": 0,
     "whOnHand": 0,
-    "whAvailable": 0
+    "whAvailable": 0,
+    "casepack": 1,
+    "cartonLength": 0,
+    "cartonWidth": 0,
+    "cartonHeight": 0
   },
   {
     "sku": "GGWMSS222710/DONATE",
@@ -1187,7 +1463,11 @@
     "lyAur": 0.0,
     "fbaStock": 0,
     "whOnHand": 0,
-    "whAvailable": 0
+    "whAvailable": 0,
+    "casepack": 1,
+    "cartonLength": 0,
+    "cartonWidth": 0,
+    "cartonHeight": 0
   },
   {
     "sku": "GGWMSS222710/RB",
@@ -1204,7 +1484,11 @@
     "lyAur": 0.0,
     "fbaStock": 0,
     "whOnHand": 0,
-    "whAvailable": 0
+    "whAvailable": 0,
+    "casepack": 1,
+    "cartonLength": 0,
+    "cartonWidth": 0,
+    "cartonHeight": 0
   },
   {
     "sku": "GGWMSS222710/RETD",
@@ -1221,7 +1505,11 @@
     "lyAur": 0.0,
     "fbaStock": 0,
     "whOnHand": 0,
-    "whAvailable": 0
+    "whAvailable": 0,
+    "casepack": 1,
+    "cartonLength": 0,
+    "cartonWidth": 0,
+    "cartonHeight": 0
   },
   {
     "sku": "GGWMSS222710 /DAM*",
@@ -1238,7 +1526,11 @@
     "lyAur": 0.0,
     "fbaStock": 0,
     "whOnHand": 0,
-    "whAvailable": 0
+    "whAvailable": 0,
+    "casepack": 1,
+    "cartonLength": 0,
+    "cartonWidth": 0,
+    "cartonHeight": 0
   },
   {
     "sku": "GGRTNW21165/DONATE",
@@ -1255,7 +1547,11 @@
     "lyAur": 0.0,
     "fbaStock": 0,
     "whOnHand": 0,
-    "whAvailable": 0
+    "whAvailable": 0,
+    "casepack": 1,
+    "cartonLength": 0,
+    "cartonWidth": 0,
+    "cartonHeight": 0
   },
   {
     "sku": "GGRTNW21165/RB",
@@ -1272,7 +1568,11 @@
     "lyAur": 0.0,
     "fbaStock": 0,
     "whOnHand": 0,
-    "whAvailable": 0
+    "whAvailable": 0,
+    "casepack": 1,
+    "cartonLength": 0,
+    "cartonWidth": 0,
+    "cartonHeight": 0
   },
   {
     "sku": "GGRTNW21165/RETD",
@@ -1289,7 +1589,11 @@
     "lyAur": 0.0,
     "fbaStock": 0,
     "whOnHand": 0,
-    "whAvailable": 0
+    "whAvailable": 0,
+    "casepack": 1,
+    "cartonLength": 0,
+    "cartonWidth": 0,
+    "cartonHeight": 0
   },
   {
     "sku": "GGRTNW21165FBM",
@@ -1306,7 +1610,11 @@
     "lyAur": 0.0,
     "fbaStock": 0,
     "whOnHand": 0,
-    "whAvailable": 0
+    "whAvailable": 0,
+    "casepack": 1,
+    "cartonLength": 0,
+    "cartonWidth": 0,
+    "cartonHeight": 0
   },
   {
     "sku": "T-GGRTNW21165",
@@ -1323,7 +1631,11 @@
     "lyAur": 0.0,
     "fbaStock": 0,
     "whOnHand": 0,
-    "whAvailable": 0
+    "whAvailable": 0,
+    "casepack": 1,
+    "cartonLength": 0,
+    "cartonWidth": 0,
+    "cartonHeight": 0
   },
   {
     "sku": "GGRTNW21165 /DAM*",
@@ -1340,7 +1652,11 @@
     "lyAur": 0.0,
     "fbaStock": 0,
     "whOnHand": 0,
-    "whAvailable": 0
+    "whAvailable": 0,
+    "casepack": 1,
+    "cartonLength": 0,
+    "cartonWidth": 0,
+    "cartonHeight": 0
   },
   {
     "sku": "GGLFTSS222710FBM",
@@ -1357,7 +1673,11 @@
     "lyAur": 0.0,
     "fbaStock": 0,
     "whOnHand": 0,
-    "whAvailable": 0
+    "whAvailable": 0,
+    "casepack": 1,
+    "cartonLength": 0,
+    "cartonWidth": 0,
+    "cartonHeight": 0
   },
   {
     "sku": "GGLFTSS222710 /DAM*",
@@ -1374,7 +1694,11 @@
     "lyAur": 0.0,
     "fbaStock": 0,
     "whOnHand": 0,
-    "whAvailable": 0
+    "whAvailable": 0,
+    "casepack": 1,
+    "cartonLength": 0,
+    "cartonWidth": 0,
+    "cartonHeight": 0
   },
   {
     "sku": "GGWMSS222708/RB",
@@ -1391,7 +1715,11 @@
     "lyAur": 0.0,
     "fbaStock": 0,
     "whOnHand": 0,
-    "whAvailable": 0
+    "whAvailable": 0,
+    "casepack": 1,
+    "cartonLength": 0,
+    "cartonWidth": 0,
+    "cartonHeight": 0
   },
   {
     "sku": "GGWMSS222708 /DAM*",
@@ -1408,7 +1736,11 @@
     "lyAur": 0.0,
     "fbaStock": 0,
     "whOnHand": 0,
-    "whAvailable": 0
+    "whAvailable": 0,
+    "casepack": 1,
+    "cartonLength": 0,
+    "cartonWidth": 0,
+    "cartonHeight": 0
   },
   {
     "sku": "GGWMSS2116BMFBM",
@@ -1425,7 +1757,11 @@
     "lyAur": 0.0,
     "fbaStock": 0,
     "whOnHand": 0,
-    "whAvailable": 0
+    "whAvailable": 0,
+    "casepack": 1,
+    "cartonLength": 0,
+    "cartonWidth": 0,
+    "cartonHeight": 0
   },
   {
     "sku": "T-GGWMSS2116BM",
@@ -1442,7 +1778,11 @@
     "lyAur": 0.0,
     "fbaStock": 0,
     "whOnHand": 0,
-    "whAvailable": 0
+    "whAvailable": 0,
+    "casepack": 1,
+    "cartonLength": 0,
+    "cartonWidth": 0,
+    "cartonHeight": 0
   },
   {
     "sku": "GGWMSS2116BM /DAM*",
@@ -1459,7 +1799,11 @@
     "lyAur": 0.0,
     "fbaStock": 0,
     "whOnHand": 0,
-    "whAvailable": 0
+    "whAvailable": 0,
+    "casepack": 1,
+    "cartonLength": 0,
+    "cartonWidth": 0,
+    "cartonHeight": 0
   },
   {
     "sku": "GGRTNW222910/DONATE",
@@ -1476,7 +1820,11 @@
     "lyAur": 0.0,
     "fbaStock": 0,
     "whOnHand": 0,
-    "whAvailable": 0
+    "whAvailable": 0,
+    "casepack": 1,
+    "cartonLength": 0,
+    "cartonWidth": 0,
+    "cartonHeight": 0
   },
   {
     "sku": "GGRTNW222910/RB",
@@ -1493,7 +1841,11 @@
     "lyAur": 0.0,
     "fbaStock": 0,
     "whOnHand": 0,
-    "whAvailable": 0
+    "whAvailable": 0,
+    "casepack": 1,
+    "cartonLength": 0,
+    "cartonWidth": 0,
+    "cartonHeight": 0
   },
   {
     "sku": "GGRTNW222910/RETD",
@@ -1510,7 +1862,11 @@
     "lyAur": 0.0,
     "fbaStock": 0,
     "whOnHand": 0,
-    "whAvailable": 0
+    "whAvailable": 0,
+    "casepack": 1,
+    "cartonLength": 0,
+    "cartonWidth": 0,
+    "cartonHeight": 0
   },
   {
     "sku": "GGRTNW222910FBM",
@@ -1527,7 +1883,11 @@
     "lyAur": 0.0,
     "fbaStock": 0,
     "whOnHand": 0,
-    "whAvailable": 0
+    "whAvailable": 0,
+    "casepack": 1,
+    "cartonLength": 0,
+    "cartonWidth": 0,
+    "cartonHeight": 0
   },
   {
     "sku": "GGRTNW222910FBM/DONATE",
@@ -1544,7 +1904,11 @@
     "lyAur": 0.0,
     "fbaStock": 0,
     "whOnHand": 0,
-    "whAvailable": 0
+    "whAvailable": 0,
+    "casepack": 1,
+    "cartonLength": 0,
+    "cartonWidth": 0,
+    "cartonHeight": 0
   },
   {
     "sku": "T-GGRTNW222910",
@@ -1561,7 +1925,11 @@
     "lyAur": 0.0,
     "fbaStock": 0,
     "whOnHand": 0,
-    "whAvailable": 0
+    "whAvailable": 0,
+    "casepack": 1,
+    "cartonLength": 0,
+    "cartonWidth": 0,
+    "cartonHeight": 0
   },
   {
     "sku": "T-GGRTNW222910/DONATE",
@@ -1578,7 +1946,11 @@
     "lyAur": 0.0,
     "fbaStock": 0,
     "whOnHand": 0,
-    "whAvailable": 0
+    "whAvailable": 0,
+    "casepack": 1,
+    "cartonLength": 0,
+    "cartonWidth": 0,
+    "cartonHeight": 0
   },
   {
     "sku": "GGRTNW222910 /DAM*",
@@ -1595,7 +1967,11 @@
     "lyAur": 0.0,
     "fbaStock": 0,
     "whOnHand": 0,
-    "whAvailable": 0
+    "whAvailable": 0,
+    "casepack": 1,
+    "cartonLength": 0,
+    "cartonWidth": 0,
+    "cartonHeight": 0
   },
   {
     "sku": "GGWMSS222910/DONATE",
@@ -1612,7 +1988,11 @@
     "lyAur": 0.0,
     "fbaStock": 0,
     "whOnHand": 0,
-    "whAvailable": 0
+    "whAvailable": 0,
+    "casepack": 1,
+    "cartonLength": 0,
+    "cartonWidth": 0,
+    "cartonHeight": 0
   },
   {
     "sku": "GGWMSS222910 /DAM*",
@@ -1629,7 +2009,11 @@
     "lyAur": 0.0,
     "fbaStock": 0,
     "whOnHand": 0,
-    "whAvailable": 0
+    "whAvailable": 0,
+    "casepack": 1,
+    "cartonLength": 0,
+    "cartonWidth": 0,
+    "cartonHeight": 0
   },
   {
     "sku": "GGLFTSS222910/DONATE",
@@ -1646,7 +2030,11 @@
     "lyAur": 0.0,
     "fbaStock": 0,
     "whOnHand": 0,
-    "whAvailable": 0
+    "whAvailable": 0,
+    "casepack": 1,
+    "cartonLength": 0,
+    "cartonWidth": 0,
+    "cartonHeight": 0
   },
   {
     "sku": "GGLFTSS222910/RB",
@@ -1663,7 +2051,11 @@
     "lyAur": 0.0,
     "fbaStock": 0,
     "whOnHand": 0,
-    "whAvailable": 0
+    "whAvailable": 0,
+    "casepack": 1,
+    "cartonLength": 0,
+    "cartonWidth": 0,
+    "cartonHeight": 0
   },
   {
     "sku": "GGLFTSS222910FBM",
@@ -1680,7 +2072,11 @@
     "lyAur": 0.0,
     "fbaStock": 0,
     "whOnHand": 0,
-    "whAvailable": 0
+    "whAvailable": 0,
+    "casepack": 1,
+    "cartonLength": 0,
+    "cartonWidth": 0,
+    "cartonHeight": 0
   },
   {
     "sku": "GGLFTSS222910FBM/RETD",
@@ -1697,7 +2093,11 @@
     "lyAur": 0.0,
     "fbaStock": 0,
     "whOnHand": 0,
-    "whAvailable": 0
+    "whAvailable": 0,
+    "casepack": 1,
+    "cartonLength": 0,
+    "cartonWidth": 0,
+    "cartonHeight": 0
   },
   {
     "sku": "T-GGLFTSS222910",
@@ -1714,7 +2114,11 @@
     "lyAur": 0.0,
     "fbaStock": 0,
     "whOnHand": 0,
-    "whAvailable": 0
+    "whAvailable": 0,
+    "casepack": 1,
+    "cartonLength": 0,
+    "cartonWidth": 0,
+    "cartonHeight": 0
   },
   {
     "sku": "T-GGLFTSS222910/RB",
@@ -1731,7 +2135,11 @@
     "lyAur": 0.0,
     "fbaStock": 0,
     "whOnHand": 0,
-    "whAvailable": 0
+    "whAvailable": 0,
+    "casepack": 1,
+    "cartonLength": 0,
+    "cartonWidth": 0,
+    "cartonHeight": 0
   },
   {
     "sku": "GGLFTSS222910 /DAM*",
@@ -1748,7 +2156,11 @@
     "lyAur": 0.0,
     "fbaStock": 0,
     "whOnHand": 0,
-    "whAvailable": 0
+    "whAvailable": 0,
+    "casepack": 1,
+    "cartonLength": 0,
+    "cartonWidth": 0,
+    "cartonHeight": 0
   },
   {
     "sku": "GGRTNW21196/DONATE",
@@ -1765,7 +2177,11 @@
     "lyAur": 0.0,
     "fbaStock": 0,
     "whOnHand": 0,
-    "whAvailable": 0
+    "whAvailable": 0,
+    "casepack": 1,
+    "cartonLength": 0,
+    "cartonWidth": 0,
+    "cartonHeight": 0
   },
   {
     "sku": "GGRTNW21196/HOLD",
@@ -1782,7 +2198,11 @@
     "lyAur": 0.0,
     "fbaStock": 0,
     "whOnHand": 0,
-    "whAvailable": 0
+    "whAvailable": 0,
+    "casepack": 1,
+    "cartonLength": 0,
+    "cartonWidth": 0,
+    "cartonHeight": 0
   },
   {
     "sku": "GGRTNW21196/RETD",
@@ -1799,7 +2219,11 @@
     "lyAur": 0.0,
     "fbaStock": 0,
     "whOnHand": 0,
-    "whAvailable": 0
+    "whAvailable": 0,
+    "casepack": 1,
+    "cartonLength": 0,
+    "cartonWidth": 0,
+    "cartonHeight": 0
   },
   {
     "sku": "T-GGRTNW21196",
@@ -1816,7 +2240,11 @@
     "lyAur": 0.0,
     "fbaStock": 0,
     "whOnHand": 0,
-    "whAvailable": 0
+    "whAvailable": 0,
+    "casepack": 1,
+    "cartonLength": 0,
+    "cartonWidth": 0,
+    "cartonHeight": 0
   },
   {
     "sku": "GGRTNW21196 /DAM*",
@@ -1833,7 +2261,11 @@
     "lyAur": 0.0,
     "fbaStock": 0,
     "whOnHand": 0,
-    "whAvailable": 0
+    "whAvailable": 0,
+    "casepack": 1,
+    "cartonLength": 0,
+    "cartonWidth": 0,
+    "cartonHeight": 0
   },
   {
     "sku": "GGWMSS2230BM/1/DONATE",
@@ -1850,7 +2282,11 @@
     "lyAur": 0.0,
     "fbaStock": 0,
     "whOnHand": 0,
-    "whAvailable": 0
+    "whAvailable": 0,
+    "casepack": 1,
+    "cartonLength": 0,
+    "cartonWidth": 0,
+    "cartonHeight": 0
   },
   {
     "sku": "GGWMSS2230BM/1/RB",
@@ -1867,7 +2303,11 @@
     "lyAur": 0.0,
     "fbaStock": 0,
     "whOnHand": 0,
-    "whAvailable": 0
+    "whAvailable": 0,
+    "casepack": 1,
+    "cartonLength": 0,
+    "cartonWidth": 0,
+    "cartonHeight": 0
   },
   {
     "sku": "GGWMSS2230BM /DAM*",
@@ -1884,7 +2324,11 @@
     "lyAur": 0.0,
     "fbaStock": 0,
     "whOnHand": 0,
-    "whAvailable": 0
+    "whAvailable": 0,
+    "casepack": 1,
+    "cartonLength": 0,
+    "cartonWidth": 0,
+    "cartonHeight": 0
   },
   {
     "sku": "GGWMSS2231BM/1",
@@ -1901,7 +2345,11 @@
     "lyAur": 0.0,
     "fbaStock": 0,
     "whOnHand": 0,
-    "whAvailable": 0
+    "whAvailable": 0,
+    "casepack": 1,
+    "cartonLength": 0,
+    "cartonWidth": 0,
+    "cartonHeight": 0
   },
   {
     "sku": "GGWMSS2231BM /DAM*",
@@ -1918,7 +2366,11 @@
     "lyAur": 0.0,
     "fbaStock": 0,
     "whOnHand": 0,
-    "whAvailable": 0
+    "whAvailable": 0,
+    "casepack": 1,
+    "cartonLength": 0,
+    "cartonWidth": 0,
+    "cartonHeight": 0
   },
   {
     "sku": "GGWMSS2232BM/1",
@@ -1935,7 +2387,11 @@
     "lyAur": 0.0,
     "fbaStock": 0,
     "whOnHand": 0,
-    "whAvailable": 0
+    "whAvailable": 0,
+    "casepack": 1,
+    "cartonLength": 0,
+    "cartonWidth": 0,
+    "cartonHeight": 0
   },
   {
     "sku": "GGWMSS2232BM /DAM*",
@@ -1952,7 +2408,11 @@
     "lyAur": 0.0,
     "fbaStock": 0,
     "whOnHand": 0,
-    "whAvailable": 0
+    "whAvailable": 0,
+    "casepack": 1,
+    "cartonLength": 0,
+    "cartonWidth": 0,
+    "cartonHeight": 0
   },
   {
     "sku": "GGWMSS2235BM/1",
@@ -1969,7 +2429,11 @@
     "lyAur": 0.0,
     "fbaStock": 0,
     "whOnHand": 0,
-    "whAvailable": 0
+    "whAvailable": 0,
+    "casepack": 1,
+    "cartonLength": 0,
+    "cartonWidth": 0,
+    "cartonHeight": 0
   },
   {
     "sku": "GGWMSS2235BM /DAM*",
@@ -1986,7 +2450,11 @@
     "lyAur": 0.0,
     "fbaStock": 0,
     "whOnHand": 0,
-    "whAvailable": 0
+    "whAvailable": 0,
+    "casepack": 1,
+    "cartonLength": 0,
+    "cartonWidth": 0,
+    "cartonHeight": 0
   },
   {
     "sku": "GGWMSS2240BM/1",
@@ -2003,7 +2471,11 @@
     "lyAur": 0.0,
     "fbaStock": 0,
     "whOnHand": 0,
-    "whAvailable": 0
+    "whAvailable": 0,
+    "casepack": 1,
+    "cartonLength": 0,
+    "cartonWidth": 0,
+    "cartonHeight": 0
   },
   {
     "sku": "GGWMSS2240BM/1/RB",
@@ -2020,7 +2492,11 @@
     "lyAur": 0.0,
     "fbaStock": 0,
     "whOnHand": 0,
-    "whAvailable": 0
+    "whAvailable": 0,
+    "casepack": 1,
+    "cartonLength": 0,
+    "cartonWidth": 0,
+    "cartonHeight": 0
   },
   {
     "sku": "GGWMSS2240BM/1/RETD",
@@ -2037,7 +2513,11 @@
     "lyAur": 0.0,
     "fbaStock": 0,
     "whOnHand": 0,
-    "whAvailable": 0
+    "whAvailable": 0,
+    "casepack": 1,
+    "cartonLength": 0,
+    "cartonWidth": 0,
+    "cartonHeight": 0
   },
   {
     "sku": "GGWMSS2240BM /DAM*",
@@ -2054,7 +2534,11 @@
     "lyAur": 0.0,
     "fbaStock": 0,
     "whOnHand": 0,
-    "whAvailable": 0
+    "whAvailable": 0,
+    "casepack": 1,
+    "cartonLength": 0,
+    "cartonWidth": 0,
+    "cartonHeight": 0
   },
   {
     "sku": "GGWMSS2236BM/1",
@@ -2071,7 +2555,11 @@
     "lyAur": 0.0,
     "fbaStock": 0,
     "whOnHand": 0,
-    "whAvailable": 0
+    "whAvailable": 0,
+    "casepack": 1,
+    "cartonLength": 0,
+    "cartonWidth": 0,
+    "cartonHeight": 0
   },
   {
     "sku": "GGWMSS2236BM/1/RB",
@@ -2088,7 +2576,11 @@
     "lyAur": 0.0,
     "fbaStock": 0,
     "whOnHand": 0,
-    "whAvailable": 0
+    "whAvailable": 0,
+    "casepack": 1,
+    "cartonLength": 0,
+    "cartonWidth": 0,
+    "cartonHeight": 0
   },
   {
     "sku": "GGWMSS2236BM/1/RETD",
@@ -2105,7 +2597,11 @@
     "lyAur": 0.0,
     "fbaStock": 0,
     "whOnHand": 0,
-    "whAvailable": 0
+    "whAvailable": 0,
+    "casepack": 1,
+    "cartonLength": 0,
+    "cartonWidth": 0,
+    "cartonHeight": 0
   },
   {
     "sku": "GGWMSS2236BM /DAM*",
@@ -2122,7 +2618,11 @@
     "lyAur": 0.0,
     "fbaStock": 0,
     "whOnHand": 0,
-    "whAvailable": 0
+    "whAvailable": 0,
+    "casepack": 1,
+    "cartonLength": 0,
+    "cartonWidth": 0,
+    "cartonHeight": 0
   },
   {
     "sku": "GGWMSS2239BM/1",
@@ -2139,7 +2639,11 @@
     "lyAur": 0.0,
     "fbaStock": 0,
     "whOnHand": 0,
-    "whAvailable": 0
+    "whAvailable": 0,
+    "casepack": 1,
+    "cartonLength": 0,
+    "cartonWidth": 0,
+    "cartonHeight": 0
   },
   {
     "sku": "GGWMSS2239BM/1/RB",
@@ -2156,7 +2660,11 @@
     "lyAur": 0.0,
     "fbaStock": 0,
     "whOnHand": 0,
-    "whAvailable": 0
+    "whAvailable": 0,
+    "casepack": 1,
+    "cartonLength": 0,
+    "cartonWidth": 0,
+    "cartonHeight": 0
   },
   {
     "sku": "GGWMSS2239BM /DAM*",
@@ -2173,7 +2681,11 @@
     "lyAur": 0.0,
     "fbaStock": 0,
     "whOnHand": 0,
-    "whAvailable": 0
+    "whAvailable": 0,
+    "casepack": 1,
+    "cartonLength": 0,
+    "cartonWidth": 0,
+    "cartonHeight": 0
   },
   {
     "sku": "GGWMSS2237BM/1",
@@ -2190,7 +2702,11 @@
     "lyAur": 0.0,
     "fbaStock": 0,
     "whOnHand": 0,
-    "whAvailable": 0
+    "whAvailable": 0,
+    "casepack": 1,
+    "cartonLength": 0,
+    "cartonWidth": 0,
+    "cartonHeight": 0
   },
   {
     "sku": "GGWMSS2237BM/1/DONATE",
@@ -2207,7 +2723,11 @@
     "lyAur": 0.0,
     "fbaStock": 0,
     "whOnHand": 0,
-    "whAvailable": 0
+    "whAvailable": 0,
+    "casepack": 1,
+    "cartonLength": 0,
+    "cartonWidth": 0,
+    "cartonHeight": 0
   },
   {
     "sku": "GGWMSS2237BM/1/RB",
@@ -2224,7 +2744,11 @@
     "lyAur": 0.0,
     "fbaStock": 0,
     "whOnHand": 0,
-    "whAvailable": 0
+    "whAvailable": 0,
+    "casepack": 1,
+    "cartonLength": 0,
+    "cartonWidth": 0,
+    "cartonHeight": 0
   },
   {
     "sku": "GGWMSS2237BM/1/RETD",
@@ -2241,7 +2765,11 @@
     "lyAur": 0.0,
     "fbaStock": 0,
     "whOnHand": 0,
-    "whAvailable": 0
+    "whAvailable": 0,
+    "casepack": 1,
+    "cartonLength": 0,
+    "cartonWidth": 0,
+    "cartonHeight": 0
   },
   {
     "sku": "GGWMSS2237BM/DONATE",
@@ -2258,7 +2786,11 @@
     "lyAur": 0.0,
     "fbaStock": 0,
     "whOnHand": 0,
-    "whAvailable": 0
+    "whAvailable": 0,
+    "casepack": 6,
+    "cartonLength": 0,
+    "cartonWidth": 0,
+    "cartonHeight": 0
   },
   {
     "sku": "GGWMSS2237BM /DAM*",
@@ -2275,7 +2807,11 @@
     "lyAur": 0.0,
     "fbaStock": 0,
     "whOnHand": 0,
-    "whAvailable": 0
+    "whAvailable": 0,
+    "casepack": 1,
+    "cartonLength": 0,
+    "cartonWidth": 0,
+    "cartonHeight": 0
   },
   {
     "sku": "GGWMSS2241BM/1",
@@ -2292,7 +2828,11 @@
     "lyAur": 0.0,
     "fbaStock": 0,
     "whOnHand": 0,
-    "whAvailable": 0
+    "whAvailable": 0,
+    "casepack": 1,
+    "cartonLength": 0,
+    "cartonWidth": 0,
+    "cartonHeight": 0
   },
   {
     "sku": "GGWMSS2241BM /DAM*",
@@ -2309,7 +2849,11 @@
     "lyAur": 0.0,
     "fbaStock": 0,
     "whOnHand": 0,
-    "whAvailable": 0
+    "whAvailable": 0,
+    "casepack": 1,
+    "cartonLength": 0,
+    "cartonWidth": 0,
+    "cartonHeight": 0
   },
   {
     "sku": "GGWMSS2238BM/1",
@@ -2326,7 +2870,11 @@
     "lyAur": 0.0,
     "fbaStock": 0,
     "whOnHand": 0,
-    "whAvailable": 0
+    "whAvailable": 0,
+    "casepack": 1,
+    "cartonLength": 0,
+    "cartonWidth": 0,
+    "cartonHeight": 0
   },
   {
     "sku": "GGWMSS2238BM/1/RB",
@@ -2343,7 +2891,11 @@
     "lyAur": 0.0,
     "fbaStock": 0,
     "whOnHand": 0,
-    "whAvailable": 0
+    "whAvailable": 0,
+    "casepack": 1,
+    "cartonLength": 0,
+    "cartonWidth": 0,
+    "cartonHeight": 0
   },
   {
     "sku": "GGWMSS2238BM /DAM*",
@@ -2360,6 +2912,10 @@
     "lyAur": 0.0,
     "fbaStock": 0,
     "whOnHand": 0,
-    "whAvailable": 0
+    "whAvailable": 0,
+    "casepack": 1,
+    "cartonLength": 0,
+    "cartonWidth": 0,
+    "cartonHeight": 0
   }
 ]

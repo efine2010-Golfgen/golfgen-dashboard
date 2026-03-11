@@ -9,7 +9,18 @@
     "unitCost": 6.1,
     "unitRetail": 9.97,
     "aur": 9.97,
-    "storeCount": 1201
+    "storeCount": 1202,
+    "casepack": 3,
+    "cartonLength": 0,
+    "cartonWidth": 0,
+    "cartonHeight": 0,
+    "color": "Multi",
+    "brand": "PGAT",
+    "series": "Tee Up",
+    "productType": "Golf Balls",
+    "pieceCount": 4,
+    "orientation": "",
+    "itemCategory": "Practice Aids"
   },
   {
     "golfgenItem": "GGWMSS2103BM",
@@ -21,7 +32,18 @@
     "unitCost": 4.76,
     "unitRetail": 8.98,
     "aur": 8.98,
-    "storeCount": 67
+    "storeCount": 66,
+    "casepack": 4,
+    "cartonLength": 0,
+    "cartonWidth": 0,
+    "cartonHeight": 0,
+    "color": "Multi",
+    "brand": "PGAT",
+    "series": "Tee Up",
+    "productType": "Targets",
+    "pieceCount": "",
+    "orientation": "",
+    "itemCategory": "Practice Aids"
   },
   {
     "golfgenItem": "GGWMSS2114BM",
@@ -33,7 +55,18 @@
     "unitCost": 4.76,
     "unitRetail": 9.97,
     "aur": 9.97,
-    "storeCount": 1876
+    "storeCount": 1886,
+    "casepack": 4,
+    "cartonLength": 0,
+    "cartonWidth": 0,
+    "cartonHeight": 0,
+    "color": "White",
+    "brand": "PGAT",
+    "series": "Practice Aids",
+    "productType": "Foam Balls",
+    "pieceCount": "",
+    "orientation": "",
+    "itemCategory": "Practice Aids"
   },
   {
     "golfgenItem": "GGWMSS2116BM",
@@ -45,7 +78,18 @@
     "unitCost": 60.01,
     "unitRetail": 99.0,
     "aur": 99.0,
-    "storeCount": 1206
+    "storeCount": 1206,
+    "casepack": 1,
+    "cartonLength": 0,
+    "cartonWidth": 0,
+    "cartonHeight": 0,
+    "color": "Red",
+    "brand": "PGAT",
+    "series": "G1",
+    "productType": "Golf Club Set",
+    "pieceCount": 5,
+    "orientation": "RH",
+    "itemCategory": "Junior Clubs"
   },
   {
     "golfgenItem": "GGWMSS2115BM",
@@ -57,7 +101,18 @@
     "unitCost": 5.25,
     "unitRetail": 10.97,
     "aur": 9.97,
-    "storeCount": 2550
+    "storeCount": 2569,
+    "casepack": 4,
+    "cartonLength": 0,
+    "cartonWidth": 0,
+    "cartonHeight": 0,
+    "color": "Multi",
+    "brand": "PGAT",
+    "series": "Practice Aids",
+    "productType": "Foam Balls",
+    "pieceCount": "",
+    "orientation": "",
+    "itemCategory": "Practice Aids"
   },
   {
     "golfgenItem": "GGWMSS2226BM",
@@ -69,7 +124,18 @@
     "unitCost": 59.0,
     "unitRetail": 85.0,
     "aur": 85.0,
-    "storeCount": 248
+    "storeCount": 248,
+    "casepack": 1,
+    "cartonLength": 0,
+    "cartonWidth": 0,
+    "cartonHeight": 0,
+    "color": "Green",
+    "brand": "PGAT",
+    "series": "G1",
+    "productType": "Golf Club Set",
+    "pieceCount": 5,
+    "orientation": "RH",
+    "itemCategory": "Junior Clubs"
   },
   {
     "golfgenItem": "GGWMSS2225BM",
@@ -81,7 +147,18 @@
     "unitCost": 4.19,
     "unitRetail": 10.97,
     "aur": 9.97,
-    "storeCount": 242
+    "storeCount": 236,
+    "casepack": 4,
+    "cartonLength": 0,
+    "cartonWidth": 0,
+    "cartonHeight": 0,
+    "color": "Multi",
+    "brand": "PGAT",
+    "series": "Practice Aids",
+    "productType": "Foam Balls",
+    "pieceCount": 4,
+    "orientation": "",
+    "itemCategory": "Practice Aids"
   },
   {
     "golfgenItem": "GGWMSS2122BM",
@@ -93,7 +170,18 @@
     "unitCost": 83.82,
     "unitRetail": 129.0,
     "aur": 129.0,
-    "storeCount": 1204
+    "storeCount": 1204,
+    "casepack": 1,
+    "cartonLength": 0,
+    "cartonWidth": 0,
+    "cartonHeight": 0,
+    "color": "Blue",
+    "brand": "PGAT",
+    "series": "G1",
+    "productType": "Golf Club Set",
+    "pieceCount": 7,
+    "orientation": "RH",
+    "itemCategory": "Junior Clubs"
   },
   {
     "golfgenItem": "GGWMSS2451BM",
@@ -105,7 +193,18 @@
     "unitCost": 22.4,
     "unitRetail": 38.97,
     "aur": 34.97,
-    "storeCount": 1872
+    "storeCount": 1893,
+    "casepack": 2,
+    "cartonLength": 0,
+    "cartonWidth": 0,
+    "cartonHeight": 0,
+    "color": "Multi",
+    "brand": "PGAT",
+    "series": "Tee Up",
+    "productType": "Starter Set",
+    "pieceCount": "",
+    "orientation": "",
+    "itemCategory": "Practice Aids"
   },
   {
     "golfgenItem": "GGWMSS2452BM",
@@ -117,7 +216,18 @@
     "unitCost": 22.4,
     "unitRetail": 38.97,
     "aur": 34.97,
-    "storeCount": 1865
+    "storeCount": 1888,
+    "casepack": 2,
+    "cartonLength": 0,
+    "cartonWidth": 0,
+    "cartonHeight": 0,
+    "color": "Multi",
+    "brand": "PGAT",
+    "series": "Tee Up",
+    "productType": "Starter Set",
+    "pieceCount": "",
+    "orientation": "",
+    "itemCategory": "Practice Aids"
   },
   {
     "golfgenItem": "GGRTFTG2228",
@@ -129,7 +239,18 @@
     "unitCost": 65.0,
     "unitRetail": 89.0,
     "aur": 89.0,
-    "storeCount": 742
+    "storeCount": 732,
+    "casepack": 1,
+    "cartonLength": 0,
+    "cartonWidth": 0,
+    "cartonHeight": 0,
+    "color": "Green",
+    "brand": "PGAT",
+    "series": "1st Tee",
+    "productType": "Golf Club Set",
+    "pieceCount": "",
+    "orientation": "RH",
+    "itemCategory": "Junior Clubs"
   },
   {
     "golfgenItem": "GGRTFTR2168",
@@ -141,7 +262,18 @@
     "unitCost": 65.95,
     "unitRetail": 99.0,
     "aur": 99.0,
-    "storeCount": 1198
+    "storeCount": 1200,
+    "casepack": 1,
+    "cartonLength": 0,
+    "cartonWidth": 0,
+    "cartonHeight": 0,
+    "color": "Red",
+    "brand": "PGAT",
+    "series": "1st Tee",
+    "productType": "Golf Club Set",
+    "pieceCount": "",
+    "orientation": "RH",
+    "itemCategory": "Junior Clubs"
   },
   {
     "golfgenItem": "GGRTFTB2178",
@@ -153,7 +285,18 @@
     "unitCost": 92.12,
     "unitRetail": 129.0,
     "aur": 129.0,
-    "storeCount": 1201
+    "storeCount": 1200,
+    "casepack": 1,
+    "cartonLength": 0,
+    "cartonWidth": 0,
+    "cartonHeight": 0,
+    "color": "Blue",
+    "brand": "PGAT",
+    "series": "1st Tee",
+    "productType": "Golf Club Set",
+    "pieceCount": "",
+    "orientation": "RH",
+    "itemCategory": "Junior Clubs"
   },
   {
     "golfgenItem": "GGRTFTO2198",
@@ -165,6 +308,17 @@
     "unitCost": 98.15,
     "unitRetail": 149.0,
     "aur": 149.0,
-    "storeCount": 234
+    "storeCount": 234,
+    "casepack": 1,
+    "cartonLength": 0,
+    "cartonWidth": 0,
+    "cartonHeight": 0,
+    "color": "Orange",
+    "brand": "PGAT",
+    "series": "1st Tee",
+    "productType": "Golf Club Set",
+    "pieceCount": "",
+    "orientation": "RH",
+    "itemCategory": "Junior Clubs"
   }
 ]

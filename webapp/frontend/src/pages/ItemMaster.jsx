@@ -389,10 +389,16 @@ export default function ItemMaster() {
             <thead>
               <tr>
                 <th style={{ minWidth: 260, textAlign: "left" }}>Product</th>
+                <th style={{ textAlign: "left" }}>Color</th>
+                <th style={{ textAlign: "left" }}>Series</th>
+                <th style={{ textAlign: "left" }}>Type</th>
+                <th style={{ textAlign: "right" }}>Pcs</th>
+                <th style={{ textAlign: "left" }}>Hand</th>
                 <th style={{ textAlign: "left" }}>Category</th>
+                <th style={{ textAlign: "right" }}>Casepack</th>
+                <th style={{ textAlign: "right" }}>Carton (L×W×H)</th>
                 <th style={{ textAlign: "right" }}>Unit Cost</th>
                 <th style={{ textAlign: "right" }}>Unit Retail</th>
-                <th style={{ textAlign: "right" }}>Carton Size</th>
                 <th style={{ textAlign: "right" }}>Store Count</th>
                 <th style={{ textAlign: "right" }}>FY26 Plan</th>
               </tr>
@@ -409,10 +415,20 @@ export default function ItemMaster() {
                       {item.walmartItem ? ` · ${item.walmartItem}` : ""}
                     </div>
                   </td>
-                  <td style={{ fontSize: 12, color: "var(--muted)" }}>{item.subcategory || item.category || "—"}</td>
+                  <td>{item.color ? <Badge color={item.color} /> : "—"}</td>
+                  <td style={{ fontSize: 12 }}>{item.series || "—"}</td>
+                  <td style={{ fontSize: 12 }}>{item.productType || "—"}</td>
+                  <td style={{ textAlign: "right" }}>{item.pieceCount || "—"}</td>
+                  <td style={{ fontSize: 12 }}>{item.orientation || "—"}</td>
+                  <td style={{ fontSize: 12, color: "var(--muted)" }}>{item.itemCategory || item.subcategory || item.category || "—"}</td>
+                  <td style={{ textAlign: "right" }}>{item.casepack || "—"}</td>
+                  <td style={{ textAlign: "right", fontSize: 11, color: "var(--muted)" }}>
+                    {item.cartonLength && item.cartonWidth && item.cartonHeight
+                      ? `${item.cartonLength}×${item.cartonWidth}×${item.cartonHeight}`
+                      : "—"}
+                  </td>
                   <td style={{ textAlign: "right" }}>{item.unitCost ? `$${item.unitCost.toFixed(2)}` : "—"}</td>
                   <td style={{ textAlign: "right" }}>{item.unitRetail ? `$${item.unitRetail.toFixed(2)}` : "—"}</td>
-                  <td style={{ textAlign: "right" }}>{item.cartonSize || "—"}</td>
                   <td style={{ textAlign: "right", fontWeight: 600 }}>{(item.storeCount || 0).toLocaleString()}</td>
                   <td style={{ textAlign: "right" }}>
                     <EditableCell value={item.plannedAnnualUnits || 0}
@@ -447,6 +463,16 @@ export default function ItemMaster() {
         secondaryId: a.asin,
         channel: "Amazon",
         color: a.color,
+        brand: a.brand || "",
+        series: a.series || "",
+        productType: a.productType || "",
+        pieceCount: a.pieceCount || "",
+        orientation: a.orientation || "",
+        category: a.category || "",
+        casepack: a.casepack || a.cartonPack || 0,
+        cartonLength: a.cartonLength || 0,
+        cartonWidth: a.cartonWidth || 0,
+        cartonHeight: a.cartonHeight || 0,
         unitCost: a.unitCost,
         plannedAnnualUnits: a.plannedAnnualUnits || 0,
         lyRevenue: a.lyRevenue || 0,
@@ -464,7 +490,17 @@ export default function ItemMaster() {
         sku: w.golfgenItem || w.itemNumber,
         secondaryId: w.walmartItem,
         channel: "Walmart",
-        color: null,
+        color: w.color || "",
+        brand: w.brand || "",
+        series: w.series || "",
+        productType: w.productType || "",
+        pieceCount: w.pieceCount || "",
+        orientation: w.orientation || "",
+        category: w.itemCategory || w.subcategory || "",
+        casepack: w.casepack || 0,
+        cartonLength: w.cartonLength || 0,
+        cartonWidth: w.cartonWidth || 0,
+        cartonHeight: w.cartonHeight || 0,
         unitCost: w.unitCost || 0,
         plannedAnnualUnits: w.plannedAnnualUnits || 0,
         lyRevenue: 0,
@@ -576,6 +612,14 @@ export default function ItemMaster() {
               <tr>
                 <SortHeader label="Product" field="name" style={{ minWidth: 280, textAlign: "left" }} />
                 <th style={{ textAlign: "left" }}>Channel</th>
+                <SortHeader label="Color" field="color" style={{ textAlign: "left" }} />
+                <th style={{ textAlign: "left" }}>Series</th>
+                <th style={{ textAlign: "left" }}>Type</th>
+                <th style={{ textAlign: "right" }}>Pcs</th>
+                <th style={{ textAlign: "left" }}>Hand</th>
+                <th style={{ textAlign: "left" }}>Category</th>
+                <th style={{ textAlign: "right" }}>Casepack</th>
+                <th style={{ textAlign: "right" }}>Carton (L×W×H)</th>
                 <SortHeader label="COGS" field="unitCost" style={{ textAlign: "right" }} />
                 <SortHeader label="Price" field="netPrice" style={{ textAlign: "right" }} />
                 <SortHeader label="FY26 Plan" field="plannedAnnualUnits" style={{ textAlign: "right" }} />
@@ -602,6 +646,18 @@ export default function ItemMaster() {
                     }}>
                       {item.channel}
                     </span>
+                  </td>
+                  <td>{item.color ? <Badge color={item.color} /> : "—"}</td>
+                  <td style={{ fontSize: 12 }}>{item.series || "—"}</td>
+                  <td style={{ fontSize: 12 }}>{item.productType || "—"}</td>
+                  <td style={{ textAlign: "right" }}>{item.pieceCount || "—"}</td>
+                  <td style={{ fontSize: 12 }}>{item.orientation || "—"}</td>
+                  <td style={{ fontSize: 12, color: "var(--muted)" }}>{item.category || "—"}</td>
+                  <td style={{ textAlign: "right" }}>{item.casepack || "—"}</td>
+                  <td style={{ textAlign: "right", fontSize: 11, color: "var(--muted)" }}>
+                    {item.cartonLength && item.cartonWidth && item.cartonHeight
+                      ? `${item.cartonLength}×${item.cartonWidth}×${item.cartonHeight}`
+                      : "—"}
                   </td>
                   <td style={{ textAlign: "right" }}>{item.unitCost > 0 ? `$${item.unitCost.toFixed(2)}` : "—"}</td>
                   <td style={{ textAlign: "right", fontWeight: 600 }}>{item.netPrice > 0 ? `$${item.netPrice.toFixed(2)}` : "—"}</td>
@@ -735,9 +791,14 @@ export default function ItemMaster() {
             <tr>
               <SortHeader label="Product" field="productName" style={{ minWidth: 280, textAlign: "left" }} />
               <SortHeader label="Color" field="color" style={{ textAlign: "left" }} />
+              <SortHeader label="Brand" field="brand" style={{ textAlign: "left" }} />
+              <SortHeader label="Series" field="series" style={{ textAlign: "left" }} />
               <SortHeader label="Type" field="productType" style={{ textAlign: "left" }} />
               <SortHeader label="Pcs" field="pieceCount" style={{ textAlign: "right" }} />
               <SortHeader label="Hand" field="orientation" style={{ textAlign: "left" }} />
+              <SortHeader label="Category" field="category" style={{ textAlign: "left" }} />
+              <th style={{ textAlign: "right" }}>Casepack</th>
+              <th style={{ textAlign: "right" }}>Carton (L×W×H)</th>
               <SortHeader label="COGS" field="unitCost" style={{ textAlign: "right" }} />
               <SortHeader label="List $" field="listPrice" style={{ textAlign: "right" }} />
               <th style={{ textAlign: "right" }}>Sale $</th>
@@ -762,9 +823,18 @@ export default function ItemMaster() {
                     </div>
                   </td>
                   <td><Badge color={item.color} /></td>
-                  <td>{item.productType}</td>
+                  <td style={{ fontSize: 12 }}>{item.brand || "—"}</td>
+                  <td style={{ fontSize: 12 }}>{item.series || "—"}</td>
+                  <td style={{ fontSize: 12 }}>{item.productType || "—"}</td>
                   <td style={{ textAlign: "right" }}>{item.pieceCount || "—"}</td>
                   <td>{item.orientation || "—"}</td>
+                  <td style={{ fontSize: 12, color: "var(--muted)" }}>{item.category || "—"}</td>
+                  <td style={{ textAlign: "right" }}>{item.casepack || item.cartonPack || "—"}</td>
+                  <td style={{ textAlign: "right", fontSize: 11, color: "var(--muted)" }}>
+                    {item.cartonLength && item.cartonWidth && item.cartonHeight
+                      ? `${item.cartonLength}×${item.cartonWidth}×${item.cartonHeight}`
+                      : "—"}
+                  </td>
                   <td style={{ textAlign: "right" }}>
                     <EditableCell value={item.unitCost} prefix="$"
                       onSave={v => handleUpdate(item.asin, "unitCost", v)} />
