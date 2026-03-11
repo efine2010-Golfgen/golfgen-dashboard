@@ -4,353 +4,353 @@
       "shipper": "GUANGDONG SHANGTAI SPORTS GOODS CO., LTD",
       "hbl": "JYQDH2512361",
       "mode": "45' HC",
-      "container": "TCNU5873733",
       "vessel": "CMA CGM NINGBO / 0TNHIN1MA",
       "poNumber": "T-857500",
       "units": 2292.0,
-      "cbm": 75.6
+      "cbm": 75.6,
+      "containerNumber": "TCNU5873733"
     },
     {
       "shipper": "GUANGDONG SHANGTAI SPORTS GOODS CO., LTD",
       "hbl": "JYQDH2512362",
       "mode": "45' HC",
-      "container": "TIIU6280942",
       "vessel": "CMA CGM NINGBO / 0TNHIN1MA",
       "poNumber": "T-857500",
       "units": 2287.0,
-      "cbm": 75.7
+      "cbm": 75.7,
+      "containerNumber": "TIIU6280942"
     },
     {
       "shipper": "GUANGDONG SHANGTAI SPORTS GOODS CO., LTD",
       "hbl": "JYQDH2512362",
       "mode": "45' HC",
-      "container": "OOLU9110752",
       "vessel": "CMA CGM NINGBO / 0TNHIN1MA",
       "poNumber": "T-857500",
       "units": 2219.0,
-      "cbm": 73.724
+      "cbm": 73.724,
+      "containerNumber": "OOLU9110752"
     },
     {
       "shipper": "CBS HOUSEWARES LIMITED",
       "hbl": "JYQDH2601001",
       "mode": "40' GP",
-      "container": "CSNU8939680",
       "vessel": "MH PERSEUS / 0TNHKN1MA",
       "poNumber": "Z135000",
       "units": 4550.0,
-      "cbm": 55.921
+      "cbm": 55.921,
+      "containerNumber": "CSNU8939680"
     },
     {
       "shipper": "CBS HOUSEWARES LIMITED",
       "hbl": "JYQDH2601001",
       "mode": "40' HC",
-      "container": "OOCU9228883",
       "vessel": "MH PERSEUS / 0TNHKN1MA",
       "poNumber": "Z135000",
       "units": 12546.0,
-      "cbm": 66.222
+      "cbm": 66.222,
+      "containerNumber": "OOCU9228883"
     },
     {
       "shipper": "GLORY COMMODITY (HONG KONG) LIMITED",
       "hbl": "JYQDH2512424",
       "mode": "45' HC",
-      "container": "HDMU6994485",
       "vessel": "HYUNDAI MARS / 0052E",
       "poNumber": "2100",
       "units": 400.0,
-      "cbm": 65.76
+      "cbm": 65.76,
+      "containerNumber": "HDMU6994485"
     },
     {
       "shipper": "CBS HOUSEWARES LIMITED",
       "hbl": "JYQDH2601153",
       "mode": "20' GP",
-      "container": "TRDU6540192",
       "vessel": "EVER SMILE / 0145E",
       "poNumber": "Z135000",
       "units": 8406.0,
-      "cbm": 24.91
+      "cbm": 24.91,
+      "containerNumber": "TRDU6540192"
     },
     {
       "shipper": "GUANGDONG SHANGTAI SPORTS GOODS CO., LTD",
       "hbl": "JYQDH2601135",
       "mode": "45' HC",
-      "container": "MRSU4516373",
       "vessel": "MAERSK SYDNEY / 6030E",
       "poNumber": "T-857600",
       "units": 2152.0,
-      "cbm": 74.74
+      "cbm": 74.74,
+      "containerNumber": "MRSU4516373"
     },
     {
       "shipper": "GUANGDONG SHANGTAI SPORTS GOODS CO., LTD",
       "hbl": "JYQDH2601135",
       "mode": "45' HC",
-      "container": "MRSU4599547",
       "vessel": "MAERSK SYDNEY / 6030E",
       "poNumber": "T-857600",
       "units": 2150.0,
-      "cbm": 74.719
+      "cbm": 74.719,
+      "containerNumber": "MRSU4599547"
     },
     {
       "shipper": "GLORY COMMODITY (HONG KONG) LIMITED",
       "hbl": "JYQDH2512422",
       "mode": "45' HC",
-      "container": "MOEU1418769",
       "vessel": "ONE HAWK / 034E",
       "poNumber": "2100",
       "units": 400.0,
-      "cbm": 65.76
+      "cbm": 65.76,
+      "containerNumber": "MOEU1418769"
     },
     {
       "shipper": "GLORY COMMODITY (HONG KONG) LIMITED",
       "hbl": "JYQDH2601408",
       "mode": "40' HC",
-      "container": "CSNU6840913",
       "vessel": "CMA CGM OTELLO / 0TNHRS1MA",
       "poNumber": "T-857900 / T-857800",
       "units": 20700.0,
-      "cbm": 62.031
+      "cbm": 62.031,
+      "containerNumber": "CSNU6840913"
     },
     {
       "shipper": "GLORY COMMODITY (HONG KONG) LIMITED",
       "hbl": "JYQDH2601408",
       "mode": "40' HC",
-      "container": "OOCU9561826",
       "vessel": "CMA CGM OTELLO / 0TNHRS1MA",
       "poNumber": "T-857900 / T-857800",
       "units": 11210.0,
-      "cbm": 52.732
+      "cbm": 52.732,
+      "containerNumber": "OOCU9561826"
     },
     {
       "shipper": "GLORY COMMODITY (HONG KONG) LIMITED",
       "hbl": "JYQDH2602072",
       "mode": "40' HC",
-      "container": "CSGU6529420",
       "vessel": "EVER SHINE / 0149-156E",
       "poNumber": "T-857700",
       "units": 1997.0,
-      "cbm": 70.0
+      "cbm": 70.0,
+      "containerNumber": "CSGU6529420"
     },
     {
       "shipper": "GLORY COMMODITY (HONG KONG) LIMITED",
       "hbl": "JYQDH2602072",
       "mode": "40' HC",
-      "container": "CSGU6700614",
       "vessel": "EVER SHINE / 0149-156E",
       "poNumber": "T-857700",
       "units": 2893.0,
-      "cbm": 67.2
+      "cbm": 67.2,
+      "containerNumber": "CSGU6700614"
     },
     {
       "shipper": "GLORY COMMODITY (HONG KONG) LIMITED",
       "hbl": "JYQDH2602072",
       "mode": "40' HC",
-      "container": "CSGU6706628",
       "vessel": "EVER SHINE / 0149-156E",
       "poNumber": "T-857700",
       "units": 1470.0,
-      "cbm": 63.4
+      "cbm": 63.4,
+      "containerNumber": "CSGU6706628"
     },
     {
       "shipper": "DGDL LONGYU MYSH",
       "hbl": "JYQDH2602119",
       "mode": "40' HQ",
-      "container": "FFAU7869827",
       "vessel": "EVER ELITE / 0150-181E",
       "poNumber": "T-870100",
       "units": 1734.0,
-      "cbm": 68.8
+      "cbm": 68.8,
+      "containerNumber": "FFAU7869827"
     },
     {
       "shipper": "DGDL LONGYU MYSH",
       "hbl": "JYQDH2602151",
       "mode": "20' GP",
-      "container": "OOLU2290605",
       "vessel": "OOCL OAKLAND / 139E",
       "poNumber": "26182T1 / \n26182U2 /\nT-870100",
       "units": 650.0,
-      "cbm": 22.1
+      "cbm": 22.1,
+      "containerNumber": "OOLU2290605"
     },
     {
       "shipper": "SHIPMENT STATUS SUMMARY",
       "hbl": "",
       "mode": "",
-      "container": "",
       "vessel": "",
       "poNumber": "",
       "units": 0.0,
-      "cbm": null
+      "cbm": null,
+      "containerNumber": ""
     },
     {
       "shipper": "Status",
       "hbl": "Count",
       "mode": "Total Units",
-      "container": "Total CBM",
       "vessel": "",
       "poNumber": "",
       "units": 0.0,
-      "cbm": 0.0
+      "cbm": 0.0,
+      "containerNumber": "Total CBM"
     },
     {
       "shipper": "Pending Shipment",
       "hbl": "3 - 2",
       "mode": "",
-      "container": "",
       "vessel": "",
       "poNumber": "",
       "units": 0.0,
-      "cbm": 4.0
+      "cbm": 4.0,
+      "containerNumber": ""
     },
     {
       "shipper": "In Transit",
       "hbl": "2",
       "mode": "2384",
-      "container": "90.9",
       "vessel": "",
       "poNumber": "",
       "units": 0.0,
-      "cbm": null
+      "cbm": null,
+      "containerNumber": "90.9"
     },
     {
       "shipper": "Delivered",
       "hbl": "15",
       "mode": "75672",
-      "container": "968.419",
       "vessel": "",
       "poNumber": "",
       "units": 0.0,
-      "cbm": null
+      "cbm": null,
+      "containerNumber": "968.419"
     },
     {
       "shipper": "TOTAL",
       "hbl": "17",
       "mode": "78056",
-      "container": "1059.319",
       "vessel": "",
       "poNumber": "",
       "units": 0.0,
-      "cbm": null
+      "cbm": null,
+      "containerNumber": "1059.319"
     },
     {
       "shipper": "UPCOMING ARRIVALS (Next 30 Days)",
       "hbl": "",
       "mode": "",
-      "container": "",
       "vessel": "",
       "poNumber": "",
       "units": 0.0,
-      "cbm": null
+      "cbm": null,
+      "containerNumber": ""
     },
     {
       "shipper": "PO#",
       "hbl": "Container",
       "mode": "Vessel",
-      "container": "ETA Port",
       "vessel": "ETA Final",
       "poNumber": "Units",
       "units": 0.0,
-      "cbm": 0.0
+      "cbm": 0.0,
+      "containerNumber": "ETA Port"
     }
   ],
   "itemsByContainer": [
     {
-      "container": "TCNU5873733",
       "invoice": "GL250066GGA",
       "eta": "2026-01-24",
       "poNumber": "T-857500",
       "sku": "GGRTFTG2228",
       "description": "PGA TOUR Tee Up Golf Club Set - Green",
-      "quantity": 518.0
+      "containerNumber": "TCNU5873733",
+      "qty": 518.0
     },
     {
-      "container": "TIIU6280942",
       "invoice": "GL250066GGB",
       "eta": "2026-01-24",
       "poNumber": "T-857500",
       "sku": "GGRTFTG2228",
       "description": "PGA TOUR Tee Up Golf Club Set - Green",
-      "quantity": 510.0
+      "containerNumber": "TIIU6280942",
+      "qty": 510.0
     },
     {
-      "container": "OOLU9110752",
       "invoice": "GL250066GGC",
       "eta": "2026-01-24",
       "poNumber": "T-857500",
       "sku": "GGRTFTG2228",
       "description": "PGA TOUR Tee Up Golf Club Set - Green",
-      "quantity": 468.0
+      "containerNumber": "OOLU9110752",
+      "qty": 468.0
     },
     {
-      "container": "MRSU4516373",
       "invoice": "GL260003GGA",
       "eta": "2026-02-08",
       "poNumber": "T-857500",
       "sku": "GGRTFTG2228",
       "description": "Short Ship Makeup - Green",
-      "quantity": 54.0
+      "containerNumber": "MRSU4516373",
+      "qty": 54.0
     },
     {
-      "container": "HDMU6994485",
       "invoice": "GL260002",
       "eta": "2026-01-29",
       "poNumber": "2100",
       "sku": "KIT 1 (Grades K-5)",
       "description": "First Tee Canada Kit - 300 Kits",
-      "quantity": 300.0
+      "containerNumber": "HDMU6994485",
+      "qty": 300.0
     },
     {
-      "container": "MOEU1418769",
       "invoice": "GL260001",
       "eta": "2026-03-03",
       "poNumber": "2100",
       "sku": "KIT 1 (Grades K-5)",
       "description": "First Tee USA Kit - 300 Kits",
-      "quantity": 300.0
+      "containerNumber": "MOEU1418769",
+      "qty": 300.0
     },
     {
-      "container": "CSNU6840913",
       "invoice": "GL260005GG",
       "eta": "2026-03-02",
       "poNumber": "T-857900",
       "sku": "GGWMSS2451BM",
       "description": "PGA TOUR Tee Up Small Golf Club Set",
-      "quantity": 3200.0
+      "containerNumber": "CSNU6840913",
+      "qty": 3200.0
     },
     {
-      "container": "OOCU9561826",
       "invoice": "GL260006GG",
       "eta": "2026-03-02",
       "poNumber": "T-857900",
       "sku": "GGWMSS2452BM",
       "description": "PGA TOUR Tee Up Medium Golf Club Set",
-      "quantity": 3000.0
+      "containerNumber": "OOCU9561826",
+      "qty": 3000.0
     },
     {
-      "container": "NON-GOLF (EGB)",
       "invoice": "",
       "eta": null,
       "poNumber": "",
       "sku": "",
       "description": "",
-      "quantity": 0.0
+      "containerNumber": "NON-GOLF (EGB)",
+      "qty": 0.0
     },
     {
-      "container": "OOCU9228883",
       "invoice": "C260001EGB",
       "eta": "2026-01-30",
       "poNumber": "Z135000",
       "sku": "TH-TB40HSS-AQUA",
       "description": "40oz Handle Tumbler - Aqua",
-      "quantity": 1386.0
+      "containerNumber": "OOCU9228883",
+      "qty": 1386.0
     },
     {
-      "container": "CSNU8939680",
       "invoice": "C260002EGB",
       "eta": "2026-01-30",
       "poNumber": "Z135000",
       "sku": "TH-TB40HSS-DSRS",
       "description": "40oz Handle Tumbler - Desert Rose",
-      "quantity": 1260.0
+      "containerNumber": "CSNU8939680",
+      "qty": 1260.0
     }
   ],
-  "lastUpdated": "2026-03-11T11:17:34.082590"
+  "lastUpload": "2026-03-11T11:17:34.082590"
 }

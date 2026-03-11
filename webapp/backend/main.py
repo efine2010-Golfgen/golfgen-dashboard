@@ -1695,6 +1695,13 @@ def logout(golfgen_session: Optional[str] = Cookie(None)):
 
 # ── Helpers ─────────────────────────────────────────────
 
+def _require_auth(request: Request):
+    """Validate session cookie or raise 401."""
+    token = request.cookies.get("golfgen_session")
+    if not token or token not in _sessions:
+        raise HTTPException(status_code=401, detail="Not authenticated")
+
+
 def get_db():
     """Return a read-only DuckDB connection."""
     return duckdb.connect(str(DB_PATH), read_only=True)

@@ -1,5 +1,5 @@
 {
-  "factoryPOs": [
+  "purchaseOrders": [
     {
       "factory": "LONGHUI THREE HUNDRED SPORTING GOODS CO., LTD",
       "poNumber": "T-857500",
@@ -453,5 +453,5 @@
       "total": 94260.0
     }
   ],
-  "lastUpdated": "2026-03-11T11:17:34.080520"
+  "lastUpload": "2026-03-11T11:17:34.080520"
 }
