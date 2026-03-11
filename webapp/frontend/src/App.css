@@ -815,10 +815,26 @@ tr:hover td { background: var(--teal-bg); }
 
 .ip-detail-table .metric-col { min-width: 180px; max-width: 220px; }
 .ip-detail-table .override-row td { background: #FFFBEB; }
+.ip-detail-table .override-row td.ip-editable-cell { padding: 2px 3px; }
 .ip-detail-table .ly-row td { color: #64748B; }
 .ip-detail-table .lly-row td { color: #94A3B8; font-style: italic; }
 .ip-detail-table .projected-row td { background: #F0FDF4; }
 .ip-detail-table .total-row td { font-weight: 700; background: #F8FAFC; }
+
+/* Editable override cell inputs */
+.ip-cell-input {
+  width: 100%; min-width: 58px; max-width: 80px;
+  padding: 3px 4px; border: 1.5px solid #E5D89C; border-radius: 4px;
+  background: #FFFEF5; color: var(--body-text);
+  font-family: 'Space Grotesk', sans-serif; font-size: 11px;
+  text-align: right; outline: none; transition: border-color 0.15s;
+  -moz-appearance: textfield;
+}
+.ip-cell-input::-webkit-outer-spin-button,
+.ip-cell-input::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
+.ip-cell-input:focus { border-color: var(--blue); background: #fff; box-shadow: 0 0 0 2px rgba(62,101,140,0.15); }
+.ip-cell-input::placeholder { color: #C4B888; font-style: italic; }
+.ip-edit-hint { font-size: 10px; margin-left: 4px; opacity: 0.5; }
 
 /* Responsive */
 @media (max-width: 900px) {

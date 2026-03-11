@@ -191,15 +191,133 @@ function ItemPlanDetail({ plan, overrides, onOverride }) {
   const sku = plan.sku;
   const ov = overrides?.[sku] || {};
 
+  // Local state for editable override fields — keyed by overrideKey, value = { Jan: ..., Feb: ... }
+  const [localEdits, setLocalEdits] = useState({});
+  const [saving, setSaving] = useState({});
+
+  // Reset local edits when plan/sku changes
+  useEffect(() => {
+    setLocalEdits({});
+  }, [sku]);
+
   // Helper to get row data with override support
   function getRow(key, overrideKey) {
     const base = plan[key] || {};
-    const override = ov[overrideKey];
-    if (override) return { ...base, ...override };
-    return base;
+    const serverOv = ov[overrideKey];
+    const local = localEdits[overrideKey];
+    // Merge: base ← server override ← local edits
+    const merged = { ...base };
+    if (serverOv) Object.assign(merged, serverOv);
+    if (local) Object.assign(merged, local);
+    return merged;
   }
 
-  // Build display rows
+  // Get the "effective" value for a month given overrides
+  function getEffectiveUnits(m) {
+    const ovUnits = getRow("tyOverrideUnits", "overrideUnits");
+    const v = ovUnits[m];
+    if (v != null && v !== "" && v !== 0) return Number(v);
+    return plan.tyPlanUnits?.[m] || 0;
+  }
+
+  function getEffectiveAUR(m) {
+    const ovAUR = getRow("tyAUROverride", "aurOverride");
+    const v = ovAUR[m];
+    if (v != null && v !== "" && v !== 0) return Number(v);
+    return plan.tyAUR?.[m] || 0;
+  }
+
+  function getEffectiveRefundUnits(m) {
+    const ovRefunds = getRow("tyOverrideRefundUnits", "refundOverride");
+    const v = ovRefunds[m];
+    if (v != null && v !== "" && v !== 0) return Number(v);
+    return plan.tyPlanRefundUnits?.[m] || 0;
+  }
+
+  // Recompute projections locally based on overrides
+  const projections = useMemo(() => {
+    const effectiveUnits = {};
+    const effectiveAUR = {};
+    const effectiveRefunds = {};
+    const forecastedRevenue = {};
+    const projectedProfit = {};
+    const cogs = plan.tyPlanGrossProfit && plan.tyPlanRevenue
+      ? (() => {
+          // Estimate COGS per unit from plan data
+          const fyRev = plan.tyPlanRevenue?.fyTotal || 1;
+          const fyProfit = plan.tyPlanGrossProfit?.fyTotal || 0;
+          const fyUnits = plan.tyPlanUnits?.fyTotal || 1;
+          return (fyRev - fyProfit) / fyUnits;
+        })()
+      : 0;
+
+    let s1Units = 0, s2Units = 0, fyUnits = 0;
+    let s1Rev = 0, s2Rev = 0, fyRev = 0;
+    let s1Prof = 0, s2Prof = 0, fyProf = 0;
+    let s1Ref = 0, s2Ref = 0, fyRef = 0;
+    let s1AUR = 0, s2AUR = 0;
+    let s1Cnt = 0, s2Cnt = 0;
+
+    MONTHS.forEach((m, i) => {
+      const units = getEffectiveUnits(m);
+      const aur = getEffectiveAUR(m);
+      const refunds = getEffectiveRefundUnits(m);
+      const rev = units * aur;
+      const profit = rev - (units * cogs);
+
+      effectiveUnits[m] = units;
+      effectiveAUR[m] = aur;
+      effectiveRefunds[m] = refunds;
+      forecastedRevenue[m] = rev;
+      projectedProfit[m] = profit;
+
+      fyUnits += units; fyRev += rev; fyProf += profit; fyRef += refunds;
+      if (i < 6) { s1Units += units; s1Rev += rev; s1Prof += profit; s1Ref += refunds; s1AUR += aur; s1Cnt++; }
+      else { s2Units += units; s2Rev += rev; s2Prof += profit; s2Ref += refunds; s2AUR += aur; s2Cnt++; }
+    });
+
+    effectiveUnits.s1Total = s1Units; effectiveUnits.s2Total = s2Units; effectiveUnits.fyTotal = fyUnits;
+    effectiveAUR.s1Total = s1Cnt ? s1AUR / s1Cnt : 0; effectiveAUR.s2Total = s2Cnt ? s2AUR / s2Cnt : 0; effectiveAUR.fyTotal = (s1Cnt + s2Cnt) ? (s1AUR + s2AUR) / (s1Cnt + s2Cnt) : 0;
+    effectiveRefunds.s1Total = s1Ref; effectiveRefunds.s2Total = s2Ref; effectiveRefunds.fyTotal = fyRef;
+    forecastedRevenue.s1Total = s1Rev; forecastedRevenue.s2Total = s2Rev; forecastedRevenue.fyTotal = fyRev;
+    projectedProfit.s1Total = s1Prof; projectedProfit.s2Total = s2Prof; projectedProfit.fyTotal = fyProf;
+
+    return { effectiveUnits, effectiveAUR, effectiveRefunds, forecastedRevenue, projectedProfit };
+  }, [plan, ov, localEdits]);
+
+  // Handle edit in an override cell
+  function handleCellEdit(overrideKey, month, rawValue) {
+    setLocalEdits(prev => ({
+      ...prev,
+      [overrideKey]: { ...(prev[overrideKey] || {}), [month]: rawValue }
+    }));
+  }
+
+  // Save override to server
+  async function handleCellBlur(overrideKey, month) {
+    const localVal = localEdits[overrideKey]?.[month];
+    if (localVal === undefined) return; // nothing changed
+    const numVal = localVal === "" ? null : Number(localVal);
+    // Merge local with server overrides to send full field
+    const serverVals = ov[overrideKey] || {};
+    const localFieldEdits = localEdits[overrideKey] || {};
+    const merged = { ...serverVals, ...localFieldEdits };
+    // Convert all to numbers
+    const cleaned = {};
+    MONTHS.forEach(m => {
+      const v = merged[m];
+      if (v != null && v !== "") cleaned[m] = Number(v);
+    });
+    setSaving(prev => ({ ...prev, [overrideKey + month]: true }));
+    try {
+      await onOverride(sku, overrideKey, cleaned);
+    } catch (e) {
+      console.error("Override save failed:", e);
+    }
+    setSaving(prev => ({ ...prev, [overrideKey + month]: false }));
+  }
+
+  // Build display rows — using projections for EFFECTIVE PROJECTIONS section
   const sections = [
     {
       title: "SALES UNITS",
@@ -214,7 +332,7 @@ function ItemPlanDetail({ plan, overrides, onOverride }) {
       title: "REVENUE ($)",
       rows: [
         { label: "TY Plan Revenue", data: plan.tyPlanRevenue, cls: "", fmt: "$" },
-        { label: "TY Projected Revenue", data: plan.tyProjectedRevenue, cls: "projected-row", fmt: "$" },
+        { label: "TY Projected Revenue", data: projections.forecastedRevenue, cls: "projected-row", fmt: "$" },
         { label: "LY Revenue", data: plan.lyRevenue, cls: "ly-row", fmt: "$" },
         { label: "LLY Revenue", data: plan.llyRevenue, cls: "lly-row", fmt: "$" },
       ]
@@ -232,6 +350,7 @@ function ItemPlanDetail({ plan, overrides, onOverride }) {
       title: "PROFITABILITY",
       rows: [
         { label: "TY Plan Gross Profit", data: plan.tyPlanGrossProfit, cls: "", fmt: "$" },
+        { label: "Projected Gross Profit", data: projections.projectedProfit, cls: "projected-row", fmt: "$" },
         { label: "LY Gross Profit", data: plan.lyGrossProfit, cls: "ly-row", fmt: "$" },
         { label: "LY Profit Margin %", data: plan.lyProfitMarginPct, cls: "ly-row", fmt: "%" },
       ]
@@ -272,11 +391,11 @@ function ItemPlanDetail({ plan, overrides, onOverride }) {
     {
       title: "EFFECTIVE PROJECTIONS",
       rows: [
-        { label: "Effective Sales Units", data: plan.effectiveSalesUnits, cls: "total-row" },
-        { label: "Effective AUR ($)", data: plan.effectiveAUR, cls: "", fmt: "$d" },
-        { label: "Effective Refund Units", data: plan.effectiveRefundUnits, cls: "" },
-        { label: "Forecasted Revenue $", data: plan.forecastedRevenue, cls: "total-row", fmt: "$" },
-        { label: "Projected Gross Profit $", data: plan.projectedGrossProfit, cls: "", fmt: "$" },
+        { label: "Effective Sales Units", data: projections.effectiveUnits, cls: "total-row" },
+        { label: "Effective AUR ($)", data: projections.effectiveAUR, cls: "", fmt: "$d" },
+        { label: "Effective Refund Units", data: projections.effectiveRefunds, cls: "" },
+        { label: "Forecasted Revenue $", data: projections.forecastedRevenue, cls: "total-row", fmt: "$" },
+        { label: "Projected Gross Profit $", data: projections.projectedProfit, cls: "", fmt: "$" },
       ]
     },
   ];
@@ -294,12 +413,12 @@ function ItemPlanDetail({ plan, overrides, onOverride }) {
     return Math.round(val).toLocaleString();
   }
 
-  // Chart: Revenue + Units comparison
+  // Chart: Revenue + Units comparison — use projections
   const chartData = MONTHS.map((m, i) => ({
     month: MONTH_LABELS[i],
-    tyUnits: plan.effectiveSalesUnits?.[m] || plan.tyOverrideUnits?.[m] || plan.tyPlanUnits?.[m] || 0,
+    tyUnits: projections.effectiveUnits[m] || 0,
     lyUnits: plan.lyUnits?.[m] || 0,
-    tyRevenue: plan.forecastedRevenue?.[m] || plan.tyProjectedRevenue?.[m] || 0,
+    tyRevenue: projections.forecastedRevenue[m] || 0,
     lyRevenue: plan.lyRevenue?.[m] || 0,
   }));
 
@@ -317,19 +436,19 @@ function ItemPlanDetail({ plan, overrides, onOverride }) {
         <div className="ip-item-fy-summary">
           <div className="ip-fy-metric">
             <span className="ip-fy-label">FY Units</span>
-            <span className="ip-fy-value">{(plan.effectiveSalesUnits?.fyTotal || 0).toLocaleString()}</span>
+            <span className="ip-fy-value">{(projections.effectiveUnits.fyTotal || 0).toLocaleString()}</span>
           </div>
           <div className="ip-fy-metric">
             <span className="ip-fy-label">FY Revenue</span>
-            <span className="ip-fy-value">{fmt$(plan.forecastedRevenue?.fyTotal)}</span>
+            <span className="ip-fy-value">{fmt$(projections.forecastedRevenue.fyTotal)}</span>
           </div>
           <div className="ip-fy-metric">
             <span className="ip-fy-label">Avg AUR</span>
-            <span className="ip-fy-value">${(plan.effectiveAUR?.fyTotal || 0).toFixed(2)}</span>
+            <span className="ip-fy-value">${(projections.effectiveAUR.fyTotal || 0).toFixed(2)}</span>
           </div>
           <div className="ip-fy-metric">
             <span className="ip-fy-label">FY Profit</span>
-            <span className="ip-fy-value">{fmt$(plan.projectedGrossProfit?.fyTotal)}</span>
+            <span className="ip-fy-value">{fmt$(projections.projectedProfit.fyTotal)}</span>
           </div>
         </div>
       </div>
@@ -383,14 +502,35 @@ function ItemPlanDetail({ plan, overrides, onOverride }) {
                 <tbody>
                   {sec.rows.map((row, ri) => {
                     if (!row.data) return null;
+                    const isEditable = !!row.editable;
                     return (
                       <tr key={ri} className={row.cls}>
-                        <td className="sticky-col metric-col">{row.label}</td>
+                        <td className="sticky-col metric-col">
+                          {row.label}
+                          {isEditable && <span className="ip-edit-hint">✏️</span>}
+                        </td>
                         <td className="num">{fmtCell(row.data?.s1Total, row.fmt)}</td>
                         <td className="num">{fmtCell(row.data?.s2Total, row.fmt)}</td>
                         <td className="num fy-total"><strong>{fmtCell(row.data?.fyTotal, row.fmt)}</strong></td>
                         {MONTHS.map(m => (
-                          <td key={m} className="num">{fmtCell(row.data?.[m], row.fmt)}</td>
+                          <td key={m} className={`num${isEditable ? " ip-editable-cell" : ""}`}>
+                            {isEditable ? (
+                              <input
+                                type="number"
+                                className="ip-cell-input"
+                                value={localEdits[row.editable]?.[m] !== undefined
+                                  ? localEdits[row.editable][m]
+                                  : (row.data?.[m] != null ? row.data[m] : "")}
+                                step={row.fmt === "$d" ? "0.01" : row.fmt === "%" ? "0.001" : "1"}
+                                onChange={e => handleCellEdit(row.editable, m, e.target.value)}
+                                onBlur={() => handleCellBlur(row.editable, m)}
+                                onKeyDown={e => { if (e.key === "Enter") e.target.blur(); }}
+                                placeholder={row.fmt === "%" ? "0.0%" : row.fmt === "$d" ? "$0.00" : "0"}
+                              />
+                            ) : (
+                              fmtCell(row.data?.[m], row.fmt)
+                            )}
+                          </td>
                         ))}
                       </tr>
                     );
