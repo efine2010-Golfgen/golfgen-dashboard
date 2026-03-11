@@ -1,5 +1,5 @@
 import { useState, useEffect } from "react";
-import { BrowserRouter, Routes, Route, NavLink } from "react-router-dom";
+import { BrowserRouter, Routes, Route, NavLink, useLocation } from "react-router-dom";
 import { api } from "./lib/api";
 import Login from "./pages/Login";
 import Dashboard from "./pages/Dashboard";
@@ -9,7 +9,63 @@ import Inventory from "./pages/Inventory";
 import GolfGenInventory from "./pages/GolfGenInventory";
 import Advertising from "./pages/Advertising";
 import ItemMaster from "./pages/ItemMaster";
+import FactoryPO from "./pages/FactoryPO";
+import LogisticsTracking from "./pages/LogisticsTracking";
 import "./App.css";
+
+const ANALYTICS_PATHS = ["/", "/products", "/profitability", "/advertising"];
+const LOGISTICS_PATHS = ["/inventory", "/golfgen-inventory", "/item-master", "/factory-po", "/logistics"];
+
+function NavBars() {
+  const location = useLocation();
+  const path = location.pathname;
+  const isLogistics = LOGISTICS_PATHS.some(p => path === p || path.startsWith(p + "/"));
+
+  return (
+    <>
+      {/* ── Row 1: Analytics ── */}
+      <nav className={`nav-bar ${!isLogistics ? "" : "nav-bar-inactive"}`}>
+        <div className="nav-inner">
+          <div className="nav-section-label">Analytics</div>
+          <NavLink to="/" end className={({ isActive }) => isActive ? "nav-tab active" : "nav-tab"}>
+            <span>📊</span> Dashboard
+          </NavLink>
+          <NavLink to="/products" className={({ isActive }) => isActive ? "nav-tab active" : "nav-tab"}>
+            <span>📦</span> Products
+          </NavLink>
+          <NavLink to="/profitability" className={({ isActive }) => isActive ? "nav-tab active" : "nav-tab"}>
+            <span>💰</span> Profitability
+          </NavLink>
+          <NavLink to="/advertising" className={({ isActive }) => isActive ? "nav-tab active" : "nav-tab"}>
+            <span>📣</span> Advertising
+          </NavLink>
+        </div>
+      </nav>
+
+      {/* ── Row 2: Logistics & Inventory ── */}
+      <nav className={`nav-bar nav-bar-logistics ${isLogistics ? "" : "nav-bar-inactive"}`}>
+        <div className="nav-inner">
+          <div className="nav-section-label">Logistics &amp; Inventory</div>
+          <NavLink to="/inventory" className={({ isActive }) => isActive ? "nav-tab active" : "nav-tab"}>
+            <span>🏭</span> Amazon FBA
+          </NavLink>
+          <NavLink to="/golfgen-inventory" className={({ isActive }) => isActive ? "nav-tab active" : "nav-tab"}>
+            <span>📦</span> GolfGen Inventory
+          </NavLink>
+          <NavLink to="/item-master" className={({ isActive }) => isActive ? "nav-tab active" : "nav-tab"}>
+            <span>📋</span> Item Master
+          </NavLink>
+          <NavLink to="/factory-po" className={({ isActive }) => isActive ? "nav-tab active" : "nav-tab"}>
+            <span>🏭</span> Factory PO
+          </NavLink>
+          <NavLink to="/logistics" className={({ isActive }) => isActive ? "nav-tab active" : "nav-tab"}>
+            <span>🚢</span> OTW / Logistics
+          </NavLink>
+        </div>
+      </nav>
+    </>
+  );
+}
 
 export default function App() {
   const [authed, setAuthed] = useState(null); // null = checking, true/false
@@ -58,32 +114,8 @@ export default function App() {
           <div className="gradient-bar" />
         </header>
 
-        {/* ── Navigation Tabs ── */}
-        <nav className="nav-bar">
-          <div className="nav-inner">
-            <NavLink to="/" end className={({ isActive }) => isActive ? "nav-tab active" : "nav-tab"}>
-              <span>📊</span> Dashboard
-            </NavLink>
-            <NavLink to="/products" className={({ isActive }) => isActive ? "nav-tab active" : "nav-tab"}>
-              <span>📦</span> Products
-            </NavLink>
-            <NavLink to="/profitability" className={({ isActive }) => isActive ? "nav-tab active" : "nav-tab"}>
-              <span>💰</span> Profitability
-            </NavLink>
-            <NavLink to="/inventory" className={({ isActive }) => isActive ? "nav-tab active" : "nav-tab"}>
-              <span>🏭</span> Amazon Inventory
-            </NavLink>
-            <NavLink to="/golfgen-inventory" className={({ isActive }) => isActive ? "nav-tab active" : "nav-tab"}>
-              <span>📦</span> GolfGen Inventory
-            </NavLink>
-            <NavLink to="/advertising" className={({ isActive }) => isActive ? "nav-tab active" : "nav-tab"}>
-              <span>📣</span> Advertising
-            </NavLink>
-            <NavLink to="/item-master" className={({ isActive }) => isActive ? "nav-tab active" : "nav-tab"}>
-              <span>📋</span> Item Master
-            </NavLink>
-          </div>
-        </nav>
+        {/* ── Navigation Tabs (Two Rows) ── */}
+        <NavBars />
 
         {/* ── Main Content ── */}
         <main className="main-content">
@@ -95,6 +127,8 @@ export default function App() {
             <Route path="/golfgen-inventory" element={<GolfGenInventory />} />
             <Route path="/advertising" element={<Advertising />} />
             <Route path="/item-master" element={<ItemMaster />} />
+            <Route path="/factory-po" element={<FactoryPO />} />
+            <Route path="/logistics" element={<LogisticsTracking />} />
           </Routes>
         </main>
       </div>

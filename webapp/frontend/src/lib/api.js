@@ -85,6 +85,22 @@ export const api = {
   itemMasterAmazon: () => fetchJSON(`/api/item-master/amazon`),
   itemMasterOther: () => fetchJSON(`/api/item-master/other`),
   itemMasterHousewares: () => fetchJSON(`/api/item-master/housewares`),
+
+  // Factory PO Summary
+  factoryPO: () => fetchJSON(`/api/factory-po`),
+  uploadFactoryPO: (file) => {
+    const fd = new FormData();
+    fd.append("file", file);
+    return fetch(`${API_BASE}/api/factory-po/upload`, { method: "POST", body: fd, credentials: "include" }).then(r => r.json());
+  },
+
+  // Logistics Tracking
+  logistics: () => fetchJSON(`/api/logistics`),
+  uploadLogistics: (file) => {
+    const fd = new FormData();
+    fd.append("file", file);
+    return fetch(`${API_BASE}/api/logistics/upload`, { method: "POST", body: fd, credentials: "include" }).then(r => r.json());
+  },
 };
 
 export function fmt$(n) {

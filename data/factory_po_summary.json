@@ -1,0 +1,653 @@
+{
+  "rateInputs": {
+    "usdRmbRate": 7.1,
+    "customsBrokerFee": 250,
+    "htsCode": "9506.31.0080",
+    "htsDutyRate": 0.046
+  },
+  "purchaseOrders": [
+    {
+      "factory": "LONGHUI THREE HUNDRED SPORTING GOODS CO., LTD",
+      "paymentTerms": "20% Deposit/80% FOB",
+      "poNumber": "T-857500",
+      "units": 6900,
+      "totalCost": 277243.63,
+      "fobDate": "2025-12-23",
+      "estArrival": "2026-02-17",
+      "cbm": 208.79,
+      "landedCost": 321713.99,
+      "oceanFreight": 0.0,
+      "customs": 44470.36
+    },
+    {
+      "factory": "LONGHUI THREE HUNDRED SPORTING GOODS CO., LTD",
+      "paymentTerms": "20% Deposit/80% FOB",
+      "poNumber": "T-857600",
+      "units": 4200,
+      "totalCost": 173595.51,
+      "fobDate": "2026-01-20",
+      "estArrival": "2026-02-17",
+      "cbm": 134.03,
+      "landedCost": 201533.99,
+      "oceanFreight": 0.0,
+      "customs": 27938.48
+    },
+    {
+      "factory": "Hui Zhou City Cheng Feng Yuan Plastic and Hardware Product Manufacturer Co., Ltd",
+      "paymentTerms": "TT in Advance",
+      "poNumber": "2100",
+      "units": 800,
+      "totalCost": 273977.49,
+      "fobDate": "2026-01-05",
+      "estArrival": "2026-03-02",
+      "cbm": 131.52,
+      "landedCost": 323087.16,
+      "oceanFreight": 4930.0,
+      "customs": 44179.67
+    },
+    {
+      "factory": "LONGHUI THREE HUNDRED SPORTING GOODS CO., LTD",
+      "paymentTerms": "20% Deposit/80% FOB",
+      "poNumber": "T-857700",
+      "units": 6360,
+      "totalCost": 262003.49,
+      "fobDate": "2026-02-07",
+      "estArrival": "2026-02-28",
+      "cbm": 200.16,
+      "landedCost": 304043.05,
+      "oceanFreight": 0.0,
+      "customs": 42039.56
+    },
+    {
+      "factory": "LONGHUI THREE HUNDRED SPORTING GOODS CO., LTD",
+      "paymentTerms": "20% Deposit/80% FOB",
+      "poNumber": "T-857800",
+      "units": 27500,
+      "totalCost": 64647.89,
+      "fobDate": "2026-02-07",
+      "estArrival": "2026-02-28",
+      "cbm": 39.51,
+      "landedCost": 75209.23,
+      "oceanFreight": 0.0,
+      "customs": 10561.34
+    },
+    {
+      "factory": "LONGHUI THREE HUNDRED SPORTING GOODS CO., LTD",
+      "paymentTerms": "20% Deposit/80% FOB",
+      "poNumber": "T-857900",
+      "units": 8200,
+      "totalCost": 69285.35,
+      "fobDate": "2026-02-07",
+      "estArrival": "2026-02-28",
+      "cbm": 41.15,
+      "landedCost": 80586.36,
+      "oceanFreight": 0.0,
+      "customs": 11301.01
+    },
+    {
+      "factory": "LONGHUI THREE HUNDRED SPORTING GOODS CO., LTD",
+      "paymentTerms": "20% Deposit/80% FOB",
+      "poNumber": "T-870100",
+      "units": 3800,
+      "totalCost": 190489.51,
+      "fobDate": "2026-01-28",
+      "estArrival": "2026-02-18",
+      "cbm": 128.26,
+      "landedCost": 221122.59,
+      "oceanFreight": 0.0,
+      "customs": 30633.08
+    },
+    {
+      "factory": "LONGHUI THREE HUNDRED SPORTING GOODS CO., LTD",
+      "paymentTerms": "20% Deposit/80% Balance",
+      "poNumber": "T-870200",
+      "units": 4000,
+      "totalCost": 231014.49,
+      "fobDate": "2026-05-06",
+      "estArrival": "2026-05-27",
+      "cbm": 144.83,
+      "landedCost": 274111.3,
+      "oceanFreight": 6000.0,
+      "customs": 37096.81
+    },
+    {
+      "factory": "LONGHUI THREE HUNDRED SPORTING GOODS CO., LTD",
+      "paymentTerms": "20% Deposit/80% Balance",
+      "poNumber": "T-870300",
+      "units": 29500,
+      "totalCost": 75756.52,
+      "fobDate": "2026-05-06",
+      "estArrival": "2026-05-27",
+      "cbm": 190.71,
+      "landedCost": 93089.69,
+      "oceanFreight": 5000.0,
+      "customs": 12333.17
+    },
+    {
+      "factory": "LONGHUI THREE HUNDRED SPORTING GOODS CO., LTD",
+      "paymentTerms": "CANCELLED",
+      "poNumber": "T-870400",
+      "units": 0,
+      "totalCost": 0.0,
+      "fobDate": null,
+      "estArrival": null,
+      "cbm": 0.0,
+      "landedCost": 0.0,
+      "oceanFreight": 0.0,
+      "customs": 0.0
+    },
+    {
+      "factory": "Hui Zhou City Cheng Feng Yuan Plastic and Hardware Product Manufacturer Co., Ltd",
+      "paymentTerms": "Net 30 FOB",
+      "poNumber": "T-870500",
+      "units": 3000,
+      "totalCost": 34013.04,
+      "fobDate": "2026-05-06",
+      "estArrival": "2026-05-27",
+      "cbm": 63.31,
+      "landedCost": 42688.12,
+      "oceanFreight": 3000.0,
+      "customs": 5675.08
+    }
+  ],
+  "unitsByItem": [
+    {
+      "sku": "X-Factory",
+      "description": "",
+      "byPO": {
+        "T-857500": "2025-12-23",
+        "2100": "2026-01-05",
+        "T-857600": "2026-01-20",
+        "T-870100": "2026-01-28",
+        "T-857700": "2026-02-07",
+        "T-857800": "2026-02-07",
+        "T-857900": "2026-02-07",
+        "T-870200": "2026-04-01",
+        "T-870300": "2026-05-06",
+        "T-870400": "2026-05-06",
+        "T-870500": "2026-05-06"
+      },
+      "total": 0
+    },
+    {
+      "sku": "GGRTFTG2228",
+      "description": "PGA TOUR FT Junior Set Orange RH",
+      "byPO": {
+        "T-857500": 1550,
+        "2100": 0,
+        "T-857600": 1000,
+        "T-870100": 0,
+        "T-857700": 1500,
+        "T-857800": 0,
+        "T-857900": 0,
+        "T-870200": 0,
+        "T-870300": 0,
+        "T-870400": 0,
+        "T-870500": 0
+      },
+      "total": 4050
+    },
+    {
+      "sku": "GGRTFTR2168",
+      "description": "PGA TOUR FT Junior Set Green RH",
+      "byPO": {
+        "T-857500": 2425,
+        "2100": 0,
+        "T-857600": 1200,
+        "T-870100": 0,
+        "T-857700": 1920,
+        "T-857800": 0,
+        "T-857900": 0,
+        "T-870200": 0,
+        "T-870300": 0,
+        "T-870400": 0,
+        "T-870500": 0
+      },
+      "total": 5545
+    },
+    {
+      "sku": "GGRTFTB2178",
+      "description": "PGA TOUR FT Junior Set Red RH",
+      "byPO": {
+        "T-857500": 2425,
+        "2100": 0,
+        "T-857600": 1200,
+        "T-870100": 0,
+        "T-857700": 1920,
+        "T-857800": 1200,
+        "T-857900": 1200,
+        "T-870200": 0,
+        "T-870300": 0,
+        "T-870400": 0,
+        "T-870500": 0
+      },
+      "total": 7945
+    },
+    {
+      "sku": "GGRTFTO2198",
+      "description": "PGA TOUR FT Junior Set Blue RH",
+      "byPO": {
+        "T-857500": 500,
+        "2100": 0,
+        "T-857600": 800,
+        "T-870100": 800,
+        "T-857700": 1020,
+        "T-857800": 800,
+        "T-857900": 800,
+        "T-870200": 0,
+        "T-870300": 0,
+        "T-870400": 0,
+        "T-870500": 0
+      },
+      "total": 4720
+    },
+    {
+      "sku": "GGWMSS2115BM",
+      "description": "PGA TOUR Color Foam Balls S/12",
+      "byPO": {
+        "T-857500": 0,
+        "2100": 0,
+        "T-857600": 0,
+        "T-870100": 0,
+        "T-857700": 0,
+        "T-857800": 17500,
+        "T-857900": 0,
+        "T-870200": 0,
+        "T-870300": 17500,
+        "T-870400": 0,
+        "T-870500": 0
+      },
+      "total": 35000
+    },
+    {
+      "sku": "GGWMSS2114BM",
+      "description": "PGA TOUR White Foam Balls S/12",
+      "byPO": {
+        "T-857500": 0,
+        "2100": 0,
+        "T-857600": 0,
+        "T-870100": 0,
+        "T-857700": 0,
+        "T-857800": 8000,
+        "T-857900": 0,
+        "T-870200": 0,
+        "T-870300": 10000,
+        "T-870400": 0,
+        "T-870500": 0
+      },
+      "total": 18000
+    },
+    {
+      "sku": "GGWMSS2225BM",
+      "description": "PGA TOUR XL White Foam Balls S/4",
+      "byPO": {
+        "T-857500": 0,
+        "2100": 0,
+        "T-857600": 0,
+        "T-870100": 0,
+        "T-857700": 0,
+        "T-857800": 0,
+        "T-857900": 0,
+        "T-870200": 0,
+        "T-870300": 2000,
+        "T-870400": 0,
+        "T-870500": 0
+      },
+      "total": 2000
+    },
+    {
+      "sku": "GGWMSS2451BM",
+      "description": "PGA TOUR Tee Up 4 Piece Set Small",
+      "byPO": {
+        "T-857500": 0,
+        "2100": 0,
+        "T-857600": 0,
+        "T-870100": 0,
+        "T-857700": 0,
+        "T-857800": 0,
+        "T-857900": 3200,
+        "T-870200": 0,
+        "T-870300": 0,
+        "T-870400": 0,
+        "T-870500": 3000
+      },
+      "total": 6200
+    },
+    {
+      "sku": "GGWMSS2452BM",
+      "description": "PGA TOUR Tee Up 4 Piece Set Medium",
+      "byPO": {
+        "T-857500": 0,
+        "2100": 0,
+        "T-857600": 0,
+        "T-870100": 0,
+        "T-857700": 0,
+        "T-857800": 0,
+        "T-857900": 3000,
+        "T-870200": 0,
+        "T-870300": 0,
+        "T-870400": 0,
+        "T-870500": 0
+      },
+      "total": 3000
+    },
+    {
+      "sku": "GGRTNW222810",
+      "description": "PGA TOUR 10 Piece Blue Set RH",
+      "byPO": {
+        "T-857500": 0,
+        "2100": 0,
+        "T-857600": 0,
+        "T-870100": 1000,
+        "T-857700": 0,
+        "T-857800": 0,
+        "T-857900": 0,
+        "T-870200": 0,
+        "T-870300": 0,
+        "T-870400": 1000,
+        "T-870500": 0
+      },
+      "total": 2000
+    },
+    {
+      "sku": "GGRTNW222910",
+      "description": "PGA TOUR 10 Piece Orange Set RH",
+      "byPO": {
+        "T-857500": 0,
+        "2100": 0,
+        "T-857600": 0,
+        "T-870100": 1000,
+        "T-857700": 0,
+        "T-857800": 0,
+        "T-857900": 0,
+        "T-870200": 0,
+        "T-870300": 0,
+        "T-870400": 1000,
+        "T-870500": 0
+      },
+      "total": 2000
+    },
+    {
+      "sku": "GGLFTSS222810",
+      "description": "PGA TOUR 10 Piece Blue Set LH",
+      "byPO": {
+        "T-857500": 0,
+        "2100": 0,
+        "T-857600": 0,
+        "T-870100": 1000,
+        "T-857700": 0,
+        "T-857800": 0,
+        "T-857900": 0,
+        "T-870200": 0,
+        "T-870300": 0,
+        "T-870400": 0,
+        "T-870500": 0
+      },
+      "total": 1000
+    },
+    {
+      "sku": "GGLTNW22265",
+      "description": "PGA TOUR 5 Piece Green Set New LH",
+      "byPO": {
+        "T-857500": 0,
+        "2100": 0,
+        "T-857600": 0,
+        "T-870100": 0,
+        "T-857700": 0,
+        "T-857800": 0,
+        "T-857900": 0,
+        "T-870200": 0,
+        "T-870300": 0,
+        "T-870400": 1000,
+        "T-870500": 0
+      },
+      "total": 1000
+    },
+    {
+      "sku": "GGRTNW21176",
+      "description": "PGA TOUR 6 Piece Blue Set RH",
+      "byPO": {
+        "T-857500": 0,
+        "2100": 0,
+        "T-857600": 0,
+        "T-870100": 0,
+        "T-857700": 0,
+        "T-857800": 0,
+        "T-857900": 0,
+        "T-870200": 0,
+        "T-870300": 0,
+        "T-870400": 0,
+        "T-870500": 0
+      },
+      "total": 0
+    },
+    {
+      "sku": "GGLFTSS222910",
+      "description": "PGA TOUR 10 Piece Orange Set LH",
+      "byPO": {
+        "T-857500": 0,
+        "2100": 0,
+        "T-857600": 0,
+        "T-870100": 0,
+        "T-857700": 0,
+        "T-857800": 0,
+        "T-857900": 0,
+        "T-870200": 0,
+        "T-870300": 0,
+        "T-870400": 1000,
+        "T-870500": 0
+      },
+      "total": 1000
+    },
+    {
+      "sku": "KIT 1",
+      "description": "Equipment Kit \u2013 Grades K-5",
+      "byPO": {
+        "T-857500": 0,
+        "2100": 600,
+        "T-857600": 0,
+        "T-870100": 0,
+        "T-857700": 0,
+        "T-857800": 0,
+        "T-857900": 0,
+        "T-870200": 0,
+        "T-870300": 0,
+        "T-870400": 0,
+        "T-870500": 0
+      },
+      "total": 600
+    },
+    {
+      "sku": "KIT 2",
+      "description": "Equipment Kit \u2013 Grades 6-8",
+      "byPO": {
+        "T-857500": 0,
+        "2100": 200,
+        "T-857600": 0,
+        "T-870100": 0,
+        "T-857700": 0,
+        "T-857800": 0,
+        "T-857900": 0,
+        "T-870200": 0,
+        "T-870300": 0,
+        "T-870400": 0,
+        "T-870500": 0
+      },
+      "total": 200
+    }
+  ],
+  "arrivalSchedule": [
+    {
+      "sku": "GGRTFTG2228",
+      "description": "PGA TOUR FT Junior Set Orange RH",
+      "jan2026": 1550,
+      "feb2026": 1000,
+      "mar2026": 1500,
+      "may2026": 0,
+      "jun2026": 0,
+      "total": 4050
+    },
+    {
+      "sku": "GGRTFTR2168",
+      "description": "PGA TOUR FT Junior Set Green RH",
+      "jan2026": 2425,
+      "feb2026": 1200,
+      "mar2026": 1920,
+      "may2026": 0,
+      "jun2026": 0,
+      "total": 5545
+    },
+    {
+      "sku": "GGRTFTB2178",
+      "description": "PGA TOUR FT Junior Set Red RH",
+      "jan2026": 2425,
+      "feb2026": 1200,
+      "mar2026": 4320,
+      "may2026": 0,
+      "jun2026": 0,
+      "total": 7945
+    },
+    {
+      "sku": "GGRTFTO2198",
+      "description": "PGA TOUR FT Junior Set Blue RH",
+      "jan2026": 500,
+      "feb2026": 1600,
+      "mar2026": 2620,
+      "may2026": 0,
+      "jun2026": 0,
+      "total": 4720
+    },
+    {
+      "sku": "GGWMSS2115BM",
+      "description": "PGA TOUR Color Foam Balls S/12",
+      "jan2026": 0,
+      "feb2026": 0,
+      "mar2026": 17500,
+      "may2026": 0,
+      "jun2026": 17500,
+      "total": 35000
+    },
+    {
+      "sku": "GGWMSS2114BM",
+      "description": "PGA TOUR White Foam Balls S/12",
+      "jan2026": 0,
+      "feb2026": 0,
+      "mar2026": 8000,
+      "may2026": 0,
+      "jun2026": 10000,
+      "total": 18000
+    },
+    {
+      "sku": "GGWMSS2225BM",
+      "description": "PGA TOUR XL White Foam Balls S/4",
+      "jan2026": 0,
+      "feb2026": 0,
+      "mar2026": 0,
+      "may2026": 0,
+      "jun2026": 2000,
+      "total": 2000
+    },
+    {
+      "sku": "GGWMSS2451BM",
+      "description": "PGA TOUR Tee Up 4 Piece Set Small",
+      "jan2026": 0,
+      "feb2026": 0,
+      "mar2026": 3200,
+      "may2026": 0,
+      "jun2026": 3000,
+      "total": 6200
+    },
+    {
+      "sku": "GGWMSS2452BM",
+      "description": "PGA TOUR Tee Up 4 Piece Set Medium",
+      "jan2026": 0,
+      "feb2026": 0,
+      "mar2026": 3000,
+      "may2026": 0,
+      "jun2026": 0,
+      "total": 3000
+    },
+    {
+      "sku": "GGRTNW222810",
+      "description": "PGA TOUR 10 Piece Blue Set RH",
+      "jan2026": 0,
+      "feb2026": 1000,
+      "mar2026": 0,
+      "may2026": 0,
+      "jun2026": 1000,
+      "total": 2000
+    },
+    {
+      "sku": "GGRTNW222910",
+      "description": "PGA TOUR 10 Piece Orange Set RH",
+      "jan2026": 0,
+      "feb2026": 1000,
+      "mar2026": 0,
+      "may2026": 0,
+      "jun2026": 1000,
+      "total": 2000
+    },
+    {
+      "sku": "GGLTNW22265",
+      "description": "PGA TOUR 5 Piece Green Set New LH",
+      "jan2026": 0,
+      "feb2026": 0,
+      "mar2026": 0,
+      "may2026": 0,
+      "jun2026": 1000,
+      "total": 1000
+    },
+    {
+      "sku": "GGRTNW21176",
+      "description": "PGA TOUR 6 Piece Blue Set RH",
+      "jan2026": 0,
+      "feb2026": 0,
+      "mar2026": 0,
+      "may2026": 0,
+      "jun2026": 0,
+      "total": 0
+    },
+    {
+      "sku": "GGLFTSS222910",
+      "description": "PGA TOUR 10 Piece Orange Set LH",
+      "jan2026": 0,
+      "feb2026": 0,
+      "mar2026": 0,
+      "may2026": 0,
+      "jun2026": 1000,
+      "total": 1000
+    },
+    {
+      "sku": "GGLFTSS222810",
+      "description": "PGA TOUR 10 Piece Blue Set LH",
+      "jan2026": 0,
+      "feb2026": 1000,
+      "mar2026": 0,
+      "may2026": 0,
+      "jun2026": 0,
+      "total": 1000
+    },
+    {
+      "sku": "KIT 1",
+      "description": "Equipment Kit \u2013 Grades K-5",
+      "jan2026": 600,
+      "feb2026": 0,
+      "mar2026": 0,
+      "may2026": 0,
+      "jun2026": 0,
+      "total": 600
+    },
+    {
+      "sku": "KIT 2",
+      "description": "Equipment Kit \u2013 Grades 6-8",
+      "jan2026": 200,
+      "feb2026": 0,
+      "mar2026": 0,
+      "may2026": 0,
+      "jun2026": 0,
+      "total": 200
+    }
+  ],
+  "lastUpload": "2026-03-09",
+  "sourceFile": "GolfGen_CF_Updated_Mar92026.xlsx"
+}

@@ -120,17 +120,46 @@ body {
   background: linear-gradient(90deg, var(--teal) 0%, var(--gold) 35%, var(--orange) 65%, var(--teal) 100%);
 }
 
-/* ── Navigation Bar ────────────────────────────────────── */
+/* ── Navigation Bars (Two-Row) ─────────────────────────── */
 .nav-bar {
   background: white;
   border-bottom: 1px solid var(--border);
   box-shadow: 0 1px 4px rgba(14,31,45,0.04);
+  transition: opacity 0.15s;
+}
+
+.nav-bar-logistics {
+  background: #FAFBFC;
+  border-bottom: 2px solid var(--teal);
+}
+
+.nav-bar-inactive {
+  opacity: 0.6;
+}
+.nav-bar-inactive:hover {
+  opacity: 1;
+}
+
+.nav-section-label {
+  display: flex;
+  align-items: center;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 1.5px;
+  text-transform: uppercase;
+  color: var(--muted);
+  padding: 0 8px 0 0;
+  margin-right: 8px;
+  border-right: 1px solid var(--border);
+  white-space: nowrap;
+  font-family: 'Space Grotesk', sans-serif;
 }
 
 .nav-inner {
   display: flex;
+  align-items: center;
   gap: 4px;
-  padding: 8px 32px;
+  padding: 6px 32px;
   max-width: 1400px;
   margin: 0 auto;
 }
@@ -138,15 +167,16 @@ body {
 .nav-tab {
   display: flex;
   align-items: center;
-  gap: 8px;
-  padding: 10px 20px;
+  gap: 6px;
+  padding: 8px 16px;
   border-radius: 8px;
   color: var(--muted);
   text-decoration: none;
-  font-size: 13px;
+  font-size: 12.5px;
   font-weight: 600;
   transition: all 0.15s;
   font-family: 'Sora', sans-serif;
+  white-space: nowrap;
 }
 
 .nav-tab:hover {
@@ -157,6 +187,10 @@ body {
 .nav-tab.active {
   background: var(--blue-active);
   color: #fff;
+}
+
+.nav-bar-logistics .nav-tab.active {
+  background: var(--teal-dark);
 }
 
 /* ── Main Content ──────────────────────────────────────── */
@@ -583,8 +617,9 @@ tr:hover td { background: var(--teal-bg); }
   .brand-title h1 { font-size: 14px; }
   .brand-title p { display: none; }
   .header-meta { gap: 8px; }
-  .nav-inner { padding: 6px 16px; overflow-x: auto; }
-  .nav-tab { padding: 8px 12px; font-size: 12px; white-space: nowrap; }
+  .nav-inner { padding: 4px 12px; overflow-x: auto; }
+  .nav-tab { padding: 6px 10px; font-size: 11px; white-space: nowrap; }
+  .nav-section-label { font-size: 8px; padding-right: 4px; margin-right: 4px; }
   .main-content { padding: 16px; }
   .chart-grid { grid-template-columns: 1fr; }
   .kpi-grid { grid-template-columns: repeat(2, 1fr); }

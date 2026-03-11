@@ -4697,6 +4697,185 @@ def item_master_other():
     return {"items": other_items, "count": len(other_items)}
 
 
+# ── Factory PO Summary ─────────────────────────────────────
+
+def _load_factory_po():
+    fp = DATA_DIR / "factory_po_summary.json"
+    if fp.exists():
+        with open(fp) as f:
+            return json.load(f)
+    return {"purchaseOrders": [], "unitsByItem": [], "arrivalSchedule": [], "lastUpload": None}
+
+def _save_factory_po(data):
+    fp = DATA_DIR / "factory_po_summary.json"
+    with open(fp, "w") as f:
+        json.dump(data, f, indent=2)
+
+@app.get("/api/factory-po")
+async def get_factory_po(request: Request):
+    _require_auth(request)
+    return _load_factory_po()
+
+@app.post("/api/factory-po/upload")
+async def upload_factory_po(request: Request, file: UploadFile = File(...)):
+    _require_auth(request)
+    import openpyxl
+    from io import BytesIO
+    contents = await file.read()
+    wb = openpyxl.load_workbook(BytesIO(contents), data_only=True)
+    if "Factory PO Summary" not in wb.sheetnames:
+        raise HTTPException(400, "Sheet 'Factory PO Summary' not found")
+    ws = wb["Factory PO Summary"]
+    rows = []
+    for row in ws.iter_rows(min_row=1, max_row=ws.max_row):
+        r = {}
+        for c in row:
+            if hasattr(c, 'column_letter') and c.value is not None:
+                r[c.column_letter] = c.value
+        rows.append(r)
+    def _to_str(dt):
+        from datetime import datetime as _dt, date as _d
+        if isinstance(dt, (_dt, _d)):
+            return dt.strftime("%Y-%m-%d")
+        return str(dt) if dt else None
+    def _sr(v):
+        try: return round(float(v), 2)
+        except: return 0
+    pos = []
+    for i in range(7, len(rows)):
+        cells = rows[i]
+        factory = cells.get("B")
+        if not factory or factory == "TOTALS":
+            break
+        pos.append({
+            "factory": str(factory), "paymentTerms": str(cells.get("D") or ""),
+            "poNumber": str(cells.get("E") or ""), "units": cells.get("F") or 0,
+            "totalCost": _sr(cells.get("G")), "fobDate": _to_str(cells.get("I")),
+            "estArrival": _to_str(cells.get("J")), "cbm": _sr(cells.get("K")),
+            "landedCost": _sr(cells.get("U")), "oceanFreight": _sr(cells.get("X")),
+            "customs": _sr(cells.get("Y"))
+        })
+    sku_start = next((i for i, r in enumerate(rows) if "UNITS BY ITEM" in str(r.get("B","")) and "PURCHASE ORDER" in str(r.get("B",""))), None)
+    sku_rows = []
+    if sku_start:
+        for i in range(sku_start + 2, len(rows)):
+            cells = rows[i]
+            sku = cells.get("B")
+            if not sku or sku == "TOTAL" or str(sku).startswith("UNITS BY"):
+                break
+            sku_rows.append({"sku": str(sku), "description": str(cells.get("C") or ""),
+                "byPO": {"T-857500": cells.get("D") or 0, "2100": cells.get("E") or 0,
+                    "T-857600": cells.get("F") or 0, "T-870100": cells.get("G") or 0,
+                    "T-857700": cells.get("I") or 0, "T-857800": cells.get("J") or 0,
+                    "T-857900": cells.get("K") or 0, "T-870200": cells.get("L") or 0,
+                    "T-870300": cells.get("M") or 0, "T-870400": cells.get("N") or 0,
+                    "T-870500": cells.get("O") or 0},
+                "total": cells.get("P") or 0})
+    arr_start = next((i for i, r in enumerate(rows) if "EST. ARRIVAL" in str(r.get("B",""))), None)
+    arrival_rows = []
+    if arr_start:
+        for i in range(arr_start + 2, len(rows)):
+            cells = rows[i]
+            sku = cells.get("B")
+            if not sku or sku == "TOTAL": break
+            arrival_rows.append({"sku": str(sku), "description": str(cells.get("C") or ""),
+                "jan2026": cells.get("D") or 0, "feb2026": cells.get("E") or 0,
+                "mar2026": cells.get("F") or 0, "may2026": cells.get("G") or 0,
+                "jun2026": cells.get("H") or 0, "total": cells.get("I") or 0})
+    from datetime import date as _date
+    data = {
+        "rateInputs": {"usdRmbRate": 7.1, "customsBrokerFee": 250, "htsCode": "9506.31.0080", "htsDutyRate": 0.046},
+        "purchaseOrders": pos, "unitsByItem": sku_rows, "arrivalSchedule": arrival_rows,
+        "lastUpload": _date.today().isoformat(), "sourceFile": file.filename
+    }
+    _save_factory_po(data)
+    return {"status": "ok", "pos": len(pos), "skus": len(sku_rows), "arrivals": len(arrival_rows), "lastUpload": data["lastUpload"]}
+
+# ── Logistics Tracking ─────────────────────────────────────
+
+def _load_logistics():
+    fp = DATA_DIR / "logistics_tracking.json"
+    if fp.exists():
+        with open(fp) as f:
+            return json.load(f)
+    return {"shipments": [], "itemsByContainer": [], "lastUpload": None}
+
+def _save_logistics(data):
+    fp = DATA_DIR / "logistics_tracking.json"
+    with open(fp, "w") as f:
+        json.dump(data, f, indent=2)
+
+@app.get("/api/logistics")
+async def get_logistics(request: Request):
+    _require_auth(request)
+    return _load_logistics()
+
+@app.post("/api/logistics/upload")
+async def upload_logistics(request: Request, file: UploadFile = File(...)):
+    _require_auth(request)
+    import openpyxl
+    from io import BytesIO
+    contents = await file.read()
+    wb = openpyxl.load_workbook(BytesIO(contents), data_only=True)
+    if "Logistics Tracking" not in wb.sheetnames:
+        raise HTTPException(400, "Sheet 'Logistics Tracking' not found")
+    ws = wb["Logistics Tracking"]
+    rows = []
+    for row in ws.iter_rows(min_row=1, max_row=ws.max_row):
+        r = {}
+        for c in row:
+            if hasattr(c, 'column_letter') and c.value is not None:
+                r[c.column_letter] = c.value
+        rows.append(r)
+    def _to_str(dt):
+        from datetime import datetime as _dt, date as _d
+        if isinstance(dt, (_dt, _d)):
+            return dt.strftime("%Y-%m-%d")
+        return str(dt) if dt else None
+    def _sr(v):
+        try: return round(float(v), 2)
+        except: return 0
+    shipments = []
+    for i in range(3, len(rows)):
+        cells = rows[i]
+        shipper = cells.get("B")
+        hbl = cells.get("C")
+        if not shipper or not hbl: continue
+        if "STATUS" in str(shipper) or "UPCOMING" in str(shipper): break
+        shipments.append({
+            "shipper": str(shipper), "hbl": str(hbl), "containerType": str(cells.get("D") or ""),
+            "containerNumber": str(cells.get("E") or ""), "vesselVoyage": str(cells.get("F") or ""),
+            "poNumber": str(cells.get("G") or ""), "units": cells.get("H") or 0,
+            "cbm": _sr(cells.get("I")), "factoryInvoice": str(cells.get("J") or ""),
+            "carrier": str(cells.get("K") or ""), "freightForwarder": str(cells.get("L") or ""),
+            "etdOrigin": _to_str(cells.get("N")), "departurePort": str(cells.get("O") or ""),
+            "etaDischarge": _to_str(cells.get("P")), "arrivalPort": str(cells.get("Q") or ""),
+            "etaFinal": _to_str(cells.get("R")), "finalLocation": str(cells.get("S") or ""),
+            "deliveryDate": _to_str(cells.get("T")), "status": str(cells.get("U") or "")
+        })
+    hdr_idx = next((i for i, r in enumerate(rows) if r.get("B") == "Container #" and r.get("F") == "Item Number"), None)
+    items = []
+    if hdr_idx:
+        cur_cntr = ""
+        for i in range(hdr_idx + 1, len(rows)):
+            cells = rows[i]
+            cntr = cells.get("B")
+            if cntr and len(str(cntr)) > 8: cur_cntr = str(cntr)
+            sku = cells.get("F"); desc = cells.get("G"); qty = cells.get("J")
+            if sku:
+                items.append({"containerNumber": cur_cntr if cntr and len(str(cntr)) > 8 else "",
+                    "invoice": str(cells.get("C") or ""), "eta": _to_str(cells.get("D")),
+                    "po": str(cells.get("E") or ""), "sku": str(sku), "description": str(desc or ""), "qty": qty or 0})
+            elif desc and "Total" in str(desc):
+                items.append({"containerNumber": "", "invoice": "", "eta": "", "po": "",
+                    "sku": "", "description": "Container Total", "qty": qty or 0})
+    from datetime import date as _date
+    data = {"shipments": shipments, "itemsByContainer": items,
+        "lastUpload": _date.today().isoformat(), "sourceFile": file.filename}
+    _save_logistics(data)
+    return {"status": "ok", "shipments": len(shipments), "items": len(items), "lastUpload": data["lastUpload"]}
+
+
 # ── Static Frontend ────────────────────────────────────────
 # Serve the built React frontend from the same server.
 # Check local dist/ first (Docker), then ../frontend/dist/ (local dev)

@@ -30,6 +30,8 @@ COPY data/golf_inventory.json ./data/
 COPY data/housewares_inventory.json ./data/
 COPY data/walmart_item_master.json ./data/
 COPY data/amazon_item_master.json ./data/
+COPY data/factory_po_summary.json ./data/
+COPY data/logistics_tracking.json ./data/
 
 # Environment
 ENV DB_DIR=/app/data
