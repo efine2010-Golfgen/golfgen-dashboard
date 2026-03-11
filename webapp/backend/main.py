@@ -6563,16 +6563,44 @@ async def get_item_plan(request: Request):
             sk = si.get("sku", "")
             sku_meta[sk] = si  # full seed record
 
-        # ── Build SKU list ──
-        sku_rows = con.execute(
+        # ── Build canonical SKU set from item_master.csv ──
+        # Extension SKUs (-FBM, -1, " - FBA", etc.) are mapped to their base
+        import re
+        master_items = load_item_master()
+        canonical_skus = {m["sku"] for m in master_items}
+        _EXT_SUFFIXES = re.compile(
+            r'\s*[-/]\s*(?:FBM|FBA|RB|DONATE|RETD|HOLD|Damage|CUST|Transfer|\d+)$',
+            re.IGNORECASE)
+
+        def _base_sku(raw_sku: str) -> str:
+            """Strip extension suffixes to find the canonical base SKU."""
+            s = raw_sku.strip()
+            # Direct match first
+            if s in canonical_skus:
+                return s
+            # Try stripping known suffixes
+            stripped = _EXT_SUFFIXES.sub('', s).strip()
+            if stripped in canonical_skus:
+                return stripped
+            return ""  # no match — skip this SKU
+
+        # Map every monthly_sales_history SKU to a canonical base SKU
+        all_hist_skus = con.execute(
             "SELECT DISTINCT sku FROM monthly_sales_history ORDER BY sku"
         ).fetchall()
+        # Build {base_sku: [raw_sku1, raw_sku2, ...]}
+        base_to_raw = {}
+        for (raw,) in all_hist_skus:
+            base = _base_sku(raw)
+            if base:
+                base_to_raw.setdefault(base, []).append(raw)
 
         skus_list = []
         all_overrides = {}  # top-level {sku: {fe_field: {month_key: val}}}
 
-        for (sku,) in sku_rows:
-            # ── LY monthly data (arrays, then convert to month-keyed objects) ──
+        for sku in sorted(base_to_raw.keys()):
+            raw_skus = base_to_raw[sku]
+            # ── LY monthly data — aggregate all raw SKUs into base ──
             ly_units_arr = [0.0] * 12
             ly_rev_arr = [0.0] * 12
             ly_prof_arr = [0.0] * 12
@@ -6582,10 +6610,13 @@ async def get_item_plan(request: Request):
                 yr = 2025 if m <= 12 else 2026
                 am = m if m <= 12 else m - 12
                 idx = m - 2
+                # Sum across all raw SKU variants for this base
+                placeholders = ",".join(["?"] * len(raw_skus))
                 row = con.execute(
-                    "SELECT units, revenue, profit, refund_units "
-                    "FROM monthly_sales_history WHERE sku=? AND year=? AND month=?",
-                    [sku, yr, am],
+                    f"SELECT SUM(units), SUM(revenue), SUM(profit), SUM(refund_units) "
+                    f"FROM monthly_sales_history WHERE sku IN ({placeholders}) "
+                    f"AND year=? AND month=?",
+                    raw_skus + [yr, am],
                 ).fetchone()
                 if row:
                     ly_units_arr[idx] = float(row[0] or 0)
@@ -6754,17 +6785,39 @@ async def get_item_plan_sales_curves(request: Request):
     _require_auth(request)
     master_curve = _compute_master_curve()
 
-    # Build per-SKU LY curves
+    # Build per-SKU LY curves — canonical SKUs only, aggregate extensions
+    import re as _re_curves
     con = _duck()
     try:
-        by_sku = {}
-        sku_rows = con.execute(
+        master_items_c = load_item_master()
+        canon_c = {m["sku"] for m in master_items_c}
+        _ext_re = _re_curves.compile(
+            r'\s*[-/]\s*(?:FBM|FBA|RB|DONATE|RETD|HOLD|Damage|CUST|Transfer|\d+)$',
+            _re_curves.IGNORECASE)
+
+        def _base_c(raw):
+            s = raw.strip()
+            if s in canon_c:
+                return s
+            stripped = _ext_re.sub('', s).strip()
+            return stripped if stripped in canon_c else ""
+
+        all_raw = con.execute(
             "SELECT DISTINCT sku FROM monthly_sales_history"
         ).fetchall()
-        for (sku,) in sku_rows:
+        base_map = {}
+        for (raw,) in all_raw:
+            b = _base_c(raw)
+            if b:
+                base_map.setdefault(b, []).append(raw)
+
+        by_sku = {}
+        for base, raws in sorted(base_map.items()):
+            placeholders = ",".join(["?"] * len(raws))
             rows = con.execute(
-                "SELECT year, month, units FROM monthly_sales_history "
-                "WHERE sku=? AND year IN (2025,2026)", [sku]
+                f"SELECT year, month, SUM(units) FROM monthly_sales_history "
+                f"WHERE sku IN ({placeholders}) AND year IN (2025,2026) "
+                f"GROUP BY year, month", raws
             ).fetchall()
             total = sum(float(r[2] or 0) for r in rows)
             curve = {k: 0 for k in _MONTH_KEYS}
@@ -6776,7 +6829,7 @@ async def get_item_plan_sales_curves(request: Request):
                         curve["jan_next"] = round(float(units or 0) / total, 4)
                     elif yr == 2025 and mo == 1:
                         curve["jan"] = round(float(units or 0) / total, 4)
-            by_sku[sku] = curve
+            by_sku[base] = curve
         return {"master": master_curve, "bySku": by_sku}
     finally:
         con.close()
