@@ -3,18 +3,13 @@ import { api } from "../lib/api";
 
 export default function Inventory() {
   const [items, setItems] = useState([]);
-  const [whSummary, setWhSummary] = useState(null);
   const [loading, setLoading] = useState(true);
   const [sortKey, setSortKey] = useState("fbaStock");
   const [sortDir, setSortDir] = useState("desc");
 
   useEffect(() => {
-    Promise.all([
-      api.inventory(),
-      api.warehouseSummary().catch(() => null),
-    ]).then(([inv, wh]) => {
+    api.inventory().then((inv) => {
       setItems(inv.items);
-      setWhSummary(wh);
       setLoading(false);
     });
   }, []);
@@ -40,13 +35,13 @@ export default function Inventory() {
   const overstock = items.filter(i => i.dos > 90).length;
 
   if (loading) {
-    return <div className="loading"><div className="spinner" /> Loading inventory...</div>;
+    return <div className="loading"><div className="spinner" /> Loading Amazon inventory...</div>;
   }
 
   return (
     <>
       <div className="page-header">
-        <h1>Inventory</h1>
+        <h1>Amazon Inventory</h1>
         <p>{items.length} SKUs in FBA &middot; Days of supply analysis</p>
       </div>
 
@@ -68,39 +63,6 @@ export default function Inventory() {
           <div className="kpi-value">{items.reduce((s, i) => s + i.fbaStock, 0).toLocaleString()}</div>
         </div>
       </div>
-
-      {/* ── Warehouse Summary ── */}
-      {whSummary && (
-        <div style={{ marginBottom: 28 }}>
-          <h3 style={{ fontFamily: "'Space Grotesk', sans-serif", fontSize: 15, fontWeight: 600, color: "var(--navy)", marginBottom: 12 }}>
-            Warehouse Inventory (3PL)
-          </h3>
-          <div className="kpi-grid" style={{ marginBottom: 0 }}>
-            <div className="kpi-card">
-              <div className="kpi-label">Golf — SKUs</div>
-              <div className="kpi-value">{(whSummary.golf?.totalSkus || 0).toLocaleString()}</div>
-            </div>
-            <div className="kpi-card">
-              <div className="kpi-label">Golf — Pcs On Hand</div>
-              <div className="kpi-value teal">{(whSummary.golf?.totalPcsOnHand || 0).toLocaleString()}</div>
-            </div>
-            <div className="kpi-card">
-              <div className="kpi-label">Housewares — SKUs</div>
-              <div className="kpi-value">{(whSummary.housewares?.totalSkus || 0).toLocaleString()}</div>
-            </div>
-            <div className="kpi-card">
-              <div className="kpi-label">Housewares — Pcs On Hand</div>
-              <div className="kpi-value teal">{(whSummary.housewares?.totalPcsOnHand || 0).toLocaleString()}</div>
-            </div>
-            <div className="kpi-card">
-              <div className="kpi-label">Total 3PL Pieces</div>
-              <div className="kpi-value pos">
-                {((whSummary.golf?.totalPcsOnHand || 0) + (whSummary.housewares?.totalPcsOnHand || 0)).toLocaleString()}
-              </div>
-            </div>
-          </div>
-        </div>
-      )}
 
       <div className="table-card">
         <table>

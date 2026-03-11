@@ -56,6 +56,8 @@ export const api = {
   warehouseGolf: (channel) => fetchJSON(`/api/warehouse/golf${channel ? `?channel=${encodeURIComponent(channel)}` : ""}`),
   warehouseHousewares: () => fetchJSON(`/api/warehouse/housewares`),
   warehouseSummary: () => fetchJSON(`/api/warehouse/summary`),
+  warehouseUnified: (division = "golf", channel = null) =>
+    fetchJSON(`/api/warehouse/unified?division=${division}${channel && channel !== "All" ? `&channel=${encodeURIComponent(channel)}` : ""}`),
 
   // Item Master
   itemMaster: () => fetchJSON(`/api/item-master`),

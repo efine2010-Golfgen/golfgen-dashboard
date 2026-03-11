@@ -166,23 +166,51 @@ export default function ItemMaster() {
           <table>
             <thead>
               <tr>
-                <th>Item #</th>
-                <th>Description</th>
-                {masterTab === "Walmart" && <th>Channel</th>}
-                <th>Pack</th>
-                <th>Pcs On-Hand</th>
-                <th>Pcs Available</th>
+                {masterTab === "Walmart" ? (
+                  <>
+                    <th>GolfGen Item #</th>
+                    <th>Walmart Item #</th>
+                    <th>Description</th>
+                    <th>Category</th>
+                    <th>Unit Cost</th>
+                    <th>Unit Retail</th>
+                    <th>Carton Size</th>
+                    <th>Store Count</th>
+                  </>
+                ) : (
+                  <>
+                    <th>Item #</th>
+                    <th>Description</th>
+                    <th>Pack</th>
+                    <th>Pcs On-Hand</th>
+                    <th>Pcs Available</th>
+                  </>
+                )}
               </tr>
             </thead>
             <tbody>
               {simpleFiltered.map((item, i) => (
                 <tr key={i}>
-                  <td style={{ fontFamily: "monospace", fontSize: 11 }}>{item.itemNumber || item.sku}</td>
-                  <td style={{ maxWidth: 300, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{item.description || item.productName}</td>
-                  {masterTab === "Walmart" && <td>{item.channel || "—"}</td>}
-                  <td>{item.pack || "—"}</td>
-                  <td>{(item.pcsOnHand || 0).toLocaleString()}</td>
-                  <td>{(item.pcsAvailable || 0).toLocaleString()}</td>
+                  {masterTab === "Walmart" ? (
+                    <>
+                      <td style={{ fontFamily: "'Space Grotesk', monospace", fontSize: 12 }}>{item.golfgenItem || item.itemNumber || "—"}</td>
+                      <td style={{ fontFamily: "'Space Grotesk', monospace", fontSize: 12 }}>{item.walmartItem || "—"}</td>
+                      <td style={{ maxWidth: 280, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{item.description || item.productName}</td>
+                      <td style={{ fontSize: 12, color: "var(--muted)" }}>{item.subcategory || item.category || "—"}</td>
+                      <td style={{ textAlign: "right" }}>{item.unitCost ? `$${item.unitCost.toFixed(2)}` : "—"}</td>
+                      <td style={{ textAlign: "right" }}>{item.unitRetail ? `$${item.unitRetail.toFixed(2)}` : "—"}</td>
+                      <td style={{ textAlign: "right" }}>{item.cartonSize || "—"}</td>
+                      <td style={{ textAlign: "right" }}>{(item.storeCount || 0).toLocaleString()}</td>
+                    </>
+                  ) : (
+                    <>
+                      <td style={{ fontFamily: "'Space Grotesk', monospace", fontSize: 12 }}>{item.itemNumber || item.sku}</td>
+                      <td style={{ maxWidth: 300, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{item.description || item.productName}</td>
+                      <td>{item.pack || "—"}</td>
+                      <td>{(item.pcsOnHand || 0).toLocaleString()}</td>
+                      <td>{(item.pcsAvailable || 0).toLocaleString()}</td>
+                    </>
+                  )}
                 </tr>
               ))}
             </tbody>

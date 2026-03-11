@@ -4,6 +4,14 @@ import {
 } from "recharts";
 import { api, fmt$ } from "../lib/api";
 
+const COLOR_SWATCH = {
+  Green: "#16a34a",
+  Blue: "#2563eb",
+  Red: "#dc2626",
+  Orange: "#ea580c",
+  Black: "#1f2937",
+};
+
 const RANGES = [
   { label: "30D", days: 30 },
   { label: "90D", days: 90 },
@@ -22,6 +30,16 @@ export default function Products() {
   const [sortKey, setSortKey] = useState("rev");
   const [sortDir, setSortDir] = useState("desc");
   const [showAll, setShowAll] = useState(false);
+  const [colorMap, setColorMap] = useState({});
+
+  // Load item master for color data (once)
+  useEffect(() => {
+    api.itemMaster().then(d => {
+      const map = {};
+      (d.items || []).forEach(i => { if (i.asin && i.color) map[i.asin] = i.color; });
+      setColorMap(map);
+    }).catch(() => {});
+  }, []);
 
   useEffect(() => {
     setLoading(true);
@@ -138,8 +156,24 @@ export default function Products() {
           <tbody>
             {display.map((p) => (
               <tr key={p.asin}>
-                <td style={{ maxWidth: 260 }}>
-                  <div style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{p.name}</div>
+                <td style={{ maxWidth: 280 }}>
+                  <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                    {colorMap[p.asin] && (
+                      <span
+                        title={colorMap[p.asin]}
+                        style={{
+                          display: "inline-block",
+                          width: 10,
+                          height: 10,
+                          borderRadius: "50%",
+                          background: COLOR_SWATCH[colorMap[p.asin]] || "#94a3b8",
+                          border: "1px solid rgba(0,0,0,0.15)",
+                          flexShrink: 0,
+                        }}
+                      />
+                    )}
+                    <div style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", minWidth: 0 }}>{p.name}</div>
+                  </div>
                   <div style={{ fontSize: 11, color: "var(--muted)", marginTop: 2, fontFamily: "'Space Grotesk', monospace" }}>
                     {p.asin}{p.sku ? ` · ${p.sku}` : ""}
                   </div>

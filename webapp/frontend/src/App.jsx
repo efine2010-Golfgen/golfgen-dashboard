@@ -6,11 +6,10 @@ import Dashboard from "./pages/Dashboard";
 import Profitability from "./pages/Profitability";
 import Products from "./pages/Products";
 import Inventory from "./pages/Inventory";
+import GolfGenInventory from "./pages/GolfGenInventory";
 import Advertising from "./pages/Advertising";
 import ItemMaster from "./pages/ItemMaster";
 import Warehouse from "./pages/Warehouse";
-import GolfWarehouse from "./pages/GolfWarehouse";
-import HousewaresWarehouse from "./pages/HousewaresWarehouse";
 import "./App.css";
 
 export default function App() {
@@ -73,7 +72,10 @@ export default function App() {
               <span>💰</span> Profitability
             </NavLink>
             <NavLink to="/inventory" className={({ isActive }) => isActive ? "nav-tab active" : "nav-tab"}>
-              <span>🏭</span> Inventory
+              <span>🏭</span> Amazon Inventory
+            </NavLink>
+            <NavLink to="/golfgen-inventory" className={({ isActive }) => isActive ? "nav-tab active" : "nav-tab"}>
+              <span>📦</span> GolfGen Inventory
             </NavLink>
             <NavLink to="/advertising" className={({ isActive }) => isActive ? "nav-tab active" : "nav-tab"}>
               <span>📣</span> Advertising
@@ -82,13 +84,7 @@ export default function App() {
               <span>📋</span> Item Master
             </NavLink>
             <NavLink to="/warehouse" className={({ isActive }) => isActive ? "nav-tab active" : "nav-tab"}>
-              <span>🏢</span> GolfGen WH
-            </NavLink>
-            <NavLink to="/warehouse/golf" className={({ isActive }) => isActive ? "nav-tab active" : "nav-tab"}>
-              <span>⛳</span> Golf WH
-            </NavLink>
-            <NavLink to="/warehouse/housewares" className={({ isActive }) => isActive ? "nav-tab active" : "nav-tab"}>
-              <span>🏠</span> Housewares
+              <span>🏢</span> Warehouse
             </NavLink>
           </div>
         </nav>
@@ -100,11 +96,10 @@ export default function App() {
             <Route path="/products" element={<Products />} />
             <Route path="/profitability" element={<Profitability />} />
             <Route path="/inventory" element={<Inventory />} />
+            <Route path="/golfgen-inventory" element={<GolfGenInventory />} />
             <Route path="/advertising" element={<Advertising />} />
             <Route path="/item-master" element={<ItemMaster />} />
             <Route path="/warehouse" element={<Warehouse />} />
-            <Route path="/warehouse/golf" element={<GolfWarehouse />} />
-            <Route path="/warehouse/housewares" element={<HousewaresWarehouse />} />
           </Routes>
         </main>
       </div>

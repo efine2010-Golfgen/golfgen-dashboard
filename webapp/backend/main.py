@@ -3817,6 +3817,177 @@ def warehouse_housewares():
     }
 
 
+@app.get("/api/warehouse/unified")
+def warehouse_unified(division: str = Query("golf", description="golf or housewares"),
+                      channel: Optional[str] = Query(None, description="All, Amazon, Walmart, Walmart & Amazon, Other (golf only)")):
+    """Unified warehouse inventory with master/sub grouping, suffix breakdown, and summary.
+    Used by the unified Inventory page."""
+    filename = "golf_inventory.json" if division == "golf" else "housewares_inventory.json"
+    items = load_json(filename)
+    if not items:
+        return {"masters": [], "summary": {}, "suffixBreakdown": {}, "channelBreakdown": {}}
+
+    # For golf, apply channel filter
+    if division == "golf" and channel and channel != "All":
+        items = [i for i in items if (i.get("channel", "") or "").lower() == channel.lower()]
+
+    # Channel breakdown (from full data, before channel filter)
+    channel_counts = {}
+    if division == "golf":
+        all_items = load_json("golf_inventory.json")
+        for i in all_items:
+            ch = i.get("channel", "Other")
+            channel_counts[ch] = channel_counts.get(ch, 0) + 1
+
+    # Known suffixes for grouping
+    SUFFIX_PATTERNS = ["/RB", "/RETD", "/DONATE", "/DMGD", "/DAM", "/HOLD", "/CUST", "/INBD", "/1",
+                       "FBM", "-RB", "-DONATE", "-RETD", "-FBM", "-HOLD", "-Damage", "-CUST", "-Transfer"]
+
+    def _get_base_sku(sku):
+        """Strip prefixes (T-) and suffixes to get the base/master SKU."""
+        s = sku.strip()
+        # Strip T- prefix
+        if s.startswith("T-"):
+            s = s[2:]
+        # Strip known suffixes
+        for pat in SUFFIX_PATTERNS:
+            if s.endswith(pat):
+                s = s[:-len(pat)]
+                break
+            if pat in s and pat.startswith("/"):
+                idx = s.find(pat)
+                s = s[:idx]
+                break
+        return s
+
+    def _get_suffix_label(sku, base):
+        """Determine suffix type for a variant SKU."""
+        s = sku.strip()
+        if s.startswith("T-"):
+            return "Transfer"
+        if "FBM" in s and "FBM" not in base:
+            return "FBM"
+        remainder = s.replace(base, "", 1)
+        if "/RB" in remainder or "-RB" in remainder:
+            return "RB"
+        if "/RETD" in remainder or "-RETD" in remainder:
+            return "RETD"
+        if "/DONATE" in remainder or "-DONATE" in remainder:
+            return "DONATE"
+        if "/DMGD" in remainder or "/DAM" in remainder or "-Damage" in remainder:
+            return "Damage"
+        if "/HOLD" in remainder or "-HOLD" in remainder:
+            return "HOLD"
+        if "/CUST" in remainder or "-CUST" in remainder:
+            return "CUST"
+        if "/INBD" in remainder:
+            return "INBD"
+        if "/1" in remainder:
+            return "Each"
+        if remainder:
+            return remainder.strip("/- ")
+        return "Standard"
+
+    # ASIN lookup from item master
+    item_master = load_item_master()
+    im_lookup = {i["sku"]: i for i in item_master}
+
+    # Group items by base SKU
+    groups = {}
+    for item in items:
+        sku = item.get("itemNumber", "").strip()
+        base = _get_base_sku(sku)
+        if base not in groups:
+            groups[base] = {"master": None, "subs": []}
+        if sku == base:
+            groups[base]["master"] = item
+        else:
+            item["suffix"] = _get_suffix_label(sku, base)
+            groups[base]["subs"].append(item)
+
+    # Build master list
+    masters = []
+    for base, group in groups.items():
+        master = group["master"]
+        subs = group["subs"]
+        if not master:
+            # Create virtual master from first sub
+            ref_item = subs[0] if subs else {}
+            master = {
+                "itemNumber": base,
+                "description": ref_item.get("description", ""),
+                "pack": ref_item.get("pack", 1),
+                "onHand": 0, "pcsOnHand": 0, "pcsAllocated": 0,
+                "pcsAvailable": 0, "damage": 0, "qcHold": 0,
+                "channel": ref_item.get("channel", "Other"),
+            }
+
+        all_in_group = [master] + subs
+        total_oh = sum(i.get("pcsOnHand", 0) for i in all_in_group)
+        total_alloc = sum(i.get("pcsAllocated", 0) for i in all_in_group)
+        total_avail = sum(i.get("pcsAvailable", 0) for i in all_in_group)
+        total_dmg = sum(i.get("damage", 0) for i in all_in_group)
+        total_qc = sum(i.get("qcHold", 0) for i in all_in_group)
+
+        # ASIN lookup
+        im_info = im_lookup.get(base, {})
+        asin = im_info.get("asin", "")
+        im_name = im_info.get("productName", "")
+
+        masters.append({
+            "baseSku": base,
+            "itemNumber": master.get("itemNumber", base),
+            "asin": asin,
+            "description": im_name if im_name else master.get("description", ""),
+            "whDescription": master.get("description", ""),
+            "pack": master.get("pack", 1),
+            "channel": master.get("channel", "Other") if division == "golf" else None,
+            "totalOnHand": total_oh,
+            "totalAllocated": total_alloc,
+            "totalAvailable": total_avail,
+            "totalDamage": total_dmg,
+            "totalQcHold": total_qc,
+            "subCount": len(subs),
+            "subs": subs,
+        })
+
+    masters.sort(key=lambda m: -m["totalOnHand"])
+
+    # Summary totals
+    summary = {
+        "totalSkus": len(masters),
+        "totalItems": len(items),
+        "totalOnHand": sum(m["totalOnHand"] for m in masters),
+        "totalAllocated": sum(m["totalAllocated"] for m in masters),
+        "totalAvailable": sum(m["totalAvailable"] for m in masters),
+        "totalDamage": sum(m["totalDamage"] for m in masters),
+    }
+
+    # Suffix breakdown (across all items in this division, not filtered by channel)
+    suffix_buckets = {}
+    all_div_items = load_json(filename)
+    for item in all_div_items:
+        sku = item.get("itemNumber", "").strip()
+        base = _get_base_sku(sku)
+        if sku == base:
+            suf = "Standard"
+        else:
+            suf = _get_suffix_label(sku, base)
+        if suf not in suffix_buckets:
+            suffix_buckets[suf] = {"skus": 0, "pcsOnHand": 0, "pcsAllocated": 0, "pcsAvailable": 0}
+        suffix_buckets[suf]["skus"] += 1
+        suffix_buckets[suf]["pcsOnHand"] += item.get("pcsOnHand", 0)
+        suffix_buckets[suf]["pcsAllocated"] += item.get("pcsAllocated", 0)
+        suffix_buckets[suf]["pcsAvailable"] += item.get("pcsAvailable", 0)
+
+    return {
+        "masters": masters,
+        "summary": summary,
+        "suffixBreakdown": suffix_buckets,
+        "channelBreakdown": channel_counts,
+    }
+
+
 @app.get("/api/warehouse/summary")
 def warehouse_summary():
     """Combined warehouse inventory summary — Golf vs Housewares totals + suffix breakdown."""
