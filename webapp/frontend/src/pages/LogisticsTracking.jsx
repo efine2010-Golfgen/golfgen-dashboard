@@ -5,11 +5,10 @@ import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContaine
 const fmtK = n => n == null ? "0" : n >= 1000 ? (n / 1000).toFixed(1) + "K" : n.toLocaleString();
 const COLORS = ["#22A387", "#3E658C", "#E87830", "#F5B731", "#7BAED0", "#D03030", "#2ECFAA", "#9B59B6"];
 
-const STATUS_COLORS = { "DELIVERED": "#22A387", "IN TRANSIT": "#3E658C", "PENDING": "#F5B731", "Pending Shipment": "#E87830" };
 const STATUS_BADGE = (status) => {
   const s = (status || "").toUpperCase();
   const bg = s.includes("DELIVER") ? "#22A387" : s.includes("TRANSIT") ? "#3E658C" : s.includes("PENDING") ? "#F5B731" : "#C4CDD0";
-  return <span style={{ display: "inline-block", padding: "2px 10px", borderRadius: 12, background: bg, color: "#fff", fontSize: 10, fontWeight: 700, letterSpacing: 0.5 }}>{status}</span>;
+  return <span style={{ display: "inline-block", padding: "2px 10px", borderRadius: 12, background: bg, color: "#fff", fontSize: 10, fontWeight: 700, letterSpacing: 0.5 }}>{status || "—"}</span>;
 };
 
 export default function LogisticsTracking() {
@@ -33,13 +32,21 @@ export default function LogisticsTracking() {
     try {
       const res = await api.uploadSupplyChain(file);
       if (res.logistics) load();
-      else alert("No 'Logistics Tracking' sheet found in file. Factory PO data may have been updated.");
+      else alert("No 'Logistics Tracking' sheet found in file.");
     } catch (err) { alert("Upload failed: " + err.message); }
     setUploading(false);
     if (fileRef.current) fileRef.current.value = "";
   };
 
-  const shipments = useMemo(() => data?.shipments || [], [data]);
+  const shipments = useMemo(() => {
+    // Filter out any remaining bad data
+    return (data?.shipments || []).filter(s => {
+      const shipper = (s.shipper || "").toUpperCase();
+      if (shipper.includes("STATUS") || shipper.includes("UPCOMING") || shipper === "TOTAL" || shipper === "PO#") return false;
+      if (!s.hbl || s.hbl.length < 5) return false;
+      return true;
+    });
+  }, [data]);
   const items = useMemo(() => data?.itemsByContainer || [], [data]);
 
   // Status breakdown
@@ -57,30 +64,21 @@ export default function LogisticsTracking() {
   const portMap = useMemo(() => {
     const m = {};
     shipments.forEach(s => {
-      const p = s.arrivalPort || "Unknown";
+      const p = s.arrivalPort || s.departurePort || "Unknown";
       if (!m[p]) m[p] = { count: 0, units: 0 };
       m[p].count++; m[p].units += s.units || 0;
     });
     return m;
   }, [shipments]);
 
-  // Container type breakdown for chart
-  const containerTypes = useMemo(() => {
-    const m = {};
-    shipments.forEach(s => {
-      const t = s.containerType || "Unknown";
-      m[t] = (m[t] || 0) + 1;
-    });
-    return Object.entries(m).map(([name, value]) => ({ name, value }));
-  }, [shipments]);
-
   // Shipper breakdown
   const shipperMap = useMemo(() => {
     const m = {};
     shipments.forEach(s => {
-      const name = (s.shipper || "Unknown").split(" ").slice(0, 2).join(" ");
-      if (!m[name]) m[name] = { units: 0, shipments: 0 };
-      m[name].units += s.units || 0; m[name].shipments++;
+      const name = (s.shipper || "Unknown");
+      const short = name.length > 25 ? name.split(" ").slice(0, 3).join(" ") : name;
+      if (!m[short]) m[short] = { units: 0, shipments: 0 };
+      m[short].units += s.units || 0; m[short].shipments++;
     });
     return Object.entries(m).map(([name, d]) => ({ name, units: d.units, shipments: d.shipments })).sort((a, b) => b.units - a.units);
   }, [shipments]);
@@ -144,9 +142,9 @@ export default function LogisticsTracking() {
 
       {/* Charts Row */}
       <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16, marginBottom: 24 }}>
-        {/* Units by Arrival Port */}
+        {/* Units by Delivery Port */}
         <div style={{ background: "#fff", borderRadius: 12, padding: 20, boxShadow: "var(--card-shadow)" }}>
-          <h3 style={{ fontSize: 14, fontFamily: "'Space Grotesk', sans-serif", color: "var(--navy)", marginBottom: 16 }}>Units by Arrival Port</h3>
+          <h3 style={{ fontSize: 14, fontFamily: "'Space Grotesk', sans-serif", color: "var(--navy)", marginBottom: 16 }}>Units by Delivery Port</h3>
           <ResponsiveContainer width="100%" height={220}>
             <BarChart data={portBar} layout="vertical" margin={{ left: 30 }}>
               <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" />
@@ -158,7 +156,7 @@ export default function LogisticsTracking() {
           </ResponsiveContainer>
         </div>
 
-        {/* Shipper Breakdown */}
+        {/* Units by Shipper */}
         <div style={{ background: "#fff", borderRadius: 12, padding: 20, boxShadow: "var(--card-shadow)" }}>
           <h3 style={{ fontSize: 14, fontFamily: "'Space Grotesk', sans-serif", color: "var(--navy)", marginBottom: 16 }}>Units by Shipper</h3>
           <ResponsiveContainer width="100%" height={220}>
@@ -200,31 +198,36 @@ export default function LogisticsTracking() {
       {/* Shipment Log Table */}
       {view === "shipments" && (
         <div style={{ background: "#fff", borderRadius: 12, overflow: "auto", boxShadow: "var(--card-shadow)" }}>
-          <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 11, minWidth: 900 }}>
+          <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 11, minWidth: 1000 }}>
             <thead>
               <tr style={{ background: "var(--navy)", color: "#fff" }}>
-                <th style={th}>Status</th><th style={th}>PO #</th><th style={th}>Container</th>
-                <th style={th}>Type</th><th style={th}>Vessel / Voyage</th>
-                <th style={{...th, textAlign: "right"}}>Units</th><th style={{...th, textAlign: "right"}}>CBM</th>
-                <th style={th}>Departure</th><th style={th}>ETD</th><th style={th}>ETA Port</th>
-                <th style={th}>Port</th><th style={th}>Delivery</th>
+                <th style={th}>Container #</th>
+                <th style={th}>Container Type</th>
+                <th style={th}>Delivery Port</th>
+                <th style={th}>ETD</th>
+                <th style={th}>ETA</th>
+                <th style={th}>ETD Port</th>
+                <th style={th}>ETA Port</th>
+                <th style={{...th, textAlign: "right"}}>Units</th>
+                <th style={{...th, textAlign: "right"}}>CBM</th>
+                <th style={th}>PO #</th>
+                <th style={th}>Status</th>
               </tr>
             </thead>
             <tbody>
               {filteredShipments.map((s, i) => (
                 <tr key={i} style={{ borderBottom: "1px solid var(--border)", background: i % 2 ? "#FAFBFC" : "#fff" }}>
-                  <td style={td}>{STATUS_BADGE(s.status)}</td>
-                  <td style={{...td, fontWeight: 600, color: "var(--blue)", fontSize: 10}}>{s.poNumber}</td>
-                  <td style={{...td, fontFamily: "monospace", fontSize: 10}}>{s.containerNumber}</td>
-                  <td style={{...td, fontSize: 10, color: "var(--muted)"}}>{s.containerType}</td>
-                  <td style={{...td, fontSize: 10, maxWidth: 160, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap"}}>{s.vesselVoyage}</td>
+                  <td style={{...td, fontFamily: "monospace", fontSize: 10, fontWeight: 600}}>{s.containerNumber || "—"}</td>
+                  <td style={{...td, fontSize: 10, color: "var(--muted)"}}>{s.containerType || "—"}</td>
+                  <td style={{...td, fontSize: 10, fontWeight: 600}}>{s.finalLocation || s.arrivalPort || "—"}</td>
+                  <td style={{...td, fontSize: 10}}>{s.etdOrigin || "—"}</td>
+                  <td style={{...td, fontSize: 10}}>{s.etaFinal || s.etaDischarge || "—"}</td>
+                  <td style={{...td, fontSize: 10}}>{s.departurePort || "—"}</td>
+                  <td style={{...td, fontSize: 10}}>{s.arrivalPort || "—"}</td>
                   <td style={{...td, textAlign: "right", fontWeight: 600}}>{(s.units || 0).toLocaleString()}</td>
                   <td style={{...td, textAlign: "right"}}>{(s.cbm || 0).toFixed(1)}</td>
-                  <td style={{...td, fontSize: 10}}>{s.departurePort || "—"}</td>
-                  <td style={{...td, fontSize: 10}}>{s.etdOrigin || "—"}</td>
-                  <td style={{...td, fontSize: 10}}>{s.etaDischarge || "—"}</td>
-                  <td style={{...td, fontSize: 10, fontWeight: 600}}>{s.arrivalPort || "—"}</td>
-                  <td style={{...td, fontSize: 10}}>{s.deliveryDate || "—"}</td>
+                  <td style={{...td, fontWeight: 600, color: "var(--blue)", fontSize: 10}}>{s.poNumber || "—"}</td>
+                  <td style={td}>{STATUS_BADGE(s.status)}</td>
                 </tr>
               ))}
             </tbody>
@@ -241,28 +244,35 @@ export default function LogisticsTracking() {
           <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 11 }}>
             <thead>
               <tr style={{ background: "var(--navy)", color: "#fff" }}>
-                <th style={th}>Container #</th><th style={th}>Invoice</th><th style={th}>ETA</th>
-                <th style={th}>PO #</th><th style={th}>SKU</th><th style={th}>Description</th>
-                <th style={{...th, textAlign: "right"}}>Qty</th>
+                <th style={th}>SKU</th>
+                <th style={th}>Description</th>
+                <th style={{...th, textAlign: "right"}}>Units</th>
+                <th style={th}>Container #</th>
+                <th style={th}>ETA</th>
+                <th style={th}>Invoice</th>
+                <th style={th}>PO #</th>
               </tr>
             </thead>
             <tbody>
-              {items.map((item, i) => {
-                const isTotal = item.description === "Container Total";
-                return (
-                  <tr key={i} style={{ borderBottom: "1px solid var(--border)",
-                    background: isTotal ? "var(--teal-bg)" : (item.containerNumber ? "#F8FAFB" : "#fff"),
-                    fontWeight: isTotal ? 700 : 400 }}>
-                    <td style={{...td, fontFamily: "monospace", fontSize: 10, fontWeight: item.containerNumber ? 700 : 400, color: item.containerNumber ? "var(--blue)" : "transparent"}}>{item.containerNumber || ""}</td>
-                    <td style={{...td, fontSize: 10}}>{item.invoice}</td>
-                    <td style={{...td, fontSize: 10}}>{item.eta || ""}</td>
-                    <td style={{...td, fontSize: 10, color: "var(--blue)"}}>{item.po}</td>
-                    <td style={{...td, fontFamily: "monospace", fontSize: 10}}>{item.sku}</td>
-                    <td style={{...td, fontSize: 10, maxWidth: 220, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap"}}>{item.description}</td>
-                    <td style={{...td, textAlign: "right", fontWeight: isTotal ? 700 : 400}}>{(item.qty || 0).toLocaleString()}</td>
-                  </tr>
-                );
-              })}
+              {items.filter(item => {
+                // Filter out any remaining Container Total or summary rows
+                const desc = (item.description || "").toUpperCase();
+                const sku = (item.sku || "").toUpperCase();
+                if (desc.includes("CONTAINER TOTAL") || desc.includes("GRAND TOTAL")) return false;
+                if (sku.includes("NON-GOLF") || desc.includes("NON-GOLF")) return false;
+                return item.sku;
+              }).map((item, i) => (
+                <tr key={i} style={{ borderBottom: "1px solid var(--border)",
+                  background: item.containerNumber ? (i % 2 ? "#FAFBFC" : "#fff") : "#fff" }}>
+                  <td style={{...td, fontFamily: "monospace", fontSize: 10, fontWeight: 600}}>{item.sku}</td>
+                  <td style={{...td, fontSize: 10, maxWidth: 220, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap"}}>{item.description}</td>
+                  <td style={{...td, textAlign: "right", fontWeight: 600}}>{(item.qty || 0).toLocaleString()}</td>
+                  <td style={{...td, fontFamily: "monospace", fontSize: 10, color: item.containerNumber ? "var(--blue)" : "transparent"}}>{item.containerNumber || ""}</td>
+                  <td style={{...td, fontSize: 10}}>{item.eta || "—"}</td>
+                  <td style={{...td, fontSize: 10}}>{item.invoice || "—"}</td>
+                  <td style={{...td, fontSize: 10, color: "var(--blue)"}}>{item.po || "—"}</td>
+                </tr>
+              ))}
             </tbody>
           </table>
         </div>
