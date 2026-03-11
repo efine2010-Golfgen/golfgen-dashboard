@@ -24,8 +24,9 @@ export default function FactoryPO() {
     if (!file) return;
     setUploading(true);
     try {
-      await api.uploadFactoryPO(file);
-      load();
+      const res = await api.uploadSupplyChain(file);
+      if (res.factoryPO) load();
+      else alert("No 'Factory PO Summary' sheet found in file. Logistics data may have been updated.");
     } catch (err) { alert("Upload failed: " + err.message); }
     setUploading(false);
     if (fileRef.current) fileRef.current.value = "";

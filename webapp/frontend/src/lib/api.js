@@ -102,6 +102,13 @@ export const api = {
     return fetch(`${API_BASE}/api/logistics/upload`, { method: "POST", body: fd, credentials: "include" }).then(r => r.json());
   },
 
+  // Combined Supply Chain Upload (Factory PO + Logistics in one file)
+  uploadSupplyChain: (file) => {
+    const fd = new FormData();
+    fd.append("file", file);
+    return fetch(`${API_BASE}/api/supply-chain/upload`, { method: "POST", body: fd, credentials: "include" }).then(r => r.json());
+  },
+
   // Item Planning
   itemPlanning: () => fetchJSON(`/api/item-planning`),
   itemPlanningRawSales: () => fetchJSON(`/api/item-planning/raw-product-sales`),

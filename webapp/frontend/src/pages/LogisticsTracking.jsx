@@ -31,8 +31,9 @@ export default function LogisticsTracking() {
     if (!file) return;
     setUploading(true);
     try {
-      await api.uploadLogistics(file);
-      load();
+      const res = await api.uploadSupplyChain(file);
+      if (res.logistics) load();
+      else alert("No 'Logistics Tracking' sheet found in file. Factory PO data may have been updated.");
     } catch (err) { alert("Upload failed: " + err.message); }
     setUploading(false);
     if (fileRef.current) fileRef.current.value = "";

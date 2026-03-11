@@ -4700,14 +4700,14 @@ def item_master_other():
 # ── Factory PO Summary ─────────────────────────────────────
 
 def _load_factory_po():
-    fp = DATA_DIR / "factory_po_summary.json"
+    fp = DB_DIR / "factory_po_summary.json"
     if fp.exists():
         with open(fp) as f:
             return json.load(f)
     return {"purchaseOrders": [], "unitsByItem": [], "arrivalSchedule": [], "lastUpload": None}
 
 def _save_factory_po(data):
-    fp = DATA_DIR / "factory_po_summary.json"
+    fp = DB_DIR / "factory_po_summary.json"
     with open(fp, "w") as f:
         json.dump(data, f, indent=2)
 
@@ -4794,14 +4794,14 @@ async def upload_factory_po(request: Request, file: UploadFile = File(...)):
 # ── Logistics Tracking ─────────────────────────────────────
 
 def _load_logistics():
-    fp = DATA_DIR / "logistics_tracking.json"
+    fp = DB_DIR / "logistics_tracking.json"
     if fp.exists():
         with open(fp) as f:
             return json.load(f)
     return {"shipments": [], "itemsByContainer": [], "lastUpload": None}
 
 def _save_logistics(data):
-    fp = DATA_DIR / "logistics_tracking.json"
+    fp = DB_DIR / "logistics_tracking.json"
     with open(fp, "w") as f:
         json.dump(data, f, indent=2)
 
@@ -4876,12 +4876,194 @@ async def upload_logistics(request: Request, file: UploadFile = File(...)):
     return {"status": "ok", "shipments": len(shipments), "items": len(items), "lastUpload": data["lastUpload"]}
 
 
+@app.post("/api/supply-chain/upload")
+async def upload_supply_chain(request: Request, file: UploadFile = File(...)):
+    """Combined upload: parses both Factory PO Summary and Logistics Tracking from one Excel file"""
+    _require_auth(request)
+    import openpyxl
+    from io import BytesIO
+    contents = await file.read()
+    wb = openpyxl.load_workbook(BytesIO(contents), data_only=True)
+    results = {"status": "ok", "sourceFile": file.filename}
+
+    # Try Factory PO
+    if "Factory PO Summary" in wb.sheetnames:
+        # Re-use the factory PO parsing logic
+        ws = wb["Factory PO Summary"]
+        rows = []
+        for row in ws.iter_rows(min_row=1, max_row=ws.max_row):
+            r = {}
+            for c in row:
+                if hasattr(c, 'column_letter') and c.value is not None:
+                    r[c.column_letter] = c.value
+            rows.append(r)
+
+        def safe_round(v, n=2):
+            try: return round(float(v), n)
+            except: return 0
+
+        purchase_orders = []
+        for i in range(7, len(rows)):
+            r = rows[i]
+            po = r.get("C") or r.get("D")
+            factory = r.get("A") or r.get("B")
+            units = r.get("F") or r.get("G")
+            if not po or not units: continue
+            if str(po).startswith("PO") or str(po).startswith("GG"):
+                purchase_orders.append({
+                    "factory": str(factory or ""),
+                    "poNumber": str(po),
+                    "units": safe_round(units, 0),
+                    "totalCost": safe_round(r.get("H") or r.get("I") or 0),
+                    "fobDate": str(r.get("J") or r.get("K") or ""),
+                    "estArrival": str(r.get("L") or r.get("M") or ""),
+                    "cbm": safe_round(r.get("N") or r.get("O") or 0),
+                    "landedCost": safe_round(r.get("P") or r.get("Q") or 0),
+                })
+
+        units_by_item = []
+        in_units_section = False
+        for i, r in enumerate(rows):
+            b_val = r.get("B", "")
+            if "UNITS BY ITEM" in str(b_val).upper() or "UNITS BY ITEM" in str(r.get("A", "")).upper():
+                in_units_section = True; continue
+            if in_units_section:
+                sku = r.get("A") or r.get("B")
+                desc = r.get("B") or r.get("C")
+                if not sku or str(sku).upper() in ["SKU", "TOTAL", ""]: continue
+                if "ARRIVAL" in str(sku).upper(): break
+                total = 0
+                by_po = {}
+                for k, v in r.items():
+                    if k not in ["A", "B", "C"] and v:
+                        try:
+                            total += int(float(v))
+                            by_po[k] = int(float(v))
+                        except: pass
+                units_by_item.append({"sku": str(sku), "description": str(desc or ""), "total": total})
+
+        arrival_schedule = []
+        in_arrival = False
+        for i, r in enumerate(rows):
+            for k, v in r.items():
+                if "ARRIVAL" in str(v).upper() and "SCHEDULE" in str(v).upper():
+                    in_arrival = True; break
+            if in_arrival:
+                sku = r.get("A") or r.get("B")
+                if not sku or str(sku).upper() in ["SKU", ""]: continue
+                if "ARRIVAL" in str(sku).upper(): continue
+                arrival_schedule.append({
+                    "sku": str(sku),
+                    "description": str(r.get("B") or r.get("C") or ""),
+                    "total": safe_round(sum(float(v) for k, v in r.items() if k not in ["A","B","C"] and v and str(v).replace('.','').replace('-','').isdigit()), 0)
+                })
+
+        from datetime import date as _date
+        po_data = {
+            "purchaseOrders": purchase_orders, "unitsByItem": units_by_item,
+            "arrivalSchedule": arrival_schedule,
+            "lastUpload": _date.today().isoformat(), "sourceFile": file.filename
+        }
+        _save_factory_po(po_data)
+        results["factoryPO"] = {"pos": len(purchase_orders), "items": len(units_by_item)}
+        results["factoryPOLastUpload"] = po_data["lastUpload"]
+
+    # Try Logistics
+    if "Logistics Tracking" in wb.sheetnames:
+        ws = wb["Logistics Tracking"]
+        rows = []
+        for row in ws.iter_rows(min_row=1, max_row=ws.max_row):
+            r = {}
+            for c in row:
+                if hasattr(c, 'column_letter') and c.value is not None:
+                    r[c.column_letter] = c.value
+            rows.append(r)
+
+        def to_str(v):
+            if v is None: return ""
+            from datetime import datetime, date
+            if isinstance(v, (datetime, date)):
+                return v.strftime("%Y-%m-%d")
+            return str(v)
+
+        def safe_round(v, n=2):
+            try: return round(float(v), n)
+            except: return 0
+
+        shipments = []
+        header_row = None
+        for i, r in enumerate(rows):
+            vals = list(r.values())
+            if any("Shipper" in str(v) for v in vals):
+                header_row = i; break
+
+        if header_row is not None:
+            for i in range(header_row + 1, len(rows)):
+                r = rows[i]
+                shipper = r.get("A") or r.get("B")
+                if not shipper: continue
+                hbl = r.get("B") or r.get("C") or ""
+                units_val = 0
+                for k in ["H","I","J"]:
+                    try:
+                        units_val = int(float(r.get(k, 0)))
+                        if units_val > 0: break
+                    except: pass
+                status = "Delivered"
+                for k, v in r.items():
+                    if v and "transit" in str(v).lower():
+                        status = "In Transit"; break
+
+                shipments.append({
+                    "shipper": to_str(shipper), "hbl": to_str(hbl),
+                    "units": units_val, "status": status,
+                    "containerNumber": to_str(r.get("D") or r.get("E") or ""),
+                    "poNumber": to_str(r.get("F") or r.get("G") or ""),
+                })
+
+        items = []
+        in_items = False
+        for i, r in enumerate(rows):
+            for k, v in r.items():
+                if v and "container" in str(v).lower() and "item" in str(v).lower():
+                    in_items = True; break
+            if in_items:
+                cn = r.get("A") or r.get("B")
+                if not cn: continue
+                if "container" in str(cn).lower() and "item" in str(cn).lower(): continue
+                sku = r.get("C") or r.get("D") or ""
+                qty = 0
+                for k in ["E","F","G","H"]:
+                    try:
+                        qty = int(float(r.get(k, 0)))
+                        if qty > 0: break
+                    except: pass
+                items.append({
+                    "containerNumber": to_str(cn), "sku": to_str(sku),
+                    "description": to_str(r.get("D") or r.get("E") or ""),
+                    "qty": qty
+                })
+
+        from datetime import date as _date
+        log_data = {"shipments": shipments, "itemsByContainer": items,
+            "lastUpload": _date.today().isoformat(), "sourceFile": file.filename}
+        _save_logistics(log_data)
+        results["logistics"] = {"shipments": len(shipments), "items": len(items)}
+        results["logisticsLastUpload"] = log_data["lastUpload"]
+
+    if "factoryPO" not in results and "logistics" not in results:
+        raise HTTPException(400, "No 'Factory PO Summary' or 'Logistics Tracking' sheet found in file")
+
+    results["lastUpload"] = _date.today().isoformat()
+    return results
+
+
 # ── Item Planning ─────────────────────────────────────────
 
-_ITEM_PLANNING_PATH = DATA_DIR / "item_planning.json"
-_RAW_PRODUCT_SALES_PATH = DATA_DIR / "raw_product_sales.json"
-_RAW_DAILY_DATA_PATH = DATA_DIR / "raw_daily_data.json"
-_ITEM_PLANNING_OVERRIDES_PATH = DATA_DIR / "item_planning_overrides.json"
+_ITEM_PLANNING_PATH = DB_DIR / "item_planning.json"
+_RAW_PRODUCT_SALES_PATH = DB_DIR / "raw_product_sales.json"
+_RAW_DAILY_DATA_PATH = DB_DIR / "raw_daily_data.json"
+_ITEM_PLANNING_OVERRIDES_PATH = DB_DIR / "item_planning_overrides.json"
 
 def _load_item_planning():
     if _ITEM_PLANNING_PATH.exists():
