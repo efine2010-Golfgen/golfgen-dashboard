@@ -6411,37 +6411,68 @@ def _init_item_plan_tables():
         con.close()
 
 
-def _compute_master_curve() -> list:
-    """Compute master sales curve as percentage distribution across 13 months."""
+_MONTH_KEYS = ["jan", "feb", "mar", "apr", "may", "jun", "jul", "aug", "sep", "oct", "nov", "dec", "jan_next"]
+
+# DB field name → frontend override field name
+_OVERRIDE_DB_TO_FE = {
+    "plan_units": "ty_override_units",
+    "aur": "ty_aur_override",
+    "refund_units": "ty_override_refund_units",
+    "refund_rate": "ty_refund_rate_override",
+    "shipment": "shipment_override",
+}
+
+
+def _db_month_to_key(month_num: int) -> str:
+    """Convert DB month number (1-13) to frontend month key."""
+    if 1 <= month_num <= 13:
+        return _MONTH_KEYS[month_num - 1]
+    return "jan"
+
+
+def _array_to_month_obj(arr: list) -> dict:
+    """Convert 12-element array (FY order: Feb..Jan) to month-keyed object."""
+    # arr[0]=Feb, arr[1]=Mar, ..., arr[10]=Dec, arr[11]=Jan(next)
+    # But we also need jan (pre-FY) — not in LY arrays, default 0
+    obj = {"jan": 0}
+    fy_keys = ["feb", "mar", "apr", "may", "jun", "jul", "aug", "sep", "oct", "nov", "dec", "jan_next"]
+    for i, k in enumerate(fy_keys):
+        obj[k] = float(arr[i]) if i < len(arr) else 0
+    return obj
+
+
+def _compute_master_curve() -> dict:
+    """Compute master sales curve as percentage distribution across 13 months.
+    Returns a dict with month keys: {jan: 0.05, feb: 0.03, ...}"""
     con = _duck()
     try:
-        # Get total units per month across all SKUs for LY (year 2025-2026)
+        # Get total units per (year, month) across all SKUs for LY
         result = con.execute("""
-            SELECT month, SUM(units) as total_units
+            SELECT year, month, SUM(units) as total_units
             FROM monthly_sales_history
             WHERE year IN (2025, 2026)
-            GROUP BY month
-            ORDER BY CASE WHEN year = 2025 THEN month ELSE month + 12 END
+            GROUP BY year, month
+            ORDER BY year, month
         """).fetchall()
 
         # Calculate total annual
-        annual_total = sum(row[1] for row in result)
+        annual_total = sum(row[2] for row in result)
 
+        curve = {k: 0 for k in _MONTH_KEYS}
         if annual_total == 0:
-            return [0] * 13
+            return curve
 
-        # Map to 13-month array
-        curve = [0] * 13
-        for month, total_units in result:
-            if month <= 12:
-                idx = month - 1  # Jan=0, Feb=1, etc. But we need to account for FY
-                # FY is Feb-Jan, so Feb=0, Mar=1, ..., Jan=12
-                fy_idx = (month - 2) % 12
-                if month == 1:
-                    fy_idx = 12  # Jan is month 13 (pre-FY or post-FY)
-                elif month >= 2:
-                    fy_idx = month - 2
-            curve[fy_idx] = round(float(total_units) / annual_total, 4)
+        for year, month, total_units in result:
+            # Map (year, month) to FY month key
+            if year == 2025 and 2 <= month <= 12:
+                key = _MONTH_KEYS[month - 1]  # feb=idx1, mar=idx2, ..., dec=idx11
+            elif year == 2026 and month == 1:
+                key = "jan_next"  # idx 12
+            elif year == 2025 and month == 1:
+                key = "jan"  # pre-FY
+            else:
+                continue
+            curve[key] = round(float(total_units) / annual_total, 4)
 
         return curve
     finally:
@@ -6450,164 +6481,165 @@ def _compute_master_curve() -> list:
 
 @app.get("/api/item-plan")
 async def get_item_plan(request: Request):
+    """Return item plan data shaped for the React frontend.
+
+    Frontend expects:
+      data.skus[]: each has ly_units/ly_revenue/etc as month-keyed objects,
+                   plus curve, ty_plan_annual, fba_beginning, wh_beginning
+      data.overrides: {sku: {fe_field_name: {month_key: value}}}
+      data.settings, data.factory_orders, data.factory_order_items
+    """
     _require_auth(request)
     con = _duck()
     try:
-        # Get settings
+        # ── Settings ──
         settings = {}
         for row in con.execute("SELECT key, value FROM item_plan_settings").fetchall():
             settings[row[0]] = row[1]
 
-        # Load seed data for SKU metadata (asin, product_name, etc.)
+        # ── Seed JSON for metadata ──
         seed_data = {}
         seed_path = DB_DIR / "item_plan_seed.json"
         if seed_path.exists():
             with open(seed_path) as f:
                 seed_data = json.load(f)
 
+        # Build metadata map from seed skus
+        sku_meta = {}
+        for si in seed_data.get("skus", []):
+            sk = si.get("sku", "")
+            sku_meta[sk] = si  # full seed record
+
+        # ── Build SKU list ──
+        sku_rows = con.execute(
+            "SELECT DISTINCT sku FROM monthly_sales_history ORDER BY sku"
+        ).fetchall()
+
         skus_list = []
-        sku_metadata = {}
-        ly_data_map = seed_data.get("ly_data", {})
-
-        # Build SKU metadata map
-        for sku_info in seed_data.get("skus", []):
-            sku = sku_info.get("sku", "")
-            sku_metadata[sku] = {
-                "asin": sku_info.get("asin", ""),
-                "product_name": sku_info.get("product_name", ""),
-                "fba_beginning": sku_info.get("fba_beginning", {}),
-                "wh_beginning": sku_info.get("wh_beginning", {}),
-                "annual_plan": sku_info.get("ty_plan_annual", 0),
-            }
-
-        # Get all unique SKUs from monthly_sales_history
-        sku_rows = con.execute("""
-            SELECT DISTINCT sku FROM monthly_sales_history
-            ORDER BY sku
-        """).fetchall()
+        all_overrides = {}  # top-level {sku: {fe_field: {month_key: val}}}
 
         for (sku,) in sku_rows:
-            # Get LY data (12 months: Feb 2025 - Jan 2026)
-            ly_units = [0] * 12
-            ly_revenue = [0] * 12
-            ly_profit = [0] * 12
-            ly_refund_units = [0] * 12
+            # ── LY monthly data (arrays, then convert to month-keyed objects) ──
+            ly_units_arr = [0.0] * 12
+            ly_rev_arr = [0.0] * 12
+            ly_prof_arr = [0.0] * 12
+            ly_ref_arr = [0.0] * 12
 
-            for month in range(2, 14):  # Feb (2) through Jan next (13)
-                year = 2025 if month <= 12 else 2026
-                actual_month = month if month <= 12 else month - 12
-                idx = month - 2  # 0-indexed
-
-                row = con.execute("""
-                    SELECT units, revenue, profit, refund_units
-                    FROM monthly_sales_history
-                    WHERE sku = ? AND year = ? AND month = ?
-                """, [sku, year, actual_month]).fetchone()
-
+            for m in range(2, 14):  # Feb(2)..Jan(13)
+                yr = 2025 if m <= 12 else 2026
+                am = m if m <= 12 else m - 12
+                idx = m - 2
+                row = con.execute(
+                    "SELECT units, revenue, profit, refund_units "
+                    "FROM monthly_sales_history WHERE sku=? AND year=? AND month=?",
+                    [sku, yr, am],
+                ).fetchone()
                 if row:
-                    ly_units[idx] = float(row[0]) if row[0] else 0
-                    ly_revenue[idx] = float(row[1]) if row[1] else 0
-                    ly_profit[idx] = float(row[2]) if row[2] else 0
-                    ly_refund_units[idx] = float(row[3]) if row[3] else 0
+                    ly_units_arr[idx] = float(row[0] or 0)
+                    ly_rev_arr[idx] = float(row[1] or 0)
+                    ly_prof_arr[idx] = float(row[2] or 0)
+                    ly_ref_arr[idx] = float(row[3] or 0)
 
-            # Get curve selection
-            curve_row = con.execute("""
-                SELECT curve_type FROM item_plan_curve_selection WHERE sku = ?
-            """, [sku]).fetchone()
-            curve_type = curve_row[0] if curve_row else "LY"
+            # Convert to month-keyed objects
+            ly_units = _array_to_month_obj(ly_units_arr)
+            ly_revenue = _array_to_month_obj(ly_rev_arr)
+            ly_profit = _array_to_month_obj(ly_prof_arr)
+            ly_refund_units = _array_to_month_obj(ly_ref_arr)
 
-            # Get overrides
-            overrides = {}
-            override_rows = con.execute("""
-                SELECT field, month, value FROM item_plan_overrides WHERE sku = ?
-                ORDER BY field, month
-            """, [sku]).fetchall()
+            # Compute derived: ly_aur = revenue / units per month
+            ly_aur = {}
+            ly_refund_rate = {}
+            for k in _MONTH_KEYS:
+                u = ly_units.get(k, 0)
+                r = ly_revenue.get(k, 0)
+                ref = ly_refund_units.get(k, 0)
+                ly_aur[k] = round(r / u, 2) if u > 0 else 0
+                ly_refund_rate[k] = round(ref / u, 4) if u > 0 else 0
 
-            for field, month, value in override_rows:
-                if field not in overrides:
-                    overrides[field] = {}
-                overrides[field][str(month)] = float(value)
+            # ── Curve selection ──
+            crow = con.execute(
+                "SELECT curve_type FROM item_plan_curve_selection WHERE sku=?", [sku]
+            ).fetchone()
+            curve = crow[0] if crow else "LY"
 
-            # Get inventory from metadata
-            meta = sku_metadata.get(sku, {})
-            fba_beginning_inv = meta.get("fba_beginning", {}).get("jan", 0)
-            wh_beginning_inv = meta.get("wh_beginning", {}).get("feb", 0)
+            # ── Overrides (DB → frontend field names & month keys) ──
+            ov_rows = con.execute(
+                "SELECT field, month, value FROM item_plan_overrides WHERE sku=?", [sku]
+            ).fetchall()
+            sku_ov = {}
+            annual_plan_from_ov = 0
+            for db_field, month_num, value in ov_rows:
+                if db_field == "annual_plan_units":
+                    annual_plan_from_ov = float(value)
+                    continue
+                fe_field = _OVERRIDE_DB_TO_FE.get(db_field, db_field)
+                if fe_field not in sku_ov:
+                    sku_ov[fe_field] = {}
+                mk = _db_month_to_key(int(month_num))
+                sku_ov[fe_field][mk] = float(value)
+            all_overrides[sku] = sku_ov
+
+            # ── Metadata from seed ──
+            meta = sku_meta.get(sku, {})
+            ty_plan_annual = annual_plan_from_ov or meta.get("ty_plan_annual", 0)
+
+            # fba_beginning / wh_beginning: seed stores dicts, frontend wants a number
+            fba_raw = meta.get("fba_beginning", 0)
+            fba_beginning = fba_raw.get("jan", 0) if isinstance(fba_raw, dict) else float(fba_raw or 0)
+            wh_raw = meta.get("wh_beginning", 0)
+            wh_beginning = wh_raw.get("feb", 0) if isinstance(wh_raw, dict) else float(wh_raw or 0)
+
+            # ty_aur plan: use LY AUR as the plan baseline (frontend references sku.ty_aur)
+            ty_aur = {k: ly_aur[k] for k in _MONTH_KEYS}
+
+            # ty_plan_units: frontend uses sku.ty_plan_units?.fy_total as fallback
+            ty_plan_units = {"fy_total": int(ty_plan_annual)}
 
             skus_list.append({
                 "sku": sku,
                 "asin": meta.get("asin", ""),
                 "product_name": meta.get("product_name", ""),
-                "curve_type": curve_type,
-                "annual_plan_units": int(meta.get("annual_plan", 0)),
-                "ly": {
-                    "units": ly_units,
-                    "revenue": ly_revenue,
-                    "profit": ly_profit,
-                    "refund_units": ly_refund_units,
-                },
-                "overrides": overrides,
-                "fba_beginning_inventory": int(fba_beginning_inv),
-                "wh_beginning_inventory": int(wh_beginning_inv),
+                "tab": meta.get("tab", ""),
+                "curve": curve,
+                "ty_plan_annual": int(ty_plan_annual),
+                "ty_plan_units": ty_plan_units,
+                "ty_aur": ty_aur,
+                "fba_beginning": int(fba_beginning),
+                "wh_beginning": int(wh_beginning),
+                "ly_units": ly_units,
+                "ly_revenue": ly_revenue,
+                "ly_gross_profit": ly_profit,
+                "ly_refund_units": ly_refund_units,
+                "ly_aur": ly_aur,
+                "ly_refund_rate": ly_refund_rate,
+                "lly_units": {},
+                "lly_revenue": {},
+                "lly_gross_profit": {},
+                "lly_refund_units": {},
             })
-
-        # Get factory orders
-        orders = []
-        order_rows = con.execute("""
-            SELECT po_number, factory, payment_terms, total_units, factory_cost,
-                   fob_date, est_arrival, wk_received, wk_available, cbm, status
-            FROM item_plan_factory_orders
-            ORDER BY po_number
-        """).fetchall()
-
-        for row in order_rows:
-            orders.append({
-                "po_number": row[0],
-                "factory": row[1],
-                "payment_terms": row[2],
-                "units": int(row[3]),
-                "factory_cost": float(row[4]),
-                "fob_date": row[5],
-                "est_arrival": row[6],
-                "wk_received": row[7],
-                "wk_available": row[8],
-                "cbm": float(row[9]),
-                "status": row[10],
-            })
-
-        # Get factory order items
-        items = []
-        item_rows = con.execute("""
-            SELECT id, po_number, sku, description, units, est_arrival,
-                   wk_received, wk_available, status
-            FROM item_plan_factory_order_items
-            ORDER BY id
-        """).fetchall()
-
-        for row in item_rows:
-            items.append({
-                "id": int(row[0]),
-                "po_number": row[1],
-                "sku": row[2],
-                "description": row[3],
-                "units": int(row[4]),
-                "est_arrival": row[5],
-                "wk_received": row[6],
-                "wk_available": row[7],
-                "status": row[8],
-            })
-
-        # Compute master curve
-        master_curve = _compute_master_curve()
 
         return {
             "settings": settings,
             "skus": skus_list,
-            "factory_orders": orders,
-            "factory_order_items": items,
-            "master_curve": master_curve,
+            "overrides": all_overrides,
         }
     finally:
         con.close()
+
+
+_OVERRIDE_FE_TO_DB = {v: k for k, v in _OVERRIDE_DB_TO_FE.items()}
+
+
+def _month_key_to_db(key: str) -> int:
+    """Convert frontend month key to DB month number (1-13)."""
+    try:
+        return _MONTH_KEYS.index(key) + 1
+    except ValueError:
+        # If it's already an int or int-string, return as-is
+        try:
+            return int(key)
+        except (ValueError, TypeError):
+            return 0
 
 
 @app.post("/api/item-plan/override")
@@ -6615,9 +6647,14 @@ async def post_item_plan_override(request: Request):
     _require_auth(request)
     body = await request.json()
     sku = body.get("sku", "")
-    field = body.get("field", "")
-    month = body.get("month", 0)
+    fe_field = body.get("field", "")
+    month_raw = body.get("month", 0)
     value = body.get("value")
+
+    # Map frontend field name → DB field name
+    db_field = _OVERRIDE_FE_TO_DB.get(fe_field, fe_field)
+    # Map frontend month key → DB month integer
+    db_month = _month_key_to_db(month_raw) if isinstance(month_raw, str) else int(month_raw)
 
     con = _duck_rw()
     try:
@@ -6625,13 +6662,13 @@ async def post_item_plan_override(request: Request):
             # Delete override
             con.execute("""
                 DELETE FROM item_plan_overrides WHERE sku = ? AND field = ? AND month = ?
-            """, [sku, field, month])
+            """, [sku, db_field, db_month])
         else:
             # Upsert override
             con.execute("""
                 INSERT OR REPLACE INTO item_plan_overrides (sku, field, month, value)
                 VALUES (?, ?, ?, ?)
-            """, [sku, field, month, float(value)])
+            """, [sku, db_field, db_month, float(value)])
         con.commit()
         return {"status": "ok"}
     finally:
@@ -6659,9 +6696,37 @@ async def post_item_plan_curve(request: Request):
 
 @app.get("/api/item-plan/sales-curves")
 async def get_item_plan_sales_curves(request: Request):
+    """Return sales curves in the shape the frontend expects:
+    {master: {jan: 0.05, ...}, bySku: {sku: {jan: 0.05, ...}}}"""
     _require_auth(request)
     master_curve = _compute_master_curve()
-    return {"master_curve": master_curve}
+
+    # Build per-SKU LY curves
+    con = _duck()
+    try:
+        by_sku = {}
+        sku_rows = con.execute(
+            "SELECT DISTINCT sku FROM monthly_sales_history"
+        ).fetchall()
+        for (sku,) in sku_rows:
+            rows = con.execute(
+                "SELECT year, month, units FROM monthly_sales_history "
+                "WHERE sku=? AND year IN (2025,2026)", [sku]
+            ).fetchall()
+            total = sum(float(r[2] or 0) for r in rows)
+            curve = {k: 0 for k in _MONTH_KEYS}
+            if total > 0:
+                for yr, mo, units in rows:
+                    if yr == 2025 and 2 <= mo <= 12:
+                        curve[_MONTH_KEYS[mo - 1]] = round(float(units or 0) / total, 4)
+                    elif yr == 2026 and mo == 1:
+                        curve["jan_next"] = round(float(units or 0) / total, 4)
+                    elif yr == 2025 and mo == 1:
+                        curve["jan"] = round(float(units or 0) / total, 4)
+            by_sku[sku] = curve
+        return {"master": master_curve, "bySku": by_sku}
+    finally:
+        con.close()
 
 
 @app.get("/api/factory-on-order")
