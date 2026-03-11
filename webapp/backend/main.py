@@ -4625,6 +4625,26 @@ def item_master_amazon():
     return {"items": parent_items, "count": len(parent_items), "totalVariations": len(all_items)}
 
 
+@app.get("/api/item-master/housewares")
+def item_master_housewares():
+    """Housewares item master — items from housewares inventory."""
+    items = load_json("housewares_inventory.json")
+    result = []
+    for item in items:
+        result.append({
+            "itemNumber": item.get("itemNumber", ""),
+            "description": item.get("description", ""),
+            "pack": item.get("pack", 0),
+            "pcsOnHand": item.get("pcsOnHand", 0),
+            "pcsAvailable": item.get("pcsAvailable", 0),
+            "pcsAllocated": item.get("pcsAllocated", 0),
+            "nonStandard": item.get("nonStandard", 0),
+            "damage": item.get("damage", 0),
+            "qcHold": item.get("qcHold", 0),
+        })
+    return {"items": result, "count": len(result)}
+
+
 @app.get("/api/item-master/other")
 def item_master_other():
     """Items in warehouse inventory that are not in Amazon or Walmart item masters."""

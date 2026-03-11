@@ -52,7 +52,8 @@ The GolfGen Dashboard is a live, production web application for GolfGen — a co
 │  ├── data/golf_inventory.json                        │
 │  ├── data/housewares_inventory.json                  │
 │  ├── data/walmart_item_master.json                   │
-│  └── data/amazon_item_master.json                    │
+│  ├── data/amazon_item_master.json                    │
+│  └── data/pricing_sync.json  (SP-API pricing cache)  │
 └──────────────────────────────────────────────────────┘
 ```
 
@@ -77,7 +78,7 @@ golfgen-dashboard/
 │   └── amazon_item_master.json         # Amazon items (139 SKUs)
 ├── webapp/
 │   ├── backend/
-│   │   ├── main.py                     # ~3,980 lines — ALL backend logic
+│   │   ├── main.py                     # ~4,200+ lines — ALL backend logic
 │   │   ├── requirements.txt            # Python dependencies
 │   │   └── dist/                       # Pre-built frontend (git-tracked)
 │   └── frontend/
@@ -93,10 +94,8 @@ golfgen-dashboard/
 │               ├── Profitability.jsx   # P&L waterfall
 │               ├── Inventory.jsx       # FBA inventory + 3PL summary
 │               ├── Advertising.jsx     # Amazon Ads analytics
-│               ├── Warehouse.jsx       # Original warehouse (grouped)
-│               ├── GolfWarehouse.jsx   # Golf 3PL with channel filter
-│               ├── HousewaresWarehouse.jsx  # Housewares 3PL
-│               ├── ItemMaster.jsx      # Amazon/Walmart/Other tabs
+│               ├── GolfGenInventory.jsx # Unified Golf/HW 3PL inventory
+│               ├── ItemMaster.jsx      # Golf (All/Amazon/Walmart) + Housewares tabs
 │               └── Login.jsx           # Password login page
 ```
 
@@ -146,12 +145,18 @@ golfgen-dashboard/
 - `POST /api/refresh-warehouse` — reload from CSV
 
 ### Item Master
-- `GET /api/item-master` — Amazon items (editable)
-- `PUT /api/item-master/{asin}` — update single item field
+- `GET /api/item-master` — Amazon items (editable, enriched with live pricing/coupon data)
+- `PUT /api/item-master/{asin}` — update single Amazon item field
 - `POST /api/item-master/bulk-update` — bulk update items
-- `GET /api/item-master/walmart`
-- `GET /api/item-master/amazon`
-- `GET /api/item-master/other`
+- `GET /api/item-master/walmart` — Walmart items (14 SKUs, editable FY26 Plan)
+- `PUT /api/item-master/walmart/{golfgen_item}` — update single Walmart item field
+- `GET /api/item-master/amazon` — Amazon items (139 SKUs)
+- `GET /api/item-master/other` — items not in Amazon or Walmart
+- `GET /api/item-master/housewares` — Housewares items from housewares_inventory.json
+
+### Pricing & Coupons
+- `GET /api/pricing/status` — pricing sync cache status and last sync time
+- `POST /api/pricing/sync` — trigger SP-API competitive pricing + Ads coupon sync
 
 ### System
 - `GET /api/health`
@@ -186,12 +191,32 @@ Session-based with httponly cookies. Password is hardcoded as `Golfgen2026` in m
 ## Channel Classification Logic (Golf Warehouse)
 
 SKUs are classified as Amazon, Walmart, or Other:
-1. Strip `T-` prefix from SKU (transfer items)
+1. Strip `T-` prefix from SKU (T- items — do NOT call these "transfer")
 2. Strip suffixes: `-RB`, `-DONATE`, `-RETD`, `-FBM`, `-HOLD`, `-Damage`, `-CUST`, `-Transfer`
 3. Match base SKU against Walmart master set (14 items) and Amazon master set (36 items)
 4. If matches both → "Walmart & Amazon"; one → that channel; neither → "Other"
 
-**Suffix types displayed:** Standard, RB (Rebate), DONATE, RETD (Returned), Transfer (T-prefix), FBM, HOLD, Damage, CUST (Customer)
+**Suffix types displayed:** Standard, RB (Rebate), DONATE, RETD (Returned), T- (T-prefix), FBM, HOLD, Damage, CUST (Customer)
+
+---
+
+## Item Master Tab Structure
+
+The Item Master page is divided into two top-level divisions: **Golf** and **Housewares**.
+
+**Golf** has three sub-tabs:
+- **All** — unified view merging Amazon + Walmart items with channel badges. Simplified columns: Product, Channel, COGS, Price, FY26 Plan, LY Rev, LY Units
+- **Amazon** — full detail view with expanded rows showing live SP-API pricing (list/sale/buy box prices with sale end dates) and Ads API coupon data (discount amounts with coupon end dates). Includes color filters, inline editing, and CouponBadge component
+- **Walmart** — editable FY26 Plan, store count, categories. 14 SKUs from walmart_item_master.json
+
+**Housewares** — single flat list of all housewares items from housewares_inventory.json. Columns: Product, Pack, Pcs On Hand, Pcs Allocated, Pcs Available, Non-Std, Damage, QC Hold
+
+### Pricing/Coupon Integration (Amazon tab)
+- SP-API `Products.get_competitive_pricing()` fetches competitive pricing in batches of 20 ASINs
+- Amazon Ads API fetches coupon data
+- Cached in `data/pricing_sync.json`
+- Live fields enriched on item master response: `liveListPrice`, `liveSalePrice`, `liveSaleEndDate`, `liveBuyBoxPrice`, `couponDiscount`, `couponType`, `couponState`, `couponEndDate`
+- `CouponBadge` component renders coupon states: ENABLED, SCHEDULED, PAUSED, EXPIRED, ERRORED
 
 ---
 
@@ -262,7 +287,7 @@ Set these in Railway dashboard (Settings → Variables):
 
 ## Important Notes
 
-- **main.py is ~3,980 lines** — be careful with edits, don't overwrite unrelated sections
+- **main.py is ~4,200+ lines** — be careful with edits, don't overwrite unrelated sections
 - **Frontend dist is git-tracked** in `webapp/backend/dist/` — this is what the Docker image serves
 - **DuckDB file** (`golfgen_amazon.duckdb`) contains all historical sales data — do NOT delete
 - **All fetch calls** must include `credentials: "include"` for auth cookies to work

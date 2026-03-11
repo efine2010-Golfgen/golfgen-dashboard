@@ -246,6 +246,80 @@ export default function GolfGenInventory() {
         </div>
       )}
 
+      {/* ── Controls Bar: toggles + search + count — all on one line ── */}
+      <div style={{
+        display: "flex", gap: 10, alignItems: "center", marginBottom: 20, flexWrap: "wrap",
+      }}>
+        <div className="range-tabs">
+          {DIVISIONS.map(d => (
+            <button key={d} className={`range-tab ${division === d ? "active" : ""}`}
+              onClick={() => { setDivision(d); setChannel("All"); setSearch(""); }}>
+              {d === "Golf" ? "⛳ Golf" : "🏠 HW"}
+            </button>
+          ))}
+        </div>
+
+        {division === "Golf" && (
+          <div className="range-tabs">
+            {GOLF_CHANNELS.map(ch => (
+              <button key={ch} className={`range-tab ${channel === ch ? "active" : ""}`}
+                onClick={() => setChannel(ch)}>
+                {ch}
+                {ch !== "All" && channelBreakdown[ch] != null && (
+                  <span style={{ opacity: 0.7, marginLeft: 4, fontSize: 11 }}>({channelBreakdown[ch]})</span>
+                )}
+              </button>
+            ))}
+          </div>
+        )}
+
+        <div style={{ flex: 1 }} />
+
+        <input
+          type="text" placeholder="Search SKU or description..."
+          value={search} onChange={e => setSearch(e.target.value)}
+          style={{
+            padding: "6px 14px", border: "1px solid rgba(14,31,45,0.15)", borderRadius: 8,
+            fontSize: 13, width: 240, outline: "none",
+          }}
+        />
+        <span style={{ fontSize: 12, color: "var(--muted)", whiteSpace: "nowrap" }}>
+          {sorted.length} of {masters.length}
+        </span>
+      </div>
+
+      {/* ── Division KPIs (current filter) ── */}
+      {!loading && (
+        <div className="kpi-grid" style={{ marginBottom: 24 }}>
+          <div className="kpi-card">
+            <div className="kpi-label">Master SKUs</div>
+            <div className="kpi-value">{summary.totalSkus || 0}</div>
+          </div>
+          <div className="kpi-card">
+            <div className="kpi-label">Total Items</div>
+            <div className="kpi-value">{summary.totalItems || 0}</div>
+          </div>
+          <div className="kpi-card">
+            <div className="kpi-label">Pcs On Hand</div>
+            <div className="kpi-value teal">{(summary.totalOnHand || 0).toLocaleString()}</div>
+          </div>
+          <div className="kpi-card">
+            <div className="kpi-label">Pcs Allocated</div>
+            <div className="kpi-value" style={{ color: "var(--gold)" }}>{(summary.totalAllocated || 0).toLocaleString()}</div>
+          </div>
+          <div className="kpi-card">
+            <div className="kpi-label">Pcs Available</div>
+            <div className="kpi-value pos">{(summary.totalAvailable || 0).toLocaleString()}</div>
+          </div>
+          {(summary.totalDamage || 0) > 0 && (
+            <div className="kpi-card">
+              <div className="kpi-label">Damage</div>
+              <div className="kpi-value neg">{(summary.totalDamage || 0).toLocaleString()}</div>
+            </div>
+          )}
+        </div>
+      )}
+
       {/* ── Executive Summary — combined KPIs + breakdown chart ── */}
       {overviewData && !loading && (
         <div className="table-card" style={{ marginBottom: 24, padding: 0, overflow: "hidden" }}>
@@ -366,80 +440,6 @@ export default function GolfGenInventory() {
               </div>
             )}
           </div>
-        </div>
-      )}
-
-      {/* ── Controls Bar: toggles + search + count — all on one line ── */}
-      <div style={{
-        display: "flex", gap: 10, alignItems: "center", marginBottom: 20, flexWrap: "wrap",
-      }}>
-        <div className="range-tabs">
-          {DIVISIONS.map(d => (
-            <button key={d} className={`range-tab ${division === d ? "active" : ""}`}
-              onClick={() => { setDivision(d); setChannel("All"); setSearch(""); }}>
-              {d === "Golf" ? "⛳ Golf" : "🏠 HW"}
-            </button>
-          ))}
-        </div>
-
-        {division === "Golf" && (
-          <div className="range-tabs">
-            {GOLF_CHANNELS.map(ch => (
-              <button key={ch} className={`range-tab ${channel === ch ? "active" : ""}`}
-                onClick={() => setChannel(ch)}>
-                {ch}
-                {ch !== "All" && channelBreakdown[ch] != null && (
-                  <span style={{ opacity: 0.7, marginLeft: 4, fontSize: 11 }}>({channelBreakdown[ch]})</span>
-                )}
-              </button>
-            ))}
-          </div>
-        )}
-
-        <div style={{ flex: 1 }} />
-
-        <input
-          type="text" placeholder="Search SKU or description..."
-          value={search} onChange={e => setSearch(e.target.value)}
-          style={{
-            padding: "6px 14px", border: "1px solid rgba(14,31,45,0.15)", borderRadius: 8,
-            fontSize: 13, width: 240, outline: "none",
-          }}
-        />
-        <span style={{ fontSize: 12, color: "var(--muted)", whiteSpace: "nowrap" }}>
-          {sorted.length} of {masters.length}
-        </span>
-      </div>
-
-      {/* ── Division KPIs (current filter) ── */}
-      {!loading && (
-        <div className="kpi-grid" style={{ marginBottom: 24 }}>
-          <div className="kpi-card">
-            <div className="kpi-label">Master SKUs</div>
-            <div className="kpi-value">{summary.totalSkus || 0}</div>
-          </div>
-          <div className="kpi-card">
-            <div className="kpi-label">Total Items</div>
-            <div className="kpi-value">{summary.totalItems || 0}</div>
-          </div>
-          <div className="kpi-card">
-            <div className="kpi-label">Pcs On Hand</div>
-            <div className="kpi-value teal">{(summary.totalOnHand || 0).toLocaleString()}</div>
-          </div>
-          <div className="kpi-card">
-            <div className="kpi-label">Pcs Available</div>
-            <div className="kpi-value pos">{(summary.totalAvailable || 0).toLocaleString()}</div>
-          </div>
-          <div className="kpi-card">
-            <div className="kpi-label">Pcs Allocated</div>
-            <div className="kpi-value" style={{ color: "var(--gold)" }}>{(summary.totalAllocated || 0).toLocaleString()}</div>
-          </div>
-          {(summary.totalDamage || 0) > 0 && (
-            <div className="kpi-card">
-              <div className="kpi-label">Damage</div>
-              <div className="kpi-value neg">{(summary.totalDamage || 0).toLocaleString()}</div>
-            </div>
-          )}
         </div>
       )}
 

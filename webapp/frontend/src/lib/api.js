@@ -84,6 +84,7 @@ export const api = {
     fetch(`${API_BASE}/api/pricing/sync`, { method: "POST", credentials: "include" }).then(r => r.json()),
   itemMasterAmazon: () => fetchJSON(`/api/item-master/amazon`),
   itemMasterOther: () => fetchJSON(`/api/item-master/other`),
+  itemMasterHousewares: () => fetchJSON(`/api/item-master/housewares`),
 };
 
 export function fmt$(n) {

@@ -10,7 +10,9 @@ const COLOR_BADGES = {
   "": { bg: "#f3f4f6", color: "#6b7280" },
 };
 
-const SECTIONS = ["All", "Green", "Blue", "Red", "Orange", "Accessories"];
+const COLOR_SECTIONS = ["All", "Green", "Blue", "Red", "Orange", "Accessories"];
+const DIVISIONS = ["Golf", "Housewares"];
+const GOLF_SUBTABS = ["All", "Amazon", "Walmart"];
 
 function Badge({ color }) {
   const style = COLOR_BADGES[color] || COLOR_BADGES[""];
@@ -60,8 +62,6 @@ function EditableCell({ value, onSave, type = "number", prefix = "", suffix = ""
   );
 }
 
-const MASTER_TABS = ["Amazon", "Walmart", "Other"];
-
 function CouponBadge({ state }) {
   if (!state) return null;
   const map = {
@@ -82,11 +82,30 @@ function CouponBadge({ state }) {
   );
 }
 
+function formatSyncTime(iso) {
+  if (!iso) return "Never";
+  const d = new Date(iso);
+  const now = new Date();
+  const diffMs = now - d;
+  const diffMin = Math.round(diffMs / 60000);
+  if (diffMin < 1) return "Just now";
+  if (diffMin < 60) return `${diffMin}m ago`;
+  const diffHr = Math.round(diffMin / 60);
+  if (diffHr < 24) return `${diffHr}h ago`;
+  return d.toLocaleDateString("en-US", { month: "short", day: "numeric" });
+}
+
+function fmtDate(iso) {
+  if (!iso) return null;
+  return new Date(iso).toLocaleDateString("en-US", { month: "short", day: "numeric" });
+}
+
 export default function ItemMaster() {
-  const [masterTab, setMasterTab] = useState("Amazon");
-  const [items, setItems] = useState([]);
+  const [division, setDivision] = useState("Golf");
+  const [golfSubTab, setGolfSubTab] = useState("All");
+  const [amazonItems, setAmazonItems] = useState([]);
   const [walmartItems, setWalmartItems] = useState(null);
-  const [otherItems, setOtherItems] = useState(null);
+  const [housewaresItems, setHousewaresItems] = useState(null);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(null);
   const [filter, setFilter] = useState("All");
@@ -98,29 +117,40 @@ export default function ItemMaster() {
   const [syncing, setSyncing] = useState(false);
   const [pricingLastSync, setPricingLastSync] = useState(null);
 
-  const load = useCallback(() => {
+  // Load Amazon items (main item master) on mount
+  const loadAmazon = useCallback(() => {
     setLoading(true);
     api.itemMaster().then(d => {
-      setItems(d.items || []);
+      setAmazonItems(d.items || []);
       setPricingLastSync(d.pricingLastSync || null);
       setLoading(false);
     }).catch(() => setLoading(false));
   }, []);
 
-  useEffect(() => { load(); }, [load]);
+  useEffect(() => { loadAmazon(); }, [loadAmazon]);
 
   useEffect(() => {
     api.pricingStatus().then(setPricingStatus).catch(() => {});
   }, []);
 
+  // Lazy-load Walmart and Housewares
+  useEffect(() => {
+    if (division === "Golf" && (golfSubTab === "All" || golfSubTab === "Walmart") && walmartItems === null) {
+      api.itemMasterWalmart().then(d => setWalmartItems(d.items || [])).catch(() => setWalmartItems([]));
+    }
+    if (division === "Housewares" && housewaresItems === null) {
+      setLoading(true);
+      api.itemMasterHousewares().then(d => { setHousewaresItems(d.items || []); setLoading(false); }).catch(() => { setHousewaresItems([]); setLoading(false); });
+    }
+  }, [division, golfSubTab, walmartItems, housewaresItems]);
+
   const handlePricingSync = async () => {
     setSyncing(true);
     try {
       await api.triggerPricingSync();
-      // Poll for completion after a short delay
       setTimeout(() => {
         api.pricingStatus().then(setPricingStatus).catch(() => {});
-        load(); // Reload items with fresh pricing data
+        loadAmazon();
         setSyncing(false);
       }, 15000);
     } catch (e) {
@@ -129,61 +159,17 @@ export default function ItemMaster() {
     }
   };
 
-  useEffect(() => {
-    if (masterTab === "Walmart" && walmartItems === null) {
-      setLoading(true);
-      api.itemMasterWalmart().then(d => { setWalmartItems(d.items || []); setLoading(false); }).catch(() => setLoading(false));
-    }
-    if (masterTab === "Other" && otherItems === null) {
-      setLoading(true);
-      api.itemMasterOther().then(d => { setOtherItems(d.items || []); setLoading(false); }).catch(() => setLoading(false));
-    }
-  }, [masterTab, walmartItems, otherItems]);
-
   const handleUpdate = async (asin, field, value) => {
     setSaving(asin);
     try {
       await api.updateItem(asin, { [field]: value });
-      setItems(prev => prev.map(i => i.asin === asin ? { ...i, [field]: value } : i));
+      setAmazonItems(prev => prev.map(i => i.asin === asin ? { ...i, [field]: value } : i));
     } catch (e) {
       console.error("Save failed:", e);
     }
     setSaving(null);
   };
 
-  const handleSort = (key) => {
-    if (sortKey === key) setSortDir(d => d === "desc" ? "asc" : "desc");
-    else { setSortKey(key); setSortDir("desc"); }
-  };
-
-  const filtered = items.filter(i => {
-    if (filter === "Accessories") return !i.color || i.color === "";
-    if (filter !== "All" && i.color !== filter) return false;
-    if (search) {
-      const q = search.toLowerCase();
-      return (i.productName || "").toLowerCase().includes(q) ||
-             (i.sku || "").toLowerCase().includes(q) ||
-             (i.asin || "").toLowerCase().includes(q);
-    }
-    return true;
-  });
-
-  const sorted = [...filtered].sort((a, b) => {
-    const av = a[sortKey] ?? "";
-    const bv = b[sortKey] ?? "";
-    if (typeof av === "number" && typeof bv === "number") return sortDir === "desc" ? bv - av : av - bv;
-    return sortDir === "desc" ? String(bv).localeCompare(String(av)) : String(av).localeCompare(String(bv));
-  });
-
-  const SortHeader = ({ label, field, style: s }) => (
-    <th onClick={() => handleSort(field)} style={{ cursor: "pointer", userSelect: "none", ...s }}>
-      {label} {sortKey === field ? (sortDir === "desc" ? "▼" : "▲") : ""}
-    </th>
-  );
-
-  if (loading) return <div className="loading"><div className="spinner" /> Loading item master...</div>;
-
-  /* ─────────────── Walmart Tab ─────────────── */
   const handleWalmartUpdate = async (golfgenItem, field, value) => {
     setSaving(golfgenItem);
     try {
@@ -195,9 +181,137 @@ export default function ItemMaster() {
     setSaving(null);
   };
 
-  if (masterTab === "Walmart") {
-    const simpleItems = walmartItems || [];
-    const simpleFiltered = simpleItems.filter(i => {
+  const handleSort = (key) => {
+    if (sortKey === key) setSortDir(d => d === "desc" ? "asc" : "desc");
+    else { setSortKey(key); setSortDir("desc"); }
+  };
+
+  const SortHeader = ({ label, field, style: s }) => (
+    <th onClick={() => handleSort(field)} style={{ cursor: "pointer", userSelect: "none", ...s }}>
+      {label} {sortKey === field ? (sortDir === "desc" ? "▼" : "▲") : ""}
+    </th>
+  );
+
+  if (loading) return <div className="loading"><div className="spinner" /> Loading item master...</div>;
+
+  /* ═══════════════════════════════════════════════════════════
+     HOUSEWARES DIVISION
+     ═══════════════════════════════════════════════════════════ */
+  if (division === "Housewares") {
+    const items = housewaresItems || [];
+    const hw = items.filter(i => {
+      if (!search) return true;
+      const q = search.toLowerCase();
+      return (i.itemNumber || "").toLowerCase().includes(q) ||
+             (i.description || "").toLowerCase().includes(q);
+    });
+
+    const totalSkus = items.length;
+    const totalOnHand = items.reduce((s, i) => s + (i.pcsOnHand || 0), 0);
+    const totalAvailable = items.reduce((s, i) => s + (i.pcsAvailable || 0), 0);
+    const totalAllocated = items.reduce((s, i) => s + (i.pcsAllocated || 0), 0);
+
+    return (
+      <>
+        <div className="page-header">
+          <h1>Item Master</h1>
+          <p>Housewares &middot; {totalSkus} items</p>
+        </div>
+
+        {/* Division Tabs */}
+        <div className="range-tabs" style={{ marginBottom: 20 }}>
+          {DIVISIONS.map(t => (
+            <button key={t} className={`range-tab ${division === t ? "active" : ""}`}
+              onClick={() => { setDivision(t); setSearch(""); setFilter("All"); }}>{t}</button>
+          ))}
+        </div>
+
+        <div className="kpi-grid" style={{ marginBottom: 24 }}>
+          <div className="kpi-card">
+            <div className="kpi-label">Total SKUs</div>
+            <div className="kpi-value teal">{totalSkus}</div>
+          </div>
+          <div className="kpi-card">
+            <div className="kpi-label">Pcs On Hand</div>
+            <div className="kpi-value" style={{ color: "var(--navy)" }}>{totalOnHand.toLocaleString()}</div>
+          </div>
+          <div className="kpi-card">
+            <div className="kpi-label">Pcs Available</div>
+            <div className="kpi-value pos">{totalAvailable.toLocaleString()}</div>
+          </div>
+          <div className="kpi-card">
+            <div className="kpi-label">Pcs Allocated</div>
+            <div className="kpi-value" style={{ color: "var(--gold)" }}>{totalAllocated.toLocaleString()}</div>
+          </div>
+        </div>
+
+        <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 16 }}>
+          <input type="text" placeholder="Search..." value={search} onChange={e => setSearch(e.target.value)}
+            style={{ padding: "6px 14px", border: "1px solid rgba(14,31,45,0.15)", borderRadius: 8, fontSize: 13, width: 260 }} />
+          <span style={{ fontSize: 12, color: "var(--muted)", marginLeft: "auto" }}>
+            {hw.length} of {totalSkus}
+          </span>
+        </div>
+
+        <div className="table-card">
+          <table>
+            <thead>
+              <tr>
+                <th style={{ minWidth: 280, textAlign: "left" }}>Product</th>
+                <th style={{ textAlign: "right" }}>Pack</th>
+                <th style={{ textAlign: "right" }}>Pcs On Hand</th>
+                <th style={{ textAlign: "right" }}>Pcs Allocated</th>
+                <th style={{ textAlign: "right" }}>Pcs Available</th>
+                <th style={{ textAlign: "right" }}>Non-Std</th>
+                <th style={{ textAlign: "right" }}>Damage</th>
+                <th style={{ textAlign: "right" }}>QC Hold</th>
+              </tr>
+            </thead>
+            <tbody>
+              {hw.map((item, i) => (
+                <tr key={i}>
+                  <td>
+                    <div style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", maxWidth: 320 }} title={item.description}>
+                      {item.description || "—"}
+                    </div>
+                    <div style={{ fontSize: 11, color: "var(--muted)", marginTop: 2, fontFamily: "'Space Grotesk', monospace" }}>
+                      {item.itemNumber || "—"}
+                    </div>
+                  </td>
+                  <td style={{ textAlign: "right" }}>{item.pack || "—"}</td>
+                  <td style={{ textAlign: "right" }}>{(item.pcsOnHand || 0).toLocaleString()}</td>
+                  <td style={{ textAlign: "right", color: (item.pcsAllocated || 0) > 0 ? "var(--gold)" : "var(--muted)" }}>
+                    {(item.pcsAllocated || 0) > 0 ? item.pcsAllocated.toLocaleString() : "—"}
+                  </td>
+                  <td style={{ textAlign: "right", fontWeight: 600, color: (item.pcsAvailable || 0) > 0 ? "#16a34a" : "var(--muted)" }}>
+                    {(item.pcsAvailable || 0).toLocaleString()}
+                  </td>
+                  <td style={{ textAlign: "right", color: (item.nonStandard || 0) > 0 ? "#dc2626" : "var(--muted)" }}>
+                    {(item.nonStandard || 0) > 0 ? item.nonStandard.toLocaleString() : "—"}
+                  </td>
+                  <td style={{ textAlign: "right", color: (item.damage || 0) > 0 ? "#dc2626" : "var(--muted)" }}>
+                    {(item.damage || 0) > 0 ? item.damage.toLocaleString() : "—"}
+                  </td>
+                  <td style={{ textAlign: "right", color: (item.qcHold || 0) > 0 ? "var(--gold)" : "var(--muted)" }}>
+                    {(item.qcHold || 0) > 0 ? item.qcHold.toLocaleString() : "—"}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </>
+    );
+  }
+
+  /* ═══════════════════════════════════════════════════════════
+     GOLF DIVISION
+     ═══════════════════════════════════════════════════════════ */
+
+  /* ─── Golf > Walmart sub-tab ─── */
+  if (golfSubTab === "Walmart") {
+    const wm = walmartItems || [];
+    const wmFiltered = wm.filter(i => {
       if (!search) return true;
       const q = search.toLowerCase();
       return (i.golfgenItem || i.itemNumber || "").toLowerCase().includes(q) ||
@@ -205,28 +319,35 @@ export default function ItemMaster() {
              (i.description || "").toLowerCase().includes(q);
     });
 
-    const totalSkus = simpleItems.length;
-    const totalStores = simpleItems.reduce((s, i) => s + (i.storeCount || 0), 0);
-    const avgCost = totalSkus > 0 ? simpleItems.reduce((s, i) => s + (i.unitCost || 0), 0) / totalSkus : 0;
-    const avgRetail = totalSkus > 0 ? simpleItems.reduce((s, i) => s + (i.unitRetail || 0), 0) / totalSkus : 0;
-    const totalPlannedWm = simpleItems.reduce((s, i) => s + (i.plannedAnnualUnits || 0), 0);
-    const categories = [...new Set(simpleItems.map(i => i.subcategory || i.category).filter(Boolean))];
+    const totalSkus = wm.length;
+    const totalStores = wm.reduce((s, i) => s + (i.storeCount || 0), 0);
+    const avgCost = totalSkus > 0 ? wm.reduce((s, i) => s + (i.unitCost || 0), 0) / totalSkus : 0;
+    const avgRetail = totalSkus > 0 ? wm.reduce((s, i) => s + (i.unitRetail || 0), 0) / totalSkus : 0;
+    const totalPlannedWm = wm.reduce((s, i) => s + (i.plannedAnnualUnits || 0), 0);
+    const categories = [...new Set(wm.map(i => i.subcategory || i.category).filter(Boolean))];
 
     return (
       <>
         <div className="page-header">
           <h1>Item Master</h1>
-          <p>Walmart items &middot; {totalSkus} SKUs</p>
+          <p>Golf &middot; Walmart &middot; {totalSkus} SKUs</p>
         </div>
 
+        {/* Division Tabs */}
+        <div className="range-tabs" style={{ marginBottom: 12 }}>
+          {DIVISIONS.map(t => (
+            <button key={t} className={`range-tab ${division === t ? "active" : ""}`}
+              onClick={() => { setDivision(t); setSearch(""); setFilter("All"); }}>{t}</button>
+          ))}
+        </div>
+        {/* Golf Sub-tabs */}
         <div className="range-tabs" style={{ marginBottom: 20 }}>
-          {MASTER_TABS.map(t => (
-            <button key={t} className={`range-tab ${masterTab === t ? "active" : ""}`}
-              onClick={() => { setMasterTab(t); setSearch(""); }}>{t}</button>
+          {GOLF_SUBTABS.map(t => (
+            <button key={t} className={`range-tab ${golfSubTab === t ? "active" : ""}`}
+              onClick={() => { setGolfSubTab(t); setSearch(""); setFilter("All"); }}>{t}</button>
           ))}
         </div>
 
-        {/* Walmart Summary */}
         <div className="kpi-grid" style={{ marginBottom: 24 }}>
           <div className="kpi-card">
             <div className="kpi-label">Total SKUs</div>
@@ -259,7 +380,7 @@ export default function ItemMaster() {
           <input type="text" placeholder="Search..." value={search} onChange={e => setSearch(e.target.value)}
             style={{ padding: "6px 14px", border: "1px solid rgba(14,31,45,0.15)", borderRadius: 8, fontSize: 13, width: 260 }} />
           <span style={{ fontSize: 12, color: "var(--muted)", marginLeft: "auto" }}>
-            {simpleFiltered.length} of {totalSkus} &middot; Click values to edit
+            {wmFiltered.length} of {totalSkus} &middot; Click values to edit
           </span>
         </div>
 
@@ -277,7 +398,7 @@ export default function ItemMaster() {
               </tr>
             </thead>
             <tbody>
-              {simpleFiltered.map((item, i) => (
+              {wmFiltered.map((item, i) => (
                 <tr key={i} style={{ background: saving === item.golfgenItem ? "rgba(46,207,170,0.08)" : undefined }}>
                   <td>
                     <div style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", maxWidth: 300 }} title={item.description}>
@@ -310,110 +431,183 @@ export default function ItemMaster() {
     );
   }
 
-  /* ─────────────── Other Tab ─────────────── */
-  if (masterTab === "Other") {
-    const simpleItems = otherItems || [];
-    const simpleFiltered = simpleItems.filter(i => {
-      if (!search) return true;
-      const q = search.toLowerCase();
-      return (i.itemNumber || "").toLowerCase().includes(q) || (i.description || "").toLowerCase().includes(q);
-    });
+  /* ─── Golf > All sub-tab ─── */
+  // "All" merges Amazon and Walmart items into a single unified view
+  const isAllTab = golfSubTab === "All";
 
-    const totalSkus = simpleItems.length;
-    const totalOnHand = simpleItems.reduce((s, i) => s + (i.pcsOnHand || 0), 0);
-    const totalAvailable = simpleItems.reduce((s, i) => s + (i.pcsAvailable || 0), 0);
-    const totalAllocated = simpleItems.reduce((s, i) => s + (i.pcsAllocated || 0), 0);
-    const golfCount = simpleItems.filter(i => i.source === "Golf").length;
-    const hwCount = simpleItems.filter(i => i.source === "Housewares").length;
+  // Build a unified list for the "All" tab
+  let allGolfItems = [];
+  if (isAllTab) {
+    // Amazon items
+    for (const a of amazonItems) {
+      allGolfItems.push({
+        id: a.asin,
+        name: a.productName,
+        sku: a.sku,
+        secondaryId: a.asin,
+        channel: "Amazon",
+        color: a.color,
+        unitCost: a.unitCost,
+        plannedAnnualUnits: a.plannedAnnualUnits || 0,
+        lyRevenue: a.lyRevenue || 0,
+        lyUnits: a.lyUnits || 0,
+        listPrice: a.listPrice || 0,
+        salePrice: a.salePrice || 0,
+        netPrice: a.netPrice || 0,
+      });
+    }
+    // Walmart items
+    for (const w of (walmartItems || [])) {
+      allGolfItems.push({
+        id: w.golfgenItem,
+        name: w.description,
+        sku: w.golfgenItem || w.itemNumber,
+        secondaryId: w.walmartItem,
+        channel: "Walmart",
+        color: null,
+        unitCost: w.unitCost || 0,
+        plannedAnnualUnits: w.plannedAnnualUnits || 0,
+        lyRevenue: 0,
+        lyUnits: 0,
+        listPrice: 0,
+        salePrice: 0,
+        netPrice: w.unitRetail || 0,
+      });
+    }
+  }
+
+  // Apply search and filter
+  const items = isAllTab ? allGolfItems : amazonItems;
+
+  const filtered = items.filter(i => {
+    if (isAllTab) {
+      if (search) {
+        const q = search.toLowerCase();
+        return (i.name || "").toLowerCase().includes(q) ||
+               (i.sku || "").toLowerCase().includes(q) ||
+               (i.secondaryId || "").toLowerCase().includes(q);
+      }
+      return true;
+    }
+    // Amazon tab filters
+    if (filter === "Accessories") return !i.color || i.color === "";
+    if (filter !== "All" && i.color !== filter) return false;
+    if (search) {
+      const q = search.toLowerCase();
+      return (i.productName || "").toLowerCase().includes(q) ||
+             (i.sku || "").toLowerCase().includes(q) ||
+             (i.asin || "").toLowerCase().includes(q);
+    }
+    return true;
+  });
+
+  const sorted = [...filtered].sort((a, b) => {
+    const av = a[sortKey] ?? "";
+    const bv = b[sortKey] ?? "";
+    if (typeof av === "number" && typeof bv === "number") return sortDir === "desc" ? bv - av : av - bv;
+    return sortDir === "desc" ? String(bv).localeCompare(String(av)) : String(av).localeCompare(String(bv));
+  });
+
+  /* ─── Golf > All view ─── */
+  if (isAllTab) {
+    const totalAmazon = amazonItems.length;
+    const totalWalmart = (walmartItems || []).length;
+    const totalAll = totalAmazon + totalWalmart;
+    const totalLyRev = amazonItems.reduce((s, i) => s + (i.lyRevenue || 0), 0);
+    const totalPlannedAll = allGolfItems.reduce((s, i) => s + (i.plannedAnnualUnits || 0), 0);
 
     return (
       <>
         <div className="page-header">
           <h1>Item Master</h1>
-          <p>Other items (not in Amazon or Walmart master) &middot; {totalSkus} SKUs</p>
+          <p>Golf &middot; All Channels &middot; {totalAll} SKUs ({totalAmazon} Amazon + {totalWalmart} Walmart)</p>
         </div>
 
+        {/* Division Tabs */}
+        <div className="range-tabs" style={{ marginBottom: 12 }}>
+          {DIVISIONS.map(t => (
+            <button key={t} className={`range-tab ${division === t ? "active" : ""}`}
+              onClick={() => { setDivision(t); setSearch(""); setFilter("All"); }}>{t}</button>
+          ))}
+        </div>
+        {/* Golf Sub-tabs */}
         <div className="range-tabs" style={{ marginBottom: 20 }}>
-          {MASTER_TABS.map(t => (
-            <button key={t} className={`range-tab ${masterTab === t ? "active" : ""}`}
-              onClick={() => { setMasterTab(t); setSearch(""); }}>{t}</button>
+          {GOLF_SUBTABS.map(t => (
+            <button key={t} className={`range-tab ${golfSubTab === t ? "active" : ""}`}
+              onClick={() => { setGolfSubTab(t); setSearch(""); setFilter("All"); setSortKey("lyRevenue"); }}>{t}</button>
           ))}
         </div>
 
-        {/* Other Summary */}
         <div className="kpi-grid" style={{ marginBottom: 24 }}>
           <div className="kpi-card">
             <div className="kpi-label">Total SKUs</div>
-            <div className="kpi-value teal">{totalSkus}</div>
+            <div className="kpi-value teal">{totalAll}</div>
           </div>
           <div className="kpi-card">
-            <div className="kpi-label">Pcs On Hand</div>
-            <div className="kpi-value" style={{ color: "var(--navy)" }}>{totalOnHand.toLocaleString()}</div>
+            <div className="kpi-label">Amazon SKUs</div>
+            <div className="kpi-value" style={{ color: "var(--blue-active)" }}>{totalAmazon}</div>
           </div>
           <div className="kpi-card">
-            <div className="kpi-label">Pcs Available</div>
-            <div className="kpi-value pos">{totalAvailable.toLocaleString()}</div>
+            <div className="kpi-label">Walmart SKUs</div>
+            <div className="kpi-value" style={{ color: "var(--orange)" }}>{totalWalmart}</div>
           </div>
           <div className="kpi-card">
-            <div className="kpi-label">Pcs Allocated</div>
-            <div className="kpi-value" style={{ color: "var(--gold)" }}>{totalAllocated.toLocaleString()}</div>
+            <div className="kpi-label">Amazon LY Revenue</div>
+            <div className="kpi-value" style={{ color: "var(--navy)" }}>{fmt$(totalLyRev)}</div>
           </div>
           <div className="kpi-card">
-            <div className="kpi-label">From Golf</div>
-            <div className="kpi-value">{golfCount}</div>
-          </div>
-          <div className="kpi-card">
-            <div className="kpi-label">From HW</div>
-            <div className="kpi-value">{hwCount}</div>
+            <div className="kpi-label">FY26 Planned Units</div>
+            <div className="kpi-value" style={{ color: "var(--orange)" }}>{totalPlannedAll.toLocaleString()}</div>
           </div>
         </div>
 
         <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 16 }}>
-          <input type="text" placeholder="Search..." value={search} onChange={e => setSearch(e.target.value)}
+          <input type="text" placeholder="Search SKU, ASIN, or name..."
+            value={search} onChange={e => setSearch(e.target.value)}
             style={{ padding: "6px 14px", border: "1px solid rgba(14,31,45,0.15)", borderRadius: 8, fontSize: 13, width: 260 }} />
           <span style={{ fontSize: 12, color: "var(--muted)", marginLeft: "auto" }}>
-            {simpleFiltered.length} of {totalSkus}
+            {sorted.length} of {totalAll}
           </span>
         </div>
 
-        <div className="table-card">
-          <table>
+        <div className="table-card" style={{ overflowX: "auto" }}>
+          <table style={{ fontSize: 13 }}>
             <thead>
               <tr>
-                <th style={{ minWidth: 260, textAlign: "left" }}>Product</th>
-                <th style={{ textAlign: "left" }}>Source</th>
-                <th style={{ textAlign: "right" }}>Pcs On Hand</th>
-                <th style={{ textAlign: "right" }}>Pcs Allocated</th>
-                <th style={{ textAlign: "right" }}>Pcs Available</th>
+                <SortHeader label="Product" field="name" style={{ minWidth: 280, textAlign: "left" }} />
+                <th style={{ textAlign: "left" }}>Channel</th>
+                <SortHeader label="COGS" field="unitCost" style={{ textAlign: "right" }} />
+                <SortHeader label="Price" field="netPrice" style={{ textAlign: "right" }} />
+                <SortHeader label="FY26 Plan" field="plannedAnnualUnits" style={{ textAlign: "right" }} />
+                <SortHeader label="LY Rev" field="lyRevenue" style={{ textAlign: "right" }} />
+                <SortHeader label="LY Units" field="lyUnits" style={{ textAlign: "right" }} />
               </tr>
             </thead>
             <tbody>
-              {simpleFiltered.map((item, i) => (
-                <tr key={i}>
-                  <td>
-                    <div style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", maxWidth: 300 }} title={item.description}>
-                      {item.description || "—"}
+              {sorted.map((item, i) => (
+                <tr key={item.id || i}>
+                  <td style={{ maxWidth: 300 }}>
+                    <div style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }} title={item.name}>
+                      {item.name || "—"}
                     </div>
                     <div style={{ fontSize: 11, color: "var(--muted)", marginTop: 2, fontFamily: "'Space Grotesk', monospace" }}>
-                      {item.itemNumber || item.sku || "—"}
+                      {item.sku}{item.secondaryId ? ` · ${item.secondaryId}` : ""}
                     </div>
                   </td>
                   <td>
                     <span style={{
                       display: "inline-block", padding: "2px 10px", borderRadius: 12, fontSize: 11, fontWeight: 600,
-                      background: item.source === "Golf" ? "rgba(46,207,170,0.1)" : "rgba(62,101,140,0.1)",
-                      color: item.source === "Golf" ? "var(--teal)" : "var(--blue-active)",
+                      background: item.channel === "Amazon" ? "rgba(62,101,140,0.1)" : "rgba(232,120,48,0.1)",
+                      color: item.channel === "Amazon" ? "var(--blue-active)" : "var(--orange)",
                     }}>
-                      {item.source}
+                      {item.channel}
                     </span>
                   </td>
-                  <td style={{ textAlign: "right" }}>{(item.pcsOnHand || 0).toLocaleString()}</td>
-                  <td style={{ textAlign: "right", color: (item.pcsAllocated || 0) > 0 ? "var(--gold)" : "var(--muted)" }}>
-                    {(item.pcsAllocated || 0) > 0 ? item.pcsAllocated.toLocaleString() : "—"}
-                  </td>
-                  <td style={{ textAlign: "right", fontWeight: 600, color: (item.pcsAvailable || 0) > 0 ? "#16a34a" : "var(--muted)" }}>
-                    {(item.pcsAvailable || 0).toLocaleString()}
-                  </td>
+                  <td style={{ textAlign: "right" }}>{item.unitCost > 0 ? `$${item.unitCost.toFixed(2)}` : "—"}</td>
+                  <td style={{ textAlign: "right", fontWeight: 600 }}>{item.netPrice > 0 ? `$${item.netPrice.toFixed(2)}` : "—"}</td>
+                  <td style={{ textAlign: "right" }}>{(item.plannedAnnualUnits || 0).toLocaleString()}</td>
+                  <td style={{ textAlign: "right" }}>{item.lyRevenue > 0 ? fmt$(item.lyRevenue) : "—"}</td>
+                  <td style={{ textAlign: "right" }}>{item.lyUnits > 0 ? item.lyUnits.toLocaleString() : "—"}</td>
                 </tr>
               ))}
             </tbody>
@@ -423,33 +617,22 @@ export default function ItemMaster() {
     );
   }
 
-  /* ─────────────── Amazon (main) Item Master ─────────────── */
-  const totalItems = items.length;
-  const totalPlanned = items.reduce((s, i) => s + (i.plannedAnnualUnits || 0), 0);
-  const totalLyRev = items.reduce((s, i) => s + (i.lyRevenue || 0), 0);
-  const colorsCount = [...new Set(items.map(i => i.color).filter(Boolean))].length;
-  const livePricedCount = items.filter(i => i.liveBuyBoxPrice != null).length;
-  const activeCouponCount = items.filter(i => i.liveCouponState === "ENABLED").length;
-
-  const formatSyncTime = (iso) => {
-    if (!iso) return "Never";
-    const d = new Date(iso);
-    const now = new Date();
-    const diffMs = now - d;
-    const diffMin = Math.round(diffMs / 60000);
-    if (diffMin < 1) return "Just now";
-    if (diffMin < 60) return `${diffMin}m ago`;
-    const diffHr = Math.round(diffMin / 60);
-    if (diffHr < 24) return `${diffHr}h ago`;
-    return d.toLocaleDateString("en-US", { month: "short", day: "numeric" });
-  };
+  /* ═══════════════════════════════════════════════════════════
+     GOLF > AMAZON sub-tab (full detail view)
+     ═══════════════════════════════════════════════════════════ */
+  const totalItems = amazonItems.length;
+  const totalPlanned = amazonItems.reduce((s, i) => s + (i.plannedAnnualUnits || 0), 0);
+  const totalLyRev = amazonItems.reduce((s, i) => s + (i.lyRevenue || 0), 0);
+  const colorsCount = [...new Set(amazonItems.map(i => i.color).filter(Boolean))].length;
+  const livePricedCount = amazonItems.filter(i => i.liveBuyBoxPrice != null).length;
+  const activeCouponCount = amazonItems.filter(i => i.liveCouponState === "ENABLED").length;
 
   return (
     <>
       <div className="page-header" style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
         <div>
           <h1>Item Master</h1>
-          <p>{totalItems} SKUs &middot; {colorsCount} colors &middot; Source of truth for product attributes</p>
+          <p>Golf &middot; Amazon &middot; {totalItems} SKUs &middot; {colorsCount} colors</p>
         </div>
         <div style={{ display: "flex", gap: 12, alignItems: "center" }}>
           {pricingLastSync && (
@@ -473,10 +656,18 @@ export default function ItemMaster() {
         </div>
       </div>
 
+      {/* Division Tabs */}
+      <div className="range-tabs" style={{ marginBottom: 12 }}>
+        {DIVISIONS.map(t => (
+          <button key={t} className={`range-tab ${division === t ? "active" : ""}`}
+            onClick={() => { setDivision(t); setSearch(""); setFilter("All"); }}>{t}</button>
+        ))}
+      </div>
+      {/* Golf Sub-tabs */}
       <div className="range-tabs" style={{ marginBottom: 20 }}>
-        {MASTER_TABS.map(t => (
-          <button key={t} className={`range-tab ${masterTab === t ? "active" : ""}`}
-            onClick={() => { setMasterTab(t); setSearch(""); setFilter("All"); }}>{t}</button>
+        {GOLF_SUBTABS.map(t => (
+          <button key={t} className={`range-tab ${golfSubTab === t ? "active" : ""}`}
+            onClick={() => { setGolfSubTab(t); setSearch(""); setFilter("All"); }}>{t}</button>
         ))}
       </div>
 
@@ -514,10 +705,10 @@ export default function ItemMaster() {
         )}
       </div>
 
-      {/* Filters */}
+      {/* Color Filters */}
       <div style={{ display: "flex", gap: 12, alignItems: "center", marginBottom: 16, flexWrap: "wrap" }}>
         <div className="range-tabs">
-          {SECTIONS.map(s => (
+          {COLOR_SECTIONS.map(s => (
             <button key={s} className={`range-tab ${filter === s ? "active" : ""}`} onClick={() => setFilter(s)}>
               {s}
             </button>
@@ -537,7 +728,7 @@ export default function ItemMaster() {
         </span>
       </div>
 
-      {/* Main Table */}
+      {/* Main Amazon Table */}
       <div className="table-card" style={{ overflowX: "auto" }}>
         <table style={{ fontSize: 13 }}>
           <thead>
@@ -549,8 +740,8 @@ export default function ItemMaster() {
               <SortHeader label="Hand" field="orientation" style={{ textAlign: "left" }} />
               <SortHeader label="COGS" field="unitCost" style={{ textAlign: "right" }} />
               <SortHeader label="List $" field="listPrice" style={{ textAlign: "right" }} />
-              <SortHeader label="Sale $" field="salePrice" style={{ textAlign: "right" }} />
-              <SortHeader label="Coupon" field="couponValue" style={{ textAlign: "right" }} />
+              <th style={{ textAlign: "right" }}>Sale $</th>
+              <th style={{ textAlign: "right" }}>Coupon</th>
               <SortHeader label="Net $" field="netPrice" style={{ textAlign: "right" }} />
               <SortHeader label="Ref Fee" field="referralFee" style={{ textAlign: "right" }} />
               <SortHeader label="FY26 Plan" field="plannedAnnualUnits" style={{ textAlign: "right" }} />
@@ -582,20 +773,36 @@ export default function ItemMaster() {
                     <EditableCell value={item.listPrice} prefix="$"
                       onSave={v => handleUpdate(item.asin, "listPrice", v)} />
                   </td>
+                  {/* Sale $ with end date from live API */}
                   <td style={{ textAlign: "right" }}>
-                    <EditableCell value={item.salePrice} prefix="$"
-                      onSave={v => handleUpdate(item.asin, "salePrice", v)} />
+                    <div>
+                      <EditableCell value={item.salePrice} prefix="$"
+                        onSave={v => handleUpdate(item.asin, "salePrice", v)} />
+                    </div>
+                    {item.liveSaleEndDate && (
+                      <div style={{ fontSize: 10, color: "var(--muted)", marginTop: 1 }}>
+                        ends {fmtDate(item.liveSaleEndDate)}
+                      </div>
+                    )}
                   </td>
+                  {/* Coupon with end date from Ads API */}
                   <td style={{ textAlign: "right" }}>
                     {item.liveCouponState ? (
-                      <span style={{ display: "flex", alignItems: "center", justifyContent: "flex-end", gap: 4 }}>
-                        {item.couponValue > 0 && (
-                          <span style={{ color: "#dc2626", fontSize: 12 }}>
-                            {item.couponType === "%" ? `${item.couponValue}%` : `$${item.couponValue}`}
-                          </span>
+                      <div>
+                        <span style={{ display: "flex", alignItems: "center", justifyContent: "flex-end", gap: 4 }}>
+                          {item.couponValue > 0 && (
+                            <span style={{ color: "#dc2626", fontSize: 12 }}>
+                              {item.couponType === "%" ? `${item.couponValue}%` : `$${item.couponValue}`}
+                            </span>
+                          )}
+                          <CouponBadge state={item.liveCouponState} />
+                        </span>
+                        {item.couponEndDate && (
+                          <div style={{ fontSize: 10, color: "var(--muted)", marginTop: 1, textAlign: "right" }}>
+                            ends {fmtDate(item.couponEndDate)}
+                          </div>
                         )}
-                        <CouponBadge state={item.liveCouponState} />
-                      </span>
+                      </div>
                     ) : item.couponValue > 0 ? (
                       <span style={{ color: "#dc2626" }}>
                         {item.couponType === "%" ? `${item.couponValue}%` : `$${item.couponValue}`} off
@@ -681,7 +888,7 @@ export default function ItemMaster() {
                                   <div style={{ fontSize: 10, color: "var(--muted)", marginBottom: 2 }}>Budget / Redemptions</div>
                                   <div style={{ fontSize: 13, fontFamily: "'Space Grotesk', monospace" }}>
                                     {item.couponBudget != null ? `$${item.couponBudget.toLocaleString()}` : "—"}
-                                    {item.couponBudgetUsed != null && (
+                                    {item.couponBudgetUsed != null && item.couponBudget > 0 && (
                                       <span style={{ color: "var(--muted)", fontSize: 11 }}> ({Math.round((item.couponBudgetUsed / item.couponBudget) * 100)}% used)</span>
                                     )}
                                   </div>
@@ -694,9 +901,9 @@ export default function ItemMaster() {
                                 <div style={{ minWidth: 120 }}>
                                   <div style={{ fontSize: 10, color: "var(--muted)", marginBottom: 2 }}>Coupon Dates</div>
                                   <div style={{ fontSize: 12 }}>
-                                    {item.couponStartDate ? new Date(item.couponStartDate).toLocaleDateString("en-US", { month: "short", day: "numeric" }) : "—"}
+                                    {fmtDate(item.couponStartDate) || "—"}
                                     {" → "}
-                                    {item.couponEndDate ? new Date(item.couponEndDate).toLocaleDateString("en-US", { month: "short", day: "numeric" }) : "—"}
+                                    {fmtDate(item.couponEndDate) || "—"}
                                   </div>
                                 </div>
                               )}
@@ -705,7 +912,7 @@ export default function ItemMaster() {
                         </div>
                       )}
 
-                      {/* Existing Detail Grid */}
+                      {/* Detail Grid */}
                       <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))", gap: 16 }}>
                         <div>
                           <div style={{ fontSize: 11, color: "var(--muted)", marginBottom: 4 }}>Brand / Series</div>
