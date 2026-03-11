@@ -4401,7 +4401,7 @@ def warehouse_unified(division: str = Query("golf", description="golf or housewa
         """Determine suffix type for a variant SKU."""
         s = sku.strip()
         if s.startswith("T-"):
-            return "Transfer"
+            return "T-"
         if "FBM" in s and "FBM" not in base:
             return "FBM"
         remainder = s.replace(base, "", 1)
@@ -4546,7 +4546,7 @@ def warehouse_summary():
             sku = item.get("itemNumber", "").strip()
             suffix = "Standard"
             if sku.startswith("T-"):
-                suffix = "Transfer (T-)"
+                suffix = "T-"
             elif sku.endswith("FBM"):
                 suffix = "FBM"
             elif "/RB" in sku:

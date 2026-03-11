@@ -19,7 +19,7 @@ const SUFFIX_COLORS = {
   FBM: "#8B5CF6",
   HOLD: "#ec4899",
   CUST: "#E87830",
-  Transfer: "#7BAED0",
+  "T-": "#7BAED0",
   Each: "#94a3b8",
   INBD: "#22A387",
 };
@@ -34,7 +34,7 @@ function SuffixBadge({ suffix }) {
     FBM: { bg: "#ede9fe", fg: "#5b21b6" },
     HOLD: { bg: "#fce7f3", fg: "#9d174d" },
     CUST: { bg: "#ffedd5", fg: "#9a3412" },
-    Transfer: { bg: "#e0f2fe", fg: "#0369a1" },
+    "T-": { bg: "#e0f2fe", fg: "#0369a1" },
     Each: { bg: "#f3f4f6", fg: "#6b7280" },
     INBD: { bg: "#d1fae5", fg: "#065f46" },
   };
