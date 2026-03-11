@@ -4055,20 +4055,26 @@ def warehouse_unified(division: str = Query("golf", description="golf or housewa
                        "FBM", "-RB", "-DONATE", "-RETD", "-FBM", "-HOLD", "-Damage", "-CUST", "-Transfer"]
 
     def _get_base_sku(sku):
-        """Strip prefixes (T-) and suffixes to get the base/master SKU."""
+        """Strip prefixes (T-) and suffixes to get the base/master SKU.
+        Strips iteratively to handle multi-suffix SKUs like GGWMSS2238BM/1/RB."""
         s = sku.strip()
         # Strip T- prefix
         if s.startswith("T-"):
             s = s[2:]
-        # Strip known suffixes
-        for pat in SUFFIX_PATTERNS:
-            if s.endswith(pat):
-                s = s[:-len(pat)]
-                break
-            if pat in s and pat.startswith("/"):
-                idx = s.find(pat)
-                s = s[:idx]
-                break
+        # Strip known suffixes iteratively (handles /1/RB, /1/DONATE, etc.)
+        changed = True
+        while changed:
+            changed = False
+            for pat in SUFFIX_PATTERNS:
+                if s.endswith(pat):
+                    s = s[:-len(pat)]
+                    changed = True
+                    break
+                if pat in s and pat.startswith("/"):
+                    idx = s.find(pat)
+                    s = s[:idx]
+                    changed = True
+                    break
         return s
 
     def _get_suffix_label(sku, base):
