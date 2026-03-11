@@ -20,12 +20,16 @@ COPY webapp/backend/dist/ ./webapp/frontend/dist/
 # SP-API credentials are passed via environment variables on Railway
 # (set in Railway dashboard, NOT baked into Docker image)
 
-# Copy data files if they exist (DuckDB database + COGS)
+# Copy data files if they exist (DuckDB database + COGS + JSON inventory)
 RUN mkdir -p ./data
 COPY data/golfgen_amazon.duckdb* ./data/
 COPY data/cogs.csv ./data/
 COPY data/item_master.csv ./data/
 COPY data/warehouse.csv ./data/
+COPY data/golf_inventory.json ./data/
+COPY data/housewares_inventory.json ./data/
+COPY data/walmart_item_master.json ./data/
+COPY data/amazon_item_master.json ./data/
 
 # Environment
 ENV DB_DIR=/app/data

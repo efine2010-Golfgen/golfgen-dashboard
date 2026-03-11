@@ -1,4 +1,7 @@
+import { useState, useEffect } from "react";
 import { BrowserRouter, Routes, Route, NavLink } from "react-router-dom";
+import { api } from "./lib/api";
+import Login from "./pages/Login";
 import Dashboard from "./pages/Dashboard";
 import Profitability from "./pages/Profitability";
 import Products from "./pages/Products";
@@ -6,9 +9,32 @@ import Inventory from "./pages/Inventory";
 import Advertising from "./pages/Advertising";
 import ItemMaster from "./pages/ItemMaster";
 import Warehouse from "./pages/Warehouse";
+import GolfWarehouse from "./pages/GolfWarehouse";
+import HousewaresWarehouse from "./pages/HousewaresWarehouse";
 import "./App.css";
 
 export default function App() {
+  const [authed, setAuthed] = useState(null); // null = checking, true/false
+
+  useEffect(() => {
+    api.authCheck()
+      .then(() => setAuthed(true))
+      .catch(() => setAuthed(false));
+  }, []);
+
+  if (authed === null) {
+    return <div className="loading"><div className="spinner" /> Checking session...</div>;
+  }
+
+  if (!authed) {
+    return <Login onLogin={() => setAuthed(true)} />;
+  }
+
+  const handleLogout = async () => {
+    await api.logout();
+    setAuthed(false);
+  };
+
   return (
     <BrowserRouter>
       <div className="app">
@@ -28,6 +54,7 @@ export default function App() {
                 <p>PGA TOUR Licensed &bull; SP-API Analytics</p>
               </div>
               <span className="live-badge">LIVE DATA</span>
+              <button className="logout-btn" onClick={handleLogout}>Sign Out</button>
             </div>
           </div>
           <div className="gradient-bar" />
@@ -57,6 +84,12 @@ export default function App() {
             <NavLink to="/warehouse" className={({ isActive }) => isActive ? "nav-tab active" : "nav-tab"}>
               <span>🏢</span> GolfGen WH
             </NavLink>
+            <NavLink to="/warehouse/golf" className={({ isActive }) => isActive ? "nav-tab active" : "nav-tab"}>
+              <span>⛳</span> Golf WH
+            </NavLink>
+            <NavLink to="/warehouse/housewares" className={({ isActive }) => isActive ? "nav-tab active" : "nav-tab"}>
+              <span>🏠</span> Housewares
+            </NavLink>
           </div>
         </nav>
 
@@ -70,6 +103,8 @@ export default function App() {
             <Route path="/advertising" element={<Advertising />} />
             <Route path="/item-master" element={<ItemMaster />} />
             <Route path="/warehouse" element={<Warehouse />} />
+            <Route path="/warehouse/golf" element={<GolfWarehouse />} />
+            <Route path="/warehouse/housewares" element={<HousewaresWarehouse />} />
           </Routes>
         </main>
       </div>

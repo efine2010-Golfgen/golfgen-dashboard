@@ -14,11 +14,14 @@ from datetime import datetime, timedelta
 from typing import Optional
 from contextlib import asynccontextmanager
 
+import secrets
+import re as _re
+
 import duckdb
-from fastapi import FastAPI, Query, Request, Body, HTTPException, UploadFile, File
+from fastapi import FastAPI, Query, Request, Body, HTTPException, UploadFile, File, Cookie
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, JSONResponse
 from pydantic import BaseModel
 
 logger = logging.getLogger("golfgen")
@@ -1399,11 +1402,65 @@ app.add_middleware(
 )
 
 
+# ── Authentication ─────────────────────────────────────────
+DASHBOARD_PASSWORD = os.environ.get("DASHBOARD_PASSWORD", "Golfgen2026")
+_sessions: set = set()
+
+
+class LoginRequest(BaseModel):
+    password: str
+
+
+@app.post("/api/auth/login")
+def login(req: LoginRequest):
+    """Validate password and return a session token."""
+    if req.password == DASHBOARD_PASSWORD:
+        token = secrets.token_hex(32)
+        _sessions.add(token)
+        response = JSONResponse({"ok": True})
+        response.set_cookie(
+            key="golfgen_session",
+            value=token,
+            httponly=True,
+            samesite="lax",
+            max_age=60 * 60 * 24 * 7,  # 7 days
+        )
+        return response
+    raise HTTPException(status_code=401, detail="Invalid password")
+
+
+@app.get("/api/auth/check")
+def auth_check(golfgen_session: Optional[str] = Cookie(None)):
+    """Check if the current session is valid."""
+    if golfgen_session and golfgen_session in _sessions:
+        return {"authenticated": True}
+    raise HTTPException(status_code=401, detail="Not authenticated")
+
+
+@app.post("/api/auth/logout")
+def logout(golfgen_session: Optional[str] = Cookie(None)):
+    """Clear the session."""
+    if golfgen_session:
+        _sessions.discard(golfgen_session)
+    response = JSONResponse({"ok": True})
+    response.delete_cookie("golfgen_session")
+    return response
+
+
 # ── Helpers ─────────────────────────────────────────────
 
 def get_db():
     """Return a read-only DuckDB connection."""
     return duckdb.connect(str(DB_PATH), read_only=True)
+
+
+def load_json(filename: str) -> list:
+    """Load a JSON data file from the data directory."""
+    path = DB_DIR / filename
+    if not path.exists():
+        return []
+    with open(path, encoding="utf-8") as f:
+        return json.load(f)
 
 
 def load_cogs() -> dict:
@@ -3699,6 +3756,198 @@ async def refresh_warehouse_from_file():
     result = await upload_warehouse_excel(mock_file)
     result["source_file"] = excel_path.name
     return result
+
+
+# ── Golf/Housewares Warehouse Endpoints ──────────────────────
+
+@app.get("/api/warehouse/golf")
+def warehouse_golf(channel: Optional[str] = Query(None, description="Filter by channel: Amazon, Walmart, Walmart & Amazon, Other")):
+    """Golf warehouse inventory with optional channel filter."""
+    items = load_json("golf_inventory.json")
+    if not items:
+        return {"items": [], "summary": {"totalSkus": 0, "totalPcsOnHand": 0, "totalPcsAvailable": 0, "totalPcsAllocated": 0, "totalDamage": 0}, "channelBreakdown": {}}
+    if channel:
+        items = [i for i in items if i.get("channel", "").lower() == channel.lower()]
+
+    total_pcs = sum(i.get("pcsOnHand", 0) for i in items)
+    total_available = sum(i.get("pcsAvailable", 0) for i in items)
+    total_allocated = sum(i.get("pcsAllocated", 0) for i in items)
+    total_damage = sum(i.get("damage", 0) for i in items)
+
+    channel_counts = {}
+    all_items = load_json("golf_inventory.json")
+    for i in all_items:
+        ch = i.get("channel", "Other")
+        channel_counts[ch] = channel_counts.get(ch, 0) + 1
+
+    return {
+        "items": items,
+        "summary": {
+            "totalSkus": len(items),
+            "totalPcsOnHand": total_pcs,
+            "totalPcsAvailable": total_available,
+            "totalPcsAllocated": total_allocated,
+            "totalDamage": total_damage,
+        },
+        "channelBreakdown": channel_counts,
+    }
+
+
+@app.get("/api/warehouse/housewares")
+def warehouse_housewares():
+    """Housewares warehouse inventory."""
+    items = load_json("housewares_inventory.json")
+    if not items:
+        return {"items": [], "summary": {"totalSkus": 0, "totalPcsOnHand": 0, "totalPcsAvailable": 0, "totalPcsAllocated": 0, "totalDamage": 0}}
+
+    total_pcs = sum(i.get("pcsOnHand", 0) for i in items)
+    total_available = sum(i.get("pcsAvailable", 0) for i in items)
+    total_allocated = sum(i.get("pcsAllocated", 0) for i in items)
+    total_damage = sum(i.get("damage", 0) for i in items)
+
+    return {
+        "items": items,
+        "summary": {
+            "totalSkus": len(items),
+            "totalPcsOnHand": total_pcs,
+            "totalPcsAvailable": total_available,
+            "totalPcsAllocated": total_allocated,
+            "totalDamage": total_damage,
+        },
+    }
+
+
+@app.get("/api/warehouse/summary")
+def warehouse_summary():
+    """Combined warehouse inventory summary — Golf vs Housewares totals + suffix breakdown."""
+    golf_items = load_json("golf_inventory.json")
+    hw_items = load_json("housewares_inventory.json")
+
+    def _summarize(items):
+        return {
+            "skus": len(items),
+            "pcsOnHand": sum(i.get("pcsOnHand", 0) for i in items),
+            "pcsAvailable": sum(i.get("pcsAvailable", 0) for i in items),
+            "pcsAllocated": sum(i.get("pcsAllocated", 0) for i in items),
+            "damage": sum(i.get("damage", 0) for i in items),
+        }
+
+    def _suffix_breakdown(items):
+        buckets = {}
+        for item in items:
+            sku = item.get("itemNumber", "").strip()
+            suffix = "Standard"
+            if sku.startswith("T-"):
+                suffix = "Transfer (T-)"
+            elif sku.endswith("FBM"):
+                suffix = "FBM"
+            elif "/RB" in sku:
+                suffix = "RB"
+            elif "/RETD" in sku:
+                suffix = "RETD"
+            elif "/DONATE" in sku:
+                suffix = "DONATE"
+            elif "/DMGD" in sku or "/DAM" in sku:
+                suffix = "Damage"
+            elif "/HOLD" in sku:
+                suffix = "HOLD"
+            elif "/CUST" in sku:
+                suffix = "CUST"
+            if suffix not in buckets:
+                buckets[suffix] = {"skus": 0, "pcsOnHand": 0, "pcsAvailable": 0, "pcsAllocated": 0}
+            buckets[suffix]["skus"] += 1
+            buckets[suffix]["pcsOnHand"] += item.get("pcsOnHand", 0)
+            buckets[suffix]["pcsAvailable"] += item.get("pcsAvailable", 0)
+            buckets[suffix]["pcsAllocated"] += item.get("pcsAllocated", 0)
+        return buckets
+
+    golf_summary = _summarize(golf_items)
+    hw_summary = _summarize(hw_items)
+
+    combined = {
+        "skus": golf_summary["skus"] + hw_summary["skus"],
+        "pcsOnHand": golf_summary["pcsOnHand"] + hw_summary["pcsOnHand"],
+        "pcsAvailable": golf_summary["pcsAvailable"] + hw_summary["pcsAvailable"],
+        "pcsAllocated": golf_summary["pcsAllocated"] + hw_summary["pcsAllocated"],
+        "damage": golf_summary["damage"] + hw_summary["damage"],
+    }
+
+    return {
+        "combined": combined,
+        "golf": golf_summary,
+        "housewares": hw_summary,
+        "golfSuffixes": _suffix_breakdown(golf_items),
+        "housewaresSuffixes": _suffix_breakdown(hw_items),
+    }
+
+
+# ── Additional Item Master Endpoints ──────────────────────
+
+@app.get("/api/item-master/walmart")
+def item_master_walmart():
+    """Walmart item master data."""
+    items = load_json("walmart_item_master.json")
+    return {"items": items, "count": len(items)}
+
+
+@app.get("/api/item-master/amazon")
+def item_master_amazon():
+    """Amazon item master data (unique parent SKUs only)."""
+    all_items = load_json("amazon_item_master.json")
+    parent_items = [i for i in all_items if i.get("asin") and "/" not in i.get("sku", "") and "FBM" not in i.get("sku", "") and not i.get("sku", "").startswith("T-")]
+    return {"items": parent_items, "count": len(parent_items), "totalVariations": len(all_items)}
+
+
+@app.get("/api/item-master/other")
+def item_master_other():
+    """Items in warehouse inventory that are not in Amazon or Walmart item masters."""
+    walmart_items = load_json("walmart_item_master.json")
+    amazon_items = load_json("amazon_item_master.json")
+    golf_items = load_json("golf_inventory.json")
+    hw_items = load_json("housewares_inventory.json")
+
+    walmart_skus = set()
+    for w in walmart_items:
+        if w.get("golfgenItem"):
+            walmart_skus.add(w["golfgenItem"].strip().upper())
+
+    amazon_skus = set()
+    for a in amazon_items:
+        if a.get("sku"):
+            amazon_skus.add(a["sku"].strip().upper())
+
+    def _base_sku(raw: str) -> str:
+        s = raw.strip().upper()
+        if s.startswith("T-"):
+            s = s[2:]
+        for suf in ["FBM", "/RB", "/RETD", "/DONATE", "/DMGD", "/CUST", "/HOLD", "/1", "/2"]:
+            if s.endswith(suf):
+                s = s[: -len(suf)]
+        s = _re.sub(r"\s*/DAM.*$", "", s)
+        return s.strip()
+
+    other_items = []
+    seen = set()
+    for item in golf_items + hw_items:
+        sku_raw = item.get("itemNumber", "").strip().upper()
+        base = _base_sku(sku_raw)
+        if base in seen:
+            continue
+        in_walmart = base in walmart_skus
+        in_amazon = base in amazon_skus
+        if not in_walmart and not in_amazon:
+            seen.add(base)
+            source = "Golf" if item in golf_items else "Housewares"
+            other_items.append({
+                "itemNumber": item.get("itemNumber", ""),
+                "description": item.get("description", ""),
+                "source": source,
+                "pcsOnHand": item.get("pcsOnHand", 0),
+                "pcsAvailable": item.get("pcsAvailable", 0),
+                "pcsAllocated": item.get("pcsAllocated", 0),
+            })
+
+    return {"items": other_items, "count": len(other_items)}
 
 
 # ── Static Frontend ────────────────────────────────────────

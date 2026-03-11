@@ -60,8 +60,13 @@ function EditableCell({ value, onSave, type = "number", prefix = "", suffix = ""
   );
 }
 
+const MASTER_TABS = ["Amazon", "Walmart", "Other"];
+
 export default function ItemMaster() {
+  const [masterTab, setMasterTab] = useState("Amazon");
   const [items, setItems] = useState([]);
+  const [walmartItems, setWalmartItems] = useState(null);
+  const [otherItems, setOtherItems] = useState(null);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(null);
   const [filter, setFilter] = useState("All");
@@ -79,6 +84,18 @@ export default function ItemMaster() {
   }, []);
 
   useEffect(() => { load(); }, [load]);
+
+  // Load Walmart / Other on first tab switch
+  useEffect(() => {
+    if (masterTab === "Walmart" && walmartItems === null) {
+      setLoading(true);
+      api.itemMasterWalmart().then(d => { setWalmartItems(d.items || []); setLoading(false); }).catch(() => setLoading(false));
+    }
+    if (masterTab === "Other" && otherItems === null) {
+      setLoading(true);
+      api.itemMasterOther().then(d => { setOtherItems(d.items || []); setLoading(false); }).catch(() => setLoading(false));
+    }
+  }, [masterTab, walmartItems, otherItems]);
 
   const handleUpdate = async (asin, field, value) => {
     setSaving(asin);
@@ -123,7 +140,59 @@ export default function ItemMaster() {
 
   if (loading) return <div className="loading"><div className="spinner" /> Loading item master...</div>;
 
-  // Summary stats
+  // Walmart / Other simple table
+  if (masterTab === "Walmart" || masterTab === "Other") {
+    const simpleItems = masterTab === "Walmart" ? (walmartItems || []) : (otherItems || []);
+    const simpleFiltered = simpleItems.filter(i => {
+      if (!search) return true;
+      const q = search.toLowerCase();
+      return (i.itemNumber || i.sku || "").toLowerCase().includes(q) || (i.description || i.productName || "").toLowerCase().includes(q);
+    });
+    return (
+      <>
+        <div className="page-header">
+          <h1>Item Master</h1>
+          <p>{masterTab} items &middot; {simpleItems.length} SKUs</p>
+        </div>
+        <div className="range-tabs" style={{ marginBottom: 20 }}>
+          {MASTER_TABS.map(t => (
+            <button key={t} className={`range-tab ${masterTab === t ? "active" : ""}`}
+              onClick={() => { setMasterTab(t); setSearch(""); }}>{t}</button>
+          ))}
+        </div>
+        <input type="text" placeholder="Search..." value={search} onChange={e => setSearch(e.target.value)}
+          style={{ padding: "6px 14px", border: "1px solid rgba(14,31,45,0.15)", borderRadius: 8, fontSize: 13, width: 260, marginBottom: 16 }} />
+        <div className="table-card">
+          <table>
+            <thead>
+              <tr>
+                <th>Item #</th>
+                <th>Description</th>
+                {masterTab === "Walmart" && <th>Channel</th>}
+                <th>Pack</th>
+                <th>Pcs On-Hand</th>
+                <th>Pcs Available</th>
+              </tr>
+            </thead>
+            <tbody>
+              {simpleFiltered.map((item, i) => (
+                <tr key={i}>
+                  <td style={{ fontFamily: "monospace", fontSize: 11 }}>{item.itemNumber || item.sku}</td>
+                  <td style={{ maxWidth: 300, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{item.description || item.productName}</td>
+                  {masterTab === "Walmart" && <td>{item.channel || "—"}</td>}
+                  <td>{item.pack || "—"}</td>
+                  <td>{(item.pcsOnHand || 0).toLocaleString()}</td>
+                  <td>{(item.pcsAvailable || 0).toLocaleString()}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </>
+    );
+  }
+
+  // Amazon (main) Item Master
   const totalItems = items.length;
   const totalPlanned = items.reduce((s, i) => s + (i.plannedAnnualUnits || 0), 0);
   const totalLyRev = items.reduce((s, i) => s + (i.lyRevenue || 0), 0);
@@ -134,6 +203,13 @@ export default function ItemMaster() {
       <div className="page-header">
         <h1>Item Master</h1>
         <p>{totalItems} SKUs &middot; {colorsCount} colors &middot; Source of truth for product attributes</p>
+      </div>
+
+      <div className="range-tabs" style={{ marginBottom: 20 }}>
+        {MASTER_TABS.map(t => (
+          <button key={t} className={`range-tab ${masterTab === t ? "active" : ""}`}
+            onClick={() => { setMasterTab(t); setSearch(""); setFilter("All"); }}>{t}</button>
+        ))}
       </div>
 
       {/* Summary Cards */}

@@ -1,12 +1,25 @@
 const API_BASE = import.meta.env.VITE_API_URL || "";
 
 async function fetchJSON(path) {
-  const res = await fetch(`${API_BASE}${path}`);
+  const res = await fetch(`${API_BASE}${path}`, { credentials: "include" });
   if (!res.ok) throw new Error(`API error: ${res.status}`);
   return res.json();
 }
 
 export const api = {
+  // Auth
+  login: (password) =>
+    fetch(`${API_BASE}/api/auth/login`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ password }),
+      credentials: "include",
+    }).then(r => { if (!r.ok) throw new Error("Login failed"); return r.json(); }),
+  authCheck: () => fetchJSON("/api/auth/check"),
+  logout: () =>
+    fetch(`${API_BASE}/api/auth/logout`, { method: "POST", credentials: "include" }).then(r => r.json()),
+
+  // Existing endpoints
   summary: (days = 365) => fetchJSON(`/api/summary?days=${days}`),
   daily: (days = 365, granularity = "daily") =>
     fetchJSON(`/api/daily?days=${days}&granularity=${granularity}`),
@@ -36,8 +49,13 @@ export const api = {
     fetchJSON(`/api/ads/search-terms?days=${days}&limit=${limit}`),
   adsNegativeKeywords: () => fetchJSON(`/api/ads/negative-keywords`),
 
-  // Warehouse
+  // Original Warehouse (Moose 3PL grouped)
   warehouse: () => fetchJSON(`/api/warehouse`),
+
+  // Golf/Housewares Warehouse
+  warehouseGolf: (channel) => fetchJSON(`/api/warehouse/golf${channel ? `?channel=${encodeURIComponent(channel)}` : ""}`),
+  warehouseHousewares: () => fetchJSON(`/api/warehouse/housewares`),
+  warehouseSummary: () => fetchJSON(`/api/warehouse/summary`),
 
   // Item Master
   itemMaster: () => fetchJSON(`/api/item-master`),
@@ -46,7 +64,11 @@ export const api = {
       method: "PUT",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(data),
+      credentials: "include",
     }).then(r => r.json()),
+  itemMasterWalmart: () => fetchJSON(`/api/item-master/walmart`),
+  itemMasterAmazon: () => fetchJSON(`/api/item-master/amazon`),
+  itemMasterOther: () => fetchJSON(`/api/item-master/other`),
 };
 
 export function fmt$(n) {
