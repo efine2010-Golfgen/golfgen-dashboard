@@ -4731,7 +4731,27 @@ async def debug_factory_po_test():
 @app.get("/api/factory-po")
 async def get_factory_po(request: Request):
     _require_auth(request)
-    return _load_factory_po()
+    data = _load_factory_po()
+    # Clean bad rows from old parser output at read time
+    if data.get("purchaseOrders"):
+        data["purchaseOrders"] = [
+            p for p in data["purchaseOrders"]
+            if p.get("factory") and not str(p["factory"]).startswith("T-")
+            and str(p.get("factory", "")).upper() not in ("TOTAL", "TOTALS", "PO#", "")
+            and not ("." in str(p.get("poNumber", "")) and len(str(p.get("poNumber", ""))) > 10)
+            and (p.get("units") or 0) > 0
+        ]
+    if data.get("unitsByItem"):
+        data["unitsByItem"] = [
+            u for u in data["unitsByItem"]
+            if u.get("sku") and str(u["sku"]).upper() not in ("TOTAL", "TOTALS", "SKU", "")
+        ]
+    if data.get("arrivalSchedule"):
+        data["arrivalSchedule"] = [
+            a for a in data["arrivalSchedule"]
+            if a.get("sku") and str(a["sku"]).upper() not in ("TOTAL", "TOTALS", "SKU", "")
+        ]
+    return data
 
 @app.post("/api/factory-po/upload")
 async def upload_factory_po(request: Request, file: UploadFile = File(...)):
@@ -4825,7 +4845,41 @@ def _save_logistics(data):
 @app.get("/api/logistics")
 async def get_logistics(request: Request):
     _require_auth(request)
-    return _load_logistics()
+    data = _load_logistics()
+    _SHIP_STOP = {"SHIPMENT STATUS SUMMARY", "STATUS SUMMARY", "UPCOMING ARRIVALS",
+                  "TOTAL", "TOTALS", "ITEM SUMMARY", "PO#", "STATUS", "IN TRANSIT",
+                  "DELIVERED", "PENDING SHIPMENT", "PENDING"}
+    if data.get("shipments"):
+        clean = []
+        for s in data["shipments"]:
+            shipper = (s.get("shipper") or "").strip()
+            if not shipper or shipper.upper() in _SHIP_STOP:
+                continue
+            if any(sw in shipper.upper() for sw in ("STATUS SUMMARY", "UPCOMING ARRIVALS", "ITEM SUMMARY")):
+                continue
+            hbl = (s.get("hbl") or "").strip()
+            if not hbl or len(hbl) < 5:
+                continue
+            # Normalize old field names to new field names
+            if "mode" in s and "containerType" not in s:
+                s["containerType"] = s.pop("mode")
+            if "vessel" in s and "vesselVoyage" not in s:
+                s["vesselVoyage"] = s.pop("vessel")
+            # Ensure status field exists
+            if not s.get("status"):
+                s["status"] = ""
+            clean.append(s)
+        data["shipments"] = clean
+    # Clean items: filter out Container Total, NON-GOLF, etc.
+    if data.get("itemsByContainer"):
+        data["itemsByContainer"] = [
+            item for item in data["itemsByContainer"]
+            if item.get("sku") and str(item["sku"]).strip()
+            and "NON-GOLF" not in str(item.get("containerNumber", "")).upper()
+            and "CONTAINER TOTAL" not in str(item.get("description", "")).upper()
+            and "GRAND TOTAL" not in str(item.get("description", "")).upper()
+        ]
+    return data
 
 @app.post("/api/logistics/upload")
 async def upload_logistics(request: Request, file: UploadFile = File(...)):

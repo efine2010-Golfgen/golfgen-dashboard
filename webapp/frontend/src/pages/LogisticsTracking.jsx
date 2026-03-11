@@ -218,7 +218,7 @@ export default function LogisticsTracking() {
               {filteredShipments.map((s, i) => (
                 <tr key={i} style={{ borderBottom: "1px solid var(--border)", background: i % 2 ? "#FAFBFC" : "#fff" }}>
                   <td style={{...td, fontFamily: "monospace", fontSize: 10, fontWeight: 600}}>{s.containerNumber || "—"}</td>
-                  <td style={{...td, fontSize: 10, color: "var(--muted)"}}>{s.containerType || "—"}</td>
+                  <td style={{...td, fontSize: 10, color: "var(--muted)"}}>{s.containerType || s.mode || "—"}</td>
                   <td style={{...td, fontSize: 10, fontWeight: 600}}>{s.finalLocation || s.arrivalPort || "—"}</td>
                   <td style={{...td, fontSize: 10}}>{s.etdOrigin || "—"}</td>
                   <td style={{...td, fontSize: 10}}>{s.etaFinal || s.etaDischarge || "—"}</td>
