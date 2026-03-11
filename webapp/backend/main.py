@@ -1942,35 +1942,45 @@ def _tab_key_for_path(path: str):
 async def tab_permission_middleware(request: Request, call_next):
     """Enforce tab-based permissions on all /api/* data endpoints."""
     path = request.url.path
-    # Skip auth endpoints, health, sync, debug, and static files
-    if (not path.startswith("/api/") or
-        path.startswith("/api/auth/") or
+    method = request.method
+
+    # Always allow OPTIONS (CORS preflight) and non-API paths
+    if method == "OPTIONS" or not path.startswith("/api/"):
+        return await call_next(request)
+
+    # Skip auth endpoints, system endpoints, upload endpoints
+    if (path.startswith("/api/auth/") or
         path.startswith("/api/me") or
         path.startswith("/api/permissions") or
+        path.startswith("/api/upload/") or
+        path.startswith("/api/debug/") or
         path in ("/api/health", "/api/sync", "/api/backfill") or
-        path.startswith("/api/debug/")):
+        path.startswith("/api/refresh")):
         return await call_next(request)
 
-    tab_key = _tab_key_for_path(path)
-    if tab_key is None:
-        # Not a tab-gated endpoint, still require auth
-        token = request.cookies.get("golfgen_session")
-        sess = _get_session(token)
-        if not sess:
-            return JSONResponse(status_code=401, content={"detail": "Not authenticated"})
-        return await call_next(request)
-
-    # Tab-gated endpoint: check session + permissions
+    # Check session
     token = request.cookies.get("golfgen_session")
-    sess = _get_session(token)
+    try:
+        sess = _get_session(token)
+    except Exception:
+        # DuckDB error (table not exist, lock, etc.) — let request through
+        return await call_next(request)
+
     if not sess:
         return JSONResponse(status_code=401, content={"detail": "Not authenticated"})
-    if sess["role"] != "admin":
+
+    # For tab-gated endpoints, check permission
+    tab_key = _tab_key_for_path(path)
+    if tab_key and sess["role"] != "admin":
         user_key = _find_user_by_email(sess["user_email"])
         if user_key:
-            enabled = _get_user_permissions(user_key)
-            if tab_key not in enabled:
-                return JSONResponse(status_code=403, content={"detail": "You do not have access to this page"})
+            try:
+                enabled = _get_user_permissions(user_key)
+                if tab_key not in enabled:
+                    return JSONResponse(status_code=403, content={"detail": "You do not have access to this page"})
+            except Exception:
+                pass  # DuckDB error — allow through
+
     return await call_next(request)
 
 

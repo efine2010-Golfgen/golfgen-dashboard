@@ -435,6 +435,12 @@ function ItemPlanDetail({ plan, overrides, onOverride }) {
     setSaving(prev => ({ ...prev, [overrideKey + month]: true }));
     try {
       await onOverride(sku, overrideKey, cleaned);
+      // Clear local edits for this field after successful save — server data is now authoritative
+      setLocalEdits(prev => {
+        const next = { ...prev };
+        delete next[overrideKey];
+        return next;
+      });
     } catch (e) {
       console.error("Override save failed:", e);
     }
