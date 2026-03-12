@@ -731,6 +731,225 @@ def debug_db_query(sql: str = Query(..., description="Read-only SQL query")):
         return {"error": str(e)}
 
 
+@router.post("/api/backfill/financial-events")
+def backfill_financial_events(
+    days: int = Query(90, description="How many days back to pull"),
+    delay: float = Query(1.5, description="Seconds between API pages"),
+):
+    """Pull ALL financial events with rate-limit-safe pacing.
+    
+    Unlike the regular sync (capped at 50 pages), this endpoint paginates
+    until there are no more pages, with a configurable delay between calls.
+    Also resolves SKU→ASIN using fba_inventory mapping.
+    """
+    import time as _time
+    import traceback as tb
+    try:
+        from sp_api.api import Finances as FinancesAPI
+        from sp_api.base import Marketplaces as _Mp
+        from services.sp_api import _load_sp_api_credentials
+
+        creds = _load_sp_api_credentials()
+        if not creds:
+            return {"error": "No SP-API credentials"}
+
+        fin_start = (datetime.utcnow() - timedelta(days=days)).strftime("%Y-%m-%dT%H:%M:%SZ")
+        finances = FinancesAPI(credentials=creds, marketplace=_Mp.US)
+
+        all_shipment_events = []
+        all_refund_events = []
+        page = 0
+        next_token = None
+        errors = []
+        date_range = {"min": None, "max": None}
+
+        while True:
+            page += 1
+            kwargs = {"PostedAfter": fin_start, "MaxResultsPerPage": 100}
+            if next_token:
+                kwargs["NextToken"] = next_token
+
+            try:
+                resp = finances.list_financial_events(**kwargs)
+            except Exception as api_err:
+                err_str = str(api_err)
+                errors.append(f"Page {page}: {err_str}")
+                if "QuotaExceeded" in err_str or "TooManyRequests" in err_str or "throttl" in err_str.lower():
+                    logger.warning(f"  Backfill throttled at page {page}, waiting 30s...")
+                    _time.sleep(30)
+                    try:
+                        resp = finances.list_financial_events(**kwargs)
+                    except Exception as retry_err:
+                        errors.append(f"Page {page} retry: {str(retry_err)}")
+                        break
+                else:
+                    break
+
+            payload = resp.payload if hasattr(resp, 'payload') else (resp if isinstance(resp, dict) else {})
+            events = payload.get("FinancialEvents", {})
+
+            shipments = events.get("ShipmentEventList", []) or []
+            refunds = events.get("RefundEventList", []) or []
+            adjustments = events.get("AdjustmentEventList", []) or []
+
+            all_shipment_events.extend(shipments)
+            all_refund_events.extend(refunds)
+            for adj in adjustments:
+                adj_type = adj.get("AdjustmentType", "") if isinstance(adj, dict) else getattr(adj, "AdjustmentType", "")
+                if any(kw in str(adj_type or "").lower() for kw in ("return", "refund", "reversal")):
+                    all_refund_events.append(adj)
+
+            # Track date range
+            for ev in (shipments + refunds):
+                pd_val = ev.get("PostedDate", "") if isinstance(ev, dict) else getattr(ev, "PostedDate", "")
+                pd_str = str(pd_val)[:10] if pd_val else ""
+                if pd_str:
+                    if not date_range["min"] or pd_str < date_range["min"]:
+                        date_range["min"] = pd_str
+                    if not date_range["max"] or pd_str > date_range["max"]:
+                        date_range["max"] = pd_str
+
+            logger.info(f"  Backfill page {page}: {len(shipments)}S + {len(refunds)}R (total: {len(all_shipment_events)}S + {len(all_refund_events)}R)")
+
+            next_token = payload.get("NextToken")
+            if not next_token:
+                break
+
+            # Rate-limit pacing
+            _time.sleep(delay)
+
+        logger.info(f"  Backfill complete: {page} pages, {len(all_shipment_events)} shipments, {len(all_refund_events)} refunds")
+
+        # ── Now write to DB ──
+        con = duckdb.connect(str(DB_PATH), read_only=False)
+
+        # Build SKU→ASIN mapping
+        sku_to_asin = {}
+        try:
+            inv_rows = con.execute("SELECT sku, asin FROM fba_inventory WHERE sku IS NOT NULL AND asin IS NOT NULL").fetchall()
+            for r in inv_rows:
+                if r[0] and r[1]:
+                    sku_to_asin[r[0]] = r[1]
+                    base = r[0].rsplit("-", 1)[0] if "-" in r[0] else r[0]
+                    if base not in sku_to_asin:
+                        sku_to_asin[base] = r[1]
+        except Exception:
+            pass
+
+        # Clear old data
+        cutoff_date = (datetime.utcnow() - timedelta(days=days)).strftime("%Y-%m-%d")
+        con.execute("DELETE FROM financial_events WHERE date >= ?", [cutoff_date])
+
+        # Helpers from sp_api.py
+        def _safe_get(obj, key, default=None):
+            if obj is None: return default
+            if isinstance(obj, dict): return obj.get(key, default)
+            return getattr(obj, key, default)
+
+        def _money(amt_obj):
+            if amt_obj is None: return 0.0
+            if isinstance(amt_obj, dict):
+                return float(amt_obj.get("CurrencyAmount", amt_obj.get("Amount", 0)) or 0)
+            if hasattr(amt_obj, "CurrencyAmount"):
+                try: return float(amt_obj.CurrencyAmount or 0)
+                except: pass
+            if hasattr(amt_obj, "Amount"):
+                try: return float(amt_obj.Amount or 0)
+                except: pass
+            try: return float(amt_obj)
+            except: return 0.0
+
+        def _posted_date_str(pd_val):
+            if pd_val is None: return None
+            if isinstance(pd_val, str): return pd_val[:10]
+            if hasattr(pd_val, 'strftime'): return pd_val.strftime("%Y-%m-%d")
+            return str(pd_val)[:10]
+
+        fin_records = 0
+        # Process shipments
+        for event in all_shipment_events:
+            order_id = _safe_get(event, "AmazonOrderId", "")
+            date_str = _posted_date_str(_safe_get(event, "PostedDate", ""))
+            for item in (_safe_get(event, "ShipmentItemList") or []):
+                sku = _safe_get(item, "SellerSKU", "")
+                asin_val = _safe_get(item, "ASIN") or sku_to_asin.get(sku, sku)
+                product_charges = shipping_ch = 0.0
+                for c in (_safe_get(item, "ItemChargeList") or []):
+                    val = _money(_safe_get(c, "ChargeAmount"))
+                    ct = _safe_get(c, "ChargeType", "")
+                    if ct == "Principal": product_charges += val
+                    elif ct in ("ShippingCharge", "Shipping"): shipping_ch += val
+                fba_fees_val = commission_val = other_val = 0.0
+                for f in (_safe_get(item, "ItemFeeList") or []):
+                    val = abs(_money(_safe_get(f, "FeeAmount")))
+                    ft = _safe_get(f, "FeeType", "")
+                    if "FBA" in ft or "Fulfillment" in ft: fba_fees_val += val
+                    elif ft in ("Commission", "ReferralFee"): commission_val += val
+                    else: other_val += val
+                promo_val = 0.0
+                for p in (_safe_get(item, "PromotionList") or []):
+                    promo_val += _money(_safe_get(p, "PromotionAmount"))
+                net = product_charges + shipping_ch - fba_fees_val - commission_val + promo_val
+                try:
+                    con.execute("""INSERT INTO financial_events
+                        (date, asin, sku, order_id, event_type, product_charges, shipping_charges,
+                         fba_fees, commission, promotion_amount, other_fees, net_proceeds)
+                        VALUES (?,?,?,?,?,?,?,?,?,?,?,?)""",
+                        [date_str, asin_val, sku, order_id, "Shipment",
+                         product_charges, shipping_ch, fba_fees_val, commission_val, promo_val, other_val, net])
+                    fin_records += 1
+                except Exception:
+                    pass
+
+        # Process refunds
+        for event in all_refund_events:
+            order_id = _safe_get(event, "AmazonOrderId", "")
+            date_str = _posted_date_str(_safe_get(event, "PostedDate", ""))
+            item_list = (_safe_get(event, "ShipmentItemAdjustmentList")
+                        or _safe_get(event, "ShipmentItemList")
+                        or _safe_get(event, "AdjustmentItemList") or [])
+            for item in item_list:
+                sku = _safe_get(item, "SellerSKU", "")
+                asin_val = _safe_get(item, "ASIN") or sku_to_asin.get(sku, sku)
+                refund_amount = refund_fba = refund_comm = refund_other = 0.0
+                for c in (_safe_get(item, "ItemChargeAdjustmentList") or _safe_get(item, "ItemChargeList") or []):
+                    val = _money(_safe_get(c, "ChargeAmount"))
+                    ct = _safe_get(c, "ChargeType", "")
+                    if ct == "Principal": refund_amount += val
+                for f in (_safe_get(item, "ItemFeeAdjustmentList") or _safe_get(item, "ItemFeeList") or []):
+                    val = abs(_money(_safe_get(f, "FeeAmount")))
+                    ft = _safe_get(f, "FeeType", "")
+                    if "FBA" in ft or "Fulfillment" in ft: refund_fba += val
+                    elif ft in ("Commission", "ReferralFee"): refund_comm += val
+                    else: refund_other += val
+                net = refund_amount - refund_fba - refund_comm
+                try:
+                    con.execute("""INSERT INTO financial_events
+                        (date, asin, sku, order_id, event_type, product_charges, shipping_charges,
+                         fba_fees, commission, promotion_amount, other_fees, net_proceeds)
+                        VALUES (?,?,?,?,?,?,?,?,?,?,?,?)""",
+                        [date_str, asin_val, sku, order_id, "Refund",
+                         refund_amount, 0, refund_fba, refund_comm, 0, refund_other, net])
+                    fin_records += 1
+                except Exception:
+                    pass
+
+        con.close()
+
+        return {
+            "status": "complete",
+            "pages_fetched": page,
+            "total_shipments": len(all_shipment_events),
+            "total_refunds": len(all_refund_events),
+            "records_inserted": fin_records,
+            "date_range": date_range,
+            "delay_per_page": delay,
+            "errors": errors,
+        }
+    except Exception as e:
+        return {"error": str(e), "traceback": tb.format_exc()}
+
+
 @router.get("/api/debug/fin-events-live")
 def debug_fin_events_live():
     """Call Finances API directly and return summary of what it finds."""
