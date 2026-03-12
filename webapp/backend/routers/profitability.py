@@ -57,7 +57,7 @@ def load_cogs() -> dict:
 def _build_product_list(con, cutoff: str) -> list:
     """Build per-ASIN product list with revenue, units, COGS, fees, and ad spend."""
     asin_rows = con.execute("""
-        SELECT asin, MAX(sku) AS sku, MAX(product_name) AS name,
+        SELECT asin,
                COALESCE(SUM(ordered_product_sales), 0) AS revenue,
                COALESCE(SUM(units_ordered), 0) AS units
         FROM daily_sales
@@ -67,9 +67,21 @@ def _build_product_list(con, cutoff: str) -> list:
     """, [cutoff]).fetchall()
 
     cogs_data = load_cogs()
+    # Get names/SKUs from inventory table
+    inv_names = {}
+    try:
+        inv_rows = con.execute("SELECT asin, sku, product_name FROM fba_inventory").fetchall()
+        for ir in inv_rows:
+            inv_names[ir[0]] = {"sku": ir[1] or "", "product_name": ir[2] or ""}
+    except Exception:
+        pass
     products = []
 
-    for asin, sku, name, rev, units in asin_rows:
+    for r in asin_rows:
+        asin, rev, units = r[0], r[1], r[2]
+        inv = inv_names.get(asin, {})
+        sku = inv.get("sku", "")
+        name = inv.get("product_name", "") or cogs_data.get(asin, {}).get("product_name", "")
         if units == 0:
             continue
 
@@ -170,8 +182,8 @@ def _ensure_today_data():
         if result and result[0] == 0:
             # Insert today's row if missing
             con.execute("""
-                INSERT INTO daily_sales (date, asin, sku, product_name, ordered_product_sales, units_ordered)
-                VALUES (?, 'ALL', '', 'All Products', 0, 0)
+                INSERT INTO daily_sales (date, asin, ordered_product_sales, units_ordered)
+                VALUES (?, 'ALL', 0, 0)
             """, [today])
             con.commit()
     except Exception:
@@ -234,6 +246,14 @@ def profitability(view: str = Query("realtime")):
 
     con = get_db()
     cogs_data = load_cogs()
+    # Get names/SKUs from inventory table
+    inv_names = {}
+    try:
+        inv_rows = con.execute("SELECT asin, sku, product_name FROM fba_inventory").fetchall()
+        for ir in inv_rows:
+            inv_names[ir[0]] = {"sku": ir[1] or "", "product_name": ir[2] or ""}
+    except Exception:
+        pass
 
     today_start = get_today(con)
     today_start = today_start.replace(hour=0, minute=0, second=0, microsecond=0)
@@ -463,7 +483,7 @@ def _build_waterfall(con, cogs_data, start: str, end: str) -> dict:
 
     # Per-ASIN cost breakdown
     asin_rows = con.execute("""
-        SELECT asin, MAX(sku) AS sku,
+        SELECT asin,
                COALESCE(SUM(ordered_product_sales), 0) AS revenue,
                COALESCE(SUM(units_ordered), 0) AS units
         FROM daily_sales
@@ -519,7 +539,8 @@ def _build_waterfall(con, cogs_data, start: str, end: str) -> dict:
     prod_rev = 0
 
     for ar in asin_rows:
-        asin, sku, rev, u = ar
+        asin, rev, u = ar[0], ar[1], ar[2]
+        sku = ""
         if u == 0:
             continue
         prod_rev += rev
