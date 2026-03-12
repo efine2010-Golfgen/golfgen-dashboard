@@ -179,9 +179,3 @@ Should return JSON with status: healthy and table row counts.
 - Ads API: every 4 hours
 - Startup catchup: runs any missed sync on container start
 ```
-
----
-
-Commit message:
-```
-docs: update CLAUDE.md with full project context and rules
