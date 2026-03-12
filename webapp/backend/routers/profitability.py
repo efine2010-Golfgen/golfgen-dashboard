@@ -106,13 +106,17 @@ def _build_product_list(con, cutoff: str) -> list:
         fbaTotal = fba_actual if fba_actual > 0 else round(rev * 0.12, 2)
         referralTotal = comm_actual if comm_actual > 0 else round(rev * 0.15, 2)
 
-        # Ad spend
-        ad_row = con.execute("""
-            SELECT COALESCE(SUM(spend), 0)
-            FROM advertising
-            WHERE asin = ? AND date >= ?
-        """, [asin, cutoff]).fetchone()
-        adSpend = ad_row[0] if ad_row else 0
+        # Ad spend (advertising table may not have asin column)
+        adSpend = 0
+        try:
+            ad_row = con.execute("""
+                SELECT COALESCE(SUM(spend), 0)
+                FROM advertising
+                WHERE asin = ? AND date >= ?
+            """, [asin, cutoff]).fetchone()
+            adSpend = ad_row[0] if ad_row else 0
+        except Exception:
+            pass
 
         net = round(rev - cogsTotal - fbaTotal - referralTotal - adSpend, 2)
 
