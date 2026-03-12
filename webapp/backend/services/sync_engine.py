@@ -182,7 +182,7 @@ def _write_sync_log(job_name, started_at, status, pulled=0, inserted=0, skipped=
         con.execute("""
             INSERT INTO sync_log
             (job_name, started_at, completed_at, status, records_pulled,
-             records_inserted, records_skipped, error_message, duration_seconds)
+             records_processed, records_skipped, error_message, duration_seconds)
             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
         """, [job_name, started_at, completed_at, status, pulled,
               inserted, skipped, error, duration])
