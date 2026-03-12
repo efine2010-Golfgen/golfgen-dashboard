@@ -516,11 +516,23 @@ def _run_sp_api_sync():
             logger.warning(f"  Could not clear old financial_events: {e}")
 
         # Build SKU→ASIN mapping from fba_inventory (financial events often lack ASIN)
+        # Financial events use base SKUs (e.g. "GG2SS2226BM") while inventory has
+        # suffixed SKUs (e.g. "GG2SS2226BM-CA", "GG2SS2226BM-FBA").
+        # Build both exact and base-prefix mappings.
         sku_to_asin = {}
         try:
             sku_rows = con.execute("SELECT sku, asin FROM fba_inventory WHERE sku IS NOT NULL AND asin IS NOT NULL").fetchall()
-            sku_to_asin = {r[0]: r[1] for r in sku_rows if r[0] and r[1]}
-            logger.info(f"  SKU→ASIN mapping: {len(sku_to_asin)} entries")
+            for r in sku_rows:
+                inv_sku, inv_asin = r[0], r[1]
+                if not inv_sku or not inv_asin:
+                    continue
+                # Exact match
+                sku_to_asin[inv_sku] = inv_asin
+                # Also map the base SKU (strip -CA, -FBA, etc. suffixes)
+                base = inv_sku.rsplit("-", 1)[0] if "-" in inv_sku else inv_sku
+                if base and base not in sku_to_asin:
+                    sku_to_asin[base] = inv_asin
+            logger.info(f"  SKU→ASIN mapping: {len(sku_to_asin)} entries (incl. base SKUs)")
         except Exception as e:
             logger.warning(f"  Could not build SKU→ASIN mapping: {e}")
 
