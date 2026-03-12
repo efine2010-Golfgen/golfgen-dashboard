@@ -729,3 +729,72 @@ def debug_db_query(sql: str = Query(..., description="Read-only SQL query")):
         return {"columns": cols, "rows": [list(r) for r in rows[:500]], "count": len(rows)}
     except Exception as e:
         return {"error": str(e)}
+
+
+@router.get("/api/debug/fin-events-live")
+def debug_fin_events_live():
+    """Call Finances API directly and return summary of what it finds."""
+    import traceback as tb
+    try:
+        from sp_api.api import Finances as FinancesAPI
+        from sp_api.base import Marketplaces as _Mp
+
+        # Use same credential loading as sp_api.py
+        from services.sp_api import _load_sp_api_credentials
+        creds = _load_sp_api_credentials()
+        if not creds:
+            return {"error": "No SP-API credentials"}
+
+        fin_start = (datetime.utcnow() - timedelta(days=90)).strftime("%Y-%m-%dT%H:%M:%SZ")
+        finances = FinancesAPI(credentials=creds, marketplace=_Mp.US)
+
+        all_shipments = 0
+        all_refunds = 0
+        pages = 0
+        next_token = None
+        sample_dates = []
+        errors = []
+
+        while pages < 5:
+            pages += 1
+            kwargs = {"PostedAfter": fin_start, "MaxResultsPerPage": 100}
+            if next_token:
+                kwargs["NextToken"] = next_token
+
+            try:
+                resp = finances.list_financial_events(**kwargs)
+            except Exception as e:
+                errors.append(f"Page {pages}: {str(e)}")
+                break
+
+            payload = resp.payload if hasattr(resp, 'payload') else (resp if isinstance(resp, dict) else {})
+            events = payload.get("FinancialEvents", {})
+            shipments = events.get("ShipmentEventList", []) or []
+            refunds = events.get("RefundEventList", []) or []
+
+            all_shipments += len(shipments)
+            all_refunds += len(refunds)
+
+            # Get sample dates from first few events
+            for s in shipments[:3]:
+                pd = s.get("PostedDate", "") if isinstance(s, dict) else getattr(s, "PostedDate", "")
+                sample_dates.append(f"shipment: {pd}")
+            for r in refunds[:3]:
+                pd = r.get("PostedDate", "") if isinstance(r, dict) else getattr(r, "PostedDate", "")
+                sample_dates.append(f"refund: {pd}")
+
+            next_token = payload.get("NextToken")
+            if not next_token:
+                break
+
+        return {
+            "fin_start": fin_start,
+            "pages_fetched": pages,
+            "total_shipments": all_shipments,
+            "total_refunds": all_refunds,
+            "sample_dates": sample_dates[:10],
+            "errors": errors,
+            "has_more_pages": bool(next_token),
+        }
+    except Exception as e:
+        return {"error": str(e), "traceback": tb.format_exc()}
