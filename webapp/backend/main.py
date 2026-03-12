@@ -205,7 +205,7 @@ def _sync_today_orders():
             try:
                 if "T" in purchase_date:
                     dt = datetime.fromisoformat(purchase_date.replace("Z", "+00:00"))
-                    dt = dt - timedelta(hours=7)
+                    dt = dt.astimezone(ZoneInfo("America/Chicago"))
                     order_day = dt.strftime("%Y-%m-%d")
                 else:
                     order_day = purchase_date[:10]
@@ -283,7 +283,7 @@ def _sync_today_orders():
             try:
                 if "T" in purchase_date:
                     dt = datetime.fromisoformat(purchase_date.replace("Z", "+00:00"))
-                    dt = dt - timedelta(hours=7)
+                    dt = dt.astimezone(ZoneInfo("America/Chicago"))
                     day_str = dt.strftime("%Y-%m-%d")
                 else:
                     day_str = purchase_date[:10]
@@ -695,7 +695,7 @@ def _run_sp_api_sync():
         summaries = response.payload.get("inventorySummaries", [])
         if summaries:
             con = duckdb.connect(str(DB_PATH), read_only=False)
-            today = datetime.now().date()
+            today = datetime.now(ZoneInfo("America/Chicago")).date()
             for item in summaries:
                 inv = item.get("inventoryDetails", {})
                 fulfillable = inv.get("fulfillableQuantity", 0) or item.get("totalQuantity", 0)
@@ -1106,7 +1106,7 @@ def _auto_backfill_if_needed():
 
     # Backfill from Apr 2024 to yesterday
     backfill_start = dt_date(2024, 4, 1)
-    backfill_end = dt_date.today() - timedelta(days=1)
+    backfill_end = datetime.now(ZoneInfo("America/Chicago")).date() - timedelta(days=1)
 
     chunk_start = backfill_start
     total_records = 0
@@ -1375,7 +1375,7 @@ def _sync_ads_data():
             return
 
     # Pull last 60 days of data
-    today = datetime.now()
+    today = datetime.now(ZoneInfo("America/Chicago"))
     start_date = (today - timedelta(days=60)).strftime("%Y-%m-%d")
     end_date = (today - timedelta(days=1)).strftime("%Y-%m-%d")
 
@@ -2462,7 +2462,7 @@ def daily_sales(days: int = Query(365), granularity: str = Query("daily")):
 def products(days: int = Query(365)):
     """Product breakdown with profitability metrics."""
     con = get_db()
-    cutoff = (datetime.now() - timedelta(days=days)).strftime("%Y-%m-%d")
+    cutoff = (datetime.now(ZoneInfo("America/Chicago")) - timedelta(days=days)).strftime("%Y-%m-%d")
     product_list = _build_product_list(con, cutoff)
     con.close()
     return {"days": days, "products": product_list}
@@ -2529,7 +2529,7 @@ def inventory():
 def product_detail(asin: str, days: int = Query(365)):
     """Detailed view for a single product including daily trend."""
     con = get_db()
-    cutoff = (datetime.now() - timedelta(days=days)).strftime("%Y-%m-%d")
+    cutoff = (datetime.now(ZoneInfo("America/Chicago")) - timedelta(days=days)).strftime("%Y-%m-%d")
     cogs_data = load_cogs()
 
     # Daily trend for this ASIN
@@ -2579,7 +2579,7 @@ def product_detail(asin: str, days: int = Query(365)):
 def pnl_waterfall(days: int = Query(365)):
     """Profit & Loss waterfall data, scaled to actual revenue from ALL rows."""
     con = get_db()
-    cutoff = (datetime.now() - timedelta(days=days)).strftime("%Y-%m-%d")
+    cutoff = (datetime.now(ZoneInfo("America/Chicago")) - timedelta(days=days)).strftime("%Y-%m-%d")
 
     # Actual revenue from 'ALL' daily rows
     actual_rev = con.execute("""
@@ -2791,7 +2791,7 @@ def _safe_ads_query(con, query, params=None):
 def ads_summary(days: int = Query(30)):
     """Ads KPIs: total spend, sales, ACOS, ROAS, TACOS, CPC, CTR."""
     con = get_db()
-    cutoff = (datetime.now() - timedelta(days=days)).strftime("%Y-%m-%d")
+    cutoff = (datetime.now(ZoneInfo("America/Chicago")) - timedelta(days=days)).strftime("%Y-%m-%d")
 
     row = _safe_ads_query(con, """
         SELECT
@@ -2854,7 +2854,7 @@ def ads_summary(days: int = Query(30)):
 def ads_daily(days: int = Query(30)):
     """Daily ads performance time series."""
     con = get_db()
-    cutoff = (datetime.now() - timedelta(days=days)).strftime("%Y-%m-%d")
+    cutoff = (datetime.now(ZoneInfo("America/Chicago")) - timedelta(days=days)).strftime("%Y-%m-%d")
 
     rows = _safe_ads_query(con, """
         SELECT date,
@@ -2895,7 +2895,7 @@ def ads_daily(days: int = Query(30)):
 def ads_campaigns(days: int = Query(30)):
     """Campaign-level performance."""
     con = get_db()
-    cutoff = (datetime.now() - timedelta(days=days)).strftime("%Y-%m-%d")
+    cutoff = (datetime.now(ZoneInfo("America/Chicago")) - timedelta(days=days)).strftime("%Y-%m-%d")
 
     rows = _safe_ads_query(con, """
         SELECT
@@ -2949,7 +2949,7 @@ def ads_campaigns(days: int = Query(30)):
 def ads_keywords(days: int = Query(30), sort: str = Query("spend"), limit: int = Query(50)):
     """Top keywords by spend, sales, or ACOS."""
     con = get_db()
-    cutoff = (datetime.now() - timedelta(days=days)).strftime("%Y-%m-%d")
+    cutoff = (datetime.now(ZoneInfo("America/Chicago")) - timedelta(days=days)).strftime("%Y-%m-%d")
 
     rows = _safe_ads_query(con, """
         SELECT
@@ -3002,7 +3002,7 @@ def ads_keywords(days: int = Query(30), sort: str = Query("spend"), limit: int =
 def ads_search_terms(days: int = Query(30), limit: int = Query(50)):
     """Top search terms by spend."""
     con = get_db()
-    cutoff = (datetime.now() - timedelta(days=days)).strftime("%Y-%m-%d")
+    cutoff = (datetime.now(ZoneInfo("America/Chicago")) - timedelta(days=days)).strftime("%Y-%m-%d")
 
     rows = _safe_ads_query(con, """
         SELECT
@@ -3710,7 +3710,7 @@ def backfill_historical(
 def product_mix(days: int = Query(365)):
     """Top 10 products by revenue for donut chart."""
     con = get_db()
-    cutoff = (datetime.now() - timedelta(days=days)).strftime("%Y-%m-%d")
+    cutoff = (datetime.now(ZoneInfo("America/Chicago")) - timedelta(days=days)).strftime("%Y-%m-%d")
     products = _build_product_list(con, cutoff)
     con.close()
 
@@ -3729,7 +3729,7 @@ def product_mix(days: int = Query(365)):
 def color_mix(days: int = Query(365)):
     """Sales breakdown by color extracted from product names."""
     con = get_db()
-    cutoff = (datetime.now() - timedelta(days=days)).strftime("%Y-%m-%d")
+    cutoff = (datetime.now(ZoneInfo("America/Chicago")) - timedelta(days=days)).strftime("%Y-%m-%d")
     products = _build_product_list(con, cutoff)
     con.close()
 
@@ -3851,7 +3851,7 @@ def profitability(view: str = Query("realtime")):
 def profitability_items(days: int = Query(365)):
     """Per-ASIN profitability breakdown matching Sellerboard item view."""
     con = get_db()
-    cutoff = (datetime.now() - timedelta(days=days)).strftime("%Y-%m-%d")
+    cutoff = (datetime.now(ZoneInfo("America/Chicago")) - timedelta(days=days)).strftime("%Y-%m-%d")
     products = _build_product_list(con, cutoff)
 
     # Get per-ASIN financial event data for the period
@@ -4667,7 +4667,7 @@ async def upload_inventory_excel(
         # Update upload metadata
         meta = _load_upload_meta()
         meta[division] = {
-            "lastUpload": datetime.now().isoformat(),
+            "lastUpload": datetime.now(ZoneInfo("America/Chicago")).isoformat(),
             "filename": file.filename,
             "itemCount": len(items),
         }
@@ -6209,7 +6209,7 @@ def _fetch_fba_shipments_from_api(statuses=None, days_back=90):
 
         result = {
             "shipments": normalized,
-            "lastSync": datetime.now().strftime("%m/%d/%Y %I:%M %p"),
+            "lastSync": datetime.now(ZoneInfo("America/Chicago")).strftime("%m/%d/%Y %I:%M %p"),
             "totalShipments": len(normalized),
         }
 
