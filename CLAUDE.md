@@ -1,295 +1,187 @@
-# GolfGen Dashboard — Project Reference for Claude
+# GolfGen Dashboard — Cowork Context File
 
-> **Purpose:** This file gives Claude full context on the GolfGen Dashboard project so Eric never has to re-explain it. Read this file at the start of any session involving this project.
+Read this entire file before doing anything else in every session.
 
----
+## Project Overview
+GolfGen Amazon Commerce Dashboard — internal tool for GolfGen LLC / 
+Elite Global Brands, Bentonville AR.
+Live URL: https://golfgen-dashboard-production-ce30.up.railway.app
+GitHub: https://github.com/efine2010-Golfgen/golfgen-dashboard
+Backup Repo: https://github.com/efine2010-Golfgen/golfgen-backups
 
-## What Is This?
+## How Deployment Works
+This project auto-deploys to Railway when code is pushed to the 
+main branch on GitHub. 
 
-The GolfGen Dashboard is a live, production web application for GolfGen — a consumer products company selling golf accessories and housewares on Amazon and Walmart. The dashboard tracks sales, inventory, advertising, profitability, and warehouse operations across both channels.
+To deploy any change:
+1. Make code changes
+2. Run: cd webapp/frontend && npm run build
+3. Copy build output: cp -r webapp/frontend/dist webapp/backend/dist
+4. Commit all changes: git add -A && git commit -m "your message"
+5. Push to GitHub: git push origin main
+6. Railway auto-deploys within 2 minutes
+7. Confirm live URL loads correctly
 
-**Live URL:** https://golfgen-dashboard-production-ce30.up.railway.app
-**GitHub Repo:** https://github.com/efine2010-Golfgen/golfgen-dashboard
-**Owner:** Eric Fine (efine2010@gmail.com)
-**Login Password:** Golfgen2026
-
----
-
-## Tech Stack
-
-| Layer | Technology | Version |
-|-------|-----------|---------|
-| Frontend | React (SPA) | 19.2 |
-| Bundler | Vite | 7.3 |
-| Routing | React Router | v7 |
-| Charts | Recharts | 3.8 |
-| Backend | FastAPI (Python) | 0.115 |
-| Database | DuckDB (file-based) | 1.5 |
-| Amazon Data | python-amazon-sp-api | ≥2.1 |
-| Amazon Ads | python-amazon-ad-api | 0.4.2 |
-| Hosting | Railway (Docker) | auto-deploy from GitHub main |
-| Excel Upload | openpyxl | ≥3.1 |
-
----
-
-## Architecture Overview
-
-```
-┌──────────────────────────────────────────────────────┐
-│  Railway (Docker container)                          │
-│                                                      │
-│  FastAPI (uvicorn :8000)                             │
-│  ├── /api/* endpoints (REST)                         │
-│  ├── SP-API background sync (orders, inventory)      │
-│  ├── Amazon Ads sync                                 │
-│  └── Static file serving (React SPA from /dist)      │
-│                                                      │
-│  Data layer:                                         │
-│  ├── data/golfgen_amazon.duckdb  (sales, orders)     │
-│  ├── data/item_master.csv                            │
-│  ├── data/cogs.csv                                   │
-│  ├── data/warehouse.csv                              │
-│  ├── data/golf_inventory.json                        │
-│  ├── data/housewares_inventory.json                  │
-│  ├── data/walmart_item_master.json                   │
-│  ├── data/amazon_item_master.json                    │
-│  └── data/pricing_sync.json  (SP-API pricing cache)  │
-└──────────────────────────────────────────────────────┘
-```
-
-**How it deploys:** Push to `main` branch on GitHub → Railway detects → builds Docker image → deploys automatically. No CI/CD config needed beyond the Dockerfile.
-
----
+NEVER manually restart Railway. NEVER use Railway CLI. 
+Just push to GitHub and Railway handles the rest.
 
 ## File Structure
-
 ```
-golfgen-dashboard/
-├── Dockerfile                          # Single-container build
-├── CLAUDE.md                           # THIS FILE - project context
-├── data/
-│   ├── golfgen_amazon.duckdb           # DuckDB database (SP-API data)
-│   ├── item_master.csv                 # Amazon product catalog
-│   ├── cogs.csv                        # Cost of goods sold
-│   ├── warehouse.csv                   # Original warehouse data
-│   ├── golf_inventory.json             # Golf 3PL warehouse inventory
-│   ├── housewares_inventory.json       # Housewares 3PL warehouse inventory
-│   ├── walmart_item_master.json        # Walmart items (14 SKUs)
-│   └── amazon_item_master.json         # Amazon items (139 SKUs)
-├── webapp/
-│   ├── backend/
-│   │   ├── main.py                     # ~4,200+ lines — ALL backend logic
-│   │   ├── requirements.txt            # Python dependencies
-│   │   └── dist/                       # Pre-built frontend (git-tracked)
-│   └── frontend/
-│       ├── package.json
-│       ├── vite.config.js              # Dev proxy /api → localhost:8000
-│       └── src/
-│           ├── App.jsx                 # Auth gate + routing + header/nav
-│           ├── App.css                 # All styles (light theme)
-│           ├── lib/api.js              # API client (all fetch calls)
-│           └── pages/
-│               ├── Dashboard.jsx       # Sales overview + charts
-│               ├── Products.jsx        # Product-level analytics
-│               ├── Profitability.jsx   # P&L waterfall
-│               ├── Inventory.jsx       # FBA inventory + 3PL summary
-│               ├── Advertising.jsx     # Amazon Ads analytics
-│               ├── GolfGenInventory.jsx # Unified Golf/HW 3PL inventory
-│               ├── ItemMaster.jsx      # Golf (All/Amazon/Walmart) + Housewares tabs
-│               └── Login.jsx           # Password login page
-```
-
----
-
-## API Endpoints (Complete List)
-
-### Authentication
-- `POST /api/auth/login` — password login, sets httponly cookie
-- `GET /api/auth/check` — validate session
-- `POST /api/auth/logout` — clear session
-
-### Sales & Analytics
-- `GET /api/summary?days=365` — KPI summary
-- `GET /api/daily?days=365&granularity=daily|weekly|monthly` — time series
-- `GET /api/products?days=365` — product breakdown
-- `GET /api/product/{asin}?days=365` — single product detail
-- `GET /api/comparison` — period-over-period comparison
-- `GET /api/monthly-yoy` — month-over-year
-- `GET /api/product-mix` — product mix analysis
-- `GET /api/color-mix` — color breakdown
-
-### Profitability
-- `GET /api/pnl?days=365` — P&L waterfall
-- `GET /api/profitability` — profitability overview
-- `GET /api/profitability/items` — item-level profitability
-
-### Inventory
-- `GET /api/inventory` — FBA inventory with days-of-supply
-
-### Advertising
-- `GET /api/ads/summary?days=30`
-- `GET /api/ads/daily?days=30`
-- `GET /api/ads/campaigns?days=30`
-- `GET /api/ads/keywords?days=30`
-- `GET /api/ads/search-terms?days=30`
-- `GET /api/ads/negative-keywords`
-- `GET /api/ads/profiles`
-- `POST /api/ads/sync`
-
-### Warehouse
-- `GET /api/warehouse` — original grouped warehouse
-- `GET /api/warehouse/golf?channel=all|amazon|walmart|both|other`
-- `GET /api/warehouse/housewares`
-- `GET /api/warehouse/summary` — Golf vs Housewares totals
-- `POST /api/upload/warehouse-excel` — upload Excel file
-- `POST /api/refresh-warehouse` — reload from CSV
-
-### Item Master
-- `GET /api/item-master` — Amazon items (editable, enriched with live pricing/coupon data)
-- `PUT /api/item-master/{asin}` — update single Amazon item field
-- `POST /api/item-master/bulk-update` — bulk update items
-- `GET /api/item-master/walmart` — Walmart items (14 SKUs, editable FY26 Plan)
-- `PUT /api/item-master/walmart/{golfgen_item}` — update single Walmart item field
-- `GET /api/item-master/amazon` — Amazon items (139 SKUs)
-- `GET /api/item-master/other` — items not in Amazon or Walmart
-- `GET /api/item-master/housewares` — Housewares items from housewares_inventory.json
-
-### Pricing & Coupons
-- `GET /api/pricing/status` — pricing sync cache status and last sync time
-- `POST /api/pricing/sync` — trigger SP-API competitive pricing + Ads coupon sync
-
-### System
-- `GET /api/health`
-- `POST /api/sync` — trigger SP-API sync
-- `GET /api/backfill` — backfill historical data
-- `GET /api/debug/today-orders`
-- `GET /api/debug/financial-events`
-
----
-
-## Design System
-
-**Theme:** Light background with dark navy header
-**Fonts:** DM Serif Display (logo), Sora (body), Space Grotesk (numbers/headings)
-**Key Colors:**
-- Teal: #2ECFAA (brand accent)
-- Navy: #0E1F2D (header background)
-- Blue: #3E658C (active nav, buttons)
-- Orange: #E87830 (secondary accent)
-- Gold: #F5B731 (highlights)
-
-**Layout:** Sticky header with gradient → gradient accent bar → white nav bar with tabs → content area (max-width 1400px)
-
----
-
-## Authentication
-
-Session-based with httponly cookies. Password is hardcoded as `Golfgen2026` in main.py (`DASHBOARD_PASSWORD` constant). Sessions stored in-memory (`_sessions` set). All frontend fetch calls include `credentials: "include"` for cookie transport.
-
----
-
-## Channel Classification Logic (Golf Warehouse)
-
-SKUs are classified as Amazon, Walmart, or Other:
-1. Strip `T-` prefix from SKU (T- items — do NOT call these "transfer")
-2. Strip suffixes: `-RB`, `-DONATE`, `-RETD`, `-FBM`, `-HOLD`, `-Damage`, `-CUST`, `-Transfer`
-3. Match base SKU against Walmart master set (14 items) and Amazon master set (36 items)
-4. If matches both → "Walmart & Amazon"; one → that channel; neither → "Other"
-
-**Suffix types displayed:** Standard, RB (Rebate), DONATE, RETD (Returned), T- (T-prefix), FBM, HOLD, Damage, CUST (Customer)
-
----
-
-## Item Master Tab Structure
-
-The Item Master page is divided into two top-level divisions: **Golf** and **Housewares**.
-
-**Golf** has three sub-tabs:
-- **All** — unified view merging Amazon + Walmart items with channel badges. Simplified columns: Product, Channel, COGS, Price, FY26 Plan, LY Rev, LY Units
-- **Amazon** — full detail view with expanded rows showing live SP-API pricing (list/sale/buy box prices with sale end dates) and Ads API coupon data (discount amounts with coupon end dates). Includes color filters, inline editing, and CouponBadge component
-- **Walmart** — editable FY26 Plan, store count, categories. 14 SKUs from walmart_item_master.json
-
-**Housewares** — single flat list of all housewares items from housewares_inventory.json. Columns: Product, Pack, Pcs On Hand, Pcs Allocated, Pcs Available, Non-Std, Damage, QC Hold
-
-### Pricing/Coupon Integration (Amazon tab)
-- SP-API `Products.get_competitive_pricing()` fetches competitive pricing in batches of 20 ASINs
-- Amazon Ads API fetches coupon data
-- Cached in `data/pricing_sync.json`
-- Live fields enriched on item master response: `liveListPrice`, `liveSalePrice`, `liveSaleEndDate`, `liveBuyBoxPrice`, `couponDiscount`, `couponType`, `couponState`, `couponEndDate`
-- `CouponBadge` component renders coupon states: ENABLED, SCHEDULED, PAUSED, EXPIRED, ERRORED
-
----
-
-## How to Deploy Changes
-
-1. Make code changes in the repo
-2. If frontend was changed: `cd webapp/frontend && npm install && npx vite build --outDir ../../temp-build --emptyOutDir`
-3. Copy build output: replace `webapp/backend/dist/` with the build output
-4. Commit: `git add . && git commit -m "description"`
-5. Push: `git push origin main`
-6. Railway auto-deploys in ~2-3 minutes
-
----
-
-## How to Run Locally
-
-```bash
-# Backend
-cd webapp/backend
-pip install -r requirements.txt
-uvicorn main:app --reload --port 8000
-
-# Frontend (separate terminal)
-cd webapp/frontend
-npm install
-npm run dev    # starts on :3000, proxies /api to :8000
+webapp/
+  backend/
+    main.py              ← FastAPI app init, router registration only
+    requirements.txt     ← all Python dependencies
+    dist/               ← compiled React frontend (copy here after build)
+    core/
+      __init__.py
+      database.py        ← DuckDB connection, DB_PATH, all CREATE TABLE
+      config.py          ← all env vars and constants
+      scheduler.py       ← APScheduler jobs, startup sync, catchup
+      auth.py            ← login, logout, sessions, permissions
+    routers/
+      __init__.py
+      sales.py           ← /api/sales/* and /api/orders/*
+      inventory.py       ← /api/inventory/*
+      advertising.py     ← /api/advertising/* and /api/coupons/*
+      item_plan.py       ← /api/item-plan/*
+      factory_po.py      ← /api/factory-po/*
+      otw.py             ← /api/otw/*
+      profitability.py   ← /api/profitability/*
+      item_master.py     ← /api/item-master/*
+      permissions.py     ← /api/permissions/*
+      system.py          ← /api/sync/*, /api/backup/*, /api/docs/*
+    services/
+      __init__.py
+      sp_api.py          ← all SP-API calls
+      ads_api.py         ← all Amazon Ads API calls
+      sync_engine.py     ← sync orchestration, _write_sync_log
+      backup.py          ← Google Drive + GitHub backup functions
+  frontend/
+    src/
+      App.jsx            ← main app, routing
+      services/
+        api.js           ← ALL fetch() calls go here only
+        metrics.js       ← all client-side formula calculations
+      hooks/
+        useAutoSave.js   ← 500ms debounce save
+        usePolling.js    ← setInterval data refresh
+        useSyncStatus.js ← watches sync_log
+      components/
+        layout/
+          Sidebar.jsx
+          Header.jsx
+        shared/
+          KPICard.jsx
+          StatusPill.jsx
+          DataTable.jsx
+          LoadingState.jsx
+          ErrorState.jsx
+      pages/             ← one file per dashboard tab
 ```
 
-Note: SP-API sync requires environment variables (`SP_API_REFRESH_TOKEN`, `LWA_APP_ID`, `LWA_CLIENT_SECRET`, `MARKETPLACE_ID`, `SELLER_ID`). Without these, the dashboard works but won't pull fresh Amazon data.
+## Database
+- Engine: DuckDB
+- Live path on Railway: /app/data/golfgen.duckdb
+- Local dev path: data/golfgen_amazon.duckdb
+- DB_PATH env var controls which path is used
+- Single connection only — defined in core/database.py
+- Never open a second duckdb.connect() anywhere
+
+## Key Database Tables
+- orders — Amazon orders from SP-API
+- order_items — line items per order
+- financial_events — refunds, fees, adjustments from SP-API
+  IMPORTANT: column is event_type NOT transaction_type
+  IMPORTANT: refund filter is event_type ILIKE '%refund%'
+- fba_inventory — FBA stock levels from SP-API
+- daily_sales — aggregated daily sales
+- advertising — Amazon Ads campaign data
+- sync_log — record of every sync run
+  Columns: job_name, started_at, completed_at, status,
+  records_processed, error_message, execution_time_seconds
+  IMPORTANT: column is records_processed NOT records_inserted
+  IMPORTANT: column is execution_time_seconds NOT duration_seconds
+- item_master — product catalog
+- item_plan_overrides — monthly unit/AUR overrides per SKU
+- item_plan_curve_selection — curve type per SKU
+- factory_on_order — factory purchase orders
+- factory_on_order_items — line items per PO
+- otw_shipments — inbound container tracking
+- sessions — user login sessions
+- user_permissions — per-user tab access controls
+- amazon_coupons — coupon status per ASIN
+
+## Environment Variables (set in Railway)
+SP_API_REFRESH_TOKEN — Amazon SP-API refresh token
+SP_API_CLIENT_ID — Amazon SP-API client ID
+SP_API_CLIENT_SECRET — Amazon SP-API client secret
+SP_API_MARKETPLACE_ID — Amazon marketplace ID
+ADS_API_CLIENT_ID — Amazon Ads API client ID
+ADS_API_CLIENT_SECRET — Amazon Ads API client secret
+ADS_API_REFRESH_TOKEN — Amazon Ads API refresh token
+GOOGLE_SERVICE_ACCOUNT_JSON — Google service account for Drive backup
+BACKUP_DRIVE_FOLDER_ID — Google Drive folder ID for backups
+GITHUB_TOKEN — GitHub personal access token for backup repo
+BACKUP_GITHUB_REPO — efine2010-Golfgen/golfgen-backups
+DB_PATH — /app/data/golfgen.duckdb
+
+## Users
+- Eric (eric@golfgen.com / eric@egbrands.com) — Admin
+- Ty (ty@golfgen.com / tysams@egbrands.com) — Staff
+- Kim (kim@golfgen.com / kim@egbrands.com) — Staff
+- Ryan (ryan@golfgen.com / ryan@egbrands.com) — Staff
+- McKay (riseecom21@gmail.com) — Staff
+
+## Critical Rules — Follow These in Every Session
+1. DuckDB connection defined ONCE in core/database.py only
+   Never open duckdb.connect() anywhere else
+2. DB_PATH defined ONCE in core/config.py only
+   Never hardcode the path in two places
+3. All datetime.now() must use ZoneInfo("America/Chicago")
+   Never use utcnow() or hardcode UTC offsets
+4. Every CREATE TABLE must have IF NOT EXISTS
+5. Never use DROP TABLE or DELETE FROM on existing data tables
+6. All CREATE SEQUENCE before CREATE TABLE in database.py
+7. Auto-save debounced 500ms — never save on every keystroke
+8. All formula math client-side in React — no server 
+   round-trips for calculations
+9. After any frontend change: npm run build in webapp/frontend/
+   then copy dist/ to webapp/backend/dist/
+10. Every sync run writes to sync_log with correct column names:
+    records_processed, execution_time_seconds (not records_inserted,
+    not duration_seconds)
+
+## How to Confirm Deployment Worked
+After pushing to GitHub wait 2 minutes then run:
+curl -s https://golfgen-dashboard-production-ce30.up.railway.app/api/health
+
+Should return JSON with status: healthy and table row counts.
+
+## Current Known Issues (as of March 2026)
+- Item Plan tab returns 500 error — needs fix
+- OTW tab missing ETD/ETA/port data — needs fix
+- Factory PO column order wrong — needs fix
+- Coupon status not showing on Profitability — needs fix
+
+## Backup System
+- Google Drive: nightly 2am Central, 30-day retention
+  Manual trigger: POST /api/backup/trigger
+  Status: GET /api/backup/status
+- GitHub: nightly after Drive backup
+  Repo: github.com/efine2010-Golfgen/golfgen-backups
+  Manual trigger: POST /api/backup/github-trigger
+  Status: GET /api/backup/github-status
+
+## Sync Schedule
+- SP-API orders: every 4 hours
+- SP-API financial events: every 4 hours  
+- SP-API inventory: every 4 hours
+- Ads API: every 4 hours
+- Startup catchup: runs any missed sync on container start
+```
 
 ---
 
-## Railway Environment Variables
-
-Set these in Railway dashboard (Settings → Variables):
-- `SP_API_REFRESH_TOKEN`
-- `LWA_APP_ID`
-- `LWA_CLIENT_SECRET`
-- `MARKETPLACE_ID` (default: ATVPDKIKX0DER for US)
-- `SELLER_ID`
-- `ADS_REFRESH_TOKEN` (for Amazon Ads)
-- `ADS_CLIENT_ID`
-- `ADS_CLIENT_SECRET`
-- `ADS_PROFILE_ID`
-- `DB_DIR` (default: /app/data)
-- `PORT` (Railway sets automatically)
-
----
-
-## Common Tasks for Claude
-
-### "Update the dashboard with new features"
-→ Edit files in this repo, rebuild frontend, commit and push to GitHub
-
-### "Fix a bug on the live site"
-→ Read main.py or the relevant .jsx file, make the fix, rebuild + push
-
-### "Add new data/inventory"
-→ Update the JSON files in data/, add COPY line to Dockerfile if new files, rebuild + push
-
-### "Change the password"
-→ Edit `DASHBOARD_PASSWORD` in main.py (search for `Golfgen2026`)
-
-### "The site is down"
-→ Check Railway dashboard for build/deploy errors. Check /api/health endpoint. Common issues: Dockerfile COPY fails for missing files, Python import errors in main.py, DuckDB lock issues.
-
----
-
-## Important Notes
-
-- **main.py is ~4,200+ lines** — be careful with edits, don't overwrite unrelated sections
-- **Frontend dist is git-tracked** in `webapp/backend/dist/` — this is what the Docker image serves
-- **DuckDB file** (`golfgen_amazon.duckdb`) contains all historical sales data — do NOT delete
-- **All fetch calls** must include `credentials: "include"` for auth cookies to work
-- **React Router v7** — uses `<BrowserRouter>`, `<Routes>`, `<Route>`, `<NavLink>`
-- **No separate CSS files per component** — everything is in App.css
+Commit message:
+```
+docs: update CLAUDE.md with full project context and rules
