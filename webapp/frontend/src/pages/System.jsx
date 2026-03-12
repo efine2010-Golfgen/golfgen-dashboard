@@ -348,7 +348,7 @@ export default function System() {
                   <td style={td}>{row.duration_seconds != null ? `${row.duration_seconds}s` : "—"}</td>
                   <td style={td}><Badge status={row.status} /></td>
                   <td style={{ ...td, textAlign: "right", fontFamily: "'Space Grotesk', monospace" }}>{row.records_pulled || 0}</td>
-                  <td style={{ ...td, textAlign: "right", fontFamily: "'Space Grotesk', monospace" }}>{row.records_inserted || 0}</td>
+                  <td style={{ ...td, textAlign: "right", fontFamily: "'Space Grotesk', monospace" }}>{row.records_processed || 0}</td>
                   <td style={{ ...td, textAlign: "right", fontFamily: "'Space Grotesk', monospace" }}>{row.records_skipped || 0}</td>
                   <td style={{ ...td, maxWidth: 200, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
                     {row.error_message ? <span style={{ color: "#dc2626", fontSize: 11 }} title={row.error_message}>{row.error_message}</span> : "—"}
