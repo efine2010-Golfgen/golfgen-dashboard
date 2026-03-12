@@ -515,6 +515,15 @@ def _run_sp_api_sync():
         except Exception as e:
             logger.warning(f"  Could not clear old financial_events: {e}")
 
+        # Build SKU→ASIN mapping from fba_inventory (financial events often lack ASIN)
+        sku_to_asin = {}
+        try:
+            sku_rows = con.execute("SELECT sku, asin FROM fba_inventory WHERE sku IS NOT NULL AND asin IS NOT NULL").fetchall()
+            sku_to_asin = {r[0]: r[1] for r in sku_rows if r[0] and r[1]}
+            logger.info(f"  SKU→ASIN mapping: {len(sku_to_asin)} entries")
+        except Exception as e:
+            logger.warning(f"  Could not build SKU→ASIN mapping: {e}")
+
         # Process shipment events (sales fees)
         first_shipment_logged = False
         for event in all_shipment_events:
@@ -524,7 +533,7 @@ def _run_sp_api_sync():
 
             for item in (_safe_get(event, "ShipmentItemList") or []):
                 sku = _safe_get(item, "SellerSKU", "")
-                asin_val = _safe_get(item, "ASIN", sku)
+                asin_val = _safe_get(item, "ASIN") or sku_to_asin.get(sku, sku)
 
                 product_charges = 0.0
                 shipping_ch = 0.0
@@ -605,7 +614,7 @@ def _run_sp_api_sync():
 
             for item in item_list:
                 sku = _safe_get(item, "SellerSKU", "")
-                asin_val = _safe_get(item, "ASIN", sku)
+                asin_val = _safe_get(item, "ASIN") or sku_to_asin.get(sku, sku)
 
                 refund_amount = 0.0
                 refund_fba = 0.0
