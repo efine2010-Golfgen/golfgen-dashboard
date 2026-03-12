@@ -601,6 +601,69 @@ async def github_backup_status(request: Request):
     return _get_gh_status()
 
 
+# ── Unauthenticated backup endpoints (token-based for Railway cron / manual curl) ──
+
+def _check_backup_token(request: Request) -> bool:
+    """Validate backup trigger token from query param or header."""
+    import os
+    expected = os.environ.get("GITHUB_TOKEN", "")[:16]  # first 16 chars as simple secret
+    token = request.query_params.get("token", "") or request.headers.get("X-Backup-Token", "")
+    return token == expected and bool(expected)
+
+
+@router.post("/api/backup/run")
+async def run_full_backup(request: Request):
+    """Trigger both Google Drive + GitHub backup. Token-authenticated for cron/curl use.
+
+    Usage:
+      curl -X POST 'https://<domain>/api/backup/run?token=<first-16-chars-of-GITHUB_TOKEN>'
+    """
+    if not _check_backup_token(request):
+        from fastapi import HTTPException
+        raise HTTPException(status_code=401, detail="Invalid or missing backup token")
+
+    from core.scheduler import _run_duckdb_backup
+    loop = asyncio.get_event_loop()
+    await loop.run_in_executor(None, _run_duckdb_backup)
+    return {
+        "status": "backup_complete",
+        "message": "Google Drive + GitHub backup completed",
+        "triggered_by": "manual_api",
+    }
+
+
+@router.get("/api/backup/run-status")
+async def backup_run_status(request: Request):
+    """Get combined backup status (no auth required — read-only, no secrets exposed)."""
+    result = {"gdrive": {}, "github": {}}
+
+    try:
+        con = duckdb.connect(str(DB_PATH), read_only=False)
+        for job_name, key in [("nightly_backup_gdrive", "gdrive"), ("nightly_backup_github", "github")]:
+            row = con.execute("""
+                SELECT started_at, completed_at, status, records_processed, error_message
+                FROM sync_log
+                WHERE job_name = ?
+                ORDER BY started_at DESC
+                LIMIT 1
+            """, [job_name]).fetchone()
+            if row:
+                result[key] = {
+                    "last_run": str(row[0])[:19] if row[0] else None,
+                    "completed": str(row[1])[:19] if row[1] else None,
+                    "status": row[2],
+                    "records": row[3] or 0,
+                    "error": row[4],
+                }
+            else:
+                result[key] = {"status": "NEVER_RUN", "last_run": None}
+        con.close()
+    except Exception as e:
+        result["error"] = str(e)
+
+    return result
+
+
 @router.post("/api/docs/update")
 async def trigger_docs_update(request: Request):
     """Manually trigger a docs update."""

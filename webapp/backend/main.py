@@ -144,7 +144,8 @@ async def tab_permission_middleware(request: Request, call_next):
         path.startswith("/api/upload/") or
         path.startswith("/api/debug/") or
         path in ("/api/health", "/api/sync", "/api/backfill") or
-        path.startswith("/api/refresh")):
+        path.startswith("/api/refresh") or
+        path in ("/api/backup/run", "/api/backup/run-status")):
         return await call_next(request)
 
     # Check session
