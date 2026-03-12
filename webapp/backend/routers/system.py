@@ -55,7 +55,7 @@ def health():
 
         # Last sync per job
         rows = con.execute("""
-            SELECT job_name, started_at, status, records_pulled
+            SELECT job_name, started_at, status, records_processed
             FROM sync_log
             WHERE id IN (
                 SELECT MAX(id) FROM sync_log GROUP BY job_name
@@ -419,7 +419,7 @@ async def get_system_status(request: Request):
     try:
         # Get last sync log entry
         last_sync = con.execute("""
-            SELECT job_name, completed_at, status, duration_seconds
+            SELECT job_name, completed_at, status, execution_time_seconds
             FROM sync_log
             WHERE status IN ('completed', 'SUCCESS')
             ORDER BY completed_at DESC
@@ -437,7 +437,7 @@ async def get_system_status(request: Request):
 
         # Get recent sync log entries (last 10)
         recent_syncs = con.execute("""
-            SELECT job_name, started_at, completed_at, status, duration_seconds, error_message
+            SELECT job_name, started_at, completed_at, status, execution_time_seconds, error_message
             FROM sync_log
             ORDER BY started_at DESC
             LIMIT 10
@@ -458,7 +458,7 @@ async def get_system_status(request: Request):
                 "job_name": last_sync[0] if last_sync else None,
                 "completed_at": str(last_sync[1]) if last_sync else None,
                 "status": last_sync[2] if last_sync else None,
-                "duration_seconds": last_sync[3] if last_sync else None
+                "execution_time_seconds": last_sync[3] if last_sync else None
             },
             "last_docs_update": {
                 "completed_at": str(last_docs[0]) if last_docs else None,
@@ -471,7 +471,7 @@ async def get_system_status(request: Request):
                     "started_at": str(row[1]),
                     "completed_at": str(row[2]),
                     "status": row[3],
-                    "duration_seconds": row[4],
+                    "execution_time_seconds": row[4],
                     "error_message": row[5]
                 }
                 for row in recent_syncs
@@ -498,8 +498,8 @@ async def get_sync_log(request: Request, limit: int = Query(50, ge=1, le=500)):
     try:
         rows = con.execute("""
             SELECT id, job_name, started_at, completed_at, status,
-                   records_pulled, records_processed, records_skipped,
-                   error_message, duration_seconds
+                   records_processed, records_processed, 
+                   error_message, execution_time_seconds
             FROM sync_log
             ORDER BY started_at DESC
             LIMIT ?
@@ -513,11 +513,11 @@ async def get_sync_log(request: Request, limit: int = Query(50, ge=1, le=500)):
                     "started_at": str(row[2]),
                     "completed_at": str(row[3]),
                     "status": row[4],
-                    "records_pulled": row[5] or 0,
+                    "records_processed": row[5] or 0,
                     "records_processed": row[6] or 0,
-                    "records_skipped": row[7] or 0,
+                    "": row[7] or 0,
                     "error_message": row[8],
-                    "duration_seconds": round(row[9], 2) if row[9] else None,
+                    "execution_time_seconds": round(row[9], 2) if row[9] else None,
                 }
                 for row in rows
             ]
@@ -645,7 +645,7 @@ async def get_docs_status(request: Request):
                     "started_at": str(row[1]),
                     "completed_at": str(row[2]),
                     "status": row[3],
-                    "duration_seconds": row[4],
+                    "execution_time_seconds": row[4],
                     "error_message": row[5],
                     "documents_updated": row[6]
                 }

@@ -82,11 +82,9 @@ def _init_system_tables():
             started_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
             completed_at TIMESTAMP,
             status TEXT DEFAULT 'in_progress',
-            records_pulled BIGINT DEFAULT 0,
             records_processed BIGINT DEFAULT 0,
-            records_skipped BIGINT DEFAULT 0,
             error_message TEXT,
-            duration_seconds DOUBLE
+            execution_time_seconds DOUBLE
         )
     """)
 
