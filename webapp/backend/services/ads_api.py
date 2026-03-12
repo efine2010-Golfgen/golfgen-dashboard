@@ -19,17 +19,9 @@ from core.config import DB_PATH, DB_DIR, CONFIG_PATH, PRICING_CACHE_PATH, TIMEZO
 logger = logging.getLogger("golfgen")
 
 
-# ── Helper Functions (imported from main at module init) ──────────────────
-# These are set by main.py when importing this module
-_load_sp_api_credentials = None
-load_item_master = None
-
-
-def set_helpers(load_sp_api_creds_fn, load_item_master_fn):
-    """Register helper functions from main module."""
-    global _load_sp_api_credentials, load_item_master
-    _load_sp_api_credentials = load_sp_api_creds_fn
-    load_item_master = load_item_master_fn
+# ── Helper Functions (direct imports from modular structure) ──────────────
+from services.sp_api import _load_sp_api_credentials
+from routers.item_master import load_item_master
 
 
 # ── Pricing Cache Functions ──────────────────────────────────────────────
