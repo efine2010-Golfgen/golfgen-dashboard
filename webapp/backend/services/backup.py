@@ -43,13 +43,37 @@ def _get_settings():
 
 
 def _get_drive_service():
-    """Authenticate with Google Drive using service account JSON from env var."""
-    from google.oauth2 import service_account
+    """Authenticate with Google Drive using OAuth2 refresh token (user account).
+
+    Falls back to service account if OAuth2 credentials are not configured.
+    OAuth2 is preferred because service accounts have no storage quota on
+    personal Google Drive.
+    """
     from googleapiclient.discovery import build
 
+    # Prefer OAuth2 user credentials (has storage quota)
+    refresh_token = os.environ.get("GOOGLE_OAUTH_REFRESH_TOKEN", "")
+    client_id = os.environ.get("GOOGLE_OAUTH_CLIENT_ID", "")
+    client_secret = os.environ.get("GOOGLE_OAUTH_CLIENT_SECRET", "")
+
+    if refresh_token and client_id and client_secret:
+        from google.oauth2.credentials import Credentials
+        credentials = Credentials(
+            token=None,
+            refresh_token=refresh_token,
+            client_id=client_id,
+            client_secret=client_secret,
+            token_uri="https://oauth2.googleapis.com/token",
+            scopes=["https://www.googleapis.com/auth/drive"],
+        )
+        logger.info("Drive auth: using OAuth2 user credentials")
+        return build("drive", "v3", credentials=credentials, cache_discovery=False)
+
+    # Fallback to service account
+    from google.oauth2 import service_account
     sa_json_str = os.environ.get("GOOGLE_SERVICE_ACCOUNT_JSON", "")
     if not sa_json_str:
-        raise RuntimeError("GOOGLE_SERVICE_ACCOUNT_JSON environment variable is not set")
+        raise RuntimeError("No Google Drive credentials configured (need GOOGLE_OAUTH_REFRESH_TOKEN or GOOGLE_SERVICE_ACCOUNT_JSON)")
 
     try:
         sa_info = json.loads(sa_json_str)
@@ -59,6 +83,7 @@ def _get_drive_service():
     credentials = service_account.Credentials.from_service_account_info(
         sa_info, scopes=["https://www.googleapis.com/auth/drive"]
     )
+    logger.info("Drive auth: using service account (warning: no storage quota on personal Drive)")
     return build("drive", "v3", credentials=credentials, cache_discovery=False)
 
 
