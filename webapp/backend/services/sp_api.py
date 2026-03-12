@@ -415,7 +415,7 @@ def _run_sp_api_sync():
         page = 0
         next_token = None
 
-        while page < 20:
+        while page < 200:
             page += 1
             kwargs = {"PostedAfter": fin_start, "MaxResultsPerPage": 100}
             if next_token:
