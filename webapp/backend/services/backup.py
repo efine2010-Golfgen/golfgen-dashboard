@@ -425,7 +425,7 @@ def get_github_backup_status() -> dict:
         con = duckdb.connect(str(DB_PATH), read_only=True)
         row = con.execute("""
             SELECT started_at, completed_at, status,
-                   records_inserted, error_message
+                   records_processed, error_message
             FROM sync_log
             WHERE job_name = 'nightly_backup_github'
             ORDER BY started_at DESC
