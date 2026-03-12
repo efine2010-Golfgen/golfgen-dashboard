@@ -17,7 +17,7 @@ from apscheduler.triggers.cron import CronTrigger
 from core.config import DB_PATH, DB_DIR, TIMEZONE, SYNC_INTERVAL_HOURS
 from services.sp_api import _sync_today_orders, _run_sp_api_sync
 from services.ads_api import _sync_ads_data, _sync_pricing_and_coupons
-from services.sync_engine import _auto_backfill_if_needed, _log_sync
+from services.sync_engine import _auto_backfill_if_needed, _log_sync, _write_sync_log
 
 logger = logging.getLogger("golfgen")
 
@@ -43,107 +43,76 @@ def _log_docs_update(status: str = "in_progress", documents_updated: str = None,
 
 def _run_scheduled_sp_api_sync():
     """Wrapper for scheduled SP-API sync with logging."""
-    start_time = time.time()
-    log_id = _log_sync("sp_api_sync", "in_progress")
+    started_at = datetime.now(ZoneInfo("America/Chicago"))
     try:
         _run_sp_api_sync()
-        execution_time = time.time() - start_time
-        _log_sync("sp_api_sync", "completed", execution_time=execution_time)
-        logger.info(f"Scheduled SP-API sync completed in {execution_time:.2f}s")
+        _write_sync_log("sp_api_sync", started_at, "SUCCESS")
+        logger.info(f"Scheduled SP-API sync completed")
     except Exception as e:
-        execution_time = time.time() - start_time
-        error_msg = str(e)
-        _log_sync("sp_api_sync", "failed", error_message=error_msg, execution_time=execution_time)
-        logger.error(f"Scheduled SP-API sync failed: {error_msg}")
+        _write_sync_log("sp_api_sync", started_at, "FAILED", error=str(e))
+        logger.error(f"Scheduled SP-API sync failed: {e}")
 
 
 def _run_scheduled_today_sync():
     """Wrapper for scheduled today orders sync with logging."""
-    start_time = time.time()
-    log_id = _log_sync("today_sync", "in_progress")
+    started_at = datetime.now(ZoneInfo("America/Chicago"))
     try:
         _sync_today_orders()
-        execution_time = time.time() - start_time
-        _log_sync("today_sync", "completed", execution_time=execution_time)
-        logger.info(f"Scheduled today sync completed in {execution_time:.2f}s")
+        _write_sync_log("today_sync", started_at, "SUCCESS")
+        logger.info(f"Scheduled today sync completed")
     except Exception as e:
-        execution_time = time.time() - start_time
-        error_msg = str(e)
-        _log_sync("today_sync", "failed", error_message=error_msg, execution_time=execution_time)
-        logger.error(f"Scheduled today sync failed: {error_msg}")
+        _write_sync_log("today_sync", started_at, "FAILED", error=str(e))
+        logger.error(f"Scheduled today sync failed: {e}")
 
 
 def _run_scheduled_ads_sync():
     """Wrapper for scheduled ads sync with logging."""
-    start_time = time.time()
-    log_id = _log_sync("ads_sync", "in_progress")
+    started_at = datetime.now(ZoneInfo("America/Chicago"))
     try:
         _sync_ads_data()
-        execution_time = time.time() - start_time
-        _log_sync("ads_sync", "completed", execution_time=execution_time)
-        logger.info(f"Scheduled ads sync completed in {execution_time:.2f}s")
+        _write_sync_log("ads_sync", started_at, "SUCCESS")
+        logger.info(f"Scheduled ads sync completed")
     except Exception as e:
-        execution_time = time.time() - start_time
-        error_msg = str(e)
-        _log_sync("ads_sync", "failed", error_message=error_msg, execution_time=execution_time)
-        logger.error(f"Scheduled ads sync failed: {error_msg}")
+        _write_sync_log("ads_sync", started_at, "FAILED", error=str(e))
+        logger.error(f"Scheduled ads sync failed: {e}")
 
 
 def _run_scheduled_pricing_sync():
     """Wrapper for scheduled pricing sync with logging."""
-    start_time = time.time()
-    log_id = _log_sync("pricing_sync", "in_progress")
+    started_at = datetime.now(ZoneInfo("America/Chicago"))
     try:
         _sync_pricing_and_coupons()
-        execution_time = time.time() - start_time
-        _log_sync("pricing_sync", "completed", execution_time=execution_time)
-        logger.info(f"Scheduled pricing sync completed in {execution_time:.2f}s")
+        _write_sync_log("pricing_sync", started_at, "SUCCESS")
+        logger.info(f"Scheduled pricing sync completed")
     except Exception as e:
-        execution_time = time.time() - start_time
-        error_msg = str(e)
-        _log_sync("pricing_sync", "failed", error_message=error_msg, execution_time=execution_time)
-        logger.error(f"Scheduled pricing sync failed: {error_msg}")
+        _write_sync_log("pricing_sync", started_at, "FAILED", error=str(e))
+        logger.error(f"Scheduled pricing sync failed: {e}")
 
 
 def _run_scheduled_docs_update():
-    """Wrapper for scheduled docs update with logging. (Placeholder for Prompt 2)"""
-    start_time = time.time()
-    log_id = _log_docs_update("in_progress")
+    """Wrapper for scheduled docs update with logging. (Placeholder)"""
+    started_at = datetime.now(ZoneInfo("America/Chicago"))
     try:
-        # Placeholder: actual implementation in Prompt 2
-        # - Collect system snapshot
-        # - Call Claude to generate docs
-        # - Save to /app/docs/
-        # - Commit to GitHub if token available
         logger.info("Docs update job started (placeholder)")
-        execution_time = time.time() - start_time
-        _log_docs_update("completed", documents_updated="architecture_guide.md, disaster_recovery_plan.md", execution_time=execution_time)
-        logger.info(f"Scheduled docs update completed in {execution_time:.2f}s")
+        _write_sync_log("docs_update", started_at, "SUCCESS")
+        _log_docs_update("completed", documents_updated="architecture_guide.md, disaster_recovery_plan.md", execution_time=0)
+        logger.info("Scheduled docs update completed")
     except Exception as e:
-        execution_time = time.time() - start_time
-        error_msg = str(e)
-        _log_docs_update("failed", error_message=error_msg, execution_time=execution_time)
-        logger.error(f"Scheduled docs update failed: {error_msg}")
+        _write_sync_log("docs_update", started_at, "FAILED", error=str(e))
+        _log_docs_update("failed", error_message=str(e), execution_time=0)
+        logger.error(f"Scheduled docs update failed: {e}")
 
 
 def _run_duckdb_backup():
-    """Wrapper for nightly DuckDB backup with logging. (Placeholder for Prompt 2)"""
-    start_time = time.time()
-    log_id = _log_sync("duckdb_backup", "in_progress")
+    """Wrapper for nightly DuckDB backup with logging. (Placeholder)"""
+    started_at = datetime.now(ZoneInfo("America/Chicago"))
     try:
-        # Placeholder: actual implementation in Prompt 2
-        # - Copy DuckDB to temp file with date suffix
-        # - Upload to Google Drive
-        # - Clean up backups older than 30 days
         logger.info("DuckDB backup job started (placeholder)")
-        execution_time = time.time() - start_time
-        _log_sync("duckdb_backup", "completed", execution_time=execution_time)
-        logger.info(f"DuckDB backup completed in {execution_time:.2f}s")
+        _write_sync_log("nightly_backup", started_at, "SUCCESS")
+        logger.info("DuckDB backup completed")
     except Exception as e:
-        execution_time = time.time() - start_time
-        error_msg = str(e)
-        _log_sync("duckdb_backup", "failed", error_message=error_msg, execution_time=execution_time)
-        logger.error(f"DuckDB backup failed: {error_msg}")
+        _write_sync_log("nightly_backup", started_at, "FAILED", error=str(e))
+        logger.error(f"DuckDB backup failed: {e}")
 
 
 async def _sync_loop():
@@ -229,37 +198,49 @@ async def _sync_loop():
 
 
 async def _startup_sync_catchup():
-    """On startup, check if any scheduled sync times have passed today without a sync_log entry.
-    If so, run the sync immediately to catch up."""
+    """On startup, check each scheduled job's last SUCCESS/PARTIAL run in sync_log.
+    If the last successful run was more than (job_interval + 10 minutes) ago,
+    run the job immediately. Ensures missed syncs during deploys are caught up."""
     try:
-        now_utc = datetime.now(ZoneInfo("UTC"))
-        now_central = now_utc.astimezone(ZoneInfo("America/Chicago"))
-        today_date = now_central.date()
+        now_central = datetime.now(ZoneInfo("America/Chicago"))
 
-        scheduled_times = [9, 12, 15, 18]  # 9am, 12pm, 3pm, 6pm Central
+        # Define jobs with their expected interval in minutes
+        catchup_jobs = [
+            ("sp_api_sync", 180, _run_scheduled_sp_api_sync),       # every 3h (9,12,15,18)
+            ("ads_sync", 60, _run_scheduled_ads_sync),               # every hour
+            ("pricing_sync", 60, _run_scheduled_pricing_sync),       # every hour (offset 30m)
+        ]
 
         con = duckdb.connect(str(DB_PATH), read_only=True)
 
-        for scheduled_hour in scheduled_times:
-            scheduled_time = now_central.replace(hour=scheduled_hour, minute=0, second=0, microsecond=0)
+        for job_name, interval_minutes, job_fn in catchup_jobs:
+            try:
+                row = con.execute("""
+                    SELECT MAX(started_at) FROM sync_log
+                    WHERE job_name = ? AND status IN ('SUCCESS', 'PARTIAL', 'completed')
+                """, [job_name]).fetchone()
+                last_run = row[0] if row and row[0] else None
 
-            # Check if this time has already passed today
-            if now_central > scheduled_time:
-                # Check if we have a sync_log entry for this job today
-                rows = con.execute("""
-                    SELECT id FROM sync_log
-                    WHERE job_name = 'sp_api_sync'
-                    AND DATE(started_at) = ?
-                    AND status = 'completed'
-                    ORDER BY started_at DESC
-                    LIMIT 1
-                """, [today_date]).fetchall()
+                threshold_minutes = interval_minutes + 10
+                if last_run:
+                    from datetime import timezone
+                    # last_run from DuckDB is naive — treat as Central
+                    if last_run.tzinfo is None:
+                        last_run = last_run.replace(tzinfo=ZoneInfo("America/Chicago"))
+                    elapsed = (now_central - last_run).total_seconds() / 60
+                    catchup = elapsed > threshold_minutes
+                else:
+                    elapsed = float('inf')
+                    catchup = True
 
-                if not rows:
-                    logger.info(f"Startup catchup: {scheduled_hour}:00 sync hasn't run yet today, running now...")
+                last_str = str(last_run)[:19] if last_run else "NEVER"
+                print(f"[STARTUP] {job_name}: last run {last_str}, catchup {'TRIGGERED' if catchup else 'NOT NEEDED'}")
+
+                if catchup:
                     loop = asyncio.get_event_loop()
-                    await loop.run_in_executor(None, _run_scheduled_sp_api_sync)
-                    break  # Only run one catchup per startup
+                    await loop.run_in_executor(None, job_fn)
+            except Exception as e:
+                print(f"[STARTUP] {job_name}: catchup error — {e}")
 
         con.close()
     except Exception as e:

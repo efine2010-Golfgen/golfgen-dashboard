@@ -193,6 +193,11 @@ export const api = {
       body: JSON.stringify({ key, value: String(value) }),
       credentials: "include",
     }).then(r => r.json()),
+
+  // System
+  health: () => fetchJSON(`/api/health`),
+  syncLog: (limit = 50) => fetchJSON(`/api/system/sync-log?limit=${limit}`),
+  systemStatus: () => fetchJSON(`/api/system/status`),
 };
 
 export function fmt$(n) {

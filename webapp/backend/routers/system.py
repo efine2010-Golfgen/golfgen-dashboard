@@ -30,13 +30,49 @@ def _load_sp_api_credentials():
 
 @router.get("/api/health")
 def health():
-    return {
-        "status": "ok",
-        "db": str(DB_PATH),
-        "db_exists": DB_PATH.exists(),
-        "port": os.environ.get("PORT", "8000"),
+    now = datetime.now(ZoneInfo("America/Chicago"))
+    result = {
+        "status": "healthy",
+        "timestamp": now.isoformat(),
+        "database": {
+            "path": str(DB_PATH),
+            "size_mb": round(DB_PATH.stat().st_size / 1024 / 1024, 2) if DB_PATH.exists() else 0,
+            "tables": {},
+        },
+        "last_sync": {},
         "has_sp_api_creds": _load_sp_api_credentials() is not None,
     }
+
+    try:
+        con = duckdb.connect(str(DB_PATH), read_only=True)
+        # Table row counts
+        for tbl in ["orders", "daily_sales", "financial_events", "fba_inventory", "advertising", "ads_campaigns"]:
+            try:
+                cnt = con.execute(f"SELECT COUNT(*) FROM {tbl}").fetchone()[0]
+                result["database"]["tables"][tbl] = cnt
+            except Exception:
+                result["database"]["tables"][tbl] = 0
+
+        # Last sync per job
+        rows = con.execute("""
+            SELECT job_name, started_at, status, records_pulled
+            FROM sync_log
+            WHERE id IN (
+                SELECT MAX(id) FROM sync_log GROUP BY job_name
+            )
+        """).fetchall()
+        for row in rows:
+            result["last_sync"][row[0]] = {
+                "time": str(row[1])[:19] if row[1] else None,
+                "status": row[2],
+                "records": row[3] or 0,
+            }
+        con.close()
+    except Exception as e:
+        result["status"] = "degraded"
+        result["error"] = str(e)
+
+    return result
 
 
 @router.post("/api/sync")
@@ -383,9 +419,9 @@ async def get_system_status(request: Request):
     try:
         # Get last sync log entry
         last_sync = con.execute("""
-            SELECT job_name, completed_at, status, execution_time_seconds
+            SELECT job_name, completed_at, status, duration_seconds
             FROM sync_log
-            WHERE status = 'completed'
+            WHERE status IN ('completed', 'SUCCESS')
             ORDER BY completed_at DESC
             LIMIT 1
         """).fetchone()
@@ -401,7 +437,7 @@ async def get_system_status(request: Request):
 
         # Get recent sync log entries (last 10)
         recent_syncs = con.execute("""
-            SELECT job_name, started_at, completed_at, status, execution_time_seconds, error_message
+            SELECT job_name, started_at, completed_at, status, duration_seconds, error_message
             FROM sync_log
             ORDER BY started_at DESC
             LIMIT 10
@@ -422,7 +458,7 @@ async def get_system_status(request: Request):
                 "job_name": last_sync[0] if last_sync else None,
                 "completed_at": str(last_sync[1]) if last_sync else None,
                 "status": last_sync[2] if last_sync else None,
-                "execution_time_seconds": last_sync[3] if last_sync else None
+                "duration_seconds": last_sync[3] if last_sync else None
             },
             "last_docs_update": {
                 "completed_at": str(last_docs[0]) if last_docs else None,
@@ -435,7 +471,7 @@ async def get_system_status(request: Request):
                     "started_at": str(row[1]),
                     "completed_at": str(row[2]),
                     "status": row[3],
-                    "execution_time_seconds": row[4],
+                    "duration_seconds": row[4],
                     "error_message": row[5]
                 }
                 for row in recent_syncs
@@ -461,7 +497,9 @@ async def get_sync_log(request: Request, limit: int = Query(50, ge=1, le=500)):
     con = duckdb.connect(str(DB_PATH), read_only=True)
     try:
         rows = con.execute("""
-            SELECT id, job_name, started_at, completed_at, status, records_processed, error_message, execution_time_seconds
+            SELECT id, job_name, started_at, completed_at, status,
+                   records_pulled, records_inserted, records_skipped,
+                   error_message, duration_seconds
             FROM sync_log
             ORDER BY started_at DESC
             LIMIT ?
@@ -475,9 +513,11 @@ async def get_sync_log(request: Request, limit: int = Query(50, ge=1, le=500)):
                     "started_at": str(row[2]),
                     "completed_at": str(row[3]),
                     "status": row[4],
-                    "records_processed": row[5],
-                    "error_message": row[6],
-                    "execution_time_seconds": row[7]
+                    "records_pulled": row[5] or 0,
+                    "records_inserted": row[6] or 0,
+                    "records_skipped": row[7] or 0,
+                    "error_message": row[8],
+                    "duration_seconds": round(row[9], 2) if row[9] else None,
                 }
                 for row in rows
             ]
@@ -517,9 +557,9 @@ async def get_backup_status(request: Request):
     con = duckdb.connect(str(DB_PATH), read_only=True)
     try:
         rows = con.execute("""
-            SELECT id, started_at, completed_at, status, execution_time_seconds, error_message
+            SELECT id, started_at, completed_at, status, duration_seconds, error_message
             FROM sync_log
-            WHERE job_name = 'duckdb_backup'
+            WHERE job_name IN ('duckdb_backup', 'nightly_backup')
             ORDER BY started_at DESC
             LIMIT 10
         """).fetchall()
@@ -531,7 +571,7 @@ async def get_backup_status(request: Request):
                     "started_at": str(row[1]),
                     "completed_at": str(row[2]),
                     "status": row[3],
-                    "execution_time_seconds": row[4],
+                    "duration_seconds": row[4],
                     "error_message": row[5]
                 }
                 for row in rows
@@ -585,7 +625,7 @@ async def get_docs_status(request: Request):
                     "started_at": str(row[1]),
                     "completed_at": str(row[2]),
                     "status": row[3],
-                    "execution_time_seconds": row[4],
+                    "duration_seconds": row[4],
                     "error_message": row[5],
                     "documents_updated": row[6]
                 }

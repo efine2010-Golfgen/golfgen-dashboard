@@ -173,12 +173,30 @@ def _auto_backfill_if_needed():
     logger.info(f"Auto-backfill complete: {total_records} total records inserted")
 
 
+def _write_sync_log(job_name, started_at, status, pulled=0, inserted=0, skipped=0, error=None):
+    """Write a completed sync log entry with timing and record counts."""
+    try:
+        completed_at = datetime.now(ZoneInfo("America/Chicago"))
+        duration = (completed_at - started_at).total_seconds()
+        con = duckdb.connect(str(DB_PATH))
+        con.execute("""
+            INSERT INTO sync_log
+            (job_name, started_at, completed_at, status, records_pulled,
+             records_inserted, records_skipped, error_message, duration_seconds)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """, [job_name, started_at, completed_at, status, pulled,
+              inserted, skipped, error, duration])
+        con.close()
+    except Exception as e:
+        logger.error(f"Failed to write sync log: {e}")
+
+
 def _log_sync(job_name: str, status: str = "in_progress", records_processed: int = 0, error_message: str = None, execution_time: float = None) -> int:
-    """Log a sync job to the sync_log table. Returns the log ID."""
+    """Legacy sync log helper. Returns the log ID."""
     try:
         con = duckdb.connect(str(DB_PATH))
         result = con.execute("""
-            INSERT INTO sync_log (job_name, status, records_processed, error_message, execution_time_seconds, completed_at)
+            INSERT INTO sync_log (job_name, status, records_pulled, error_message, duration_seconds, completed_at)
             VALUES (?, ?, ?, ?, ?, CASE WHEN ? = 'completed' OR ? = 'failed' THEN CURRENT_TIMESTAMP ELSE NULL END)
             RETURNING id
         """, [job_name, status, records_processed, error_message, execution_time, status, status]).fetchone()

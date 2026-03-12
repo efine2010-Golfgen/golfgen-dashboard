@@ -14,6 +14,7 @@ import LogisticsTracking from "./pages/LogisticsTracking";
 import ItemPlanning from "./pages/ItemPlanning";
 import FBAShipments from "./pages/FBAShipments";
 import Permissions from "./pages/Permissions";
+import System from "./pages/System";
 import "./App.css";
 
 /* ── Tab definitions keyed by tab_key matching backend ALL_TABS ── */
@@ -149,7 +150,10 @@ export default function App() {
               <div className="user-info">
                 {user && <span className="user-name">{user.name}{isAdmin && <span className="admin-badge">Admin</span>}</span>}
                 {isAdmin && (
-                  <NavLink to="/permissions" className="permissions-link">Permissions</NavLink>
+                  <>
+                    <NavLink to="/permissions" className="permissions-link">Permissions</NavLink>
+                    <NavLink to="/system" className="permissions-link">System</NavLink>
+                  </>
                 )}
                 <button className="logout-btn" onClick={handleLogout}>Sign Out</button>
               </div>
@@ -176,6 +180,7 @@ export default function App() {
             {allowed["fba-shipments"] !== false && <Route path="/fba-shipments" element={<FBAShipments />} />}
             {allowed["item-planning"] !== false && <Route path="/item-planning" element={<ItemPlanning />} />}
             {isAdmin && <Route path="/permissions" element={<Permissions />} />}
+            {isAdmin && <Route path="/system" element={<System />} />}
             <Route path="*" element={<Navigate to="/" replace />} />
           </Routes>
         </main>
