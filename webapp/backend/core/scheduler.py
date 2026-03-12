@@ -245,7 +245,7 @@ async def _startup_sync_catchup():
             ("pricing_sync", 60, _run_scheduled_pricing_sync),       # every hour (offset 30m)
         ]
 
-        con = duckdb.connect(str(DB_PATH), read_only=True)
+        con = duckdb.connect(str(DB_PATH), read_only=False)
 
         for job_name, interval_minutes, job_fn in catchup_jobs:
             try:

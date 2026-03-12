@@ -90,7 +90,7 @@ def run_backup() -> dict:
 
         # Step 1: Export DuckDB to Parquet
         logger.info(f"Backup: Exporting DuckDB to Parquet in {export_dir}")
-        con = duckdb.connect(str(DB_PATH), read_only=True)
+        con = duckdb.connect(str(DB_PATH), read_only=False)
         try:
             con.execute(f"EXPORT DATABASE '{export_dir}' (FORMAT PARQUET)")
         finally:
@@ -304,7 +304,7 @@ def run_github_backup() -> dict:
         files_to_commit = {}
 
         # ── File 1: Database manifest ──
-        con = duckdb.connect(str(DB_PATH), read_only=True)
+        con = duckdb.connect(str(DB_PATH), read_only=False)
         tables_raw = con.execute("SHOW TABLES").fetchall()
         manifest = {
             "backup_time": now.isoformat(),
@@ -422,7 +422,7 @@ def get_github_backup_status() -> dict:
     """
     repo_name = os.environ.get("BACKUP_GITHUB_REPO", "")
     try:
-        con = duckdb.connect(str(DB_PATH), read_only=True)
+        con = duckdb.connect(str(DB_PATH), read_only=False)
         row = con.execute("""
             SELECT started_at, completed_at, status,
                    records_processed, error_message

@@ -29,7 +29,7 @@ def _auto_backfill_if_needed():
     from sp_api.api import Reports
     from sp_api.base import Marketplaces, ReportType
 
-    con = duckdb.connect(str(DB_PATH), read_only=True)
+    con = duckdb.connect(str(DB_PATH), read_only=False)
     try:
         earliest_row = con.execute(
             "SELECT MIN(date) FROM daily_sales WHERE asin = 'ALL'"

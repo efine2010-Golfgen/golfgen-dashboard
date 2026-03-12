@@ -44,7 +44,7 @@ def health():
     }
 
     try:
-        con = duckdb.connect(str(DB_PATH), read_only=True)
+        con = duckdb.connect(str(DB_PATH), read_only=False)
         # Table row counts
         for tbl in ["orders", "daily_sales", "financial_events", "fba_inventory", "advertising", "ads_campaigns"]:
             try:
@@ -415,7 +415,7 @@ async def get_system_status(request: Request):
         from fastapi import HTTPException
         raise HTTPException(status_code=401, detail="Not authenticated")
 
-    con = duckdb.connect(str(DB_PATH), read_only=True)
+    con = duckdb.connect(str(DB_PATH), read_only=False)
     try:
         # Get last sync log entry
         last_sync = con.execute("""
@@ -494,7 +494,7 @@ async def get_sync_log(request: Request, limit: int = Query(50, ge=1, le=500)):
         from fastapi import HTTPException
         raise HTTPException(status_code=401, detail="Not authenticated")
 
-    con = duckdb.connect(str(DB_PATH), read_only=True)
+    con = duckdb.connect(str(DB_PATH), read_only=False)
     try:
         rows = con.execute("""
             SELECT id, job_name, started_at, completed_at, status,
@@ -629,7 +629,7 @@ async def get_docs_status(request: Request):
         from fastapi import HTTPException
         raise HTTPException(status_code=401, detail="Not authenticated")
 
-    con = duckdb.connect(str(DB_PATH), read_only=True)
+    con = duckdb.connect(str(DB_PATH), read_only=False)
     try:
         rows = con.execute("""
             SELECT id, started_at, completed_at, status, execution_time_seconds, error_message, documents_updated

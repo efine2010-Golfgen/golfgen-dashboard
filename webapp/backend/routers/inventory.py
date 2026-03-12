@@ -26,7 +26,7 @@ _FBA_SHIPMENTS_CACHE_PATH = DB_DIR / "fba_shipments_cache.json"
 
 def get_db():
     """Return a read-only DuckDB connection."""
-    return duckdb.connect(str(DB_PATH), read_only=True)
+    return duckdb.connect(str(DB_PATH), read_only=False)
 
 
 def load_json(filename: str) -> list:

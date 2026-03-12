@@ -23,7 +23,7 @@ def _duck_rw():
 
 def _duck():
     """Return a read-only DuckDB connection for item plan queries."""
-    return duckdb.connect(str(DB_PATH), read_only=True)
+    return duckdb.connect(str(DB_PATH), read_only=False)
 
 
 def _require_auth(request: Request):

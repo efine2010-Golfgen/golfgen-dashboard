@@ -39,7 +39,7 @@ def _get_session(token: str):
     """Look up session from DuckDB. Returns dict or None."""
     if not token:
         return None
-    con = duckdb.connect(str(DB_PATH), read_only=True)
+    con = duckdb.connect(str(DB_PATH), read_only=False)
     rows = con.execute(
         "SELECT token, user_email, user_name, role FROM sessions WHERE token = ?",
         [token],
@@ -53,7 +53,7 @@ def _get_session(token: str):
 
 def _get_user_permissions(user_name: str):
     """Return set of enabled tab_keys for a user."""
-    con = duckdb.connect(str(DB_PATH), read_only=True)
+    con = duckdb.connect(str(DB_PATH), read_only=False)
     rows = con.execute(
         "SELECT tab_key FROM user_permissions WHERE user_name = ? AND enabled = TRUE",
         [user_name],
@@ -276,7 +276,7 @@ def get_all_permissions(request: Request):
     sess = _get_session(request.cookies.get("golfgen_session"))
     if not sess or sess["role"] != "admin":
         raise HTTPException(status_code=403, detail="Admin access required")
-    con = duckdb.connect(str(DB_PATH), read_only=True)
+    con = duckdb.connect(str(DB_PATH), read_only=False)
     rows = con.execute(
         "SELECT user_name, tab_key, enabled FROM user_permissions ORDER BY user_name, tab_key"
     ).fetchall()
