@@ -321,6 +321,8 @@ export default function FactoryPO() {
                 <th style={th}>SKU</th>
                 <th style={th}>Description</th>
                 <th style={th}>Channel</th>
+                <th style={th}>Container #</th>
+                <th style={th}>Arrival Date</th>
                 <th style={{...th, textAlign: "right", borderLeft: "2px solid rgba(255,255,255,0.15)"}}>Total Ordered</th>
                 {allMonthCols.length > 0 && allMonthCols.map(m => (
                   <th key={m} style={{...th, textAlign: "right", fontSize: 10}}>{m}</th>
@@ -345,6 +347,8 @@ export default function FactoryPO() {
                         {channel}
                       </span>
                     </td>
+                    <td style={{...td, fontFamily: "monospace", fontSize: 10}}>{row.containerNumber || "—"}</td>
+                    <td style={{...td, fontSize: 10, color: row.arrivalDate ? "#22A387" : "var(--muted)"}}>{row.arrivalDate || "—"}</td>
                     <td style={{...td, textAlign: "right", fontWeight: 700, borderLeft: "2px solid var(--border)"}}>{total > 0 ? total.toLocaleString() : "—"}</td>
                     {allMonthCols.map(m => {
                       const v = (row.monthlyArrivals || {})[m] || 0;
@@ -357,7 +361,7 @@ export default function FactoryPO() {
                 );
               })}
               <tr style={{ background: "var(--teal-bg)", fontWeight: 700 }}>
-                <td style={td} colSpan={3}>TOTAL</td>
+                <td style={td} colSpan={5}>TOTAL</td>
                 <td style={{...td, textAlign: "right", borderLeft: "2px solid var(--border)"}}>{combinedItems.reduce((s, r) => s + (r.total || r.quantity || 0), 0).toLocaleString()}</td>
                 {allMonthCols.map(m => {
                   const colTotal = combinedItems.reduce((s, r) => s + ((r.monthlyArrivals || {})[m] || 0), 0);

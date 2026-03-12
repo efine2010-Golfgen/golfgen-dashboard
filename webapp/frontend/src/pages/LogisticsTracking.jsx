@@ -204,36 +204,40 @@ export default function LogisticsTracking() {
       {/* Shipment Log Table */}
       {view === "shipments" && (
         <div style={{ background: "#fff", borderRadius: 12, overflow: "auto", boxShadow: "var(--card-shadow)" }}>
-          <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 11, minWidth: 1000 }}>
+          <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 11, minWidth: 1200 }}>
             <thead>
               <tr style={{ background: "var(--navy)", color: "#fff" }}>
+                <th style={th}>Shipper</th>
+                <th style={th}>Factory</th>
+                <th style={th}>HB#</th>
                 <th style={th}>Container #</th>
                 <th style={th}>Type</th>
-                <th style={th}>Delivery Port</th>
+                <th style={th}>Vessel</th>
                 <th style={th}>ETD</th>
-                <th style={th}>ETA</th>
                 <th style={th}>ETD Port</th>
+                <th style={th}>ETA</th>
                 <th style={th}>ETA Port</th>
-                <th style={{...th, textAlign: "right"}}>Units</th>
-                <th style={{...th, textAlign: "right"}}>CBM</th>
-                <th style={th}>PO #</th>
-                <th style={th}>Status</th>
+                <th style={th}>ETA Deliv.</th>
+                <th style={th}>Deliv. Location</th>
+                <th style={th}>Act. Delivery</th>
               </tr>
             </thead>
             <tbody>
               {filteredShipments.map((s, i) => (
                 <tr key={i} style={{ borderBottom: "1px solid var(--border)", background: i % 2 ? "#FAFBFC" : "#fff" }}>
+                  <td style={{...td, fontSize: 10, fontWeight: 600, maxWidth: 160, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap"}}>{s.shipper || "—"}</td>
+                  <td style={{...td, fontSize: 10}}>{s.factory || "—"}</td>
+                  <td style={{...td, fontFamily: "monospace", fontSize: 10, fontWeight: 600}}>{s.hbl || "—"}</td>
                   <td style={{...td, fontFamily: "monospace", fontSize: 10, fontWeight: 600}}>{s.containerNumber || "—"}</td>
-                  <td style={{...td, fontSize: 10, color: "var(--muted)"}}>{s.containerType || s.mode || "—"}</td>
-                  <td style={{...td, fontSize: 10, fontWeight: 600}}>{s.finalLocation || s.arrivalPort || "—"}</td>
+                  <td style={{...td, fontSize: 10, color: "var(--muted)"}}>{s.containerType || "—"}</td>
+                  <td style={{...td, fontSize: 10, maxWidth: 180, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap"}}>{s.vesselVoyage || "—"}</td>
                   <td style={{...td, fontSize: 10}}>{s.etdOrigin || "—"}</td>
-                  <td style={{...td, fontSize: 10}}>{s.etaFinal || s.etaDischarge || "—"}</td>
                   <td style={{...td, fontSize: 10}}>{s.departurePort || "—"}</td>
+                  <td style={{...td, fontSize: 10}}>{s.etaDischarge || "—"}</td>
                   <td style={{...td, fontSize: 10}}>{s.arrivalPort || "—"}</td>
-                  <td style={{...td, textAlign: "right", fontWeight: 600}}>{(s.units || 0).toLocaleString()}</td>
-                  <td style={{...td, textAlign: "right"}}>{(s.cbm || 0).toFixed(1)}</td>
-                  <td style={{...td, fontWeight: 600, color: "var(--blue)", fontSize: 10}}>{s.poNumber || "—"}</td>
-                  <td style={td}>{STATUS_BADGE(s.status)}</td>
+                  <td style={{...td, fontSize: 10}}>{s.etaFinal || "—"}</td>
+                  <td style={{...td, fontSize: 10}}>{s.finalLocation || "—"}</td>
+                  <td style={{...td, fontSize: 10, fontWeight: 600, color: s.deliveryDate ? "#22A387" : "var(--muted)"}}>{s.deliveryDate || "—"}</td>
                 </tr>
               ))}
             </tbody>

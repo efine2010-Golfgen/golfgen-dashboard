@@ -127,6 +127,48 @@ async def get_factory_po(request: Request):
     # Also attach items by container to the response for cross-reference
     data["logisticsItems"] = items_by_container
 
+    # ── Enrich unitsByItem with container # and arrival date ──
+    # Build SKU → [{containerNumber, eta, qty}] from logistics items
+    sku_containers: dict[str, list[dict]] = {}
+    for item in items_by_container:
+        sku = (item.get("sku") or "").strip()
+        cn = (item.get("containerNumber") or "").strip()
+        if not sku or not cn:
+            continue
+        sku_containers.setdefault(sku, [])
+        sku_containers[sku].append({
+            "containerNumber": cn,
+            "eta": item.get("eta") or "",
+            "qty": item.get("qty") or 0,
+        })
+
+    # Also build container → arrival date from shipments
+    container_arrival: dict[str, str] = {}
+    for s in shipments:
+        cn = (s.get("containerNumber") or "").strip()
+        if cn:
+            container_arrival[cn] = s.get("deliveryDate") or s.get("etaFinal") or s.get("etaDischarge") or ""
+
+    # Expand unitsByItem: if a SKU has multiple containers, create one row per container
+    expanded_units = []
+    for u in data.get("unitsByItem", []):
+        sku = (u.get("sku") or "").strip()
+        containers = sku_containers.get(sku, [])
+        if containers:
+            for c in containers:
+                row = dict(u)
+                row["containerNumber"] = c["containerNumber"]
+                row["containerQty"] = c["qty"]
+                row["arrivalDate"] = container_arrival.get(c["containerNumber"], c["eta"])
+                expanded_units.append(row)
+        else:
+            row = dict(u)
+            row["containerNumber"] = ""
+            row["containerQty"] = 0
+            row["arrivalDate"] = ""
+            expanded_units.append(row)
+    data["unitsByItem"] = expanded_units
+
     return data
 
 @router.post("/api/factory-po/upload")

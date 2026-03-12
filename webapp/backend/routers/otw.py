@@ -65,13 +65,87 @@ async def get_logistics(request: Request):
 
     # ── Enrich items with container status from shipments ──
     container_status = {}
+    container_eta = {}
     for s in data.get("shipments", []):
         cn = (s.get("containerNumber") or "").strip()
         if cn:
             container_status[cn] = s.get("status") or ""
+            container_eta[cn] = s.get("deliveryDate") or s.get("etaFinal") or s.get("etaDischarge") or ""
     for item in data.get("itemsByContainer", []):
         cn = (item.get("containerNumber") or "").strip()
         item["status"] = container_status.get(cn, "")
+
+    # ── If no itemsByContainer from logistics sheet, build from Factory PO Summary ──
+    if not data.get("itemsByContainer"):
+        try:
+            fp = DB_DIR / "factory_po_summary.json"
+            if fp.exists():
+                with open(fp) as f:
+                    po_data = json.load(f)
+                # Build PO → container mapping from shipments (by matching HBL/PO)
+                # Use logistics items if available in PO data
+                logistics_items = po_data.get("logisticsItems", [])
+                if logistics_items:
+                    for item in logistics_items:
+                        cn = (item.get("containerNumber") or "").strip()
+                        item["status"] = container_status.get(cn, "")
+                        item["arrivalDate"] = container_eta.get(cn, item.get("eta", ""))
+                    data["itemsByContainer"] = logistics_items
+                else:
+                    # Build from unitsByItem + container mapping
+                    units = po_data.get("unitsByItem", [])
+                    # Build SKU → containers from PO containers
+                    sku_po_map = {}  # sku -> list of PO numbers from byPO
+                    for u in units:
+                        sku = (u.get("sku") or "").strip()
+                        if not sku:
+                            continue
+                        for po_num in (u.get("byPO") or {}).keys():
+                            sku_po_map.setdefault(sku, set()).add(po_num)
+
+                    # Build PO → containers from purchaseOrders
+                    po_container_map = {}
+                    for po in po_data.get("purchaseOrders", []):
+                        po_num = (po.get("poNumber") or "").strip()
+                        for c in po.get("containers", []):
+                            cn = (c.get("containerNumber") or "").strip()
+                            if cn:
+                                po_container_map.setdefault(po_num, []).append(cn)
+
+                    items = []
+                    for u in units:
+                        sku = (u.get("sku") or "").strip()
+                        desc = u.get("description", "")
+                        total_qty = u.get("total") or u.get("quantity") or 0
+                        # Find containers for this SKU via PO mapping
+                        containers_for_sku = set()
+                        for po_num in sku_po_map.get(sku, set()):
+                            for cn in po_container_map.get(po_num, []):
+                                containers_for_sku.add(cn)
+                        if containers_for_sku:
+                            for cn in sorted(containers_for_sku):
+                                items.append({
+                                    "containerNumber": cn,
+                                    "sku": sku,
+                                    "description": desc,
+                                    "qty": total_qty,
+                                    "eta": container_eta.get(cn, ""),
+                                    "status": container_status.get(cn, ""),
+                                    "arrivalDate": container_eta.get(cn, ""),
+                                })
+                        else:
+                            items.append({
+                                "containerNumber": "",
+                                "sku": sku,
+                                "description": desc,
+                                "qty": total_qty,
+                                "eta": "",
+                                "status": "",
+                                "arrivalDate": "",
+                            })
+                    data["itemsByContainer"] = items
+        except Exception as e:
+            logger.error(f"Error building items from Factory PO: {e}")
 
     return data
 
@@ -130,7 +204,7 @@ async def upload_logistics(request: Request, file: UploadFile = File(...)):
     for i, r in enumerate(rows):
         vals = [str(v).upper() for v in r.values()]
         joined = " ".join(vals)
-        if "SHIPPER" in joined and ("HBL" in joined or "MODE" in joined):
+        if ("SHIPPER" in joined or "FACTORY" in joined) and ("HBL" in joined or "HB" in joined or "MODE" in joined):
             header_row = i
             break
 
@@ -147,32 +221,35 @@ async def upload_logistics(request: Request, file: UploadFile = File(...)):
             shipper_str = str(shipper).strip()
             shipper_upper = shipper_str.upper()
             if any(sw in shipper_upper for sw in _STOP_WORDS): break
-            if shipper_upper in ["SHIPPER", "STATUS", ""] or len(shipper_str) <= 3: continue
-            hbl = str(r.get("C") or "").strip()
+            if shipper_upper in ["SHIPPER", "FACTORY", "STATUS", ""] or len(shipper_str) <= 3: continue
+            hbl = str(r.get("D") or "").strip()
             if not hbl or len(hbl) < 5: continue
-            raw_status = str(r.get("U") or "").strip()
-            if raw_status:
-                status = raw_status
-            else:
+            # Infer status from delivery date
+            delivery_raw = r.get("N")
+            if delivery_raw and str(delivery_raw).strip():
                 status = "Delivered"
-                for _k, _v in r.items():
-                    if _v and "transit" in str(_v).lower():
-                        status = "In Transit"; break
+            else:
+                eta_raw = r.get("J")
+                if eta_raw:
+                    status = "In Transit"
+                else:
+                    status = "Pending"
             shipments.append({
-                "shipper": shipper_str, "hbl": hbl,
-                "containerType": str(r.get("D") or "").strip(),
-                "containerNumber": str(r.get("E") or "").strip(),
-                "vesselVoyage": str(r.get("F") or "").strip(),
-                "poNumber": str(r.get("G") or "").strip(),
-                "units": _si(r.get("H")), "cbm": _sr(r.get("I"), 1),
-                "factoryInvoice": str(r.get("J") or "").strip(),
-                "carrier": str(r.get("K") or "").strip(),
-                "freightForwarder": str(r.get("L") or "").strip(),
-                "etdOrigin": _to_str(r.get("N")), "departurePort": str(r.get("O") or "").strip(),
-                "etaDischarge": _to_str(r.get("P")), "arrivalPort": str(r.get("Q") or "").strip(),
-                "etaFinal": _to_str(r.get("R")), "finalLocation": str(r.get("S") or "").strip(),
-                "deliveryDate": _to_str(r.get("T")), "status": status,
-                "freightCost": _sr(r.get("V"), 2),
+                "shipper": shipper_str,                            # B = Factory/Shipper
+                "factory": str(r.get("C") or "").strip(),          # C = Shipped (brand)
+                "hbl": hbl,                                        # D = HB#
+                "containerType": str(r.get("E") or "").strip(),    # E = Type
+                "containerNumber": str(r.get("F") or "").strip(),  # F = CNTR#
+                "vesselVoyage": str(r.get("G") or "").strip(),     # G = Vessel
+                "etdOrigin": _to_str(r.get("H")),                  # H = ETD
+                "departurePort": str(r.get("I") or "").strip(),    # I = ETD PORT
+                "etaDischarge": _to_str(r.get("J")),               # J = ETA
+                "arrivalPort": str(r.get("K") or "").strip(),      # K = ETA PORT
+                "etaFinal": _to_str(r.get("L")),                   # L = ETA Dest. (date)
+                "finalLocation": str(r.get("M") or "").strip(),    # M = ETA Dest. (location)
+                "deliveryDate": _to_str(r.get("N")),               # N = Actual Delivery
+                "comments": str(r.get("O") or "").strip(),         # O = Comments
+                "status": status,
             })
 
     # ── Parse items by container ──
@@ -483,7 +560,7 @@ async def upload_supply_chain(request: Request, file: UploadFile = File(...)):
         for i, r in enumerate(rows):
             vals = [str(v).upper() for v in r.values()]
             joined = " ".join(vals)
-            if "SHIPPER" in joined and ("HBL" in joined or "MODE" in joined):
+            if ("SHIPPER" in joined or "FACTORY" in joined) and ("HBL" in joined or "HB" in joined or "MODE" in joined):
                 header_row = i
                 break
 
@@ -506,50 +583,44 @@ async def upload_supply_chain(request: Request, file: UploadFile = File(...)):
                 if any(sw in shipper_upper for sw in _STOP_WORDS):
                     break
                 # Skip re-header rows
-                if shipper_upper in ["SHIPPER", "STATUS", ""]:
+                if shipper_upper in ["SHIPPER", "FACTORY", "STATUS", ""]:
                     continue
                 # A real shipper name should be > 3 chars and not a number
                 if len(shipper_str) <= 3:
                     continue
 
-                hbl = str(r.get("C") or "").strip()
+                hbl = str(r.get("D") or "").strip()
                 # HBL should look like a tracking number (letters+digits, > 5 chars)
                 if not hbl or len(hbl) < 5:
                     continue
 
-                # Extract status from column U (DELIVERED, IN TRANSIT, PENDING, etc.)
-                raw_status = str(r.get("U") or "").strip()
-                if raw_status:
-                    status = raw_status
-                else:
-                    # Fallback: scan row for transit/delivered keywords
+                # Infer status from delivery date
+                delivery_raw = r.get("N")
+                if delivery_raw and str(delivery_raw).strip():
                     status = "Delivered"
-                    for _k, _v in r.items():
-                        if _v and "transit" in str(_v).lower():
-                            status = "In Transit"
-                            break
+                else:
+                    eta_raw = r.get("J")
+                    if eta_raw:
+                        status = "In Transit"
+                    else:
+                        status = "Pending"
 
                 shipments.append({
-                    "shipper": shipper_str,
-                    "hbl": hbl,
-                    "containerType": str(r.get("D") or "").strip(),
-                    "containerNumber": str(r.get("E") or "").strip(),
-                    "vesselVoyage": str(r.get("F") or "").strip(),
-                    "poNumber": str(r.get("G") or "").strip(),
-                    "units": safe_int(r.get("H")),
-                    "cbm": safe_round_l(r.get("I"), 1),
-                    "factoryInvoice": str(r.get("J") or "").strip(),
-                    "carrier": str(r.get("K") or "").strip(),
-                    "freightForwarder": str(r.get("L") or "").strip(),
-                    "etdOrigin": to_str(r.get("N")),
-                    "departurePort": str(r.get("O") or "").strip(),
-                    "etaDischarge": to_str(r.get("P")),
-                    "arrivalPort": str(r.get("Q") or "").strip(),
-                    "etaFinal": to_str(r.get("R")),
-                    "finalLocation": str(r.get("S") or "").strip(),
-                    "deliveryDate": to_str(r.get("T")),
+                    "shipper": shipper_str,                            # B = Factory/Shipper
+                    "factory": str(r.get("C") or "").strip(),          # C = Shipped (brand)
+                    "hbl": hbl,                                        # D = HB#
+                    "containerType": str(r.get("E") or "").strip(),    # E = Type
+                    "containerNumber": str(r.get("F") or "").strip(),  # F = CNTR#
+                    "vesselVoyage": str(r.get("G") or "").strip(),     # G = Vessel
+                    "etdOrigin": to_str(r.get("H")),                   # H = ETD
+                    "departurePort": str(r.get("I") or "").strip(),    # I = ETD PORT
+                    "etaDischarge": to_str(r.get("J")),                # J = ETA
+                    "arrivalPort": str(r.get("K") or "").strip(),      # K = ETA PORT
+                    "etaFinal": to_str(r.get("L")),                    # L = ETA Dest. (date)
+                    "finalLocation": str(r.get("M") or "").strip(),    # M = ETA Dest. (location)
+                    "deliveryDate": to_str(r.get("N")),                # N = Actual Delivery
+                    "comments": str(r.get("O") or "").strip(),         # O = Comments
                     "status": status,
-                    "freightCost": safe_round_l(r.get("V"), 2),
                 })
 
         # ── Parse Items by Container ──
