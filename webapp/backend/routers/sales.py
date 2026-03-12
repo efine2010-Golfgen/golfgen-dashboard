@@ -293,7 +293,7 @@ def summary(days: int = Query(365, description="Number of days to include")):
 
 
 @router.get("/api/daily")
-def daily_sales(days: int = Query(365), granularity: str = Query("daily")):
+def get_daily_sales(days: int = Query(365), granularity: str = Query("daily")):
     """Time-series sales data for charts. Granularity: daily or weekly."""
     con = get_db()
     cutoff = (get_today(con) - timedelta(days=days)).strftime("%Y-%m-%d")
