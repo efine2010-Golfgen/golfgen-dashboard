@@ -173,7 +173,7 @@ def _auto_backfill_if_needed():
     logger.info(f"Auto-backfill complete: {total_records} total records inserted")
 
 
-def _write_sync_log(job_name, started_at, status, pulled=0, inserted=0, skipped=0, error=None):
+def _write_sync_log(job_name, started_at, status, inserted=0, error=None):
     """Write a completed sync log entry with timing and record counts."""
     try:
         completed_at = datetime.now(ZoneInfo("America/Chicago"))
@@ -181,11 +181,11 @@ def _write_sync_log(job_name, started_at, status, pulled=0, inserted=0, skipped=
         con = duckdb.connect(str(DB_PATH))
         con.execute("""
             INSERT INTO sync_log
-            (job_name, started_at, completed_at, status, records_pulled,
-             records_processed, records_skipped, error_message, duration_seconds)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-        """, [job_name, started_at, completed_at, status, pulled,
-              inserted, skipped, error, duration])
+            (job_name, started_at, completed_at, status,
+             records_processed, error_message, execution_time_seconds)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
+        """, [job_name, started_at, completed_at, status,
+              inserted, error, duration])
         con.close()
     except Exception as e:
         logger.error(f"Failed to write sync log: {e}")
