@@ -87,7 +87,7 @@ def _sync_today_orders():
         import time as _t
         # Get orders from last 2 days to catch any we missed
         now_utc = datetime.now(ZoneInfo("UTC"))
-        after_date = (now_utc - timedelta(days=2)).isoformat()
+        after_date = (now_utc - timedelta(days=2)).strftime("%Y-%m-%dT%H:%M:%SZ")
         orders_api = OrdersAPI(credentials=credentials, marketplace=Marketplaces.US)
         response = orders_api.get_orders(
             CreatedAfter=after_date,
