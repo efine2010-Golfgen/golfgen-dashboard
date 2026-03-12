@@ -498,7 +498,7 @@ async def get_sync_log(request: Request, limit: int = Query(50, ge=1, le=500)):
     try:
         rows = con.execute("""
             SELECT id, job_name, started_at, completed_at, status,
-                   records_pulled, records_inserted, records_skipped,
+                   records_pulled, records_processed, records_skipped,
                    error_message, duration_seconds
             FROM sync_log
             ORDER BY started_at DESC
@@ -514,7 +514,7 @@ async def get_sync_log(request: Request, limit: int = Query(50, ge=1, le=500)):
                     "completed_at": str(row[3]),
                     "status": row[4],
                     "records_pulled": row[5] or 0,
-                    "records_inserted": row[6] or 0,
+                    "records_processed": row[6] or 0,
                     "records_skipped": row[7] or 0,
                     "error_message": row[8],
                     "duration_seconds": round(row[9], 2) if row[9] else None,
