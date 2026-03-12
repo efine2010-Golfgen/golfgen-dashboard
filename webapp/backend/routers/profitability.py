@@ -496,6 +496,7 @@ def _build_waterfall(con, cogs_data, start: str, end: str) -> dict:
     """, [start, end]).fetchall()
 
     # Financial data (date-filtered for the period)
+    # Per-ASIN breakdown (may use SKU identifiers instead of ASINs)
     fin_rows = []
     try:
         fin_rows = con.execute("""
@@ -515,9 +516,58 @@ def _build_waterfall(con, cogs_data, start: str, end: str) -> dict:
         """, [start, end]).fetchall()
     except Exception:
         pass
-    fin_by_asin = {r[0]: {"fba": r[1], "comm": r[2], "promo": r[3],
-                           "shipping": r[4], "other": r[5],
-                           "refund_amt": r[6], "refund_count": r[7]} for r in fin_rows}
+
+    # Build fin_by_asin with SKU→ASIN resolution via fba_inventory
+    sku_to_asin = {}
+    try:
+        inv_map = con.execute("SELECT sku, asin FROM fba_inventory WHERE sku IS NOT NULL AND asin IS NOT NULL").fetchall()
+        for im in inv_map:
+            if im[0] and im[1]:
+                sku_to_asin[im[0]] = im[1]
+                base = im[0].rsplit("-", 1)[0] if "-" in im[0] else im[0]
+                if base not in sku_to_asin:
+                    sku_to_asin[base] = im[1]
+    except Exception:
+        pass
+
+    fin_by_asin = {}
+    for r in fin_rows:
+        raw_key = r[0]
+        # Try to resolve SKU to real ASIN
+        resolved = sku_to_asin.get(raw_key, raw_key)
+        entry = {"fba": r[1], "comm": r[2], "promo": r[3],
+                 "shipping": r[4], "other": r[5],
+                 "refund_amt": r[6], "refund_count": r[7]}
+        if resolved in fin_by_asin:
+            # Merge if multiple SKUs map to same ASIN
+            for k in entry:
+                fin_by_asin[resolved][k] = fin_by_asin[resolved].get(k, 0) + entry[k]
+        else:
+            fin_by_asin[resolved] = entry
+
+    # Account-level financial totals (fallback when per-ASIN matching fails)
+    acct_fin = {"fba": 0, "comm": 0, "promo": 0, "shipping": 0, "other": 0,
+                "refund_amt": 0, "refund_count": 0}
+    try:
+        acct_row = con.execute("""
+            SELECT SUM(ABS(fba_fees)),
+                   SUM(ABS(commission)),
+                   SUM(ABS(promotion_amount)),
+                   SUM(ABS(shipping_charges)),
+                   SUM(ABS(other_fees)),
+                   SUM(CASE WHEN event_type LIKE '%Refund%' OR event_type LIKE '%Return%'
+                       THEN ABS(product_charges) ELSE 0 END),
+                   COUNT(CASE WHEN event_type LIKE '%Refund%' OR event_type LIKE '%Return%'
+                       THEN 1 END)
+            FROM financial_events
+            WHERE date >= ? AND date < ?
+        """, [start, end]).fetchone()
+        if acct_row and acct_row[0] is not None:
+            acct_fin = {"fba": acct_row[0], "comm": acct_row[1], "promo": acct_row[2],
+                        "shipping": acct_row[3], "other": acct_row[4],
+                        "refund_amt": acct_row[5], "refund_count": acct_row[6]}
+    except Exception:
+        pass
 
     # Ad spend from the *advertising* table (the actual table name in this DB)
     total_ad = 0
@@ -581,6 +631,20 @@ def _build_waterfall(con, cogs_data, start: str, end: str) -> dict:
         total_refunds += fin.get("refund_amt", 0)
         total_other_fees += fin.get("other", 0)
         total_refund_units += fin.get("refund_count", 0)
+
+    # Use account-level financial totals when per-ASIN matching misses data
+    # (common when financial_events stores SKUs instead of ASINs)
+    if total_refunds == 0 and acct_fin["refund_amt"] > 0:
+        total_refunds = acct_fin["refund_amt"]
+        total_refund_units = acct_fin["refund_count"]
+    if total_fba == 0 and acct_fin["fba"] > 0:
+        total_fba = acct_fin["fba"]
+    if total_referral == 0 and acct_fin["comm"] > 0:
+        total_referral = acct_fin["comm"]
+    if total_promo == 0 and acct_fin["promo"] > 0:
+        total_promo = acct_fin["promo"]
+    if total_shipping == 0 and acct_fin["shipping"] > 0:
+        total_shipping = acct_fin["shipping"]
 
     # If we have per-ASIN data for this period, scale to actual sales
     # If not, fall back to global cost ratios from _build_product_list
