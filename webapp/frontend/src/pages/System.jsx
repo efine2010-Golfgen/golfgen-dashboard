@@ -25,16 +25,20 @@ function Badge({ status }) {
 export default function System() {
   const [syncLog, setSyncLog] = useState([]);
   const [health, setHealth] = useState(null);
+  const [backup, setBackup] = useState(null);
   const [loading, setLoading] = useState(true);
   const [lastRefresh, setLastRefresh] = useState(null);
+  const [backupRunning, setBackupRunning] = useState(false);
 
   const load = useCallback(() => {
     Promise.all([
       api.syncLog(50).catch(() => ({ entries: [] })),
       api.health().catch(() => null),
-    ]).then(([log, h]) => {
+      api.backupStatus().catch(() => null),
+    ]).then(([log, h, b]) => {
       setSyncLog(log.entries || []);
       setHealth(h);
+      setBackup(b);
       setLoading(false);
       setLastRefresh(new Date());
     });
@@ -42,9 +46,22 @@ export default function System() {
 
   useEffect(() => {
     load();
-    const interval = setInterval(load, 60_000); // auto-refresh every 60s
+    const interval = setInterval(load, 60_000);
     return () => clearInterval(interval);
   }, [load]);
+
+  const handleRunBackup = async () => {
+    setBackupRunning(true);
+    try {
+      await api.triggerBackup();
+      // Auto-refresh after backup completes
+      setTimeout(load, 2000);
+    } catch (e) {
+      console.error("Backup trigger failed:", e);
+    } finally {
+      setBackupRunning(false);
+    }
+  };
 
   const fmtTime = (ts) => {
     if (!ts || ts === "None") return "—";
@@ -92,6 +109,90 @@ export default function System() {
           ))}
         </div>
       )}
+
+      {/* Database Backup Card */}
+      <div style={{ background: "#fff", borderRadius: 12, padding: 20, marginBottom: 24, boxShadow: "0 1px 3px rgba(0,0,0,0.08)" }}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16 }}>
+          <h3 style={{ margin: 0, fontSize: 15, fontWeight: 600 }}>Database Backup (Google Drive)</h3>
+          <button
+            onClick={handleRunBackup}
+            disabled={backupRunning}
+            style={{
+              padding: "8px 16px", borderRadius: 8, border: "none",
+              background: backupRunning ? "#94a3b8" : "#3E658C", color: "#fff",
+              cursor: backupRunning ? "not-allowed" : "pointer",
+              fontSize: 13, fontWeight: 600, display: "flex", alignItems: "center", gap: 6,
+            }}
+          >
+            {backupRunning ? (
+              <>
+                <span style={{ display: "inline-block", width: 14, height: 14, border: "2px solid #fff", borderTopColor: "transparent", borderRadius: "50%", animation: "spin 1s linear infinite" }} />
+                Running...
+              </>
+            ) : "Run Backup Now"}
+          </button>
+        </div>
+
+        {backup && !backup.configured && (
+          <div style={{ padding: 12, background: "#fef3c7", borderRadius: 8, fontSize: 13, color: "#92400e", marginBottom: 12 }}>
+            Google Drive backup is not configured. Set GOOGLE_SERVICE_ACCOUNT_JSON and BACKUP_DRIVE_FOLDER_ID environment variables.
+          </div>
+        )}
+
+        {backup && backup.error && backup.configured && (
+          <div style={{ padding: 12, background: "#fee2e2", borderRadius: 8, fontSize: 13, color: "#991b1b", marginBottom: 12 }}>
+            Error: {backup.error}
+          </div>
+        )}
+
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))", gap: 12, marginBottom: 16 }}>
+          <div style={{ padding: 12, background: "#f8fafc", borderRadius: 8 }}>
+            <div style={{ fontSize: 11, color: "#6B8090", marginBottom: 4, textTransform: "uppercase", letterSpacing: "0.05em" }}>Last Backup</div>
+            <div style={{ fontSize: 14, fontWeight: 600, color: "#2A3D50" }}>
+              {backup?.last_backup ? fmtDate(backup.last_backup.created) : "Never"}
+            </div>
+          </div>
+          <div style={{ padding: 12, background: "#f8fafc", borderRadius: 8 }}>
+            <div style={{ fontSize: 11, color: "#6B8090", marginBottom: 4, textTransform: "uppercase", letterSpacing: "0.05em" }}>Backup Size</div>
+            <div style={{ fontSize: 14, fontWeight: 600, fontFamily: "'Space Grotesk', monospace", color: "#2A3D50" }}>
+              {backup?.last_backup ? `${backup.last_backup.size_mb} MB` : "—"}
+            </div>
+          </div>
+          <div style={{ padding: 12, background: "#f8fafc", borderRadius: 8 }}>
+            <div style={{ fontSize: 11, color: "#6B8090", marginBottom: 4, textTransform: "uppercase", letterSpacing: "0.05em" }}>Total Backups</div>
+            <div style={{ fontSize: 14, fontWeight: 600, fontFamily: "'Space Grotesk', monospace", color: "#2A3D50" }}>
+              {backup?.total_backups ?? "—"}
+            </div>
+          </div>
+          <div style={{ padding: 12, background: "#f8fafc", borderRadius: 8 }}>
+            <div style={{ fontSize: 11, color: "#6B8090", marginBottom: 4, textTransform: "uppercase", letterSpacing: "0.05em" }}>Status</div>
+            <div style={{ fontSize: 14, fontWeight: 600, color: backup?.configured ? "#16a34a" : "#dc2626" }}>
+              {backup?.configured ? "Configured" : "Not Configured"}
+            </div>
+          </div>
+        </div>
+
+        {/* Recent backups list */}
+        {backup?.backups && backup.backups.length > 0 && (
+          <div>
+            <div style={{ fontSize: 12, fontWeight: 600, color: "#6B8090", marginBottom: 8, textTransform: "uppercase", letterSpacing: "0.05em" }}>Recent Backups</div>
+            <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+              {backup.backups.map((b, i) => (
+                <div key={i} style={{
+                  display: "flex", justifyContent: "space-between", alignItems: "center",
+                  padding: "8px 12px", background: "#f8fafc", borderRadius: 6, fontSize: 13,
+                }}>
+                  <span style={{ color: "#2A3D50", fontFamily: "'Space Grotesk', monospace", fontSize: 12 }}>{b.name}</span>
+                  <span style={{ display: "flex", gap: 16, alignItems: "center" }}>
+                    <span style={{ color: "#6B8090", fontSize: 12 }}>{b.size_mb} MB</span>
+                    <span style={{ color: "#6B8090", fontSize: 12 }}>{fmtDate(b.created)}</span>
+                  </span>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+      </div>
 
       {/* Last Sync Summary */}
       {health?.last_sync && Object.keys(health.last_sync).length > 0 && (
@@ -163,6 +264,9 @@ export default function System() {
           </table>
         </div>
       </div>
+
+      {/* Spinner animation */}
+      <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>
     </div>
   );
 }

@@ -104,12 +104,16 @@ def _run_scheduled_docs_update():
 
 
 def _run_duckdb_backup():
-    """Wrapper for nightly DuckDB backup with logging. (Placeholder)"""
+    """Wrapper for nightly DuckDB backup to Google Drive with logging."""
     started_at = datetime.now(ZoneInfo("America/Chicago"))
     try:
-        logger.info("DuckDB backup job started (placeholder)")
-        _write_sync_log("nightly_backup", started_at, "SUCCESS")
-        logger.info("DuckDB backup completed")
+        from services.backup import run_backup
+        result = run_backup()
+        _write_sync_log(
+            "nightly_backup", started_at, "SUCCESS",
+            inserted=1,  # 1 backup file uploaded
+        )
+        logger.info(f"DuckDB backup completed: {result.get('filename')} ({result.get('size_mb')} MB)")
     except Exception as e:
         _write_sync_log("nightly_backup", started_at, "FAILED", error=str(e))
         logger.error(f"DuckDB backup failed: {e}")

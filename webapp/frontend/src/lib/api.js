@@ -198,6 +198,14 @@ export const api = {
   health: () => fetchJSON(`/api/health`),
   syncLog: (limit = 50) => fetchJSON(`/api/system/sync-log?limit=${limit}`),
   systemStatus: () => fetchJSON(`/api/system/status`),
+
+  // Backup
+  backupStatus: () => fetchJSON(`/api/backup/status`),
+  triggerBackup: () =>
+    fetch(`${API_BASE}/api/backup/trigger`, { method: "POST", credentials: "include" }).then(r => {
+      if (!r.ok) throw new Error(`Backup failed: ${r.status}`);
+      return r.json();
+    }),
 };
 
 export function fmt$(n) {

@@ -528,7 +528,7 @@ async def get_sync_log(request: Request, limit: int = Query(50, ge=1, le=500)):
 
 @router.post("/api/backup/trigger")
 async def trigger_backup(request: Request):
-    """Manually trigger a DuckDB backup."""
+    """Manually trigger a Google Drive database backup."""
     from core.auth import get_session
     from core.scheduler import _run_duckdb_backup
 
@@ -540,13 +540,14 @@ async def trigger_backup(request: Request):
 
     loop = asyncio.get_event_loop()
     await loop.run_in_executor(None, _run_duckdb_backup)
-    return {"status": "backup_started"}
+    return {"status": "backup_complete", "message": "Backup uploaded to Google Drive"}
 
 
 @router.get("/api/backup/status")
-async def get_backup_status(request: Request):
-    """Get status of recent backups from sync_log."""
+async def backup_status(request: Request):
+    """Get Google Drive backup status — last backup, total count, recent list."""
     from core.auth import get_session
+    from services.backup import get_backup_status as _get_backup_status
 
     token = request.cookies.get("golfgen_session")
     sess = get_session(token)
@@ -554,31 +555,7 @@ async def get_backup_status(request: Request):
         from fastapi import HTTPException
         raise HTTPException(status_code=401, detail="Not authenticated")
 
-    con = duckdb.connect(str(DB_PATH), read_only=True)
-    try:
-        rows = con.execute("""
-            SELECT id, started_at, completed_at, status, duration_seconds, error_message
-            FROM sync_log
-            WHERE job_name IN ('duckdb_backup', 'nightly_backup')
-            ORDER BY started_at DESC
-            LIMIT 10
-        """).fetchall()
-
-        return {
-            "backups": [
-                {
-                    "id": row[0],
-                    "started_at": str(row[1]),
-                    "completed_at": str(row[2]),
-                    "status": row[3],
-                    "duration_seconds": row[4],
-                    "error_message": row[5]
-                }
-                for row in rows
-            ]
-        }
-    finally:
-        con.close()
+    return _get_backup_status()
 
 
 @router.post("/api/docs/update")
