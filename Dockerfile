@@ -56,3 +56,4 @@ EXPOSE 8000
 
 # Railway injects $PORT automatically
 CMD ["/app/docker-entrypoint.sh"]
+# force rebuild 1773290878
