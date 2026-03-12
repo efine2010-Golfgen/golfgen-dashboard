@@ -4,11 +4,10 @@ import {
   Tooltip, ResponsiveContainer, Legend,
 } from "recharts";
 import { api } from "../lib/api";
+import { CHART_COLORS as COLORS, TOOLTIP_STYLE } from "../lib/constants";
 
 const DIVISIONS = ["Golf", "HW"];
 const GOLF_CHANNELS = ["All", "Amazon", "Walmart"];
-const COLORS = ["#2ECFAA", "#3E658C", "#E87830", "#F5B731", "#7BAED0", "#22A387", "#D03030", "#8B5CF6", "#94a3b8"];
-const TOOLTIP_STYLE = { background: "#fff", border: "1px solid rgba(14,31,45,0.1)", borderRadius: 8, color: "#2A3D50", boxShadow: "0 4px 12px rgba(14,31,45,0.1)" };
 
 const SUFFIX_COLORS = {
   Standard: "#2ECFAA",
@@ -119,16 +118,8 @@ export default function GolfGenInventory() {
     setUploading(div);
     setUploadMsg(null);
     try {
-      const formData = new FormData();
-      formData.append("file", file);
-      const API_BASE = import.meta.env.VITE_API_URL || "";
-      const res = await fetch(`${API_BASE}/api/upload/inventory-excel?division=${div}`, {
-        method: "POST",
-        body: formData,
-        credentials: "include",
-      });
-      const result = await res.json();
-      if (res.ok) {
+      const { ok, data: result } = await api.uploadInventoryExcel(file, div);
+      if (ok) {
         setUploadMsg({ type: "success", text: `${div === "golf" ? "Golf" : "HW"}: ${result.itemCount} items uploaded from ${file.name}` });
         api.uploadMeta().then(d => setUploadMeta(d || {})).catch(() => {});
         api.warehouseSummary().then(d => setOverviewData(d)).catch(() => null);

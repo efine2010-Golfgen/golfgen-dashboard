@@ -4,6 +4,7 @@ import {
   Tooltip, ResponsiveContainer, Legend, PieChart, Pie, Cell, ComposedChart,
 } from "recharts";
 import { api, fmt$ } from "../lib/api";
+import { CHART_COLORS as COLORS, TOOLTIP_STYLE } from "../lib/constants";
 
 const RANGES = [
   { label: "30D", days: 30 },
@@ -11,9 +12,6 @@ const RANGES = [
   { label: "6M", days: 180 },
   { label: "1Y", days: 365 },
 ];
-
-const COLORS = ["#2ECFAA", "#3E658C", "#E87830", "#F5B731", "#7BAED0", "#22A387", "#D03030", "#8B5CF6", "#94a3b8", "#8892b0"];
-const TOOLTIP_STYLE = { background: "#fff", border: "1px solid rgba(14,31,45,0.1)", borderRadius: 8, color: "#2A3D50", boxShadow: "0 4px 12px rgba(14,31,45,0.1)" };
 
 // Color map for the color sales chart
 const COLOR_MAP = {

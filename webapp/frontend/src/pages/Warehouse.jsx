@@ -1,13 +1,6 @@
 import { useState, useEffect, useCallback } from "react";
 import { api } from "../lib/api";
-
-const COLOR_BADGES = {
-  Green: { bg: "#dcfce7", color: "#166534" },
-  Blue: { bg: "#dbeafe", color: "#1e40af" },
-  Red: { bg: "#fee2e2", color: "#991b1b" },
-  Orange: { bg: "#ffedd5", color: "#9a3412" },
-  Black: { bg: "#e5e7eb", color: "#1f2937" },
-};
+import { COLOR_BADGES } from "../lib/constants";
 
 function Badge({ color }) {
   if (!color) return null;
@@ -89,15 +82,8 @@ export default function Warehouse() {
     setUploading(true);
     setUploadMsg(null);
     try {
-      const formData = new FormData();
-      formData.append("file", file);
-      const API_BASE = import.meta.env.VITE_API_URL || "";
-      const res = await fetch(`${API_BASE}/api/upload/warehouse-excel`, {
-        method: "POST",
-        body: formData,
-      });
-      const data = await res.json();
-      if (res.ok) {
+      const { ok, data } = await api.uploadWarehouseExcel(file);
+      if (ok) {
         const whRows = data.warehouse?.rows || 0;
         setUploadMsg({ type: "success", text: `Updated! ${whRows} warehouse items refreshed from ${file.name}` });
         load(); // Reload data

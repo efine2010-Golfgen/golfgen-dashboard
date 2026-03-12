@@ -4,6 +4,7 @@ import {
   Tooltip, ResponsiveContainer, Legend, ComposedChart, Line
 } from "recharts";
 import { api, fmt$ } from "../lib/api";
+import { TOOLTIP_STYLE } from "../lib/constants";
 
 const RANGES = [
   { label: "7D", days: 7 },
@@ -189,7 +190,7 @@ function OverviewTab({ daily }) {
             <CartesianGrid strokeDasharray="3 3" stroke="rgba(14,31,45,0.08)" />
             <XAxis dataKey="date" tick={{ fill: "#6B8090", fontSize: 11 }} tickFormatter={d => d.slice(5)} />
             <YAxis tick={{ fill: "#6B8090", fontSize: 11 }} tickFormatter={v => `$${(v).toFixed(0)}`} />
-            <Tooltip contentStyle={{ background: "#fff", border: "1px solid rgba(14,31,45,0.1)", borderRadius: 8, color: "#2A3D50", boxShadow: "0 4px 12px rgba(14,31,45,0.1)" }}
+            <Tooltip contentStyle={TOOLTIP_STYLE}
               formatter={(v, name) => [`$${v.toFixed(2)}`, name]} />
             <Legend />
             <Bar dataKey="spend" fill="#E87830" radius={[3,3,0,0]} name="Ad Spend" />
@@ -216,7 +217,7 @@ function OverviewTab({ daily }) {
             <CartesianGrid strokeDasharray="3 3" stroke="rgba(14,31,45,0.08)" />
             <XAxis dataKey="date" tick={{ fill: "#6B8090", fontSize: 11 }} tickFormatter={d => d.slice(5)} />
             <YAxis tick={{ fill: "#6B8090", fontSize: 11 }} tickFormatter={v => `${v}%`} />
-            <Tooltip contentStyle={{ background: "#fff", border: "1px solid rgba(14,31,45,0.1)", borderRadius: 8, color: "#2A3D50", boxShadow: "0 4px 12px rgba(14,31,45,0.1)" }}
+            <Tooltip contentStyle={TOOLTIP_STYLE}
               formatter={(v) => [`${v}%`]} />
             <Legend />
             <Area type="monotone" dataKey="acos" stroke="#F5B731" strokeWidth={2} fill="url(#acosGrad)" name="ACOS" />
@@ -234,7 +235,7 @@ function OverviewTab({ daily }) {
             <XAxis dataKey="date" tick={{ fill: "#6B8090", fontSize: 11 }} tickFormatter={d => d.slice(5)} />
             <YAxis yAxisId="left" tick={{ fill: "#6B8090", fontSize: 11 }} />
             <YAxis yAxisId="right" orientation="right" tick={{ fill: "#6B8090", fontSize: 11 }} />
-            <Tooltip contentStyle={{ background: "#fff", border: "1px solid rgba(14,31,45,0.1)", borderRadius: 8, color: "#2A3D50", boxShadow: "0 4px 12px rgba(14,31,45,0.1)" }} />
+            <Tooltip contentStyle={TOOLTIP_STYLE} />
             <Legend />
             <Bar yAxisId="left" dataKey="clicks" fill="#3E658C" radius={[3,3,0,0]} name="Clicks" />
             <Line yAxisId="right" type="monotone" dataKey="impressions" stroke="#E87830" strokeWidth={2} dot={false} name="Impressions" />
@@ -256,7 +257,7 @@ function OverviewTab({ daily }) {
             <CartesianGrid strokeDasharray="3 3" stroke="rgba(14,31,45,0.08)" />
             <XAxis dataKey="date" tick={{ fill: "#6B8090", fontSize: 11 }} tickFormatter={d => d.slice(5)} />
             <YAxis tick={{ fill: "#6B8090", fontSize: 11 }} tickFormatter={v => `${v}x`} />
-            <Tooltip contentStyle={{ background: "#fff", border: "1px solid rgba(14,31,45,0.1)", borderRadius: 8, color: "#2A3D50", boxShadow: "0 4px 12px rgba(14,31,45,0.1)" }}
+            <Tooltip contentStyle={TOOLTIP_STYLE}
               formatter={(v) => [`${v}x`, "ROAS"]} />
             <Area type="monotone" dataKey="roas" stroke="#2ECFAA" strokeWidth={2} fill="url(#roasGrad)" />
           </AreaChart>

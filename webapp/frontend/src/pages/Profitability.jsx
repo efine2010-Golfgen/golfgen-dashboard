@@ -5,6 +5,7 @@ import {
   AreaChart, Legend
 } from "recharts";
 import { api, fmt$ } from "../lib/api";
+import { TOOLTIP_STYLE } from "../lib/constants";
 
 const COMP_VIEWS = [
   { key: "realtime", label: "Today / WTD / MTD / YTD" },
@@ -20,11 +21,6 @@ const RANGES = [
   { label: "6M", days: 180 },
   { label: "1Y", days: 365 },
 ];
-
-const TOOLTIP_STYLE = {
-  background: "#fff", border: "1px solid rgba(14,31,45,0.1)",
-  borderRadius: 8, color: "#2A3D50", boxShadow: "0 4px 12px rgba(14,31,45,0.1)"
-};
 
 const WATERFALL_COLORS = {
   sales: "#2ECFAA",

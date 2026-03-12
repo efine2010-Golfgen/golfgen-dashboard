@@ -167,6 +167,24 @@ export const api = {
       body: JSON.stringify(data),
       credentials: "include",
     }).then(r => r.json()),
+  // Inventory Excel upload (GolfGenInventory page)
+  uploadInventoryExcel: (file, division) => {
+    const fd = new FormData();
+    fd.append("file", file);
+    return fetch(`${API_BASE}/api/upload/inventory-excel?division=${division}`, {
+      method: "POST", body: fd, credentials: "include",
+    }).then(r => r.json().then(data => ({ ok: r.ok, data })));
+  },
+
+  // Warehouse Excel upload
+  uploadWarehouseExcel: (file) => {
+    const fd = new FormData();
+    fd.append("file", file);
+    return fetch(`${API_BASE}/api/upload/warehouse-excel`, {
+      method: "POST", body: fd, credentials: "include",
+    }).then(r => r.json().then(data => ({ ok: r.ok, data })));
+  },
+
   dashboardSettings: () => fetchJSON(`/api/dashboard-settings`),
   updateDashboardSetting: (key, value) =>
     fetch(`${API_BASE}/api/dashboard-settings`, {

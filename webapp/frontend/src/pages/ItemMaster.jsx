@@ -1,14 +1,6 @@
 import { useState, useEffect, useCallback } from "react";
 import { api, fmt$ } from "../lib/api";
-
-const COLOR_BADGES = {
-  Green: { bg: "#dcfce7", color: "#166534" },
-  Blue: { bg: "#dbeafe", color: "#1e40af" },
-  Red: { bg: "#fee2e2", color: "#991b1b" },
-  Orange: { bg: "#ffedd5", color: "#9a3412" },
-  Black: { bg: "#e5e7eb", color: "#1f2937" },
-  "": { bg: "#f3f4f6", color: "#6b7280" },
-};
+import { COLOR_BADGES } from "../lib/constants";
 
 const COLOR_SECTIONS = ["All", "Green", "Blue", "Red", "Orange", "Accessories"];
 const DIVISIONS = ["Golf", "Housewares"];
