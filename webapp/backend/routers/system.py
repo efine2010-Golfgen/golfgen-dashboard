@@ -712,3 +712,20 @@ async def get_disaster_recovery_doc(request: Request):
             "content": "Disaster recovery plan not yet generated. Run /api/docs/update to generate.",
             "last_updated": None
         }
+
+
+@router.get("/api/debug/db-query")
+def debug_db_query(sql: str = Query(..., description="Read-only SQL query")):
+    """Run a read-only SQL query against the database for debugging."""
+    # Only allow SELECT queries
+    cleaned = sql.strip().upper()
+    if not cleaned.startswith("SELECT"):
+        return {"error": "Only SELECT queries allowed"}
+    try:
+        con = duckdb.connect(str(DB_PATH), read_only=False)
+        rows = con.execute(sql).fetchall()
+        cols = [desc[0] for desc in con.description]
+        con.close()
+        return {"columns": cols, "rows": [list(r) for r in rows[:500]], "count": len(rows)}
+    except Exception as e:
+        return {"error": str(e)}
