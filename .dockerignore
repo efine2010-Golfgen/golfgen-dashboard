@@ -8,14 +8,14 @@ node_modules/
 .gitignore
 
 # Dev/local files not needed in cloud
-services/
 templates/
 scripts/
-*.html
-*.sh
 *.md
 *.pdf
 config/
+
+# Keep docker-entrypoint.sh (negate the exclusion)
+!docker-entrypoint.sh
 webapp/frontend/src/
 webapp/frontend/public/
 webapp/frontend/node_modules/
