@@ -104,8 +104,8 @@ def _build_product_list(con, cutoff: str) -> list:
         SELECT asin,
                COALESCE(SUM(ordered_product_sales), 0) AS revenue,
                COALESCE(SUM(units_ordered), 0) AS units,
-               COALESCE(SUM(sessions), 0) AS sessions,
-               COALESCE(SUM(total_order_items), 0) AS orders
+               COALESCE(SUM(page_views), 0) AS sessions,
+               COALESCE(SUM(units_ordered), 0) AS orders
         FROM daily_sales
         WHERE asin != 'ALL' AND date >= ?
         GROUP BY asin
@@ -252,7 +252,7 @@ def summary(days: int = Query(365, description="Number of days to include")):
         SELECT
             COALESCE(SUM(ordered_product_sales), 0) AS revenue,
             COALESCE(SUM(units_ordered), 0) AS units,
-            COALESCE(SUM(sessions), 0) AS sessions
+            COALESCE(SUM(page_views), 0) AS sessions
         FROM daily_sales
         WHERE date >= ? AND asin = 'ALL'
     """, [cutoff]).fetchone()
@@ -301,7 +301,7 @@ def get_daily_sales(days: int = Query(365), granularity: str = Query("daily")):
             date,
             COALESCE(ordered_product_sales, 0) AS revenue,
             COALESCE(units_ordered, 0) AS units,
-            COALESCE(sessions, 0) AS sessions
+            COALESCE(page_views, 0) AS sessions
         FROM daily_sales
         WHERE date >= ? AND asin = 'ALL'
         ORDER BY date
@@ -351,7 +351,7 @@ def product_detail(asin: str, days: int = Query(365)):
         SELECT date,
                COALESCE(ordered_product_sales, 0) AS revenue,
                COALESCE(units_ordered, 0) AS units,
-               COALESCE(sessions, 0) AS sessions
+               COALESCE(page_views, 0) AS sessions
         FROM daily_sales
         WHERE date >= ? AND asin = ?
         ORDER BY date
@@ -533,7 +533,7 @@ def period_comparison(view: str = Query("realtime")):
             SELECT
                 COALESCE(SUM(ordered_product_sales), 0),
                 COALESCE(SUM(units_ordered), 0),
-                COALESCE(SUM(sessions), 0)
+                COALESCE(SUM(page_views), 0)
             FROM daily_sales
             WHERE date >= ? AND date < ? AND asin = 'ALL'
         """, [p["start"], p["end"]]).fetchone()
@@ -577,7 +577,7 @@ def period_comparison(view: str = Query("realtime")):
             SELECT
                 COALESCE(SUM(ordered_product_sales), 0),
                 COALESCE(SUM(units_ordered), 0),
-                COALESCE(SUM(sessions), 0)
+                COALESCE(SUM(page_views), 0)
             FROM daily_sales
             WHERE date >= ? AND date < ? AND asin = 'ALL'
         """, [ly_start.strftime("%Y-%m-%d"), ly_end.strftime("%Y-%m-%d")]).fetchone()
