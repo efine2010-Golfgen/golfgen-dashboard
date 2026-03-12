@@ -57,7 +57,7 @@ def _get_drive_service():
         raise RuntimeError(f"Failed to parse GOOGLE_SERVICE_ACCOUNT_JSON: {e}")
 
     credentials = service_account.Credentials.from_service_account_info(
-        sa_info, scopes=["https://www.googleapis.com/auth/drive.file"]
+        sa_info, scopes=["https://www.googleapis.com/auth/drive"]
     )
     return build("drive", "v3", credentials=credentials, cache_discovery=False)
 
@@ -123,7 +123,8 @@ def run_backup() -> dict:
         }
         media = MediaFileUpload(str(archive_path), mimetype="application/gzip", resumable=True)
         uploaded = drive.files().create(
-            body=file_metadata, media_body=media, fields="id,name,size,createdTime"
+            body=file_metadata, media_body=media, fields="id,name,size,createdTime",
+            supportsAllDrives=True
         ).execute()
 
         drive_file_id = uploaded.get("id", "")
