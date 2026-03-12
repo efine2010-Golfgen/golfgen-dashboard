@@ -206,6 +206,14 @@ export const api = {
       if (!r.ok) throw new Error(`Backup failed: ${r.status}`);
       return r.json();
     }),
+
+  // GitHub Backup
+  githubBackupStatus: () => fetchJSON(`/api/backup/github-status`),
+  triggerGithubBackup: () =>
+    fetch(`${API_BASE}/api/backup/github-trigger`, { method: "POST", credentials: "include" }).then(r => {
+      if (!r.ok) throw new Error(`GitHub backup failed: ${r.status}`);
+      return r.json();
+    }),
 };
 
 export function fmt$(n) {

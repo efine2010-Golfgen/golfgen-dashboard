@@ -104,19 +104,49 @@ def _run_scheduled_docs_update():
 
 
 def _run_duckdb_backup():
-    """Wrapper for nightly DuckDB backup to Google Drive with logging."""
-    started_at = datetime.now(ZoneInfo("America/Chicago"))
+    """Nightly backup: Google Drive (full DB) then GitHub (manifest + docs)."""
+    chicago = ZoneInfo("America/Chicago")
+
+    # ── Google Drive backup ──
+    gdrive_started = datetime.now(chicago)
+    logger.info("[SCHEDULER] Starting Google Drive backup")
     try:
         from services.backup import run_backup
-        result = run_backup()
+        gdrive_result = run_backup()
+        gdrive_status = gdrive_result.get("status", "FAILED")
+        logger.info(f"[SCHEDULER] Google Drive backup: {gdrive_status}")
         _write_sync_log(
-            "nightly_backup", started_at, "SUCCESS",
-            inserted=1,  # 1 backup file uploaded
+            "nightly_backup_gdrive", gdrive_started, gdrive_status,
+            inserted=1 if gdrive_status == "SUCCESS" else 0,
+            error=gdrive_result.get("error"),
         )
-        logger.info(f"DuckDB backup completed: {result.get('filename')} ({result.get('size_mb')} MB)")
     except Exception as e:
-        _write_sync_log("nightly_backup", started_at, "FAILED", error=str(e))
-        logger.error(f"DuckDB backup failed: {e}")
+        logger.error(f"[SCHEDULER] Google Drive backup exception: {e}")
+        _write_sync_log(
+            "nightly_backup_gdrive", gdrive_started, "FAILED",
+            error=str(e),
+        )
+
+    # ── GitHub backup (always runs even if Drive backup failed) ──
+    github_started = datetime.now(chicago)
+    logger.info("[SCHEDULER] Starting GitHub backup")
+    try:
+        from services.backup import run_github_backup
+        github_result = run_github_backup()
+        github_status = github_result.get("status", "FAILED")
+        files_count = len(github_result.get("files_committed", []))
+        logger.info(f"[SCHEDULER] GitHub backup: {github_status} ({files_count} files)")
+        _write_sync_log(
+            "nightly_backup_github", github_started, github_status,
+            inserted=files_count,
+            error=github_result.get("error"),
+        )
+    except Exception as e:
+        logger.error(f"[SCHEDULER] GitHub backup exception: {e}")
+        _write_sync_log(
+            "nightly_backup_github", github_started, "FAILED",
+            error=str(e),
+        )
 
 
 async def _sync_loop():

@@ -26,19 +26,23 @@ export default function System() {
   const [syncLog, setSyncLog] = useState([]);
   const [health, setHealth] = useState(null);
   const [backup, setBackup] = useState(null);
+  const [githubBackup, setGithubBackup] = useState(null);
   const [loading, setLoading] = useState(true);
   const [lastRefresh, setLastRefresh] = useState(null);
   const [backupRunning, setBackupRunning] = useState(false);
+  const [githubBackupRunning, setGithubBackupRunning] = useState(false);
 
   const load = useCallback(() => {
     Promise.all([
       api.syncLog(50).catch(() => ({ entries: [] })),
       api.health().catch(() => null),
       api.backupStatus().catch(() => null),
-    ]).then(([log, h, b]) => {
+      api.githubBackupStatus().catch(() => null),
+    ]).then(([log, h, b, gb]) => {
       setSyncLog(log.entries || []);
       setHealth(h);
       setBackup(b);
+      setGithubBackup(gb);
       setLoading(false);
       setLastRefresh(new Date());
     });
@@ -60,6 +64,18 @@ export default function System() {
       console.error("Backup trigger failed:", e);
     } finally {
       setBackupRunning(false);
+    }
+  };
+
+  const handleRunGithubBackup = async () => {
+    setGithubBackupRunning(true);
+    try {
+      await api.triggerGithubBackup();
+      setTimeout(load, 2000);
+    } catch (e) {
+      console.error("GitHub backup trigger failed:", e);
+    } finally {
+      setGithubBackupRunning(false);
     }
   };
 
@@ -192,6 +208,85 @@ export default function System() {
             </div>
           </div>
         )}
+      </div>
+
+      {/* GitHub Backup Card */}
+      <div style={{ background: "#fff", borderRadius: 12, padding: 20, marginBottom: 24, boxShadow: "0 1px 3px rgba(0,0,0,0.08)" }}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16 }}>
+          <h3 style={{ margin: 0, fontSize: 15, fontWeight: 600 }}>GitHub Backup (Manifest + Docs)</h3>
+          <div style={{ display: "flex", gap: 8 }}>
+            {githubBackup?.repo_url && (
+              <a
+                href={githubBackup.repo_url}
+                target="_blank"
+                rel="noopener noreferrer"
+                style={{
+                  padding: "8px 16px", borderRadius: 8, border: "1px solid #e2e8f0",
+                  background: "#fff", color: "#2A3D50", textDecoration: "none",
+                  fontSize: 13, fontWeight: 500, display: "flex", alignItems: "center", gap: 4,
+                }}
+              >
+                View on GitHub
+              </a>
+            )}
+            <button
+              onClick={handleRunGithubBackup}
+              disabled={githubBackupRunning}
+              style={{
+                padding: "8px 16px", borderRadius: 8, border: "none",
+                background: githubBackupRunning ? "#94a3b8" : "#2A3D50", color: "#fff",
+                cursor: githubBackupRunning ? "not-allowed" : "pointer",
+                fontSize: 13, fontWeight: 600, display: "flex", alignItems: "center", gap: 6,
+              }}
+            >
+              {githubBackupRunning ? (
+                <>
+                  <span style={{ display: "inline-block", width: 14, height: 14, border: "2px solid #fff", borderTopColor: "transparent", borderRadius: "50%", animation: "spin 1s linear infinite" }} />
+                  Running...
+                </>
+              ) : "Run GitHub Backup Now"}
+            </button>
+          </div>
+        </div>
+
+        {githubBackup && !githubBackup.configured && (
+          <div style={{ padding: 12, background: "#fef3c7", borderRadius: 8, fontSize: 13, color: "#92400e", marginBottom: 12 }}>
+            GitHub backup is not configured. Set GITHUB_TOKEN and BACKUP_GITHUB_REPO environment variables.
+          </div>
+        )}
+
+        {githubBackup?.error && githubBackup.configured && (
+          <div style={{ padding: 12, background: "#fee2e2", borderRadius: 8, fontSize: 13, color: "#991b1b", marginBottom: 12 }}>
+            Error: {githubBackup.error}
+          </div>
+        )}
+
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))", gap: 12 }}>
+          <div style={{ padding: 12, background: "#f8fafc", borderRadius: 8 }}>
+            <div style={{ fontSize: 11, color: "#6B8090", marginBottom: 4, textTransform: "uppercase", letterSpacing: "0.05em" }}>Last Commit</div>
+            <div style={{ fontSize: 14, fontWeight: 600, color: "#2A3D50" }}>
+              {githubBackup?.last_backup_time ? fmtDate(githubBackup.last_backup_time) : "Never"}
+            </div>
+          </div>
+          <div style={{ padding: 12, background: "#f8fafc", borderRadius: 8 }}>
+            <div style={{ fontSize: 11, color: "#6B8090", marginBottom: 4, textTransform: "uppercase", letterSpacing: "0.05em" }}>Files Committed</div>
+            <div style={{ fontSize: 14, fontWeight: 600, fontFamily: "'Space Grotesk', monospace", color: "#2A3D50" }}>
+              {githubBackup?.files_committed ?? "—"}
+            </div>
+          </div>
+          <div style={{ padding: 12, background: "#f8fafc", borderRadius: 8 }}>
+            <div style={{ fontSize: 11, color: "#6B8090", marginBottom: 4, textTransform: "uppercase", letterSpacing: "0.05em" }}>Status</div>
+            <div>
+              {githubBackup?.status ? <Badge status={githubBackup.status} /> : <span style={{ fontSize: 14, color: "#6B8090" }}>—</span>}
+            </div>
+          </div>
+          <div style={{ padding: 12, background: "#f8fafc", borderRadius: 8 }}>
+            <div style={{ fontSize: 11, color: "#6B8090", marginBottom: 4, textTransform: "uppercase", letterSpacing: "0.05em" }}>Repository</div>
+            <div style={{ fontSize: 13, fontWeight: 500, color: "#2A3D50", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+              {githubBackup?.repo || "Not configured"}
+            </div>
+          </div>
+        </div>
       </div>
 
       {/* Last Sync Summary */}

@@ -12,3 +12,4 @@ tzdata>=2024.1
 anthropic>=0.28.0
 google-api-python-client>=2.100.0
 google-auth>=2.27.0
+PyGithub==2.2.0

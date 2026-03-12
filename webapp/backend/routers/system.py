@@ -558,6 +558,49 @@ async def backup_status(request: Request):
     return _get_backup_status()
 
 
+@router.post("/api/backup/github-trigger")
+async def trigger_github_backup(request: Request):
+    """Manually trigger a GitHub manifest/docs backup."""
+    from core.auth import get_session
+    from services.backup import run_github_backup
+    from services.sync_engine import _write_sync_log
+
+    token = request.cookies.get("golfgen_session")
+    sess = get_session(token)
+    if not sess:
+        from fastapi import HTTPException
+        raise HTTPException(status_code=401, detail="Not authenticated")
+
+    started_at = datetime.now(ZoneInfo("America/Chicago"))
+    result = run_github_backup()
+    _write_sync_log(
+        "nightly_backup_github", started_at,
+        result.get("status", "FAILED"),
+        inserted=len(result.get("files_committed", [])),
+        error=result.get("error"),
+    )
+    return {
+        "status": result.get("status"),
+        "files_committed": result.get("files_committed", []),
+        "error": result.get("error"),
+    }
+
+
+@router.get("/api/backup/github-status")
+async def github_backup_status(request: Request):
+    """Get GitHub backup status from sync_log."""
+    from core.auth import get_session
+    from services.backup import get_github_backup_status as _get_gh_status
+
+    token = request.cookies.get("golfgen_session")
+    sess = get_session(token)
+    if not sess:
+        from fastapi import HTTPException
+        raise HTTPException(status_code=401, detail="Not authenticated")
+
+    return _get_gh_status()
+
+
 @router.post("/api/docs/update")
 async def trigger_docs_update(request: Request):
     """Manually trigger a docs update."""
