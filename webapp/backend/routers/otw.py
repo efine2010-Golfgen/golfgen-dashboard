@@ -82,12 +82,22 @@ async def upload_logistics(request: Request, file: UploadFile = File(...)):
     import openpyxl
     from io import BytesIO
     contents = await file.read()
-    wb = openpyxl.load_workbook(BytesIO(contents), data_only=True)
-    if "Logistics Tracking" not in wb.sheetnames:
-        raise HTTPException(400, "Sheet 'Logistics Tracking' not found")
-    # Re-use the combined parser by calling the supply-chain upload logic
-    # For standalone, we just wrap it in an UploadFile-like call
-    ws = wb["Logistics Tracking"]
+    if not contents:
+        raise HTTPException(400, "Empty file uploaded")
+    try:
+        wb = openpyxl.load_workbook(BytesIO(contents), data_only=True)
+    except Exception as e:
+        logger.error(f"Failed to open Excel file: {e}")
+        raise HTTPException(400, f"Could not read Excel file: {e}. Make sure it is a valid .xlsx file.")
+    # Case-insensitive sheet name matching
+    logistics_sheet = None
+    for sn in wb.sheetnames:
+        if sn.strip().lower() == "logistics tracking":
+            logistics_sheet = sn
+            break
+    if not logistics_sheet:
+        raise HTTPException(400, f"Sheet 'Logistics Tracking' not found. Available sheets: {wb.sheetnames}")
+    ws = wb[logistics_sheet]
     rows = []
     for row in ws.iter_rows(min_row=1, max_row=ws.max_row):
         r = {}
@@ -215,12 +225,23 @@ async def upload_supply_chain(request: Request, file: UploadFile = File(...)):
     import openpyxl
     from io import BytesIO
     contents = await file.read()
-    wb = openpyxl.load_workbook(BytesIO(contents), data_only=True)
+    if not contents:
+        raise HTTPException(400, "Empty file uploaded")
+    try:
+        wb = openpyxl.load_workbook(BytesIO(contents), data_only=True)
+    except Exception as e:
+        logger.error(f"Failed to open Excel file: {e}")
+        raise HTTPException(400, f"Could not read Excel file: {e}. Make sure it is a valid .xlsx file.")
     results = {"status": "ok", "sourceFile": file.filename}
 
-    # Try Factory PO
-    if "Factory PO Summary" in wb.sheetnames:
-        ws = wb["Factory PO Summary"]
+    # Try Factory PO (case-insensitive)
+    factory_sheet = None
+    for sn in wb.sheetnames:
+        if sn.strip().lower() == "factory po summary":
+            factory_sheet = sn
+            break
+    if factory_sheet:
+        ws = wb[factory_sheet]
         rows = []
         for row in ws.iter_rows(min_row=1, max_row=ws.max_row):
             r = {}
@@ -421,8 +442,14 @@ async def upload_supply_chain(request: Request, file: UploadFile = File(...)):
         results["factoryPOLastUpload"] = po_data["lastUpload"]
 
     # Try Logistics
-    if "Logistics Tracking" in wb.sheetnames:
-        ws = wb["Logistics Tracking"]
+    # Case-insensitive sheet name matching for Logistics
+    logistics_sheet = None
+    for sn in wb.sheetnames:
+        if sn.strip().lower() == "logistics tracking":
+            logistics_sheet = sn
+            break
+    if logistics_sheet:
+        ws = wb[logistics_sheet]
         rows = []
         for row in ws.iter_rows(min_row=1, max_row=ws.max_row):
             r = {}
@@ -600,7 +627,7 @@ async def upload_supply_chain(request: Request, file: UploadFile = File(...)):
         results["logisticsLastUpload"] = log_data["lastUpload"]
 
     if "factoryPO" not in results and "logistics" not in results:
-        raise HTTPException(400, "No 'Factory PO Summary' or 'Logistics Tracking' sheet found in file")
+        raise HTTPException(400, f"No 'Factory PO Summary' or 'Logistics Tracking' sheet found. Available sheets: {wb.sheetnames}")
 
     results["lastUpload"] = _date.today().isoformat()
     return results

@@ -32,8 +32,16 @@ export default function LogisticsTracking() {
     setUploading(true);
     try {
       const res = await api.uploadSupplyChain(file);
-      if (res.logistics) load();
-      else alert("No 'Logistics Tracking' sheet found in file.");
+      if (res.logistics || res.logisticsLastUpload) {
+        load();
+      } else if (res.status === "ok") {
+        // File parsed but no Logistics sheet — try standalone logistics endpoint
+        const res2 = await api.uploadLogistics(file);
+        if (res2.status === "ok") load();
+        else alert("No 'Logistics Tracking' sheet found in file.");
+      } else {
+        alert(res.detail || res.error || "No 'Logistics Tracking' sheet found in file.");
+      }
     } catch (err) { alert("Upload failed: " + err.message); }
     setUploading(false);
     if (fileRef.current) fileRef.current.value = "";
