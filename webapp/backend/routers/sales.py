@@ -102,7 +102,6 @@ def _build_product_list(con, cutoff: str) -> list:
     # Product-level sales — use per-ASIN data (excluding aggregate 'ALL' row)
     rows = con.execute("""
         SELECT asin,
-               MAX(product_name) AS product_name,
                COALESCE(SUM(ordered_product_sales), 0) AS revenue,
                COALESCE(SUM(units_ordered), 0) AS units,
                COALESCE(SUM(sessions), 0) AS sessions,
@@ -126,7 +125,8 @@ def _build_product_list(con, cutoff: str) -> list:
 
     products = []
     for r in rows:
-        asin, api_name, revenue, units, sessions, orders = r
+        asin, revenue, units, sessions, orders = r
+        api_name = inv_names.get(asin, {}).get("product_name", "")
         if units == 0:
             continue
 
