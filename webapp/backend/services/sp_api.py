@@ -1,0 +1,802 @@
+"""
+SP-API service functions for GolfGen Dashboard.
+Handles Amazon SP-API synchronization including orders, financial events, inventory, and sales reports.
+"""
+
+import os
+import json
+import logging
+import duckdb
+from datetime import datetime, timedelta
+from zoneinfo import ZoneInfo
+from pathlib import Path
+from typing import Optional
+from collections import defaultdict
+
+from core.config import DB_PATH, DB_DIR, CONFIG_PATH, TIMEZONE, COGS_PATH
+
+logger = logging.getLogger("golfgen")
+
+
+def _load_sp_api_credentials() -> dict | None:
+    """Load SP-API credentials from env vars (Railway) or config file (local dev).
+
+    Supports both naming conventions for env vars:
+      - New: SP_API_REFRESH_TOKEN, SP_API_LWA_APP_ID, SP_API_LWA_CLIENT_SECRET, ...
+      - Legacy: SP_API_REFRESH_TOKEN, LWA_APP_ID, LWA_CLIENT_SECRET, ...
+    """
+    # Priority 1: Environment variables (used on Railway)
+    env_refresh = os.environ.get("SP_API_REFRESH_TOKEN", "")
+    if env_refresh:
+        return {
+            "refresh_token": env_refresh,
+            "lwa_app_id": os.environ.get("SP_API_LWA_APP_ID") or os.environ.get("LWA_APP_ID", ""),
+            "lwa_client_secret": os.environ.get("SP_API_LWA_CLIENT_SECRET") or os.environ.get("LWA_CLIENT_SECRET", ""),
+            "aws_access_key": os.environ.get("SP_API_AWS_ACCESS_KEY", ""),
+            "aws_secret_key": os.environ.get("SP_API_AWS_SECRET_KEY", ""),
+            "role_arn": os.environ.get("SP_API_ROLE_ARN", ""),
+        }
+
+    # Priority 2: Config file (local development)
+    if CONFIG_PATH.exists():
+        with open(CONFIG_PATH) as f:
+            creds_json = json.load(f)
+        sp = creds_json.get("AMAZON_SP_API", {})
+        creds = {
+            "refresh_token": sp.get("refresh_token"),
+            "lwa_app_id": sp.get("lwa_app_id"),
+            "lwa_client_secret": sp.get("lwa_client_secret"),
+            "aws_access_key": sp.get("aws_access_key"),
+            "aws_secret_key": sp.get("aws_secret_key"),
+            "role_arn": sp.get("role_arn"),
+        }
+        if creds.get("refresh_token"):
+            return creds
+
+    return None
+
+
+# Track last today-sync so we don't hammer the API
+_last_today_sync = 0.0
+
+
+def _sync_today_orders():
+    """Fast sync: pull today's orders from Amazon Orders API.
+
+    This is the critical path for showing live "Today" data.
+    Runs at startup, on /api/sync, and inline if today has no data.
+
+    Strategy: Use getOrderItems for EVERY order to get accurate item-level
+    prices.  OrderTotal is unreliable (missing for Pending, sometimes $0
+    for FBA orders).  Item-level prices are the ground truth.
+    """
+    try:
+        from sp_api.api import Orders as OrdersAPI
+        from sp_api.base import Marketplaces
+    except ImportError:
+        logger.warning("SP-API library not installed — skipping today sync")
+        return False
+
+    credentials = _load_sp_api_credentials()
+    if not credentials:
+        return False
+
+    logger.info("  Syncing today's orders (real-time)...")
+    try:
+        import time as _t
+        # Get orders from last 2 days to catch any we missed
+        now_utc = datetime.now(ZoneInfo("UTC"))
+        after_date = (now_utc - timedelta(days=2)).isoformat()
+        orders_api = OrdersAPI(credentials=credentials, marketplace=Marketplaces.US)
+        response = orders_api.get_orders(
+            CreatedAfter=after_date,
+            MarketplaceIds=["ATVPDKIKX0DER"],
+            MaxResultsPerPage=100
+        )
+
+        order_list = response.payload.get("Orders", [])
+
+        # Handle pagination — get ALL orders, not just first 100
+        next_token = response.payload.get("NextToken")
+        while next_token:
+            try:
+                next_resp = orders_api.get_orders(
+                    NextToken=next_token,
+                    MarketplaceIds=["ATVPDKIKX0DER"],
+                )
+                more_orders = next_resp.payload.get("Orders", [])
+                order_list.extend(more_orders)
+                next_token = next_resp.payload.get("NextToken")
+            except Exception:
+                break
+
+        logger.info(f"  Got {len(order_list)} orders from last 2 days")
+
+        con = duckdb.connect(str(DB_PATH), read_only=False)
+
+        # Store raw orders
+        for order in order_list:
+            order_total = order.get("OrderTotal", {})
+            con.execute("""
+                INSERT OR REPLACE INTO orders
+                (order_id, purchase_date, order_status, fulfillment_channel,
+                 sales_channel, order_total, currency_code, number_of_items,
+                 ship_city, ship_state, ship_postal_code,
+                 is_business_order, is_prime)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """, [
+                order.get("AmazonOrderId"),
+                order.get("PurchaseDate"),
+                order.get("OrderStatus"),
+                order.get("FulfillmentChannel"),
+                order.get("SalesChannel"),
+                float(order_total.get("Amount", 0)) if order_total else 0,
+                order_total.get("CurrencyCode", "USD") if order_total else "USD",
+                order.get("NumberOfItemsShipped", 0) + order.get("NumberOfItemsUnshipped", 0),
+                order.get("ShippingAddress", {}).get("City", ""),
+                order.get("ShippingAddress", {}).get("StateOrRegion", ""),
+                order.get("ShippingAddress", {}).get("PostalCode", ""),
+                order.get("IsBusinessOrder", False),
+                order.get("IsPrime", False),
+            ])
+
+        # ── Get item-level prices for ALL non-cancelled orders ──
+        # OrderTotal is unreliable.  getOrderItems gives us actual item prices.
+        # Rate limit: burst 30, then 0.5/sec.  We handle this with adaptive sleep.
+        now_central = datetime.now(ZoneInfo("America/Chicago"))
+        today_str = now_central.strftime("%Y-%m-%d")
+        yesterday_str = (now_central - timedelta(days=1)).strftime("%Y-%m-%d")
+
+        # Build ASIN price lookup from historical data for fallback
+        asin_prices = {}
+        try:
+            price_rows = con.execute("""
+                SELECT asin,
+                       SUM(ordered_product_sales) / NULLIF(SUM(units_ordered), 0) AS avg_price
+                FROM daily_sales
+                WHERE asin != 'ALL' AND units_ordered > 0
+                  AND date >= CURRENT_DATE - 90
+                GROUP BY asin
+            """).fetchall()
+            for pr in price_rows:
+                if pr[1] and pr[1] > 0:
+                    asin_prices[pr[0]] = float(pr[1])
+        except Exception:
+            pass
+        logger.info(f"  ASIN price fallback: {len(asin_prices)} ASINs with known prices")
+
+        items_fetched = 0
+        items_failed = 0
+        burst_count = 0
+
+        for order in order_list:
+            status = order.get("OrderStatus", "")
+            if status in ("Canceled", "Cancelled"):
+                continue
+
+            # Only fetch items for today and yesterday orders
+            purchase_date = order.get("PurchaseDate", "")
+            if not purchase_date:
+                continue
+            try:
+                if "T" in purchase_date:
+                    dt = datetime.fromisoformat(purchase_date.replace("Z", "+00:00"))
+                    dt = dt.astimezone(ZoneInfo("America/Chicago"))
+                    order_day = dt.strftime("%Y-%m-%d")
+                else:
+                    order_day = purchase_date[:10]
+            except Exception:
+                order_day = purchase_date[:10]
+
+            if order_day not in (today_str, yesterday_str):
+                continue
+
+            order_id = order.get("AmazonOrderId")
+            if not order_id:
+                continue
+
+            try:
+                items_resp = orders_api.get_order_items(order_id)
+                item_list = items_resp.payload.get("OrderItems", [])
+                total_from_items = 0.0
+                total_qty = 0
+                for item in item_list:
+                    asin = item.get("ASIN", "")
+                    qty = 0
+                    try:
+                        qty = int(item.get("QuantityOrdered", 0))
+                    except (ValueError, TypeError):
+                        pass
+
+                    # ItemPrice is the total for this line (price × qty)
+                    price = item.get("ItemPrice")
+                    item_amount = 0.0
+                    if price and isinstance(price, dict):
+                        amt_str = price.get("Amount", "0")
+                        try:
+                            item_amount = float(amt_str)
+                        except (ValueError, TypeError):
+                            pass
+
+                    # Fallback: if ItemPrice is 0 or missing (Pending orders),
+                    # use historical average price for this ASIN
+                    if item_amount == 0 and qty > 0 and asin in asin_prices:
+                        item_amount = round(asin_prices[asin] * qty, 2)
+                        logger.info(f"    {order_id}: used fallback price for {asin} = ${item_amount:.2f} ({qty} × ${asin_prices[asin]:.2f})")
+
+                    total_from_items += item_amount
+                    total_qty += qty
+
+                # Always use item-level total (more accurate than OrderTotal)
+                order["_item_revenue"] = total_from_items
+                order["_item_qty"] = total_qty
+                items_fetched += 1
+
+                # Adaptive rate limiting: burst first 25, then sleep
+                burst_count += 1
+                if burst_count > 25:
+                    _t.sleep(2.0)  # Stay well under rate limit
+            except Exception as e:
+                items_failed += 1
+                logger.warning(f"  getOrderItems failed for {order_id}: {e}")
+                # On rate limit, back off
+                if "throttl" in str(e).lower() or "429" in str(e):
+                    _t.sleep(5.0)
+
+        logger.info(f"  Fetched items for {items_fetched} orders ({items_failed} failed)")
+
+        # ── Aggregate by date ──
+        daily_agg = defaultdict(lambda: {"revenue": 0.0, "units": 0, "orders": 0})
+
+        for order in order_list:
+            status = order.get("OrderStatus", "")
+            if status in ("Canceled", "Cancelled"):
+                continue
+            purchase_date = order.get("PurchaseDate", "")
+            if not purchase_date:
+                continue
+            try:
+                if "T" in purchase_date:
+                    dt = datetime.fromisoformat(purchase_date.replace("Z", "+00:00"))
+                    dt = dt.astimezone(ZoneInfo("America/Chicago"))
+                    day_str = dt.strftime("%Y-%m-%d")
+                else:
+                    day_str = purchase_date[:10]
+            except Exception:
+                day_str = purchase_date[:10]
+
+            # Prefer item-level revenue (most accurate), fall back to OrderTotal
+            if "_item_revenue" in order:
+                amount = order["_item_revenue"]
+                n_items = order["_item_qty"]
+            else:
+                order_total = order.get("OrderTotal", {})
+                amount = float(order_total.get("Amount", 0)) if order_total else 0
+                n_items = order.get("NumberOfItemsShipped", 0) + order.get("NumberOfItemsUnshipped", 0)
+
+            daily_agg[day_str]["revenue"] += amount
+            daily_agg[day_str]["units"] += n_items
+            daily_agg[day_str]["orders"] += 1
+
+        # ── Write to daily_sales ──
+        for day_str in [today_str, yesterday_str]:
+            if day_str not in daily_agg:
+                continue
+            agg = daily_agg[day_str]
+            existing = con.execute(
+                "SELECT ordered_product_sales FROM daily_sales WHERE date = ? AND asin = 'ALL'",
+                [day_str]
+            ).fetchone()
+            existing_rev = float(existing[0]) if existing and existing[0] else 0.0
+
+            # Only overwrite if new revenue is >= existing (never clobber good data with partial sync)
+            if agg["revenue"] >= existing_rev:
+                con.execute("""
+                    INSERT OR REPLACE INTO daily_sales
+                    (date, asin, units_ordered, ordered_product_sales,
+                     sessions, session_percentage, page_views,
+                     buy_box_percentage, unit_session_percentage)
+                    VALUES (?, 'ALL', ?, ?, 0, 0, 0, 0, 0)
+                """, [day_str, agg["units"], agg["revenue"]])
+                logger.info(f"  {day_str}: ${agg['revenue']:.2f} rev, {agg['units']} units, {agg['orders']} orders")
+
+        con.close()
+
+        # Log summary for debugging
+        for ds in sorted(daily_agg.keys()):
+            a = daily_agg[ds]
+            logger.info(f"  Date {ds}: ${a['revenue']:.2f} / {a['units']}u / {a['orders']} orders")
+
+        logger.info(f"  Today sync complete: {len(order_list)} orders, {items_fetched} items fetched")
+        return True
+    except Exception as e:
+        logger.error(f"  Today orders sync error: {e}")
+        import traceback
+        logger.error(traceback.format_exc())
+        return False
+
+
+def _ensure_today_data():
+    """If today has no data in daily_sales, do a quick Orders API pull.
+
+    Called inline by profitability/comparison endpoints so the user
+    never sees Today = $0 when Amazon has live data.
+    Throttled to at most once per 5 minutes.
+    """
+    global _last_today_sync
+    import time as _time
+    now = _time.time()
+    if now - _last_today_sync < 300:          # 5-minute cooldown
+        return
+
+    today_str = datetime.now(ZoneInfo("America/Chicago")).strftime("%Y-%m-%d")
+    try:
+        con = duckdb.connect(str(DB_PATH), read_only=False)
+        row = con.execute(
+            "SELECT ordered_product_sales FROM daily_sales WHERE date = ? AND asin = 'ALL'",
+            [today_str]
+        ).fetchone()
+        con.close()
+        has_data = row and row[0] and float(row[0]) > 0
+    except Exception:
+        has_data = False
+
+    if not has_data:
+        logger.info(f"Today ({today_str}) has no data — triggering quick Orders API sync")
+        _last_today_sync = now
+        _sync_today_orders()
+
+
+def _run_sp_api_sync():
+    """Pull latest data from Amazon SP-API into DuckDB (runs in background thread).
+
+    Order of operations (fastest first):
+    1. Today's Orders (fast, ~5 seconds) — critical for live "Today" data
+    2. Financial Events (fast, ~5 seconds) — actual fees/refunds
+    3. FBA Inventory (fast, ~5 seconds)
+    4. Sales & Traffic Report (SLOW, 2-5 minutes) — historical data with sessions
+    """
+    try:
+        from sp_api.api import Reports, Orders, Inventories, Finances
+        from sp_api.base import Marketplaces, ReportType
+    except ImportError:
+        logger.warning("SP-API library not installed — skipping sync")
+        return
+
+    credentials = _load_sp_api_credentials()
+    if not credentials:
+        logger.warning("No SP-API credentials found (env vars or config file) — skipping sync")
+        return
+
+    logger.info("Starting SP-API background sync...")
+    import time, gzip, requests as req
+
+    # ── Ensure financial_events table exists ──────────────────────
+    try:
+        _con = duckdb.connect(str(DB_PATH), read_only=False)
+        _con.execute("""
+            CREATE TABLE IF NOT EXISTS financial_events (
+                date DATE,
+                asin VARCHAR,
+                sku VARCHAR,
+                order_id VARCHAR,
+                event_type VARCHAR,
+                product_charges DOUBLE DEFAULT 0,
+                shipping_charges DOUBLE DEFAULT 0,
+                fba_fees DOUBLE DEFAULT 0,
+                commission DOUBLE DEFAULT 0,
+                promotion_amount DOUBLE DEFAULT 0,
+                other_fees DOUBLE DEFAULT 0,
+                net_proceeds DOUBLE DEFAULT 0
+            )
+        """)
+        _con.close()
+    except Exception as e:
+        logger.warning(f"  Could not ensure financial_events table: {e}")
+
+    # ── 1. TODAY'S ORDERS (fast, real-time) ──────────────────────
+    global _last_today_sync
+    import time as _time
+    _last_today_sync = _time.time()
+    _sync_today_orders()
+
+    # ── 2. FINANCIAL EVENTS (actual fees, refunds, promos) ──────
+    try:
+        from sp_api.api import Finances as FinancesAPI
+        logger.info("  Pulling financial events (fees, refunds)...")
+
+        fin_start = (datetime.utcnow() - timedelta(days=90)).strftime("%Y-%m-%dT%H:%M:%SZ")
+        finances = FinancesAPI(credentials=credentials, marketplace=Marketplaces.US)
+
+        # Manual NextToken pagination (more reliable than @load_all_pages)
+        all_shipment_events = []
+        all_refund_events = []
+        page = 0
+        next_token = None
+
+        while page < 20:
+            page += 1
+            kwargs = {"PostedAfter": fin_start, "MaxResultsPerPage": 100}
+            if next_token:
+                kwargs["NextToken"] = next_token
+
+            try:
+                resp = finances.list_financial_events(**kwargs)
+            except Exception as api_err:
+                logger.error(f"  Financial events API call error (page {page}): {api_err}")
+                import traceback
+                logger.error(traceback.format_exc())
+                break
+
+            payload = resp.payload if hasattr(resp, 'payload') else (resp if isinstance(resp, dict) else {})
+            events = payload.get("FinancialEvents", {})
+
+            if page == 1:
+                logger.info(f"  Financial events payload keys: {list(payload.keys())}")
+                logger.info(f"  Financial events event keys: {list(events.keys()) if events else 'EMPTY'}")
+                # Log ALL event lists and their counts
+                for k, v in events.items():
+                    if isinstance(v, list):
+                        logger.info(f"    {k}: {len(v)} items")
+
+            shipments = events.get("ShipmentEventList", []) or []
+            refunds = events.get("RefundEventList", []) or []
+            adjustments = events.get("AdjustmentEventList", []) or []
+            all_shipment_events.extend(shipments)
+            all_refund_events.extend(refunds)
+            # AdjustmentEventList often contains return-related adjustments
+            for adj in adjustments:
+                adj_type = adj.get("AdjustmentType", "") if isinstance(adj, dict) else getattr(adj, "AdjustmentType", "")
+                adj_type_str = str(adj_type or "").lower()
+                if "return" in adj_type_str or "refund" in adj_type_str or "reversal" in adj_type_str:
+                    all_refund_events.append(adj)
+            logger.info(f"  Financial events page {page}: {len(shipments)} shipments, {len(refunds)} refunds, {len(adjustments)} adjustments")
+
+            # Check for next page
+            next_token = payload.get("NextToken")
+            if not next_token:
+                break
+
+        logger.info(f"  Total financial events: {len(all_shipment_events)} shipments, {len(all_refund_events)} refunds")
+        con = duckdb.connect(str(DB_PATH), read_only=False)
+        fin_records = 0
+
+        # Helper: Amazon uses CurrencyAmount (not Amount) in money objects
+        # sp_api may return model objects, dicts, Decimals, or strings
+        def _money(amt_obj):
+            if amt_obj is None:
+                return 0.0
+            # Plain dict
+            if isinstance(amt_obj, dict):
+                return float(amt_obj.get("CurrencyAmount", amt_obj.get("Amount", 0)) or 0)
+            # sp_api model object (has attributes instead of dict keys)
+            if hasattr(amt_obj, "CurrencyAmount"):
+                try:
+                    return float(amt_obj.CurrencyAmount or 0)
+                except Exception:
+                    pass
+            if hasattr(amt_obj, "Amount"):
+                try:
+                    return float(amt_obj.Amount or 0)
+                except Exception:
+                    pass
+            # Already a number (Decimal, float, int)
+            try:
+                return float(amt_obj)
+            except Exception:
+                return 0.0
+
+        # Helper: extract string date from PostedDate (may be str or datetime)
+        def _posted_date_str(pd_val):
+            if pd_val is None:
+                return None
+            if isinstance(pd_val, str):
+                return pd_val[:10] if len(pd_val) >= 10 else pd_val
+            # datetime object
+            if hasattr(pd_val, 'strftime'):
+                return pd_val.strftime("%Y-%m-%d")
+            return str(pd_val)[:10]
+
+        # Helper: safely get dict-like value (works for dicts AND sp_api model objects)
+        def _safe_get(obj, key, default=None):
+            if obj is None:
+                return default
+            if isinstance(obj, dict):
+                return obj.get(key, default)
+            # sp_api model object — try attribute access
+            return getattr(obj, key, default)
+
+        # Clear old financial events for re-sync (avoids duplicates without needing PK)
+        try:
+            cutoff_date = (datetime.utcnow() - timedelta(days=90)).strftime("%Y-%m-%d")
+            con.execute("DELETE FROM financial_events WHERE date >= ?", [cutoff_date])
+            logger.info(f"  Cleared financial_events from {cutoff_date} for re-sync")
+        except Exception as e:
+            logger.warning(f"  Could not clear old financial_events: {e}")
+
+        # Process shipment events (sales fees)
+        first_shipment_logged = False
+        for event in all_shipment_events:
+            order_id = _safe_get(event, "AmazonOrderId", "")
+            posted_date = _safe_get(event, "PostedDate", "")
+            date_str = _posted_date_str(posted_date)
+
+            for item in (_safe_get(event, "ShipmentItemList") or []):
+                sku = _safe_get(item, "SellerSKU", "")
+                asin_val = _safe_get(item, "ASIN", sku)
+
+                product_charges = 0.0
+                shipping_ch = 0.0
+                charge_list = _safe_get(item, "ItemChargeList") or []
+                for c in charge_list:
+                    val = _money(_safe_get(c, "ChargeAmount"))
+                    ct = _safe_get(c, "ChargeType", "")
+                    if ct == "Principal":
+                        product_charges += val
+                    elif ct in ("ShippingCharge", "Shipping"):
+                        shipping_ch += val
+
+                # Log first shipment's charge structure for debugging
+                if not first_shipment_logged and charge_list:
+                    first_c = charge_list[0]
+                    ca = _safe_get(first_c, "ChargeAmount")
+                    logger.info(f"  DEBUG charge structure: type={type(first_c).__name__}, "
+                               f"ChargeAmount type={type(ca).__name__}, "
+                               f"ChargeAmount value={ca}, "
+                               f"parsed_val={_money(ca)}")
+                    first_shipment_logged = True
+
+                fba_fees_val = 0.0
+                commission_val = 0.0
+                other_val = 0.0
+                for f in (_safe_get(item, "ItemFeeList") or []):
+                    val = abs(_money(_safe_get(f, "FeeAmount")))
+                    ft = _safe_get(f, "FeeType", "")
+                    if "FBA" in ft or "Fulfillment" in ft:
+                        fba_fees_val += val
+                    elif ft in ("Commission", "ReferralFee"):
+                        commission_val += val
+                    else:
+                        other_val += val
+
+                promo_val = 0.0
+                for p in (_safe_get(item, "PromotionList") or []):
+                    promo_val += _money(_safe_get(p, "PromotionAmount"))
+
+                net = product_charges + shipping_ch - fba_fees_val - commission_val + promo_val
+
+                try:
+                    con.execute("""
+                        INSERT INTO financial_events
+                        (date, asin, sku, order_id, event_type,
+                         product_charges, shipping_charges, fba_fees,
+                         commission, promotion_amount, other_fees, net_proceeds)
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    """, [
+                        date_str, asin_val, sku, order_id, "Shipment",
+                        product_charges, shipping_ch,
+                        fba_fees_val, commission_val, promo_val, other_val, net
+                    ])
+                    fin_records += 1
+                except Exception as ins_err:
+                    logger.warning(f"  Shipment insert error: {ins_err}")
+
+        # Process refund events (from RefundEventList + return-related AdjustmentEventList)
+        first_refund_logged = False
+        for event in all_refund_events:
+            order_id = _safe_get(event, "AmazonOrderId", "")
+            posted_date = _safe_get(event, "PostedDate", "")
+            date_str = _posted_date_str(posted_date)
+
+            # Try multiple possible item list keys (different event types use different keys)
+            item_list = (_safe_get(event, "ShipmentItemAdjustmentList")
+                        or _safe_get(event, "ShipmentItemList")
+                        or _safe_get(event, "AdjustmentItemList")
+                        or [])
+
+            if not first_refund_logged:
+                logger.info(f"  DEBUG refund event keys: {list(event.keys()) if isinstance(event, dict) else dir(event)}")
+                logger.info(f"  DEBUG refund item_list length: {len(item_list)}, type: {type(item_list).__name__}")
+                if item_list:
+                    first_item = item_list[0]
+                    logger.info(f"  DEBUG refund first item keys: {list(first_item.keys()) if isinstance(first_item, dict) else 'model'}")
+                first_refund_logged = True
+
+            for item in item_list:
+                sku = _safe_get(item, "SellerSKU", "")
+                asin_val = _safe_get(item, "ASIN", sku)
+
+                refund_amount = 0.0
+                refund_fba = 0.0
+                refund_comm = 0.0
+                refund_other = 0.0
+                charge_adj_list = (_safe_get(item, "ItemChargeAdjustmentList")
+                                  or _safe_get(item, "ItemChargeList") or [])
+                for c in charge_adj_list:
+                    val = _money(_safe_get(c, "ChargeAmount"))
+                    ct = _safe_get(c, "ChargeType", "")
+                    if ct == "Principal":
+                        refund_amount += val
+                    else:
+                        refund_other += abs(val)
+
+                # Also capture fee adjustments for refunds
+                fee_adj_list = (_safe_get(item, "ItemFeeAdjustmentList")
+                               or _safe_get(item, "ItemFeeList") or [])
+                for f in fee_adj_list:
+                    val = _money(_safe_get(f, "FeeAmount"))
+                    ft = _safe_get(f, "FeeType", "")
+                    if "FBA" in ft or "Fulfillment" in ft:
+                        refund_fba += abs(val)
+                    elif ft in ("Commission", "ReferralFee"):
+                        refund_comm += abs(val)
+
+                try:
+                    con.execute("""
+                        INSERT INTO financial_events
+                        (date, asin, sku, order_id, event_type,
+                         product_charges, shipping_charges, fba_fees,
+                         commission, promotion_amount, other_fees, net_proceeds)
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    """, [
+                        date_str,
+                        asin_val, sku, order_id, "Refund",
+                        abs(refund_amount), 0, refund_fba, refund_comm, 0, refund_other,
+                        abs(refund_amount)
+                    ])
+                    fin_records += 1
+                    logger.info(f"  Inserted refund: order={order_id}, asin={asin_val}, amount=${abs(refund_amount):.2f}")
+                except Exception as ins_err:
+                    logger.error(f"  Refund insert error for {order_id}/{asin_val}: {ins_err}")
+
+        con.close()
+        logger.info(f"  Financial events sync done: {fin_records} records (shipments + refunds)")
+    except Exception as e:
+        logger.error(f"  Financial events sync error: {e}")
+
+    # ── 3. FBA INVENTORY ────────────────────────────────────────
+    try:
+        logger.info("  Pulling FBA inventory...")
+        inventory_api = Inventories(credentials=credentials, marketplace=Marketplaces.US)
+        response = inventory_api.get_inventory_summary_marketplace(
+            marketplaceIds=["ATVPDKIKX0DER"],
+            granularityType="Marketplace",
+            granularityId="ATVPDKIKX0DER"
+        )
+        summaries = response.payload.get("inventorySummaries", [])
+        if summaries:
+            con = duckdb.connect(str(DB_PATH), read_only=False)
+            today = datetime.now(ZoneInfo("America/Chicago")).date()
+            for item in summaries:
+                inv = item.get("inventoryDetails", {})
+                fulfillable = inv.get("fulfillableQuantity", 0) or item.get("totalQuantity", 0)
+                reserved = inv.get("reservedQuantity", {})
+                reserved_qty = reserved.get("totalReservedQuantity", 0) if isinstance(reserved, dict) else int(reserved or 0)
+                con.execute("""
+                    INSERT OR REPLACE INTO fba_inventory
+                    (date, asin, sku, product_name, condition,
+                     fulfillable_quantity, inbound_working_quantity,
+                     inbound_shipped_quantity, inbound_receiving_quantity,
+                     reserved_quantity, unfulfillable_quantity, total_quantity)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """, [
+                    today, item.get("asin", ""),
+                    item.get("sellerSku", item.get("fnSku", "")),
+                    item.get("productName", "")[:200],
+                    item.get("condition", "NewItem"),
+                    int(fulfillable or 0),
+                    int(inv.get("inboundWorkingQuantity", 0) or 0),
+                    int(inv.get("inboundShippedQuantity", 0) or 0),
+                    int(inv.get("inboundReceivingQuantity", 0) or 0),
+                    int(reserved_qty or 0), 0,
+                    int(item.get("totalQuantity", 0)),
+                ])
+            con.close()
+            logger.info(f"  Inventory sync done: {len(summaries)} items")
+    except Exception as e:
+        logger.error(f"  Inventory sync error: {e}")
+
+    # ── 4. SALES & TRAFFIC REPORT (slow, 2-5 min polling) ──────
+    try:
+        end_date = datetime.utcnow().date()
+        start_date = end_date - timedelta(days=3)
+        logger.info(f"  Requesting Sales report {start_date} to {end_date}...")
+
+        reports = Reports(credentials=credentials, marketplace=Marketplaces.US)
+        report_response = reports.create_report(
+            reportType=ReportType.GET_SALES_AND_TRAFFIC_REPORT,
+            dataStartTime=start_date.isoformat(),
+            dataEndTime=end_date.isoformat(),
+            reportOptions={"dateGranularity": "DAY", "asinGranularity": "CHILD"}
+        )
+        report_id = report_response.payload.get("reportId")
+
+        report_data = None
+        for attempt in range(30):
+            time.sleep(10)
+            status_response = reports.get_report(report_id)
+            status = status_response.payload.get("processingStatus")
+            if status == "DONE":
+                doc_id = status_response.payload.get("reportDocumentId")
+                doc_response = reports.get_report_document(doc_id)
+                report_data = doc_response.payload
+                break
+            elif status in ("CANCELLED", "FATAL"):
+                logger.error(f"  Report failed: {status}")
+                break
+
+        if report_data:
+            if isinstance(report_data, dict) and "url" in report_data:
+                is_gzipped = report_data.get("compressionAlgorithm", "").upper() == "GZIP"
+                resp = req.get(report_data["url"])
+                if is_gzipped:
+                    import gzip as gz
+                    report_text = gz.decompress(resp.content).decode("utf-8")
+                else:
+                    report_text = resp.text
+                report_data = json.loads(report_text)
+
+            if isinstance(report_data, str):
+                report_data = json.loads(report_data)
+
+            con = duckdb.connect(str(DB_PATH), read_only=False)
+            records = 0
+
+            for day_entry in report_data.get("salesAndTrafficByDate", []):
+                entry_date = day_entry.get("date", "")
+                traffic = day_entry.get("trafficByDate", {})
+                sales_info = day_entry.get("salesByDate", {})
+                ordered_sales = sales_info.get("orderedProductSales", {})
+                sales_amount = float(ordered_sales.get("amount", 0)) if isinstance(ordered_sales, dict) else float(ordered_sales or 0)
+
+                con.execute("""
+                    INSERT OR REPLACE INTO daily_sales
+                    (date, asin, units_ordered, ordered_product_sales,
+                     sessions, session_percentage, page_views,
+                     buy_box_percentage, unit_session_percentage)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """, [
+                    entry_date, "ALL",
+                    int(sales_info.get("unitsOrdered", 0)),
+                    sales_amount,
+                    int(traffic.get("sessions", 0)),
+                    float(traffic.get("sessionPercentage", 0)),
+                    int(traffic.get("pageViews", 0)),
+                    float(traffic.get("buyBoxPercentage", 0)),
+                    float(traffic.get("unitSessionPercentage", 0)),
+                ])
+                records += 1
+
+            for asin_entry in report_data.get("salesAndTrafficByAsin", []):
+                asin = asin_entry.get("childAsin") or asin_entry.get("parentAsin", "")
+                traffic = asin_entry.get("trafficByAsin", {})
+                sales_info = asin_entry.get("salesByAsin", {})
+                entry_date = asin_entry.get("date", str(start_date))
+                ordered_sales = sales_info.get("orderedProductSales", {})
+                sales_amount = float(ordered_sales.get("amount", 0)) if isinstance(ordered_sales, dict) else float(ordered_sales or 0)
+
+                con.execute("""
+                    INSERT OR REPLACE INTO daily_sales
+                    (date, asin, units_ordered, ordered_product_sales,
+                     sessions, session_percentage, page_views,
+                     buy_box_percentage, unit_session_percentage)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """, [
+                    entry_date, asin,
+                    int(sales_info.get("unitsOrdered", 0)),
+                    sales_amount,
+                    int(traffic.get("sessions", 0)),
+                    float(traffic.get("sessionPercentage", 0)),
+                    int(traffic.get("pageViews", 0)),
+                    float(traffic.get("buyBoxPercentage", 0)),
+                    float(traffic.get("unitSessionPercentage", 0)),
+                ])
+                records += 1
+
+            con.close()
+            logger.info(f"  Sales sync done: {records} records stored")
+
+    except Exception as e:
+        logger.error(f"  Sales sync error: {e}")
+
+    logger.info("SP-API background sync complete.")
