@@ -440,6 +440,7 @@ def get_github_backup_status() -> dict:
                 "files_committed": 0,
                 "repo": repo_name,
                 "configured": bool(os.environ.get("GITHUB_TOKEN")) and bool(repo_name),
+                "note": "Backup has not run yet or log entry missing",
             }
 
         return {
