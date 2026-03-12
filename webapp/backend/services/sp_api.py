@@ -507,13 +507,31 @@ def _run_sp_api_sync():
             # sp_api model object — try attribute access
             return getattr(obj, key, default)
 
-        # Clear old financial events for re-sync (avoids duplicates without needing PK)
-        try:
-            cutoff_date = (datetime.utcnow() - timedelta(days=90)).strftime("%Y-%m-%d")
-            con.execute("DELETE FROM financial_events WHERE date >= ?", [cutoff_date])
-            logger.info(f"  Cleared financial_events from {cutoff_date} for re-sync")
-        except Exception as e:
-            logger.warning(f"  Could not clear old financial_events: {e}")
+        # Determine the actual date range fetched so we only clear that range
+        # (preserves backfill data for dates the regular sync doesn't reach)
+        fetched_dates = set()
+        def _extract_date(ev):
+            pd_val = ev.get("PostedDate", "") if isinstance(ev, dict) else getattr(ev, "PostedDate", "")
+            if pd_val:
+                d = str(pd_val)[:10]
+                if d and len(d) == 10:
+                    fetched_dates.add(d)
+        for ev in all_shipment_events:
+            _extract_date(ev)
+        for ev in all_refund_events:
+            _extract_date(ev)
+
+        if fetched_dates:
+            min_fetched = min(fetched_dates)
+            max_fetched = max(fetched_dates)
+            try:
+                con.execute("DELETE FROM financial_events WHERE date >= ? AND date <= ?",
+                           [min_fetched, max_fetched])
+                logger.info(f"  Cleared financial_events from {min_fetched} to {max_fetched} for re-sync (preserving data outside this range)")
+            except Exception as e:
+                logger.warning(f"  Could not clear old financial_events: {e}")
+        else:
+            logger.info("  No financial events fetched — skipping delete")
 
         # Build SKU→ASIN mapping from fba_inventory (financial events often lack ASIN)
         # Financial events use base SKUs (e.g. "GG2SS2226BM") while inventory has
