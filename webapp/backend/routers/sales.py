@@ -102,7 +102,6 @@ def _build_product_list(con, cutoff: str) -> list:
     # Product-level sales — use per-ASIN data (excluding aggregate 'ALL' row)
     rows = con.execute("""
         SELECT asin,
-               MAX(sku) AS sku,
                MAX(product_name) AS product_name,
                COALESCE(SUM(ordered_product_sales), 0) AS revenue,
                COALESCE(SUM(units_ordered), 0) AS units,
@@ -127,7 +126,7 @@ def _build_product_list(con, cutoff: str) -> list:
 
     products = []
     for r in rows:
-        asin, sku, api_name, revenue, units, sessions, orders = r
+        asin, api_name, revenue, units, sessions, orders = r
         if units == 0:
             continue
 
@@ -138,7 +137,7 @@ def _build_product_list(con, cutoff: str) -> list:
         aur = round(revenue / units, 2)
 
         # COGS: from file, by ASIN or SKU
-        cogs_info = cogs_data.get(asin) or cogs_data.get(sku or "") or {}
+        cogs_info = cogs_data.get(asin) or {}
         cogs_per_unit = cogs_info.get("cogs", 0)
         if cogs_per_unit == 0:
             cogs_per_unit = round(aur * 0.35, 2)  # estimate
@@ -155,8 +154,7 @@ def _build_product_list(con, cutoff: str) -> list:
                 or asin)
 
         # SKU: COGS file > daily_sales > inventory table
-        resolved_sku = (sku
-                        or cogs_info.get("sku", "")
+        resolved_sku = (cogs_info.get("sku", "")
                         or inv_info.get("sku", ""))
 
         # FBA fees
