@@ -149,6 +149,48 @@ async def get_logistics(request: Request):
 
     return data
 
+@router.post("/api/logistics/debug-parse")
+async def debug_logistics_parse(request: Request, file: UploadFile = File(...)):
+    """Temporary debug endpoint — returns what the parser sees without saving."""
+    require_auth(request)
+    import openpyxl
+    from io import BytesIO
+    contents = await file.read()
+    wb = openpyxl.load_workbook(BytesIO(contents), data_only=True)
+    result = {"sheets": wb.sheetnames}
+    logistics_sheet = None
+    for sn in wb.sheetnames:
+        if sn.strip().lower() == "logistics tracking":
+            logistics_sheet = sn
+            break
+    if not logistics_sheet:
+        result["error"] = "No Logistics Tracking sheet"
+        return result
+    ws = wb[logistics_sheet]
+    rows = []
+    for row in ws.iter_rows(min_row=1, max_row=min(ws.max_row, 30)):
+        r = {}
+        for c in row:
+            if hasattr(c, 'column_letter') and c.value is not None:
+                r[c.column_letter] = str(c.value)[:80]
+        rows.append(r)
+    result["totalRows"] = ws.max_row
+    result["first30rows"] = rows
+    # Find header
+    header_row = None
+    for i, r in enumerate(rows):
+        vals = [str(v).upper() for v in r.values()]
+        joined = " ".join(vals)
+        if ("SHIPPER" in joined or "FACTORY" in joined) and ("HBL" in joined or "HB" in joined or "MODE" in joined):
+            header_row = i
+            break
+    result["headerRow"] = header_row
+    if header_row is not None:
+        result["headerValues"] = rows[header_row]
+        if header_row + 1 < len(rows):
+            result["firstDataRow"] = rows[header_row + 1]
+    return result
+
 @router.post("/api/logistics/upload")
 async def upload_logistics(request: Request, file: UploadFile = File(...)):
     """Standalone logistics upload — delegates to the same logic as combined supply-chain upload."""
@@ -208,6 +250,7 @@ async def upload_logistics(request: Request, file: UploadFile = File(...)):
             header_row = i
             break
 
+    logger.info(f"[LOGISTICS UPLOAD] header_row={header_row}, total_rows={len(rows)}")
     if header_row is not None:
         empty_count = 0
         for i in range(header_row + 1, len(rows)):
@@ -220,10 +263,16 @@ async def upload_logistics(request: Request, file: UploadFile = File(...)):
             empty_count = 0
             shipper_str = str(shipper).strip()
             shipper_upper = shipper_str.upper()
-            if any(sw in shipper_upper for sw in _STOP_WORDS): break
-            if shipper_upper in ["SHIPPER", "FACTORY", "STATUS", ""] or len(shipper_str) <= 3: continue
+            if any(sw in shipper_upper for sw in _STOP_WORDS):
+                logger.info(f"[LOGISTICS UPLOAD] row {i}: STOP WORD hit: {shipper_str}")
+                break
+            if shipper_upper in ["SHIPPER", "FACTORY", "STATUS", ""] or len(shipper_str) <= 3:
+                logger.info(f"[LOGISTICS UPLOAD] row {i}: skip re-header/short: {shipper_str}")
+                continue
             hbl = str(r.get("D") or "").strip()
-            if not hbl or len(hbl) < 5: continue
+            if not hbl or len(hbl) < 5:
+                logger.info(f"[LOGISTICS UPLOAD] row {i}: skip bad HBL: '{hbl}' shipper={shipper_str}")
+                continue
             # Infer status from delivery date
             delivery_raw = r.get("N")
             if delivery_raw and str(delivery_raw).strip():
@@ -251,6 +300,11 @@ async def upload_logistics(request: Request, file: UploadFile = File(...)):
                 "comments": str(r.get("O") or "").strip(),         # O = Comments
                 "status": status,
             })
+        logger.info(f"[LOGISTICS UPLOAD] parsed {len(shipments)} shipments from standalone endpoint")
+    else:
+        logger.info("[LOGISTICS UPLOAD] NO header_row found - dumping first 10 rows")
+        for i, r in enumerate(rows[:10]):
+            logger.info(f"  row {i}: {dict(r)}")
 
     # ── Parse items by container ──
     item_header_row = None
@@ -564,6 +618,7 @@ async def upload_supply_chain(request: Request, file: UploadFile = File(...)):
                 header_row = i
                 break
 
+        logger.info(f"[SC UPLOAD] header_row={header_row}, total_rows={len(rows)}")
         if header_row is not None:
             empty_count = 0
             for i in range(header_row + 1, len(rows)):
@@ -581,17 +636,21 @@ async def upload_supply_chain(request: Request, file: UploadFile = File(...)):
 
                 # Stop at summary/status rows
                 if any(sw in shipper_upper for sw in _STOP_WORDS):
+                    logger.info(f"[SC UPLOAD] row {i}: STOP WORD hit: {shipper_str}")
                     break
                 # Skip re-header rows
                 if shipper_upper in ["SHIPPER", "FACTORY", "STATUS", ""]:
+                    logger.info(f"[SC UPLOAD] row {i}: skip re-header: {shipper_str}")
                     continue
                 # A real shipper name should be > 3 chars and not a number
                 if len(shipper_str) <= 3:
+                    logger.info(f"[SC UPLOAD] row {i}: skip short: {shipper_str}")
                     continue
 
                 hbl = str(r.get("D") or "").strip()
                 # HBL should look like a tracking number (letters+digits, > 5 chars)
                 if not hbl or len(hbl) < 5:
+                    logger.info(f"[SC UPLOAD] row {i}: skip bad HBL: '{hbl}' shipper={shipper_str}")
                     continue
 
                 # Infer status from delivery date
@@ -622,6 +681,12 @@ async def upload_supply_chain(request: Request, file: UploadFile = File(...)):
                     "comments": str(r.get("O") or "").strip(),         # O = Comments
                     "status": status,
                 })
+
+        logger.info(f"[SC UPLOAD] parsed {len(shipments)} shipments")
+        if not shipments and header_row is not None:
+            logger.info("[SC UPLOAD] 0 shipments - dumping rows around header")
+            for i in range(max(0, header_row - 1), min(len(rows), header_row + 5)):
+                logger.info(f"  row {i}: {dict(rows[i])}")
 
         # ── Parse Items by Container ──
         # Find the "ITEM SUMMARY BY CONTAINER" header row
