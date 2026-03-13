@@ -513,13 +513,10 @@ def _parse_workbook(wb, filename: str) -> dict:
                     if inv_data.get("invoice_number", "—") != "—" and rec["invoice_number"] == "—":
                         rec["invoice_number"] = inv_data["invoice_number"]
 
-    # ── Save to store ──
+    # ── Replace entire data store (clean slate each upload) ──
     all_records = list(records.values())
     store = _load_store()
-    existing = {r["record_id"]: r for r in store.get("records", [])}
-    for rec in all_records:
-        existing[rec["record_id"]] = rec
-    store["records"] = list(existing.values())
+    store["records"] = all_records  # full replace, no merge with old data
     store["lastUpload"] = datetime.now(TZ).isoformat()
     store["sourceFile"] = filename
     _save_store(store)
