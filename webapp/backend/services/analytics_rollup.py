@@ -152,7 +152,8 @@ def _has_hierarchy_columns(con, table: str) -> bool:
 
 def run_full_rollup():
     """Run all rollups. Called by scheduler nightly at 2:30am Central."""
-    con = duckdb.connect(str(DB_PATH), read_only=False)
+    from core.database import get_db
+    con = get_db()
     try:
         # Check if hierarchy columns exist — if not, run migration first
         if not _has_hierarchy_columns(con, 'orders'):
