@@ -42,6 +42,8 @@ def health():
         },
         "last_sync": {},
         "has_sp_api_creds": _load_sp_api_credentials() is not None,
+        "has_google_sso_creds": bool(os.environ.get("GOOGLE_CLIENT_ID")) and bool(os.environ.get("GOOGLE_CLIENT_SECRET")),
+        "google_redirect_uri_set": bool(os.environ.get("GOOGLE_REDIRECT_URI")),
     }
 
     try:
