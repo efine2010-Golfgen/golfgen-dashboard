@@ -555,7 +555,11 @@ def _run_sp_api_sync_inner():
                 kwargs["NextToken"] = next_token
 
             try:
-                resp = finances.list_financial_events(**kwargs)
+                @retry_with_backoff(max_retries=3, base_delay=2.0, max_delay=30.0)
+                def _fetch_financial_page(**kw):
+                    return finances.list_financial_events(**kw)
+
+                resp = _fetch_financial_page(**kwargs)
             except Exception as api_err:
                 logger.error(f"  Financial events API call error (page {page}): {api_err}")
                 import traceback
@@ -850,49 +854,65 @@ def _run_sp_api_sync_inner():
         except Exception:
             pass
 
-    # ── 3. FBA INVENTORY ────────────────────────────────────────
+    # ── 3. FBA INVENTORY (with retry + transaction wrapping) ────
     try:
         logger.info("  Pulling FBA inventory...")
         inventory_api = Inventories(credentials=credentials, marketplace=Marketplaces.US)
-        response = inventory_api.get_inventory_summary_marketplace(
-            marketplaceIds=["ATVPDKIKX0DER"],
-            granularityType="Marketplace",
-            granularityId="ATVPDKIKX0DER"
-        )
+
+        @retry_with_backoff(max_retries=3, base_delay=2.0, max_delay=30.0)
+        def _fetch_inventory():
+            return inventory_api.get_inventory_summary_marketplace(
+                marketplaceIds=["ATVPDKIKX0DER"],
+                granularityType="Marketplace",
+                granularityId="ATVPDKIKX0DER"
+            )
+
+        response = _fetch_inventory()
         summaries = response.payload.get("inventorySummaries", [])
         if summaries:
             con = duckdb.connect(str(DB_PATH), read_only=False)
-            today = datetime.now(ZoneInfo("America/Chicago")).date()
-            for item in summaries:
-                inv = item.get("inventoryDetails", {})
-                fulfillable = inv.get("fulfillableQuantity", 0) or item.get("totalQuantity", 0)
-                reserved = inv.get("reservedQuantity", {})
-                reserved_qty = reserved.get("totalReservedQuantity", 0) if isinstance(reserved, dict) else int(reserved or 0)
-                _inv_asin = item.get("asin", "")
-                _div = _get_division_for_asin(_inv_asin)
-                con.execute("""
-                    INSERT OR REPLACE INTO fba_inventory
-                    (date, asin, sku, product_name, condition,
-                     fulfillable_quantity, inbound_working_quantity,
-                     inbound_shipped_quantity, inbound_receiving_quantity,
-                     reserved_quantity, unfulfillable_quantity, total_quantity,
-                     division, customer, platform)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'amazon', 'sp_api')
-                """, [
-                    today, _inv_asin,
-                    item.get("sellerSku", item.get("fnSku", "")),
-                    item.get("productName", "")[:200],
-                    item.get("condition", "NewItem"),
-                    int(fulfillable or 0),
-                    int(inv.get("inboundWorkingQuantity", 0) or 0),
-                    int(inv.get("inboundShippedQuantity", 0) or 0),
-                    int(inv.get("inboundReceivingQuantity", 0) or 0),
-                    int(reserved_qty or 0), 0,
-                    int(item.get("totalQuantity", 0)),
-                    _div
-                ])
-            con.close()
-            logger.info(f"  Inventory sync done: {len(summaries)} items")
+            con.execute("BEGIN TRANSACTION")
+            try:
+                today = datetime.now(ZoneInfo("America/Chicago")).date()
+                for item in summaries:
+                    inv = item.get("inventoryDetails", {})
+                    fulfillable = inv.get("fulfillableQuantity", 0) or item.get("totalQuantity", 0)
+                    reserved = inv.get("reservedQuantity", {})
+                    reserved_qty = reserved.get("totalReservedQuantity", 0) if isinstance(reserved, dict) else int(reserved or 0)
+                    _inv_asin = item.get("asin", "")
+                    _div = _get_division_for_asin(_inv_asin)
+                    con.execute("""
+                        INSERT OR REPLACE INTO fba_inventory
+                        (date, asin, sku, product_name, condition,
+                         fulfillable_quantity, inbound_working_quantity,
+                         inbound_shipped_quantity, inbound_receiving_quantity,
+                         reserved_quantity, unfulfillable_quantity, total_quantity,
+                         division, customer, platform)
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'amazon', 'sp_api')
+                    """, [
+                        today, _inv_asin,
+                        item.get("sellerSku", item.get("fnSku", "")),
+                        item.get("productName", "")[:200],
+                        item.get("condition", "NewItem"),
+                        int(fulfillable or 0),
+                        int(inv.get("inboundWorkingQuantity", 0) or 0),
+                        int(inv.get("inboundShippedQuantity", 0) or 0),
+                        int(inv.get("inboundReceivingQuantity", 0) or 0),
+                        int(reserved_qty or 0), 0,
+                        int(item.get("totalQuantity", 0)),
+                        _div
+                    ])
+                con.execute("COMMIT")
+                logger.info(f"  Inventory sync done: {len(summaries)} items")
+            except Exception as e:
+                logger.error(f"  Inventory transaction error: {e}")
+                try:
+                    con.execute("ROLLBACK")
+                    logger.info("  Inventory rolled back due to error")
+                except Exception:
+                    pass
+            finally:
+                con.close()
     except Exception as e:
         logger.error(f"  Inventory sync error: {e}")
 

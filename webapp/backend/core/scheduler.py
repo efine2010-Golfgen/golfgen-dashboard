@@ -5,6 +5,7 @@ import shutil
 import asyncio
 import logging
 import time
+import threading
 import duckdb
 from datetime import datetime
 from zoneinfo import ZoneInfo
@@ -25,6 +26,17 @@ logger = logging.getLogger("golfgen")
 # Module-level scheduler instance (will be started in lifespan)
 scheduler = None
 
+# Scheduler-level locks to prevent overlapping scheduled runs of the same job type
+_scheduler_locks = {
+    "sp_api": threading.Lock(),
+    "today": threading.Lock(),
+    "ads": threading.Lock(),
+    "pricing": threading.Lock(),
+    "analytics": threading.Lock(),
+    "backup": threading.Lock(),
+    "docs": threading.Lock(),
+}
+
 
 def _log_docs_update(status: str = "in_progress", documents_updated: str = None, error_message: str = None, execution_time: float = None) -> int:
     """Log a docs update to the docs_update_log table. Returns the log ID."""
@@ -43,82 +55,129 @@ def _log_docs_update(status: str = "in_progress", documents_updated: str = None,
 
 
 def _run_scheduled_sp_api_sync():
-    """Wrapper for scheduled SP-API sync with logging."""
-    started_at = datetime.now(ZoneInfo("America/Chicago"))
+    """Wrapper for scheduled SP-API sync with logging and scheduler-level mutex."""
+    if not _scheduler_locks["sp_api"].acquire(blocking=False):
+        logger.warning("Skipping scheduled SP-API sync — previous run still active")
+        return
     try:
-        _run_sp_api_sync()
-        _write_sync_log("sp_api_sync", started_at, "SUCCESS")
-        logger.info(f"Scheduled SP-API sync completed")
-    except Exception as e:
-        _write_sync_log("sp_api_sync", started_at, "FAILED", error=str(e))
-        logger.error(f"Scheduled SP-API sync failed: {e}")
+        started_at = datetime.now(ZoneInfo("America/Chicago"))
+        try:
+            _run_sp_api_sync()
+            _write_sync_log("sp_api_sync", started_at, "SUCCESS")
+            logger.info(f"Scheduled SP-API sync completed")
+        except Exception as e:
+            _write_sync_log("sp_api_sync", started_at, "FAILED", error=str(e))
+            logger.error(f"Scheduled SP-API sync failed: {e}")
+    finally:
+        _scheduler_locks["sp_api"].release()
 
 
 def _run_scheduled_today_sync():
-    """Wrapper for scheduled today orders sync with logging."""
-    started_at = datetime.now(ZoneInfo("America/Chicago"))
+    """Wrapper for scheduled today orders sync with logging and scheduler-level mutex."""
+    if not _scheduler_locks["today"].acquire(blocking=False):
+        logger.warning("Skipping scheduled today sync — previous run still active")
+        return
     try:
-        _sync_today_orders()
-        _write_sync_log("today_sync", started_at, "SUCCESS")
-        logger.info(f"Scheduled today sync completed")
-    except Exception as e:
-        _write_sync_log("today_sync", started_at, "FAILED", error=str(e))
-        logger.error(f"Scheduled today sync failed: {e}")
+        started_at = datetime.now(ZoneInfo("America/Chicago"))
+        try:
+            _sync_today_orders()
+            _write_sync_log("today_sync", started_at, "SUCCESS")
+            logger.info(f"Scheduled today sync completed")
+        except Exception as e:
+            _write_sync_log("today_sync", started_at, "FAILED", error=str(e))
+            logger.error(f"Scheduled today sync failed: {e}")
+    finally:
+        _scheduler_locks["today"].release()
 
 
 def _run_scheduled_ads_sync():
-    """Wrapper for scheduled ads sync with logging."""
-    started_at = datetime.now(ZoneInfo("America/Chicago"))
+    """Wrapper for scheduled ads sync with logging and scheduler-level mutex."""
+    if not _scheduler_locks["ads"].acquire(blocking=False):
+        logger.warning("Skipping scheduled ads sync — previous run still active")
+        return
     try:
-        _sync_ads_data()
-        _write_sync_log("ads_sync", started_at, "SUCCESS")
-        logger.info(f"Scheduled ads sync completed")
-    except Exception as e:
-        _write_sync_log("ads_sync", started_at, "FAILED", error=str(e))
-        logger.error(f"Scheduled ads sync failed: {e}")
+        started_at = datetime.now(ZoneInfo("America/Chicago"))
+        try:
+            _sync_ads_data()
+            _write_sync_log("ads_sync", started_at, "SUCCESS")
+            logger.info(f"Scheduled ads sync completed")
+        except Exception as e:
+            _write_sync_log("ads_sync", started_at, "FAILED", error=str(e))
+            logger.error(f"Scheduled ads sync failed: {e}")
+    finally:
+        _scheduler_locks["ads"].release()
 
 
 def _run_scheduled_pricing_sync():
-    """Wrapper for scheduled pricing sync with logging."""
-    started_at = datetime.now(ZoneInfo("America/Chicago"))
+    """Wrapper for scheduled pricing sync with logging and scheduler-level mutex."""
+    if not _scheduler_locks["pricing"].acquire(blocking=False):
+        logger.warning("Skipping scheduled pricing sync — previous run still active")
+        return
     try:
-        _sync_pricing_and_coupons()
-        _write_sync_log("pricing_sync", started_at, "SUCCESS")
-        logger.info(f"Scheduled pricing sync completed")
-    except Exception as e:
-        _write_sync_log("pricing_sync", started_at, "FAILED", error=str(e))
-        logger.error(f"Scheduled pricing sync failed: {e}")
+        started_at = datetime.now(ZoneInfo("America/Chicago"))
+        try:
+            _sync_pricing_and_coupons()
+            _write_sync_log("pricing_sync", started_at, "SUCCESS")
+            logger.info(f"Scheduled pricing sync completed")
+        except Exception as e:
+            _write_sync_log("pricing_sync", started_at, "FAILED", error=str(e))
+            logger.error(f"Scheduled pricing sync failed: {e}")
+    finally:
+        _scheduler_locks["pricing"].release()
 
 
 def _run_scheduled_docs_update():
-    """Wrapper for scheduled docs update with logging. (Placeholder)"""
-    started_at = datetime.now(ZoneInfo("America/Chicago"))
+    """Wrapper for scheduled docs update with logging and scheduler-level mutex. (Placeholder)"""
+    if not _scheduler_locks["docs"].acquire(blocking=False):
+        logger.warning("Skipping scheduled docs update — previous run still active")
+        return
     try:
-        logger.info("Docs update job started (placeholder)")
-        _write_sync_log("docs_update", started_at, "SUCCESS")
-        _log_docs_update("completed", documents_updated="architecture_guide.md, disaster_recovery_plan.md", execution_time=0)
-        logger.info("Scheduled docs update completed")
-    except Exception as e:
-        _write_sync_log("docs_update", started_at, "FAILED", error=str(e))
-        _log_docs_update("failed", error_message=str(e), execution_time=0)
-        logger.error(f"Scheduled docs update failed: {e}")
+        started_at = datetime.now(ZoneInfo("America/Chicago"))
+        try:
+            logger.info("Docs update job started (placeholder)")
+            _write_sync_log("docs_update", started_at, "SUCCESS")
+            _log_docs_update("completed", documents_updated="architecture_guide.md, disaster_recovery_plan.md", execution_time=0)
+            logger.info("Scheduled docs update completed")
+        except Exception as e:
+            _write_sync_log("docs_update", started_at, "FAILED", error=str(e))
+            _log_docs_update("failed", error_message=str(e), execution_time=0)
+            logger.error(f"Scheduled docs update failed: {e}")
+    finally:
+        _scheduler_locks["docs"].release()
 
 
 def _run_scheduled_analytics_rollup():
-    """Wrapper for scheduled analytics rollup with logging."""
-    started_at = datetime.now(ZoneInfo("America/Chicago"))
+    """Wrapper for scheduled analytics rollup with logging and scheduler-level mutex."""
+    if not _scheduler_locks["analytics"].acquire(blocking=False):
+        logger.warning("Skipping scheduled analytics rollup — previous run still active")
+        return
     try:
-        result = run_full_rollup()
-        _write_sync_log("analytics_rollup", started_at, "SUCCESS",
-                        inserted=(result.get("daily_rows", 0) + result.get("sku_rows", 0)))
-        logger.info(f"Scheduled analytics rollup completed: {result}")
-    except Exception as e:
-        _write_sync_log("analytics_rollup", started_at, "FAILED", error=str(e))
-        logger.error(f"Scheduled analytics rollup failed: {e}")
+        started_at = datetime.now(ZoneInfo("America/Chicago"))
+        try:
+            result = run_full_rollup()
+            _write_sync_log("analytics_rollup", started_at, "SUCCESS",
+                            inserted=(result.get("daily_rows", 0) + result.get("sku_rows", 0)))
+            logger.info(f"Scheduled analytics rollup completed: {result}")
+        except Exception as e:
+            _write_sync_log("analytics_rollup", started_at, "FAILED", error=str(e))
+            logger.error(f"Scheduled analytics rollup failed: {e}")
+    finally:
+        _scheduler_locks["analytics"].release()
 
 
 def _run_duckdb_backup():
-    """Nightly backup: Google Drive (full DB) then GitHub (manifest + docs)."""
+    """Nightly backup: Google Drive (full DB) then GitHub (manifest + docs). Scheduler-level mutex."""
+    if not _scheduler_locks["backup"].acquire(blocking=False):
+        logger.warning("Skipping scheduled backup — previous run still active")
+        return
+    try:
+        _run_duckdb_backup_inner()
+    finally:
+        _scheduler_locks["backup"].release()
+
+
+def _run_duckdb_backup_inner():
+    """Actual backup logic — called inside mutex."""
     chicago = ZoneInfo("America/Chicago")
 
     # ── Google Drive backup ──
