@@ -141,7 +141,7 @@ export default function ItemMaster() {
 
   // Load untagged ASINs from DuckDB item_master
   useEffect(() => {
-    fetch("/api/item-master/untagged")
+    fetch("/api/item-master/untagged", { credentials: "include" })
       .then(r => r.json())
       .then(d => setUntaggedItems(d.items || []))
       .catch(() => {});
@@ -150,18 +150,18 @@ export default function ItemMaster() {
   const handleSeedItemMaster = async () => {
     setSeeding(true);
     try {
-      const r = await fetch("/api/item-master/seed", { method: "POST" });
+      const r = await fetch("/api/item-master/seed", { method: "POST", credentials: "include" });
       const d = await r.json();
       alert(`Seeded ${d.inserted} new ASINs into item_master (${d.existing} already existed)`);
       // Refresh untagged list
-      fetch("/api/item-master/untagged").then(r => r.json()).then(d => setUntaggedItems(d.items || [])).catch(() => {});
+      fetch("/api/item-master/untagged", { credentials: "include" }).then(r => r.json()).then(d => setUntaggedItems(d.items || [])).catch(() => {});
     } catch (e) { alert("Seed failed: " + e.message); }
     setSeeding(false);
   };
 
   const handleSetDivisionTag = async (asin, div) => {
     try {
-      await fetch(`/api/item-master/${asin}/division`, {
+      await fetch(`/api/item-master/${asin}/division`, { credentials: "include",
         method: "PUT",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ division: div }),
@@ -175,7 +175,7 @@ export default function ItemMaster() {
     if (!asins.length) return;
     if (!confirm(`Set ALL ${asins.length} untagged ASINs to "${div}"?`)) return;
     try {
-      await fetch("/api/item-master/bulk-set-division", {
+      await fetch("/api/item-master/bulk-set-division", { credentials: "include",
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ asins, division: div }),
@@ -187,7 +187,7 @@ export default function ItemMaster() {
   const handlePropagate = async () => {
     setPropagating(true);
     try {
-      const r = await fetch("/api/item-master/propagate-division", { method: "POST" });
+      const r = await fetch("/api/item-master/propagate-division", { method: "POST", credentials: "include" });
       const d = await r.json();
       const summary = Object.entries(d.updated || {}).map(([t, n]) => `${t}: ${n}`).join(", ");
       alert(`Division tags propagated to all historical data!\n${summary}`);

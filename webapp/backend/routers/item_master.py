@@ -618,7 +618,7 @@ def item_master_untagged():
             con.execute("ALTER TABLE item_master ADD COLUMN customer VARCHAR")
 
         rows = con.execute(
-            "SELECT asin, sku, product_name, customer FROM item_master WHERE division IS NULL OR division = '' ORDER BY sku"
+            "SELECT asin, sku, product_name, customer FROM item_master WHERE division IS NULL OR division = '' OR division = 'unknown' ORDER BY sku"
         ).fetchall()
         items = [
             {"asin": r[0], "sku": r[1], "productName": r[2], "customer": r[3]}
