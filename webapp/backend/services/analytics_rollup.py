@@ -21,6 +21,20 @@ def run_daily_rollup(con, target_date: date = None):
 
     now = datetime.now(ZoneInfo("America/Chicago"))
 
+    # Check if required tables exist with hierarchy columns
+    try:
+        tables = [r[0] for r in con.execute("SHOW TABLES").fetchall()]
+        if 'orders' not in tables or 'analytics_daily' not in tables:
+            logger.warning(f"Daily rollup skipped: missing tables. Have: {tables}")
+            return 0
+        cols = [r[0] for r in con.execute("DESCRIBE orders").fetchall()]
+        if 'division' not in cols:
+            logger.warning("Daily rollup skipped: orders table missing division column")
+            return 0
+    except Exception as e:
+        logger.warning(f"Daily rollup check failed: {e}")
+        return 0
+
     # Get all division+customer combinations that had activity on this date
     # Pull from orders (units + revenue)
     orders_data = con.execute("""
@@ -100,6 +114,15 @@ def run_sku_rollup(con, period: str = 'last_30d'):
     days = period_days.get(period, 30)
     cutoff = (now - timedelta(days=days)).date()
 
+    # Check if required tables exist
+    try:
+        tables = [r[0] for r in con.execute("SHOW TABLES").fetchall()]
+        if 'item_master' not in tables or 'daily_sales' not in tables:
+            logger.warning(f"SKU rollup skipped: missing tables. Have: {tables}")
+            return 0
+    except Exception:
+        pass
+
     sku_data = con.execute("""
         SELECT
             ds.asin,
@@ -152,8 +175,16 @@ def _has_hierarchy_columns(con, table: str) -> bool:
 
 def run_full_rollup():
     """Run all rollups. Called by scheduler nightly at 2:30am Central."""
-    from core.database import get_db
-    con = get_db()
+    db_path = str(DB_PATH)
+    logger.info(f"Starting full rollup, DB_PATH={db_path}")
+    con = duckdb.connect(db_path, read_only=False)
+    # Verify we have the right database
+    try:
+        tables = [r[0] for r in con.execute("SHOW TABLES").fetchall()]
+        logger.info(f"Tables in DB: {tables}")
+    except Exception as e:
+        logger.error(f"Cannot list tables: {e}")
+        tables = []
     try:
         # Check if hierarchy columns exist — if not, run migration first
         if not _has_hierarchy_columns(con, 'orders'):
