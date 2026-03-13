@@ -5,6 +5,7 @@ All paths, environment variables, constants, and user/tab data defined here.
 
 import os
 import logging
+import secrets
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
@@ -98,6 +99,25 @@ EMAIL_TO_USER = {}
 for _ukey, _udata in USERS.items():
     for _em in _udata["emails"]:
         EMAIL_TO_USER[_em.lower()] = _ukey
+
+# ── Google SSO Configuration ──────────────────────────────
+GOOGLE_CLIENT_ID = os.environ.get("GOOGLE_CLIENT_ID", "")
+GOOGLE_CLIENT_SECRET = os.environ.get("GOOGLE_CLIENT_SECRET", "")
+GOOGLE_REDIRECT_URI = os.environ.get("GOOGLE_REDIRECT_URI", "")  # e.g. https://your-app.up.railway.app/api/auth/google/callback
+SESSION_SECRET = os.environ.get("SESSION_SECRET", secrets.token_hex(32))
+
+# Whitelisted emails allowed to login via Google SSO (case-insensitive)
+ALLOWED_SSO_EMAILS = {em.lower() for em in [
+    "eric@golfgen.com",
+    "eric@egbrands.com",
+    "ty@golfgen.com",
+    "kim@golfgen.com",
+    "riseecom21@gmail.com",
+]}
+
+# Session timeouts
+SESSION_MAX_AGE_HOURS = 18       # Absolute session lifetime
+SESSION_IDLE_TIMEOUT_HOURS = 2   # Expire after inactivity
 
 # ── Financial Year Configuration ──────────────────────────
 # Month through which we have complete historical data (for syncing and backfilling)

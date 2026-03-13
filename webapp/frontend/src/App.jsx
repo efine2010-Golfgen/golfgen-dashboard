@@ -18,6 +18,7 @@ import Permissions from "./pages/Permissions";
 import System from "./pages/System";
 import MfaSetup from "./pages/MfaSetup";
 import MfaVerify from "./pages/MfaVerify";
+import AuditLog from "./pages/AuditLog";
 import HierarchyFilter from "./components/HierarchyFilter";
 import "./App.css";
 
@@ -314,6 +315,9 @@ export default function App() {
                   ) : (
                     <span className="header-grid-btn header-grid-btn-hidden"></span>
                   )}
+                  {isAdmin && (
+                    <a href="/audit-log" className="header-grid-btn">Audit Log</a>
+                  )}
                   <button className="header-grid-btn header-grid-btn-signout" onClick={handleLogout}>Sign Out</button>
                 </div>
                 <div className="live-badge-row">
@@ -346,6 +350,7 @@ export default function App() {
             <Route path="/account/security/mfa-setup" element={<MfaSetup />} />
             {isAdmin && <Route path="/permissions" element={<Permissions />} />}
             {isAdmin && <Route path="/system" element={<System />} />}
+            {isAdmin && <Route path="/audit-log" element={<AuditLog />} />}
             <Route path="*" element={<Navigate to="/" replace />} />
           </Routes>
         </main>

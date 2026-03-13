@@ -43,6 +43,30 @@ def _init_auth_tables():
             PRIMARY KEY (user_name, tab_key)
         )
     """)
+    # Add session timeout columns if missing
+    try:
+        con.execute("ALTER TABLE sessions ADD COLUMN last_active_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP")
+    except Exception:
+        pass  # Column already exists
+    try:
+        con.execute("ALTER TABLE sessions ADD COLUMN login_method TEXT DEFAULT 'password'")
+    except Exception:
+        pass
+
+    # ── Audit log table ──────────────────────────────────────
+    con.execute("""
+        CREATE TABLE IF NOT EXISTS audit_log (
+            id          INTEGER,
+            ts          TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            user_email  TEXT,
+            user_name   TEXT,
+            action      TEXT NOT NULL,
+            detail      TEXT,
+            ip_address  TEXT,
+            path        TEXT
+        )
+    """)
+
     # Seed default permissions for staff users (all enabled)
     for ukey, udata in USERS.items():
         if udata["role"] == "staff":
