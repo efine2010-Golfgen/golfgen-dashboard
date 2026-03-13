@@ -403,6 +403,207 @@ def backfill_historical(
     }
 
 
+@router.post("/api/sync/backfill-orders")
+async def backfill_orders(
+    request: Request,
+    days: int = Query(90, description="How many days back to backfill")
+):
+    """Backfill historical orders using the Orders API.
+
+    Pulls ALL orders from the specified number of days back to today,
+    inserts them into the orders table, and re-aggregates daily_sales
+    for any days where the Orders API revenue exceeds existing data.
+    This fills the gap where the orders table only had recent data.
+    """
+    from core.auth import get_session
+    from services.sp_api import _load_sp_api_credentials
+
+    token = request.cookies.get("golfgen_session")
+    sess = get_session(token)
+    if not sess:
+        from fastapi import HTTPException
+        raise HTTPException(status_code=401, detail="Not authenticated")
+
+    try:
+        from sp_api.api import Orders as OrdersAPI
+        from sp_api.base import Marketplaces
+        import time as _t
+    except ImportError:
+        return {"error": "SP-API library not installed"}
+
+    credentials = _load_sp_api_credentials()
+    if not credentials:
+        return {"error": "No SP-API credentials configured"}
+
+    now_utc = datetime.now(ZoneInfo("UTC"))
+    after_date = (now_utc - timedelta(days=days)).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+    logger.info(f"Order backfill: pulling orders from last {days} days...")
+
+    orders_api = OrdersAPI(credentials=credentials, marketplace=Marketplaces.US)
+
+    # Fetch all orders with pagination
+    all_orders = []
+    try:
+        response = orders_api.get_orders(
+            CreatedAfter=after_date,
+            MarketplaceIds=["ATVPDKIKX0DER"],
+            MaxResultsPerPage=100
+        )
+        all_orders.extend(response.payload.get("Orders", []))
+        next_token = response.payload.get("NextToken")
+
+        page = 1
+        while next_token and page < 50:
+            page += 1
+            _t.sleep(1)
+            try:
+                next_resp = orders_api.get_orders(
+                    NextToken=next_token,
+                    MarketplaceIds=["ATVPDKIKX0DER"],
+                )
+                all_orders.extend(next_resp.payload.get("Orders", []))
+                next_token = next_resp.payload.get("NextToken")
+            except Exception as e:
+                logger.warning(f"Order backfill pagination error page {page}: {e}")
+                break
+    except Exception as e:
+        return {"error": f"Orders API call failed: {e}"}
+
+    logger.info(f"Order backfill: got {len(all_orders)} orders total")
+
+    # Insert all orders into the orders table
+    con = duckdb.connect(str(DB_PATH), read_only=False)
+    inserted = 0
+    for order in all_orders:
+        try:
+            order_total = order.get("OrderTotal", {})
+            con.execute("""
+                INSERT OR REPLACE INTO orders
+                (order_id, purchase_date, order_status, fulfillment_channel,
+                 sales_channel, order_total, currency_code, number_of_items,
+                 ship_city, ship_state, ship_postal_code,
+                 is_business_order, is_prime)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """, [
+                order.get("AmazonOrderId"),
+                order.get("PurchaseDate"),
+                order.get("OrderStatus"),
+                order.get("FulfillmentChannel"),
+                order.get("SalesChannel"),
+                float(order_total.get("Amount", 0)) if order_total else 0,
+                order_total.get("CurrencyCode", "USD") if order_total else "USD",
+                order.get("NumberOfItemsShipped", 0) + order.get("NumberOfItemsUnshipped", 0),
+                order.get("ShippingAddress", {}).get("City", ""),
+                order.get("ShippingAddress", {}).get("StateOrRegion", ""),
+                order.get("ShippingAddress", {}).get("PostalCode", ""),
+                order.get("IsBusinessOrder", False),
+                order.get("IsPrime", False),
+            ])
+            inserted += 1
+        except Exception as e:
+            logger.warning(f"Order insert error: {e}")
+
+    # Now fetch item-level detail for orders to get accurate revenue
+    # Group orders by day for daily_sales aggregation
+    from collections import defaultdict
+    daily_agg = defaultdict(lambda: {"revenue": 0.0, "units": 0, "orders": 0})
+    items_fetched = 0
+    burst_count = 0
+
+    for order in all_orders:
+        status = order.get("OrderStatus", "")
+        if status in ("Canceled", "Cancelled"):
+            continue
+
+        purchase_date = order.get("PurchaseDate", "")
+        if not purchase_date:
+            continue
+        try:
+            if "T" in purchase_date:
+                dt = datetime.fromisoformat(purchase_date.replace("Z", "+00:00"))
+                dt = dt.astimezone(ZoneInfo("America/Chicago"))
+                day_str = dt.strftime("%Y-%m-%d")
+            else:
+                day_str = purchase_date[:10]
+        except Exception:
+            day_str = purchase_date[:10]
+
+        order_id = order.get("AmazonOrderId", "")
+        total_from_items = 0.0
+        total_qty = 0
+
+        # Try to get item-level detail
+        try:
+            items_resp = orders_api.get_order_items(order_id)
+            item_list = items_resp.payload.get("OrderItems", [])
+            for item in item_list:
+                qty = int(item.get("QuantityOrdered", 0) or 0)
+                price = item.get("ItemPrice")
+                item_amount = 0.0
+                if price and isinstance(price, dict):
+                    try:
+                        item_amount = float(price.get("Amount", "0"))
+                    except (ValueError, TypeError):
+                        pass
+                total_from_items += item_amount
+                total_qty += qty
+            items_fetched += 1
+            burst_count += 1
+            if burst_count > 25:
+                _t.sleep(2.0)
+        except Exception:
+            # Fall back to OrderTotal
+            order_total = order.get("OrderTotal", {})
+            total_from_items = float(order_total.get("Amount", 0)) if order_total else 0
+            total_qty = order.get("NumberOfItemsShipped", 0) + order.get("NumberOfItemsUnshipped", 0)
+            if "throttl" in str(order_id).lower():
+                _t.sleep(5.0)
+
+        daily_agg[day_str]["revenue"] += total_from_items
+        daily_agg[day_str]["units"] += total_qty
+        daily_agg[day_str]["orders"] += 1
+
+    # Write daily aggregates — only update if Orders API data is better
+    days_updated = 0
+    now_central = datetime.now(ZoneInfo("America/Chicago"))
+    today_str = now_central.strftime("%Y-%m-%d")
+    yesterday_str = (now_central - timedelta(days=1)).strftime("%Y-%m-%d")
+
+    for day_str in sorted(daily_agg.keys()):
+        agg = daily_agg[day_str]
+        if agg["revenue"] <= 0:
+            continue
+        existing = con.execute(
+            "SELECT ordered_product_sales FROM daily_sales WHERE date = ? AND asin = 'ALL'",
+            [day_str]
+        ).fetchone()
+        existing_rev = float(existing[0]) if existing and existing[0] else 0.0
+
+        is_recent = day_str in (today_str, yesterday_str)
+        if is_recent or agg["revenue"] >= existing_rev:
+            con.execute("""
+                INSERT OR REPLACE INTO daily_sales
+                (date, asin, units_ordered, ordered_product_sales,
+                 sessions, session_percentage, page_views,
+                 buy_box_percentage, unit_session_percentage)
+                VALUES (?, 'ALL', ?, ?, 0, 0, 0, 0, 0)
+            """, [day_str, agg["units"], agg["revenue"]])
+            days_updated += 1
+
+    con.close()
+    logger.info(f"Order backfill complete: {inserted} orders, {items_fetched} items fetched, {days_updated} days updated")
+
+    return {
+        "status": "done",
+        "orders_found": len(all_orders),
+        "orders_inserted": inserted,
+        "items_fetched": items_fetched,
+        "days_updated": days_updated,
+        "date_range": f"{after_date[:10]} to {today_str}",
+    }
+
+
 @router.get("/api/system/status")
 async def get_system_status(request: Request):
     """Get system status including last sync times, scheduler status, and recent logs."""
@@ -601,69 +802,6 @@ async def github_backup_status(request: Request):
     return _get_gh_status()
 
 
-# ── Unauthenticated backup endpoints (token-based for Railway cron / manual curl) ──
-
-def _check_backup_token(request: Request) -> bool:
-    """Validate backup trigger token from query param or header."""
-    import os
-    expected = os.environ.get("GITHUB_TOKEN", "")[:16]  # first 16 chars as simple secret
-    token = request.query_params.get("token", "") or request.headers.get("X-Backup-Token", "")
-    return token == expected and bool(expected)
-
-
-@router.post("/api/backup/run")
-async def run_full_backup(request: Request):
-    """Trigger both Google Drive + GitHub backup. Token-authenticated for cron/curl use.
-
-    Usage:
-      curl -X POST 'https://<domain>/api/backup/run?token=<first-16-chars-of-GITHUB_TOKEN>'
-    """
-    if not _check_backup_token(request):
-        from fastapi import HTTPException
-        raise HTTPException(status_code=401, detail="Invalid or missing backup token")
-
-    from core.scheduler import _run_duckdb_backup
-    loop = asyncio.get_event_loop()
-    await loop.run_in_executor(None, _run_duckdb_backup)
-    return {
-        "status": "backup_complete",
-        "message": "Google Drive + GitHub backup completed",
-        "triggered_by": "manual_api",
-    }
-
-
-@router.get("/api/backup/run-status")
-async def backup_run_status(request: Request):
-    """Get combined backup status (no auth required — read-only, no secrets exposed)."""
-    result = {"gdrive": {}, "github": {}}
-
-    try:
-        con = duckdb.connect(str(DB_PATH), read_only=False)
-        for job_name, key in [("nightly_backup_gdrive", "gdrive"), ("nightly_backup_github", "github")]:
-            row = con.execute("""
-                SELECT started_at, completed_at, status, records_processed, error_message
-                FROM sync_log
-                WHERE job_name = ?
-                ORDER BY started_at DESC
-                LIMIT 1
-            """, [job_name]).fetchone()
-            if row:
-                result[key] = {
-                    "last_run": str(row[0])[:19] if row[0] else None,
-                    "completed": str(row[1])[:19] if row[1] else None,
-                    "status": row[2],
-                    "records": row[3] or 0,
-                    "error": row[4],
-                }
-            else:
-                result[key] = {"status": "NEVER_RUN", "last_run": None}
-        con.close()
-    except Exception as e:
-        result["error"] = str(e)
-
-    return result
-
-
 @router.post("/api/docs/update")
 async def trigger_docs_update(request: Request):
     """Manually trigger a docs update."""
@@ -775,308 +913,3 @@ async def get_disaster_recovery_doc(request: Request):
             "content": "Disaster recovery plan not yet generated. Run /api/docs/update to generate.",
             "last_updated": None
         }
-
-
-@router.get("/api/debug/db-query")
-def debug_db_query(sql: str = Query(..., description="Read-only SQL query")):
-    """Run a read-only SQL query against the database for debugging."""
-    # Only allow SELECT queries
-    cleaned = sql.strip().upper()
-    if not cleaned.startswith("SELECT"):
-        return {"error": "Only SELECT queries allowed"}
-    try:
-        con = duckdb.connect(str(DB_PATH), read_only=False)
-        rows = con.execute(sql).fetchall()
-        cols = [desc[0] for desc in con.description]
-        con.close()
-        return {"columns": cols, "rows": [list(r) for r in rows[:500]], "count": len(rows)}
-    except Exception as e:
-        return {"error": str(e)}
-
-
-@router.post("/api/backfill/financial-events")
-def backfill_financial_events(
-    days: int = Query(90, description="How many days back to pull"),
-    delay: float = Query(1.5, description="Seconds between API pages"),
-):
-    """Pull ALL financial events with rate-limit-safe pacing.
-    
-    Unlike the regular sync (capped at 50 pages), this endpoint paginates
-    until there are no more pages, with a configurable delay between calls.
-    Also resolves SKU→ASIN using fba_inventory mapping.
-    """
-    import time as _time
-    import traceback as tb
-    try:
-        from sp_api.api import Finances as FinancesAPI
-        from sp_api.base import Marketplaces as _Mp
-        from services.sp_api import _load_sp_api_credentials
-
-        creds = _load_sp_api_credentials()
-        if not creds:
-            return {"error": "No SP-API credentials"}
-
-        fin_start = (datetime.utcnow() - timedelta(days=days)).strftime("%Y-%m-%dT%H:%M:%SZ")
-        finances = FinancesAPI(credentials=creds, marketplace=_Mp.US)
-
-        all_shipment_events = []
-        all_refund_events = []
-        page = 0
-        next_token = None
-        errors = []
-        date_range = {"min": None, "max": None}
-
-        while True:
-            page += 1
-            kwargs = {"PostedAfter": fin_start, "MaxResultsPerPage": 100}
-            if next_token:
-                kwargs["NextToken"] = next_token
-
-            try:
-                resp = finances.list_financial_events(**kwargs)
-            except Exception as api_err:
-                err_str = str(api_err)
-                errors.append(f"Page {page}: {err_str}")
-                if "QuotaExceeded" in err_str or "TooManyRequests" in err_str or "throttl" in err_str.lower():
-                    logger.warning(f"  Backfill throttled at page {page}, waiting 30s...")
-                    _time.sleep(30)
-                    try:
-                        resp = finances.list_financial_events(**kwargs)
-                    except Exception as retry_err:
-                        errors.append(f"Page {page} retry: {str(retry_err)}")
-                        break
-                else:
-                    break
-
-            payload = resp.payload if hasattr(resp, 'payload') else (resp if isinstance(resp, dict) else {})
-            events = payload.get("FinancialEvents", {})
-
-            shipments = events.get("ShipmentEventList", []) or []
-            refunds = events.get("RefundEventList", []) or []
-            adjustments = events.get("AdjustmentEventList", []) or []
-
-            all_shipment_events.extend(shipments)
-            all_refund_events.extend(refunds)
-            for adj in adjustments:
-                adj_type = adj.get("AdjustmentType", "") if isinstance(adj, dict) else getattr(adj, "AdjustmentType", "")
-                if any(kw in str(adj_type or "").lower() for kw in ("return", "refund", "reversal")):
-                    all_refund_events.append(adj)
-
-            # Track date range
-            for ev in (shipments + refunds):
-                pd_val = ev.get("PostedDate", "") if isinstance(ev, dict) else getattr(ev, "PostedDate", "")
-                pd_str = str(pd_val)[:10] if pd_val else ""
-                if pd_str:
-                    if not date_range["min"] or pd_str < date_range["min"]:
-                        date_range["min"] = pd_str
-                    if not date_range["max"] or pd_str > date_range["max"]:
-                        date_range["max"] = pd_str
-
-            logger.info(f"  Backfill page {page}: {len(shipments)}S + {len(refunds)}R (total: {len(all_shipment_events)}S + {len(all_refund_events)}R)")
-
-            next_token = payload.get("NextToken")
-            if not next_token:
-                break
-
-            # Rate-limit pacing
-            _time.sleep(delay)
-
-        logger.info(f"  Backfill complete: {page} pages, {len(all_shipment_events)} shipments, {len(all_refund_events)} refunds")
-
-        # ── Now write to DB ──
-        con = duckdb.connect(str(DB_PATH), read_only=False)
-
-        # Build SKU→ASIN mapping
-        sku_to_asin = {}
-        try:
-            inv_rows = con.execute("SELECT sku, asin FROM fba_inventory WHERE sku IS NOT NULL AND asin IS NOT NULL").fetchall()
-            for r in inv_rows:
-                if r[0] and r[1]:
-                    sku_to_asin[r[0]] = r[1]
-                    base = r[0].rsplit("-", 1)[0] if "-" in r[0] else r[0]
-                    if base not in sku_to_asin:
-                        sku_to_asin[base] = r[1]
-        except Exception:
-            pass
-
-        # Clear old data
-        cutoff_date = (datetime.utcnow() - timedelta(days=days)).strftime("%Y-%m-%d")
-        con.execute("DELETE FROM financial_events WHERE date >= ?", [cutoff_date])
-
-        # Helpers from sp_api.py
-        def _safe_get(obj, key, default=None):
-            if obj is None: return default
-            if isinstance(obj, dict): return obj.get(key, default)
-            return getattr(obj, key, default)
-
-        def _money(amt_obj):
-            if amt_obj is None: return 0.0
-            if isinstance(amt_obj, dict):
-                return float(amt_obj.get("CurrencyAmount", amt_obj.get("Amount", 0)) or 0)
-            if hasattr(amt_obj, "CurrencyAmount"):
-                try: return float(amt_obj.CurrencyAmount or 0)
-                except: pass
-            if hasattr(amt_obj, "Amount"):
-                try: return float(amt_obj.Amount or 0)
-                except: pass
-            try: return float(amt_obj)
-            except: return 0.0
-
-        def _posted_date_str(pd_val):
-            if pd_val is None: return None
-            if isinstance(pd_val, str): return pd_val[:10]
-            if hasattr(pd_val, 'strftime'): return pd_val.strftime("%Y-%m-%d")
-            return str(pd_val)[:10]
-
-        fin_records = 0
-        # Process shipments
-        for event in all_shipment_events:
-            order_id = _safe_get(event, "AmazonOrderId", "")
-            date_str = _posted_date_str(_safe_get(event, "PostedDate", ""))
-            for item in (_safe_get(event, "ShipmentItemList") or []):
-                sku = _safe_get(item, "SellerSKU", "")
-                asin_val = _safe_get(item, "ASIN") or sku_to_asin.get(sku, sku)
-                product_charges = shipping_ch = 0.0
-                for c in (_safe_get(item, "ItemChargeList") or []):
-                    val = _money(_safe_get(c, "ChargeAmount"))
-                    ct = _safe_get(c, "ChargeType", "")
-                    if ct == "Principal": product_charges += val
-                    elif ct in ("ShippingCharge", "Shipping"): shipping_ch += val
-                fba_fees_val = commission_val = other_val = 0.0
-                for f in (_safe_get(item, "ItemFeeList") or []):
-                    val = abs(_money(_safe_get(f, "FeeAmount")))
-                    ft = _safe_get(f, "FeeType", "")
-                    if "FBA" in ft or "Fulfillment" in ft: fba_fees_val += val
-                    elif ft in ("Commission", "ReferralFee"): commission_val += val
-                    else: other_val += val
-                promo_val = 0.0
-                for p in (_safe_get(item, "PromotionList") or []):
-                    promo_val += _money(_safe_get(p, "PromotionAmount"))
-                net = product_charges + shipping_ch - fba_fees_val - commission_val + promo_val
-                try:
-                    con.execute("""INSERT INTO financial_events
-                        (date, asin, sku, order_id, event_type, product_charges, shipping_charges,
-                         fba_fees, commission, promotion_amount, other_fees, net_proceeds)
-                        VALUES (?,?,?,?,?,?,?,?,?,?,?,?)""",
-                        [date_str, asin_val, sku, order_id, "Shipment",
-                         product_charges, shipping_ch, fba_fees_val, commission_val, promo_val, other_val, net])
-                    fin_records += 1
-                except Exception:
-                    pass
-
-        # Process refunds
-        for event in all_refund_events:
-            order_id = _safe_get(event, "AmazonOrderId", "")
-            date_str = _posted_date_str(_safe_get(event, "PostedDate", ""))
-            item_list = (_safe_get(event, "ShipmentItemAdjustmentList")
-                        or _safe_get(event, "ShipmentItemList")
-                        or _safe_get(event, "AdjustmentItemList") or [])
-            for item in item_list:
-                sku = _safe_get(item, "SellerSKU", "")
-                asin_val = _safe_get(item, "ASIN") or sku_to_asin.get(sku, sku)
-                refund_amount = refund_fba = refund_comm = refund_other = 0.0
-                for c in (_safe_get(item, "ItemChargeAdjustmentList") or _safe_get(item, "ItemChargeList") or []):
-                    val = _money(_safe_get(c, "ChargeAmount"))
-                    ct = _safe_get(c, "ChargeType", "")
-                    if ct == "Principal": refund_amount += val
-                for f in (_safe_get(item, "ItemFeeAdjustmentList") or _safe_get(item, "ItemFeeList") or []):
-                    val = abs(_money(_safe_get(f, "FeeAmount")))
-                    ft = _safe_get(f, "FeeType", "")
-                    if "FBA" in ft or "Fulfillment" in ft: refund_fba += val
-                    elif ft in ("Commission", "ReferralFee"): refund_comm += val
-                    else: refund_other += val
-                net = refund_amount - refund_fba - refund_comm
-                try:
-                    con.execute("""INSERT INTO financial_events
-                        (date, asin, sku, order_id, event_type, product_charges, shipping_charges,
-                         fba_fees, commission, promotion_amount, other_fees, net_proceeds)
-                        VALUES (?,?,?,?,?,?,?,?,?,?,?,?)""",
-                        [date_str, asin_val, sku, order_id, "Refund",
-                         refund_amount, 0, refund_fba, refund_comm, 0, refund_other, net])
-                    fin_records += 1
-                except Exception:
-                    pass
-
-        con.close()
-
-        return {
-            "status": "complete",
-            "pages_fetched": page,
-            "total_shipments": len(all_shipment_events),
-            "total_refunds": len(all_refund_events),
-            "records_inserted": fin_records,
-            "date_range": date_range,
-            "delay_per_page": delay,
-            "errors": errors,
-        }
-    except Exception as e:
-        return {"error": str(e), "traceback": tb.format_exc()}
-
-
-@router.get("/api/debug/fin-events-live")
-def debug_fin_events_live():
-    """Call Finances API directly and return summary of what it finds."""
-    import traceback as tb
-    try:
-        from sp_api.api import Finances as FinancesAPI
-        from sp_api.base import Marketplaces as _Mp
-
-        # Use same credential loading as sp_api.py
-        from services.sp_api import _load_sp_api_credentials
-        creds = _load_sp_api_credentials()
-        if not creds:
-            return {"error": "No SP-API credentials"}
-
-        fin_start = (datetime.utcnow() - timedelta(days=90)).strftime("%Y-%m-%dT%H:%M:%SZ")
-        finances = FinancesAPI(credentials=creds, marketplace=_Mp.US)
-
-        all_shipments = 0
-        all_refunds = 0
-        pages = 0
-        next_token = None
-        sample_dates = []
-        errors = []
-
-        while pages < 5:
-            pages += 1
-            kwargs = {"PostedAfter": fin_start, "MaxResultsPerPage": 100}
-            if next_token:
-                kwargs["NextToken"] = next_token
-
-            try:
-                resp = finances.list_financial_events(**kwargs)
-            except Exception as e:
-                errors.append(f"Page {pages}: {str(e)}")
-                break
-
-            payload = resp.payload if hasattr(resp, 'payload') else (resp if isinstance(resp, dict) else {})
-            events = payload.get("FinancialEvents", {})
-            shipments = events.get("ShipmentEventList", []) or []
-            refunds = events.get("RefundEventList", []) or []
-
-            all_shipments += len(shipments)
-            all_refunds += len(refunds)
-
-            # Get sample dates from first few events
-            for s in shipments[:3]:
-                pd = s.get("PostedDate", "") if isinstance(s, dict) else getattr(s, "PostedDate", "")
-                sample_dates.append(f"shipment: {pd}")
-            for r in refunds[:3]:
-                pd = r.get("PostedDate", "") if isinstance(r, dict) else getattr(r, "PostedDate", "")
-                sample_dates.append(f"refund: {pd}")
-
-            next_token = payload.get("NextToken")
-            if not next_token:
-                break
-
-        return {
-            "fin_start": fin_start,
-            "pages_fetched": pages,
-            "total_shipments": all_shipments,
-            "total_refunds": all_refunds,
-            "sample_dates": sample_dates[:10],
-            "errors": errors,
-            "has_more_pages": bool(next_token),
-        }
-    except Exception as e:
-        return {"error": str(e), "traceback": tb.format_exc()}

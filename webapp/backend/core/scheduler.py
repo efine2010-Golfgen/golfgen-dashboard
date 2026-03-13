@@ -211,6 +211,9 @@ async def _sync_loop():
         scheduler.add_job(_run_scheduled_sp_api_sync, CronTrigger(hour=15, minute=0, timezone="America/Chicago"), id="sp_api_sync_3pm")
         scheduler.add_job(_run_scheduled_sp_api_sync, CronTrigger(hour=18, minute=0, timezone="America/Chicago"), id="sp_api_sync_6pm")
 
+        # Schedule today-orders sync every hour on the half-hour (fast, ~10s)
+        scheduler.add_job(_run_scheduled_today_sync, CronTrigger(minute=30, second=0, timezone="America/Chicago"), id="today_sync_hourly")
+
         # Schedule ads sync every 2 hours
         scheduler.add_job(_run_scheduled_ads_sync, CronTrigger(minute=0, second=0, timezone="America/Chicago"), id="ads_sync_hourly")
 

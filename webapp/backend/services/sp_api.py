@@ -85,9 +85,9 @@ def _sync_today_orders():
     logger.info("  Syncing today's orders (real-time)...")
     try:
         import time as _t
-        # Get orders from last 2 days to catch any we missed
+        # Get orders from last 7 days to catch delayed/pending orders
         now_utc = datetime.now(ZoneInfo("UTC"))
-        after_date = (now_utc - timedelta(days=2)).strftime("%Y-%m-%dT%H:%M:%SZ")
+        after_date = (now_utc - timedelta(days=7)).strftime("%Y-%m-%dT%H:%M:%SZ")
         orders_api = OrdersAPI(credentials=credentials, marketplace=Marketplaces.US)
         response = orders_api.get_orders(
             CreatedAfter=after_date,
@@ -111,7 +111,7 @@ def _sync_today_orders():
             except Exception:
                 break
 
-        logger.info(f"  Got {len(order_list)} orders from last 2 days")
+        logger.info(f"  Got {len(order_list)} orders from last 7 days")
 
         con = duckdb.connect(str(DB_PATH), read_only=False)
 
@@ -147,6 +147,10 @@ def _sync_today_orders():
         now_central = datetime.now(ZoneInfo("America/Chicago"))
         today_str = now_central.strftime("%Y-%m-%d")
         yesterday_str = (now_central - timedelta(days=1)).strftime("%Y-%m-%d")
+        # Build set of recent dates we want item-level detail for
+        recent_dates = set()
+        for d in range(7):
+            recent_dates.add((now_central - timedelta(days=d)).strftime("%Y-%m-%d"))
 
         # Build ASIN price lookup from historical data for fallback
         asin_prices = {}
@@ -189,7 +193,7 @@ def _sync_today_orders():
             except Exception:
                 order_day = purchase_date[:10]
 
-            if order_day not in (today_str, yesterday_str):
+            if order_day not in recent_dates:
                 continue
 
             order_id = order.get("AmazonOrderId")
@@ -280,9 +284,7 @@ def _sync_today_orders():
             daily_agg[day_str]["orders"] += 1
 
         # ── Write to daily_sales ──
-        for day_str in [today_str, yesterday_str]:
-            if day_str not in daily_agg:
-                continue
+        for day_str in sorted(daily_agg.keys()):
             agg = daily_agg[day_str]
             existing = con.execute(
                 "SELECT ordered_product_sales FROM daily_sales WHERE date = ? AND asin = 'ALL'",
@@ -290,8 +292,10 @@ def _sync_today_orders():
             ).fetchone()
             existing_rev = float(existing[0]) if existing and existing[0] else 0.0
 
-            # Only overwrite if new revenue is >= existing (never clobber good data with partial sync)
-            if agg["revenue"] >= existing_rev:
+            # For today/yesterday: always overwrite with latest Orders API data (most current)
+            # For older days: only overwrite if new revenue is higher (don't clobber Sales Report data)
+            is_recent = day_str in (today_str, yesterday_str)
+            if is_recent or agg["revenue"] >= existing_rev:
                 con.execute("""
                     INSERT OR REPLACE INTO daily_sales
                     (date, asin, units_ordered, ordered_product_sales,
@@ -299,7 +303,7 @@ def _sync_today_orders():
                      buy_box_percentage, unit_session_percentage)
                     VALUES (?, 'ALL', ?, ?, 0, 0, 0, 0, 0)
                 """, [day_str, agg["units"], agg["revenue"]])
-                logger.info(f"  {day_str}: ${agg['revenue']:.2f} rev, {agg['units']} units, {agg['orders']} orders")
+                logger.info(f"  {day_str}: ${agg['revenue']:.2f} rev, {agg['units']} units, {agg['orders']} orders (was ${existing_rev:.2f})")
 
         con.close()
 
@@ -318,16 +322,18 @@ def _sync_today_orders():
 
 
 def _ensure_today_data():
-    """If today has no data in daily_sales, do a quick Orders API pull.
+    """If today has no data or stale data, do a quick Orders API pull.
 
     Called inline by profitability/comparison endpoints so the user
-    never sees Today = $0 when Amazon has live data.
-    Throttled to at most once per 5 minutes.
+    sees the most current data available. Refreshes if:
+    - Today has no data ($0), OR
+    - Last sync was more than 30 minutes ago (data may be stale)
+    Throttled to at most once per 3 minutes.
     """
     global _last_today_sync
     import time as _time
     now = _time.time()
-    if now - _last_today_sync < 300:          # 5-minute cooldown
+    if now - _last_today_sync < 180:          # 3-minute cooldown
         return
 
     today_str = datetime.now(ZoneInfo("America/Chicago")).strftime("%Y-%m-%d")
@@ -342,8 +348,11 @@ def _ensure_today_data():
     except Exception:
         has_data = False
 
-    if not has_data:
-        logger.info(f"Today ({today_str}) has no data — triggering quick Orders API sync")
+    # Refresh if no data, OR if last sync was over 30 minutes ago
+    stale = (now - _last_today_sync) > 1800  # 30 minutes
+    if not has_data or stale:
+        reason = "no data" if not has_data else "stale (>30min)"
+        logger.info(f"Today ({today_str}) needs refresh ({reason}) — triggering Orders API sync")
         _last_today_sync = now
         _sync_today_orders()
 
@@ -415,7 +424,7 @@ def _run_sp_api_sync():
         page = 0
         next_token = None
 
-        while page < 50:
+        while page < 20:
             page += 1
             kwargs = {"PostedAfter": fin_start, "MaxResultsPerPage": 100}
             if next_token:
@@ -507,52 +516,13 @@ def _run_sp_api_sync():
             # sp_api model object — try attribute access
             return getattr(obj, key, default)
 
-        # Determine the actual date range fetched so we only clear that range
-        # (preserves backfill data for dates the regular sync doesn't reach)
-        fetched_dates = set()
-        def _extract_date(ev):
-            pd_val = ev.get("PostedDate", "") if isinstance(ev, dict) else getattr(ev, "PostedDate", "")
-            if pd_val:
-                d = str(pd_val)[:10]
-                if d and len(d) == 10:
-                    fetched_dates.add(d)
-        for ev in all_shipment_events:
-            _extract_date(ev)
-        for ev in all_refund_events:
-            _extract_date(ev)
-
-        if fetched_dates:
-            min_fetched = min(fetched_dates)
-            max_fetched = max(fetched_dates)
-            try:
-                con.execute("DELETE FROM financial_events WHERE date >= ? AND date <= ?",
-                           [min_fetched, max_fetched])
-                logger.info(f"  Cleared financial_events from {min_fetched} to {max_fetched} for re-sync (preserving data outside this range)")
-            except Exception as e:
-                logger.warning(f"  Could not clear old financial_events: {e}")
-        else:
-            logger.info("  No financial events fetched — skipping delete")
-
-        # Build SKU→ASIN mapping from fba_inventory (financial events often lack ASIN)
-        # Financial events use base SKUs (e.g. "GG2SS2226BM") while inventory has
-        # suffixed SKUs (e.g. "GG2SS2226BM-CA", "GG2SS2226BM-FBA").
-        # Build both exact and base-prefix mappings.
-        sku_to_asin = {}
+        # Clear old financial events for re-sync (avoids duplicates without needing PK)
         try:
-            sku_rows = con.execute("SELECT sku, asin FROM fba_inventory WHERE sku IS NOT NULL AND asin IS NOT NULL").fetchall()
-            for r in sku_rows:
-                inv_sku, inv_asin = r[0], r[1]
-                if not inv_sku or not inv_asin:
-                    continue
-                # Exact match
-                sku_to_asin[inv_sku] = inv_asin
-                # Also map the base SKU (strip -CA, -FBA, etc. suffixes)
-                base = inv_sku.rsplit("-", 1)[0] if "-" in inv_sku else inv_sku
-                if base and base not in sku_to_asin:
-                    sku_to_asin[base] = inv_asin
-            logger.info(f"  SKU→ASIN mapping: {len(sku_to_asin)} entries (incl. base SKUs)")
+            cutoff_date = (datetime.utcnow() - timedelta(days=90)).strftime("%Y-%m-%d")
+            con.execute("DELETE FROM financial_events WHERE date >= ?", [cutoff_date])
+            logger.info(f"  Cleared financial_events from {cutoff_date} for re-sync")
         except Exception as e:
-            logger.warning(f"  Could not build SKU→ASIN mapping: {e}")
+            logger.warning(f"  Could not clear old financial_events: {e}")
 
         # Process shipment events (sales fees)
         first_shipment_logged = False
@@ -563,7 +533,7 @@ def _run_sp_api_sync():
 
             for item in (_safe_get(event, "ShipmentItemList") or []):
                 sku = _safe_get(item, "SellerSKU", "")
-                asin_val = _safe_get(item, "ASIN") or sku_to_asin.get(sku, sku)
+                asin_val = _safe_get(item, "ASIN", sku)
 
                 product_charges = 0.0
                 shipping_ch = 0.0
@@ -644,7 +614,7 @@ def _run_sp_api_sync():
 
             for item in item_list:
                 sku = _safe_get(item, "SellerSKU", "")
-                asin_val = _safe_get(item, "ASIN") or sku_to_asin.get(sku, sku)
+                asin_val = _safe_get(item, "ASIN", sku)
 
                 refund_amount = 0.0
                 refund_fba = 0.0
