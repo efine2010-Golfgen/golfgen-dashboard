@@ -5,6 +5,7 @@ import {
 } from "recharts";
 import { api, fmt$ } from "../lib/api";
 import { CHART_COLORS as COLORS, TOOLTIP_STYLE } from "../lib/constants";
+import HierarchyFilter from "../components/HierarchyFilter";
 
 const RANGES = [
   { label: "30D", days: 30 },
@@ -58,18 +59,20 @@ export default function Dashboard() {
   const [monthlyYoY, setMonthlyYoY] = useState({ years: [], data: [] });
   const [colorData, setColorData] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [hierarchy, setHierarchy] = useState({ division: "", customer: "", platform: "" });
 
   // Load main dashboard data — each call independent so one failure doesn't kill all charts
   useEffect(() => {
     setLoading(true);
+    const h = hierarchy;
     const safe = (p, fallback) => p.catch(e => { console.error("Dashboard fetch error:", e); return fallback; });
     Promise.all([
-      safe(api.summary(days), null),
-      safe(api.daily(days, days <= 90 ? "daily" : "weekly"), { data: [] }),
+      safe(api.summary(days, h), null),
+      safe(api.daily(days, days <= 90 ? "daily" : "weekly", h), { data: [] }),
       safe(api.pnl(days), null),
-      safe(api.comparison(compView), { periods: [] }),
-      safe(api.monthlyYoY(), { years: [], data: [] }),
-      safe(api.colorMix(days), { colors: [] }),
+      safe(api.comparison(compView, h), { periods: [] }),
+      safe(api.monthlyYoY(h), { years: [], data: [] }),
+      safe(api.colorMix(days, h), { colors: [] }),
     ]).then(([s, d, p, comp, yoy, colors]) => {
       if (s) setSummary(s);
       setDaily(d?.data || []);
@@ -79,16 +82,16 @@ export default function Dashboard() {
       setColorData(colors?.colors || []);
       setLoading(false);
     }).catch(() => setLoading(false));
-  }, [days]);
+  }, [days, hierarchy]);
 
   // Load comparison data when view changes
   useEffect(() => {
     setCompLoading(true);
-    api.comparison(compView).then(comp => {
+    api.comparison(compView, hierarchy).then(comp => {
       setComparison(comp.periods || []);
       setCompLoading(false);
     }).catch(() => setCompLoading(false));
-  }, [compView]);
+  }, [compView, hierarchy]);
 
   if (loading) {
     return <div className="loading"><div className="spinner" /> Loading dashboard...</div>;
@@ -113,7 +116,10 @@ export default function Dashboard() {
     <>
       <div className="page-header">
         <h1>Dashboard</h1>
-        <p>Amazon FBA performance overview</p>
+        <div style={{ display: "flex", alignItems: "center", gap: 16, flexWrap: "wrap" }}>
+          <p style={{ margin: 0 }}>Performance overview</p>
+          <HierarchyFilter onChange={setHierarchy} compact />
+        </div>
       </div>
 
       {/* ── Period Comparison Table ──────────────────────── */}

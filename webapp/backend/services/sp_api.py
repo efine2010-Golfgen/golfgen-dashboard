@@ -123,8 +123,9 @@ def _sync_today_orders():
                 (order_id, purchase_date, order_status, fulfillment_channel,
                  sales_channel, order_total, currency_code, number_of_items,
                  ship_city, ship_state, ship_postal_code,
-                 is_business_order, is_prime)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                 is_business_order, is_prime,
+                 division, customer, platform)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'golf', 'amazon', 'sp_api')
             """, [
                 order.get("AmazonOrderId"),
                 order.get("PurchaseDate"),
@@ -301,8 +302,9 @@ def _sync_today_orders():
                     INSERT OR REPLACE INTO daily_sales
                     (date, asin, units_ordered, ordered_product_sales,
                      sessions, session_percentage, page_views,
-                     buy_box_percentage, unit_session_percentage)
-                    VALUES (?, 'ALL', ?, ?, 0, 0, 0, 0, 0)
+                     buy_box_percentage, unit_session_percentage,
+                     division, customer, platform)
+                    VALUES (?, 'ALL', ?, ?, 0, 0, 0, 0, 0, 'golf', 'amazon', 'sp_api')
                 """, [day_str, agg["units"], agg["revenue"]])
                 logger.info(f"  {day_str}: ${agg['revenue']:.2f} rev, {agg['units']} units, {agg['orders']} orders (was ${existing_rev:.2f})")
 
@@ -581,8 +583,9 @@ def _run_sp_api_sync():
                         INSERT INTO financial_events
                         (date, asin, sku, order_id, event_type,
                          product_charges, shipping_charges, fba_fees,
-                         commission, promotion_amount, other_fees, net_proceeds)
-                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                         commission, promotion_amount, other_fees, net_proceeds,
+                         division, customer, platform)
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'golf', 'amazon', 'sp_api')
                     """, [
                         date_str, asin_val, sku, order_id, "Shipment",
                         product_charges, shipping_ch,
@@ -647,8 +650,9 @@ def _run_sp_api_sync():
                         INSERT INTO financial_events
                         (date, asin, sku, order_id, event_type,
                          product_charges, shipping_charges, fba_fees,
-                         commission, promotion_amount, other_fees, net_proceeds)
-                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                         commission, promotion_amount, other_fees, net_proceeds,
+                         division, customer, platform)
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'golf', 'amazon', 'sp_api')
                     """, [
                         date_str,
                         asin_val, sku, order_id, "Refund",
@@ -688,8 +692,9 @@ def _run_sp_api_sync():
                     (date, asin, sku, product_name, condition,
                      fulfillable_quantity, inbound_working_quantity,
                      inbound_shipped_quantity, inbound_receiving_quantity,
-                     reserved_quantity, unfulfillable_quantity, total_quantity)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                     reserved_quantity, unfulfillable_quantity, total_quantity,
+                     division, customer, platform)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'golf', 'amazon', 'sp_api')
                 """, [
                     today, item.get("asin", ""),
                     item.get("sellerSku", item.get("fnSku", "")),
@@ -764,8 +769,9 @@ def _run_sp_api_sync():
                     INSERT OR REPLACE INTO daily_sales
                     (date, asin, units_ordered, ordered_product_sales,
                      sessions, session_percentage, page_views,
-                     buy_box_percentage, unit_session_percentage)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                     buy_box_percentage, unit_session_percentage,
+                     division, customer, platform)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'golf', 'amazon', 'sp_api')
                 """, [
                     entry_date, "ALL",
                     int(sales_info.get("unitsOrdered", 0)),
@@ -790,8 +796,9 @@ def _run_sp_api_sync():
                     INSERT OR REPLACE INTO daily_sales
                     (date, asin, units_ordered, ordered_product_sales,
                      sessions, session_percentage, page_views,
-                     buy_box_percentage, unit_session_percentage)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                     buy_box_percentage, unit_session_percentage,
+                     division, customer, platform)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'golf', 'amazon', 'sp_api')
                 """, [
                     entry_date, asin,
                     int(sales_info.get("unitsOrdered", 0)),
@@ -882,8 +889,9 @@ def _backfill_orders(days: int = 90):
                 (order_id, purchase_date, order_status, fulfillment_channel,
                  sales_channel, order_total, currency_code, number_of_items,
                  ship_city, ship_state, ship_postal_code,
-                 is_business_order, is_prime)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                 is_business_order, is_prime,
+                 division, customer, platform)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'golf', 'amazon', 'sp_api')
             """, [
                 order.get("AmazonOrderId"),
                 order.get("PurchaseDate"),
@@ -976,8 +984,9 @@ def _backfill_orders(days: int = 90):
                 INSERT OR REPLACE INTO daily_sales
                 (date, asin, units_ordered, ordered_product_sales,
                  sessions, session_percentage, page_views,
-                 buy_box_percentage, unit_session_percentage)
-                VALUES (?, 'ALL', ?, ?, 0, 0, 0, 0, 0)
+                 buy_box_percentage, unit_session_percentage,
+                 division, customer, platform)
+                VALUES (?, 'ALL', ?, ?, 0, 0, 0, 0, 0, 'golf', 'amazon', 'sp_api')
             """, [day_str, agg["units"], agg["revenue"]])
             days_updated += 1
 

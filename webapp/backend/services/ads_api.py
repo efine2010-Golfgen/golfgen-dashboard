@@ -538,16 +538,18 @@ def _handle_campaign_report(data):
         # Aggregate table (for summary endpoints)
         con.execute("""
             INSERT OR REPLACE INTO advertising
-            (date, campaign_id, campaign_name, impressions, clicks, spend, sales, orders, units)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            (date, campaign_id, campaign_name, impressions, clicks, spend, sales, orders, units,
+             division, customer, platform)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'golf', 'amazon', 'sp_api')
         """, [date, campaign_id, campaign_name, impressions, clicks, spend, sales, orders, units])
 
         # Campaign detail table
         con.execute("""
             INSERT OR REPLACE INTO ads_campaigns
             (date, campaign_id, campaign_name, campaign_type, campaign_status,
-             daily_budget, impressions, clicks, spend, sales, orders, units)
-            VALUES (?, ?, ?, 'SP', ?, ?, ?, ?, ?, ?, ?, ?)
+             daily_budget, impressions, clicks, spend, sales, orders, units,
+             division, customer, platform)
+            VALUES (?, ?, ?, 'SP', ?, ?, ?, ?, ?, ?, ?, ?, 'golf', 'amazon', 'sp_api')
         """, [date, campaign_id, campaign_name, status, budget,
               impressions, clicks, spend, sales, orders, units])
 
@@ -567,8 +569,9 @@ def _handle_targeting_report(data):
             INSERT OR REPLACE INTO ads_keywords
             (date, campaign_id, campaign_name, ad_group_id, ad_group_name,
              keyword_id, keyword_text, match_type,
-             impressions, clicks, spend, sales, orders, units)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+             impressions, clicks, spend, sales, orders, units,
+             division, customer, platform)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'golf', 'amazon', 'sp_api')
         """, [
             date,
             str(row.get("campaignId", "")),
@@ -602,8 +605,9 @@ def _handle_search_term_report(data):
             INSERT OR REPLACE INTO ads_search_terms
             (date, campaign_id, campaign_name, ad_group_name,
              keyword_text, match_type, search_term,
-             impressions, clicks, spend, sales, orders, units)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+             impressions, clicks, spend, sales, orders, units,
+             division, customer, platform)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'golf', 'amazon', 'sp_api')
         """, [
             date, campaign_id,
             row.get("campaignName", ""),

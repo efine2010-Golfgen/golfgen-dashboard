@@ -121,7 +121,10 @@ def _init_sales_tables():
             ship_state VARCHAR,
             ship_postal_code VARCHAR,
             is_business_order BOOLEAN,
-            is_prime BOOLEAN
+            is_prime BOOLEAN,
+            division TEXT DEFAULT NULL,
+            customer TEXT DEFAULT NULL,
+            platform TEXT DEFAULT NULL
         )
     """)
 
@@ -136,6 +139,9 @@ def _init_sales_tables():
             page_views BIGINT DEFAULT 0,
             buy_box_percentage DOUBLE DEFAULT 0,
             unit_session_percentage DOUBLE DEFAULT 0,
+            division TEXT DEFAULT NULL,
+            customer TEXT DEFAULT NULL,
+            platform TEXT DEFAULT NULL,
             PRIMARY KEY (date, asin)
         )
     """)
@@ -154,6 +160,9 @@ def _init_sales_tables():
             reserved_quantity INTEGER DEFAULT 0,
             unfulfillable_quantity INTEGER DEFAULT 0,
             total_quantity INTEGER DEFAULT 0,
+            division TEXT DEFAULT NULL,
+            customer TEXT DEFAULT NULL,
+            platform TEXT DEFAULT NULL,
             PRIMARY KEY (date, asin, condition)
         )
     """)
@@ -171,7 +180,10 @@ def _init_sales_tables():
             commission DOUBLE DEFAULT 0,
             promotion_amount DOUBLE DEFAULT 0,
             other_fees DOUBLE DEFAULT 0,
-            net_proceeds DOUBLE DEFAULT 0
+            net_proceeds DOUBLE DEFAULT 0,
+            division TEXT DEFAULT NULL,
+            customer TEXT DEFAULT NULL,
+            platform TEXT DEFAULT NULL
         )
     """)
 
@@ -193,6 +205,9 @@ def _init_advertising_tables():
             sales DOUBLE DEFAULT 0,
             orders BIGINT DEFAULT 0,
             units BIGINT DEFAULT 0,
+            division TEXT DEFAULT NULL,
+            customer TEXT DEFAULT NULL,
+            platform TEXT DEFAULT NULL,
             PRIMARY KEY (date, campaign_id)
         )
     """)
@@ -211,6 +226,9 @@ def _init_advertising_tables():
             sales DOUBLE DEFAULT 0,
             orders BIGINT DEFAULT 0,
             units BIGINT DEFAULT 0,
+            division TEXT DEFAULT NULL,
+            customer TEXT DEFAULT NULL,
+            platform TEXT DEFAULT NULL,
             PRIMARY KEY (date, campaign_id)
         )
     """)
@@ -230,7 +248,10 @@ def _init_advertising_tables():
             spend DOUBLE DEFAULT 0,
             sales DOUBLE DEFAULT 0,
             orders BIGINT DEFAULT 0,
-            units BIGINT DEFAULT 0
+            units BIGINT DEFAULT 0,
+            division TEXT DEFAULT NULL,
+            customer TEXT DEFAULT NULL,
+            platform TEXT DEFAULT NULL
         )
     """)
 
@@ -248,7 +269,10 @@ def _init_advertising_tables():
             spend DOUBLE DEFAULT 0,
             sales DOUBLE DEFAULT 0,
             orders BIGINT DEFAULT 0,
-            units BIGINT DEFAULT 0
+            units BIGINT DEFAULT 0,
+            division TEXT DEFAULT NULL,
+            customer TEXT DEFAULT NULL,
+            platform TEXT DEFAULT NULL
         )
     """)
 
@@ -280,6 +304,9 @@ def _init_item_plan_tables():
                 revenue DOUBLE,
                 profit DOUBLE,
                 refund_units DOUBLE,
+                division TEXT DEFAULT NULL,
+                customer TEXT DEFAULT NULL,
+                platform TEXT DEFAULT NULL,
                 PRIMARY KEY (sku, year, month)
             )
         """)
@@ -313,7 +340,10 @@ def _init_item_plan_tables():
                 wk_received TEXT,
                 wk_available TEXT,
                 cbm DOUBLE,
-                status TEXT DEFAULT 'PENDING'
+                status TEXT DEFAULT 'PENDING',
+                division TEXT DEFAULT NULL,
+                customer TEXT DEFAULT NULL,
+                platform TEXT DEFAULT NULL
             )
         """)
 
@@ -327,7 +357,10 @@ def _init_item_plan_tables():
                 est_arrival TEXT,
                 wk_received TEXT,
                 wk_available TEXT,
-                status TEXT DEFAULT 'PENDING'
+                status TEXT DEFAULT 'PENDING',
+                division TEXT DEFAULT NULL,
+                customer TEXT DEFAULT NULL,
+                platform TEXT DEFAULT NULL
             )
         """)
 
@@ -369,8 +402,9 @@ def _init_item_plan_tables():
                         try:
                             con.execute("""
                                 INSERT INTO monthly_sales_history
-                                (sku, year, month, units, revenue, profit, refund_units)
-                                VALUES (?, ?, ?, ?, ?, ?, ?)
+                                (sku, year, month, units, revenue, profit, refund_units,
+                                 division, customer, platform)
+                                VALUES (?, ?, ?, ?, ?, ?, ?, 'golf', 'amazon', 'sp_api')
                             """, [
                                 sku,
                                 year,
@@ -443,15 +477,26 @@ def _init_item_plan_tables():
                 with open(factory_seed_path) as f:
                     factory_data = json.load(f)
 
+                # PO-to-customer mapping for seed data
+                _po_customer_map = {
+                    "2100": "first_tee", "2200": "walmart_stores",
+                    "2300": "walmart_stores", "2400": "walmart_stores",
+                    "2500": "amazon", "2600": "amazon",
+                    "2700": "walmart_stores", "2800": "walmart_stores",
+                }
+
                 for order in factory_data.get("orders", []):
+                    po = order.get("po_number", "")
+                    cust = _po_customer_map.get(po, "amazon")
                     try:
                         con.execute("""
                             INSERT INTO item_plan_factory_orders
                             (po_number, factory, payment_terms, total_units, factory_cost,
-                             fob_date, est_arrival, wk_received, wk_available, cbm, status)
-                            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                             fob_date, est_arrival, wk_received, wk_available, cbm, status,
+                             division, customer, platform)
+                            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'golf', ?, 'manual_entry')
                         """, [
-                            order.get("po_number", ""),
+                            po,
                             order.get("factory", ""),
                             order.get("payment_terms", ""),
                             int(order.get("units", 0)),
@@ -462,27 +507,47 @@ def _init_item_plan_tables():
                             order.get("wk_available", ""),
                             float(order.get("cbm", 0)),
                             order.get("status", "PENDING"),
+                            cust,
                         ])
                     except Exception:
                         pass
 
+                # Walmart SKU prefixes for line-item customer determination
+                _walmart_skus = {
+                    'GGRTFTG2228', 'GGRTFTR2168', 'GGRTFTB2178', 'GGRTFTO2198',
+                    'GGWMSS2114BM', 'GGWMSS2115BM', 'GGWMSS2451BM', 'GGWMSS2452BM',
+                    'GGWMSS2116BM', 'GGWMSS2117BM', 'GGWMSS2453BM', 'GGWMSS2454BM',
+                    'GGWMSS2118BM', 'GGWMSS2119BM',
+                }
+                _first_tee_skus = {'KIT 1', 'KIT 2'}
+
                 for idx, item in enumerate(factory_data.get("items", []), start=1):
+                    item_sku = item.get("sku", "")
+                    item_po = item.get("po_number", "")
+                    if item_sku in _first_tee_skus or item_po == "2100":
+                        item_cust = "first_tee"
+                    elif item_sku in _walmart_skus:
+                        item_cust = "walmart_stores"
+                    else:
+                        item_cust = _po_customer_map.get(item_po, "amazon")
                     try:
                         con.execute("""
                             INSERT INTO item_plan_factory_order_items
                             (id, po_number, sku, description, units, est_arrival,
-                             wk_received, wk_available, status)
-                            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                             wk_received, wk_available, status,
+                             division, customer, platform)
+                            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'golf', ?, 'manual_entry')
                         """, [
                             idx,
-                            item.get("po_number", ""),
-                            item.get("sku", ""),
+                            item_po,
+                            item_sku,
                             item.get("description", ""),
                             int(item.get("units", 0)),
                             item.get("est_arrival", ""),
                             item.get("wk_received", ""),
                             item.get("wk_available", ""),
                             item.get("status", "PENDING"),
+                            item_cust,
                         ])
                     except Exception:
                         pass

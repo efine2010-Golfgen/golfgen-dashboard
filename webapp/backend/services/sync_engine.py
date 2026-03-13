@@ -121,8 +121,9 @@ def _auto_backfill_if_needed():
                         INSERT OR REPLACE INTO daily_sales
                         (date, asin, units_ordered, ordered_product_sales,
                          sessions, session_percentage, page_views,
-                         buy_box_percentage, unit_session_percentage)
-                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                         buy_box_percentage, unit_session_percentage,
+                         division, customer, platform)
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'golf', 'amazon', 'sp_api')
                     """, [
                         entry_date, "ALL",
                         int(sales_info.get("unitsOrdered", 0)),
@@ -147,8 +148,9 @@ def _auto_backfill_if_needed():
                         INSERT OR REPLACE INTO daily_sales
                         (date, asin, units_ordered, ordered_product_sales,
                          sessions, session_percentage, page_views,
-                         buy_box_percentage, unit_session_percentage)
-                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                         buy_box_percentage, unit_session_percentage,
+                         division, customer, platform)
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'golf', 'amazon', 'sp_api')
                     """, [
                         entry_date, asin,
                         int(sales_info.get("unitsOrdered", 0)),

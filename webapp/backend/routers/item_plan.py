@@ -74,6 +74,8 @@ def load_item_master() -> list:
                 "series": (row.get("series") or "").strip(),
                 "productType": (row.get("product_type") or "").strip(),
                 "pieceCount": int(float(row.get("piece_count") or 0)),
+                "division": (row.get("division") or "").strip(),
+                "customer": (row.get("customer") or "").strip(),
             })
     return items
 
@@ -463,7 +465,8 @@ async def get_factory_on_order(request: Request):
         orders = []
         order_rows = con.execute("""
             SELECT po_number, factory, payment_terms, total_units, factory_cost,
-                   fob_date, est_arrival, wk_received, wk_available, cbm, status
+                   fob_date, est_arrival, wk_received, wk_available, cbm, status,
+                   division, customer, platform
             FROM item_plan_factory_orders
             ORDER BY po_number
         """).fetchall()
@@ -481,12 +484,16 @@ async def get_factory_on_order(request: Request):
                 "wk_available": row[8],
                 "cbm": float(row[9]),
                 "status": row[10],
+                "division": row[11],
+                "customer": row[12],
+                "platform": row[13],
             })
 
         items = []
         item_rows = con.execute("""
             SELECT id, po_number, sku, description, units, est_arrival,
-                   wk_received, wk_available, status
+                   wk_received, wk_available, status,
+                   division, customer, platform
             FROM item_plan_factory_order_items
             ORDER BY id
         """).fetchall()
@@ -502,6 +509,9 @@ async def get_factory_on_order(request: Request):
                 "wk_received": row[6],
                 "wk_available": row[7],
                 "status": row[8],
+                "division": row[9],
+                "customer": row[10],
+                "platform": row[11],
             })
 
         return {"orders": orders, "items": items}
@@ -522,8 +532,9 @@ async def post_factory_on_order(request: Request):
             con.execute("""
                 INSERT OR REPLACE INTO item_plan_factory_orders
                 (po_number, factory, payment_terms, total_units, factory_cost,
-                 fob_date, est_arrival, wk_received, wk_available, cbm, status)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                 fob_date, est_arrival, wk_received, wk_available, cbm, status,
+                 division, customer, platform)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """, [
                 body.get("po_number", ""),
                 body.get("factory", ""),
@@ -536,14 +547,18 @@ async def post_factory_on_order(request: Request):
                 body.get("wk_available", ""),
                 float(body.get("cbm", 0)),
                 body.get("status", "PENDING"),
+                body.get("division", "golf"),
+                body.get("customer", ""),
+                body.get("platform", "manual_entry"),
             ])
         else:
             # It's an item
             con.execute("""
                 INSERT OR REPLACE INTO item_plan_factory_order_items
                 (po_number, sku, description, units, est_arrival,
-                 wk_received, wk_available, status)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                 wk_received, wk_available, status,
+                 division, customer, platform)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """, [
                 body.get("po_number", ""),
                 body.get("sku", ""),
@@ -553,6 +568,9 @@ async def post_factory_on_order(request: Request):
                 body.get("wk_received", ""),
                 body.get("wk_available", ""),
                 body.get("status", "PENDING"),
+                body.get("division", "golf"),
+                body.get("customer", ""),
+                body.get("platform", "manual_entry"),
             ])
 
         con.commit()

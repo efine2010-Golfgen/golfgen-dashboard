@@ -239,23 +239,50 @@ def _aggregate_weekly(daily_data: list) -> list:
     return result
 
 
+# ── Hierarchy Filter Helper ──────────────────────────────
+
+def _hierarchy_filter(division: str | None, customer: str | None, platform: str | None) -> tuple[str, list]:
+    """Build optional WHERE clause fragments for division/customer/platform filtering.
+    Returns (sql_fragment, params) where sql_fragment starts with ' AND ...' if any filters set."""
+    clauses = []
+    params = []
+    if division:
+        clauses.append("division = ?")
+        params.append(division)
+    if customer:
+        clauses.append("customer = ?")
+        params.append(customer)
+    if platform:
+        clauses.append("platform = ?")
+        params.append(platform)
+    if clauses:
+        return " AND " + " AND ".join(clauses), params
+    return "", []
+
+
 # ── API Routes ──────────────────────────────────────────
 
 
 @router.get("/api/summary")
-def summary(days: int = Query(365, description="Number of days to include")):
+def summary(
+    days: int = Query(365, description="Number of days to include"),
+    division: str | None = Query(None),
+    customer: str | None = Query(None),
+    platform: str | None = Query(None),
+):
     """High-level KPIs: revenue, units, orders, sessions, AUR, conv rate."""
     con = get_db()
     cutoff = (get_today(con) - timedelta(days=days)).strftime("%Y-%m-%d") if days > 0 else get_today(con).strftime("%Y-%m-%d")
+    hf, hp = _hierarchy_filter(division, customer, platform)
 
-    row = con.execute("""
+    row = con.execute(f"""
         SELECT
             COALESCE(SUM(ordered_product_sales), 0) AS revenue,
             COALESCE(SUM(units_ordered), 0) AS units,
             COALESCE(SUM(page_views), 0) AS sessions
         FROM daily_sales
-        WHERE date >= ? AND asin = 'ALL'
-    """, [cutoff]).fetchone()
+        WHERE date >= ? AND asin = 'ALL'{hf}
+    """, [cutoff] + hp).fetchone()
 
     revenue, units, sessions = row
     orders = units  # total_order_items is not populated; use units as proxy
@@ -291,21 +318,28 @@ def summary(days: int = Query(365, description="Number of days to include")):
 
 
 @router.get("/api/daily")
-def get_daily_sales(days: int = Query(365), granularity: str = Query("daily")):
+def get_daily_sales(
+    days: int = Query(365),
+    granularity: str = Query("daily"),
+    division: str | None = Query(None),
+    customer: str | None = Query(None),
+    platform: str | None = Query(None),
+):
     """Time-series sales data for charts. Granularity: daily or weekly."""
     con = get_db()
     cutoff = (get_today(con) - timedelta(days=days)).strftime("%Y-%m-%d")
+    hf, hp = _hierarchy_filter(division, customer, platform)
 
-    rows = con.execute("""
+    rows = con.execute(f"""
         SELECT
             date,
             COALESCE(ordered_product_sales, 0) AS revenue,
             COALESCE(units_ordered, 0) AS units,
             COALESCE(page_views, 0) AS sessions
         FROM daily_sales
-        WHERE date >= ? AND asin = 'ALL'
+        WHERE date >= ? AND asin = 'ALL'{hf}
         ORDER BY date
-    """, [cutoff]).fetchall()
+    """, [cutoff] + hp).fetchall()
     con.close()
 
     data = []
@@ -330,7 +364,12 @@ def get_daily_sales(days: int = Query(365), granularity: str = Query("daily")):
 
 
 @router.get("/api/products")
-def products(days: int = Query(365)):
+def products(
+    days: int = Query(365),
+    division: str | None = Query(None),
+    customer: str | None = Query(None),
+    platform: str | None = Query(None),
+):
     """Product breakdown with profitability metrics."""
     con = get_db()
     cutoff = (datetime.now(ZoneInfo("America/Chicago")) - timedelta(days=days)).strftime("%Y-%m-%d")
@@ -390,7 +429,12 @@ def product_detail(asin: str, days: int = Query(365)):
 
 
 @router.get("/api/comparison")
-def period_comparison(view: str = Query("realtime")):
+def period_comparison(
+    view: str = Query("realtime"),
+    division: str | None = Query(None),
+    customer: str | None = Query(None),
+    platform: str | None = Query(None),
+):
     """Return KPI comparison across multiple time periods.
 
     Views:
@@ -509,6 +553,8 @@ def period_comparison(view: str = Query("realtime")):
              "end": tomorrow},
         ]
 
+    hf, hp = _hierarchy_filter(division, customer, platform)
+
     def chg(cur, prev):
         if prev == 0:
             return 0
@@ -529,14 +575,14 @@ def period_comparison(view: str = Query("realtime")):
 
     results = []
     for p in periods:
-        row = con.execute("""
+        row = con.execute(f"""
             SELECT
                 COALESCE(SUM(ordered_product_sales), 0),
                 COALESCE(SUM(units_ordered), 0),
                 COALESCE(SUM(page_views), 0)
             FROM daily_sales
-            WHERE date >= ? AND date < ? AND asin = 'ALL'
-        """, [p["start"], p["end"]]).fetchone()
+            WHERE date >= ? AND date < ? AND asin = 'ALL'{hf}
+        """, [p["start"], p["end"]] + hp).fetchone()
 
         rev, units, sessions = row
         orders = units
@@ -573,14 +619,14 @@ def period_comparison(view: str = Query("realtime")):
             ly_start = datetime.strptime(p["start"], "%Y-%m-%d") - timedelta(days=365)
             ly_end = datetime.strptime(p["end"], "%Y-%m-%d") - timedelta(days=365)
 
-        ly_row = con.execute("""
+        ly_row = con.execute(f"""
             SELECT
                 COALESCE(SUM(ordered_product_sales), 0),
                 COALESCE(SUM(units_ordered), 0),
                 COALESCE(SUM(page_views), 0)
             FROM daily_sales
-            WHERE date >= ? AND date < ? AND asin = 'ALL'
-        """, [ly_start.strftime("%Y-%m-%d"), ly_end.strftime("%Y-%m-%d")]).fetchone()
+            WHERE date >= ? AND date < ? AND asin = 'ALL'{hf}
+        """, [ly_start.strftime("%Y-%m-%d"), ly_end.strftime("%Y-%m-%d")] + hp).fetchone()
 
         ly_rev, ly_units, ly_sessions = ly_row
         ly_orders = ly_units
@@ -625,22 +671,27 @@ def period_comparison(view: str = Query("realtime")):
 
 
 @router.get("/api/monthly-yoy")
-def monthly_yoy():
+def monthly_yoy(
+    division: str | None = Query(None),
+    customer: str | None = Query(None),
+    platform: str | None = Query(None),
+):
     """Monthly revenue broken down by year for YoY comparison.
     Always returns 12 months with bars for 2024, 2025, 2026."""
     con = get_db()
+    hf, hp = _hierarchy_filter(division, customer, platform)
 
-    rows = con.execute("""
+    rows = con.execute(f"""
         SELECT
             EXTRACT(YEAR FROM CAST(date AS DATE)) AS yr,
             EXTRACT(MONTH FROM CAST(date AS DATE)) AS mo,
             COALESCE(SUM(ordered_product_sales), 0) AS revenue
         FROM daily_sales
         WHERE asin = 'ALL'
-          AND CAST(date AS DATE) >= '2024-01-01'
+          AND CAST(date AS DATE) >= '2024-01-01'{hf}
         GROUP BY EXTRACT(YEAR FROM CAST(date AS DATE)), EXTRACT(MONTH FROM CAST(date AS DATE))
         ORDER BY yr, mo
-    """).fetchall()
+    """, hp).fetchall()
 
     con.close()
 
@@ -666,7 +717,12 @@ def monthly_yoy():
 
 
 @router.get("/api/product-mix")
-def product_mix(days: int = Query(365)):
+def product_mix(
+    days: int = Query(365),
+    division: str | None = Query(None),
+    customer: str | None = Query(None),
+    platform: str | None = Query(None),
+):
     """Top 10 products by revenue for donut chart."""
     con = get_db()
     cutoff = (datetime.now(ZoneInfo("America/Chicago")) - timedelta(days=days)).strftime("%Y-%m-%d")
@@ -685,7 +741,12 @@ def product_mix(days: int = Query(365)):
 
 
 @router.get("/api/color-mix")
-def color_mix(days: int = Query(365)):
+def color_mix(
+    days: int = Query(365),
+    division: str | None = Query(None),
+    customer: str | None = Query(None),
+    platform: str | None = Query(None),
+):
     """Sales breakdown by color extracted from product names."""
     con = get_db()
     cutoff = (datetime.now(ZoneInfo("America/Chicago")) - timedelta(days=days)).strftime("%Y-%m-%d")

@@ -1,5 +1,14 @@
 const API_BASE = import.meta.env.VITE_API_URL || "";
 
+// Build hierarchy query string fragment from {division, customer, platform}
+function _hq(h = {}) {
+  let q = "";
+  if (h.division) q += `&division=${encodeURIComponent(h.division)}`;
+  if (h.customer) q += `&customer=${encodeURIComponent(h.customer)}`;
+  if (h.platform) q += `&platform=${encodeURIComponent(h.platform)}`;
+  return q;
+}
+
 async function fetchJSON(path) {
   const res = await fetch(`${API_BASE}${path}`, { credentials: "include" });
   if (!res.ok) {
@@ -43,20 +52,20 @@ export const api = {
     }).then(r => { if (!r.ok) throw new Error("Permission update failed"); return r.json(); }),
 
   // Existing endpoints
-  summary: (days = 365) => fetchJSON(`/api/summary?days=${days}`),
-  daily: (days = 365, granularity = "daily") =>
-    fetchJSON(`/api/daily?days=${days}&granularity=${granularity}`),
-  products: (days = 365) => fetchJSON(`/api/products?days=${days}`),
+  summary: (days = 365, h = {}) => fetchJSON(`/api/summary?days=${days}${_hq(h)}`),
+  daily: (days = 365, granularity = "daily", h = {}) =>
+    fetchJSON(`/api/daily?days=${days}&granularity=${granularity}${_hq(h)}`),
+  products: (days = 365, h = {}) => fetchJSON(`/api/products?days=${days}${_hq(h)}`),
   inventory: () => fetchJSON(`/api/inventory`),
   productDetail: (asin, days = 365) =>
     fetchJSON(`/api/product/${asin}?days=${days}`),
   pnl: (days = 365) => fetchJSON(`/api/pnl?days=${days}`),
 
   // Dashboard analytics
-  comparison: (view = "realtime") => fetchJSON(`/api/comparison?view=${view}`),
-  monthlyYoY: () => fetchJSON(`/api/monthly-yoy`),
-  productMix: (days = 365) => fetchJSON(`/api/product-mix?days=${days}`),
-  colorMix: (days = 365) => fetchJSON(`/api/color-mix?days=${days}`),
+  comparison: (view = "realtime", h = {}) => fetchJSON(`/api/comparison?view=${view}${_hq(h)}`),
+  monthlyYoY: (h = {}) => fetchJSON(`/api/monthly-yoy${_hq(h) ? '?' + _hq(h).slice(1) : ''}`),
+  productMix: (days = 365, h = {}) => fetchJSON(`/api/product-mix?days=${days}${_hq(h)}`),
+  colorMix: (days = 365, h = {}) => fetchJSON(`/api/color-mix?days=${days}${_hq(h)}`),
 
   // Profitability (Sellerboard-style)
   profitability: (view = "realtime") => fetchJSON(`/api/profitability?view=${view}`),
