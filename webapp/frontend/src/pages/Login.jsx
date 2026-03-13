@@ -1,11 +1,29 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { api } from "../lib/api";
+
+const SSO_ERRORS = {
+  google_denied: "Google sign-in was cancelled or denied.",
+  token_exchange_failed: "Google sign-in failed — please try again.",
+  userinfo_failed: "Could not retrieve your Google account info.",
+  not_authorized: "Your Google account is not authorized for this dashboard. Contact your admin.",
+};
 
 export default function Login({ onLogin }) {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
+
+  // Check for SSO error in URL on mount
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const authError = params.get("auth_error");
+    if (authError && SSO_ERRORS[authError]) {
+      setError(SSO_ERRORS[authError]);
+      // Clean the URL
+      window.history.replaceState({}, "", window.location.pathname);
+    }
+  }, []);
 
   const handleSubmit = async (e) => {
     e.preventDefault();

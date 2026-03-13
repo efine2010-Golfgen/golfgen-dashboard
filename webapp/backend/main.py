@@ -349,7 +349,6 @@ def google_login():
     """Redirect user to Google's OAuth consent screen."""
     if not GOOGLE_CLIENT_ID or not GOOGLE_CLIENT_SECRET:
         raise HTTPException(status_code=501, detail="Google SSO not configured")
-    from authlib.integrations.starlette_client import OAuth
     import urllib.parse
     # Build Google authorization URL directly
     params = {

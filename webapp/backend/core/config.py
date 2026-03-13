@@ -110,8 +110,12 @@ SESSION_SECRET = os.environ.get("SESSION_SECRET", secrets.token_hex(32))
 ALLOWED_SSO_EMAILS = {em.lower() for em in [
     "eric@golfgen.com",
     "eric@egbrands.com",
+    "efine2010@gmail.com",
     "ty@golfgen.com",
+    "tysams@egbrands.com",
     "kim@golfgen.com",
+    "kim@egbrands.com",
+    "ryan@egbrands.com",
     "riseecom21@gmail.com",
 ]}
 
