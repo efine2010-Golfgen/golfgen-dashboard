@@ -217,7 +217,7 @@ export default function SupplyChain() {
 
       {error && <div className="login-error" style={{ margin: "0 0 16px" }}>{error}</div>}
 
-      <div style={{ display: "flex", gap: 4, marginBottom: 0 }}>
+      <div style={{ display: "flex", gap: 4, marginBottom: 0, position: "sticky", top: 178, zIndex: 90, background: "#f1f5f9", paddingTop: 4, paddingBottom: 2 }}>
         <SubTab label="OTW Summary" active={view === "otw"} onClick={() => setView("otw")} />
         <SubTab label="PO Summary" active={view === "po"} onClick={() => setView("po")} />
         <SubTab label="Invoice Summary" active={view === "invoices"} onClick={() => setView("invoices")} />

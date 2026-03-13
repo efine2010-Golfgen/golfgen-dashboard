@@ -304,7 +304,7 @@ export default function App() {
                   <button className="header-grid-btn header-grid-btn-signout" onClick={handleLogout}>Sign Out</button>
                 </div>
                 <div className="live-badge-row">
-                  <span className="live-badge">LIVE DATA</span>
+                  <span className="live-badge header-grid-btn">LIVE DATA</span>
                 </div>
               </div>
             </div>

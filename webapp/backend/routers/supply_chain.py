@@ -513,10 +513,13 @@ def _parse_workbook(wb, filename: str) -> dict:
                     if inv_data.get("invoice_number", "—") != "—" and rec["invoice_number"] == "—":
                         rec["invoice_number"] = inv_data["invoice_number"]
 
-    # ── Replace entire data store (clean slate each upload) ──
+    # ── Smart merge: replace all records for POs in this upload, keep others ──
     all_records = list(records.values())
+    uploaded_pos = {r["po_number"] for r in all_records}
     store = _load_store()
-    store["records"] = all_records  # full replace, no merge with old data
+    # Keep existing records whose PO is NOT in this upload
+    kept = [r for r in store.get("records", []) if r.get("po_number") not in uploaded_pos]
+    store["records"] = kept + all_records
     store["lastUpload"] = datetime.now(TZ).isoformat()
     store["sourceFile"] = filename
     _save_store(store)
@@ -862,3 +865,11 @@ async def get_raw_store(_user=Depends(require_auth)):
         "sourceFile": store.get("sourceFile"),
         "records": store.get("records", [])[:200],  # cap at 200 for debug
     }
+
+
+@router.post("/clear")
+async def clear_store(_user=Depends(require_auth)):
+    """Admin: wipe all supply chain data so a fresh upload starts clean."""
+    store = {"records": [], "lastUpload": None, "sourceFile": None}
+    _save_store(store)
+    return {"status": "ok", "message": "Supply chain store cleared"}
