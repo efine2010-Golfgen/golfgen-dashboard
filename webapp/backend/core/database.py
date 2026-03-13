@@ -588,7 +588,11 @@ def _init_item_plan_tables():
 
 
 def _init_item_master_table():
-    """Create DuckDB item_master table if not exist (source of truth for division mapping)."""
+    """Create DuckDB item_master table if not exist (source of truth for division mapping).
+
+    Auto-seeds from existing orders/order_items/daily_sales tables so that
+    untagged ASINs appear immediately without a manual POST to /api/item-master/seed.
+    """
     con = duckdb.connect(str(DB_PATH))
     con.execute("""
         CREATE TABLE IF NOT EXISTS item_master (
@@ -602,6 +606,61 @@ def _init_item_master_table():
             brand         VARCHAR
         )
     """)
+
+    # Auto-seed: if item_master is empty, populate from order data
+    try:
+        count = con.execute("SELECT COUNT(*) FROM item_master").fetchone()[0]
+        if count == 0:
+            logger.info("item_master is empty — auto-seeding from order data ...")
+            inserted = 0
+
+            # Seed from daily_sales (has product_name)
+            try:
+                rows = con.execute("""
+                    SELECT DISTINCT asin, '' as sku, product_name
+                    FROM daily_sales
+                    WHERE asin IS NOT NULL AND asin != '' AND asin != 'ALL'
+                """).fetchall()
+                for r in rows:
+                    try:
+                        con.execute("""
+                            INSERT INTO item_master (asin, sku, product_name, division, customer, platform)
+                            VALUES (?, ?, ?, 'unknown', 'amazon', 'sp_api')
+                        """, [r[0], r[1] or "", r[2] or ""])
+                        inserted += 1
+                    except Exception:
+                        pass
+            except Exception:
+                pass
+
+            # Seed from order_items (has sku)
+            try:
+                rows = con.execute("""
+                    SELECT DISTINCT asin, seller_sku, title
+                    FROM order_items
+                    WHERE asin IS NOT NULL AND asin != ''
+                """).fetchall()
+                for r in rows:
+                    asin = r[0]
+                    try:
+                        existing = con.execute(
+                            "SELECT 1 FROM item_master WHERE asin = ?", [asin]
+                        ).fetchone()
+                        if not existing:
+                            con.execute("""
+                                INSERT INTO item_master (asin, sku, product_name, division, customer, platform)
+                                VALUES (?, ?, ?, 'unknown', 'amazon', 'sp_api')
+                            """, [asin, r[1] or "", r[2] or ""])
+                            inserted += 1
+                    except Exception:
+                        pass
+            except Exception:
+                pass
+
+            logger.info(f"item_master auto-seed complete: {inserted} ASINs inserted")
+    except Exception as e:
+        logger.warning(f"item_master auto-seed check failed (non-fatal): {e}")
+
     con.close()
 
 

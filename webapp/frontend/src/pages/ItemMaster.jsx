@@ -196,11 +196,22 @@ export default function ItemMaster() {
   };
 
   const renderUntaggedBanner = () => {
-    if (!untaggedItems || untaggedItems.length === 0) return null;
+    // If no untagged items, show a seed button so Eric can discover new ASINs
+    if (!untaggedItems || untaggedItems.length === 0) {
+      return (
+        <div style={{ background: "#e8f4fd", border: "1px solid #b6d4fe", borderRadius: 8, padding: 12, marginBottom: 20, display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+          <span style={{ fontSize: 13, color: "#0d6efd" }}>All ASINs have division tags assigned.</span>
+          <button onClick={handleSeedItemMaster} disabled={seeding}
+            style={{ background: "#0d6efd", color: "#fff", border: "none", borderRadius: 4, padding: "6px 14px", cursor: "pointer", fontSize: 13 }}>
+            {seeding ? "Scanning..." : "Scan for New ASINs"}
+          </button>
+        </div>
+      );
+    }
     return (
       <div style={{ background: "#fff3cd", border: "1px solid #ffc107", borderRadius: 8, padding: 16, marginBottom: 20 }}>
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
-          <strong style={{ fontSize: 15 }}>⚠️ {untaggedItems.length} ASIN{untaggedItems.length > 1 ? "s" : ""} need division tagging</strong>
+          <strong style={{ fontSize: 15 }}>{untaggedItems.length} ASIN{untaggedItems.length > 1 ? "s" : ""} need division tagging</strong>
           <div style={{ display: "flex", gap: 8 }}>
             <button onClick={() => handleBulkSetDivision("golf")}
               style={{ background: "#198754", color: "#fff", border: "none", borderRadius: 4, padding: "6px 12px", cursor: "pointer", fontSize: 13 }}>
@@ -216,7 +227,7 @@ export default function ItemMaster() {
           {untaggedItems.map(item => (
             <div key={item.asin} style={{ display: "flex", alignItems: "center", gap: 10, padding: "4px 0", borderBottom: "1px solid #eee" }}>
               <span style={{ fontFamily: "monospace", fontSize: 13, minWidth: 120 }}>{item.asin}</span>
-              <span style={{ flex: 1, fontSize: 13, color: "#555" }}>{item.product_name || "—"}</span>
+              <span style={{ flex: 1, fontSize: 13, color: "#555" }}>{item.productName || "—"}</span>
               <button onClick={() => handleSetDivisionTag(item.asin, "golf")}
                 style={{ background: "#198754", color: "#fff", border: "none", borderRadius: 4, padding: "3px 10px", cursor: "pointer", fontSize: 12 }}>Golf</button>
               <button onClick={() => handleSetDivisionTag(item.asin, "housewares")}
