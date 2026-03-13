@@ -101,9 +101,12 @@ for _ukey, _udata in USERS.items():
         EMAIL_TO_USER[_em.lower()] = _ukey
 
 # ── Google SSO Configuration ──────────────────────────────
-GOOGLE_CLIENT_ID = os.environ.get("GOOGLE_CLIENT_ID", "")
-GOOGLE_CLIENT_SECRET = os.environ.get("GOOGLE_CLIENT_SECRET", "")
-GOOGLE_REDIRECT_URI = os.environ.get("GOOGLE_REDIRECT_URI", "")  # e.g. https://your-app.up.railway.app/api/auth/google/callback
+GOOGLE_CLIENT_ID = os.environ.get("GOOGLE_CLIENT_ID") or os.environ.get("GOOGLE_OAUTH_CLIENT_ID", "")
+GOOGLE_CLIENT_SECRET = os.environ.get("GOOGLE_CLIENT_SECRET") or os.environ.get("GOOGLE_OAUTH_CLIENT_SECRET", "")
+GOOGLE_REDIRECT_URI = (
+    os.environ.get("GOOGLE_REDIRECT_URI")
+    or "https://golfgen-dashboard-production-ce30.up.railway.app/api/auth/google/callback"
+)
 SESSION_SECRET = os.environ.get("SESSION_SECRET", secrets.token_hex(32))
 
 # Whitelisted emails allowed to login via Google SSO (case-insensitive)
