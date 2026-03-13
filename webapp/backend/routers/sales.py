@@ -3,7 +3,6 @@ import csv
 import json
 import logging
 import re
-import duckdb
 from pathlib import Path
 from collections import defaultdict
 from datetime import datetime, timedelta
@@ -12,6 +11,7 @@ from zoneinfo import ZoneInfo
 from fastapi import APIRouter, Query
 
 from core.config import DB_PATH, DB_DIR, COGS_PATH
+from core.database import get_db
 from core.hierarchy import hierarchy_filter as _hierarchy_filter
 
 logger = logging.getLogger("golfgen")
@@ -19,9 +19,6 @@ router = APIRouter()
 
 
 # ── Helper Functions ────────────────────────────────────
-def get_db():
-    """Return a read-only DuckDB connection."""
-    return duckdb.connect(str(DB_PATH), read_only=False)
 
 
 def load_json(filename: str) -> list:

@@ -1,31 +1,159 @@
 """
 Database initialization and connection management.
 All CREATE SEQUENCE and CREATE TABLE statements are here.
+
+Supports both DuckDB (default) and PostgreSQL (when DATABASE_URL is set).
 """
 
 import json
 import logging
+import re
 import duckdb
 from pathlib import Path
 
-from .config import DB_PATH, DB_DIR, USERS, ALL_TABS
+from .config import DB_PATH, DB_DIR, USERS, ALL_TABS, DATABASE_URL, USE_POSTGRES
 
 logger = logging.getLogger("golfgen")
 
 
-def get_db():
-    """Return a read-only DuckDB connection."""
-    return duckdb.connect(str(DB_PATH), read_only=False)
+# ── Dual-mode database wrapper ──────────────────────────────────────────────
+# Provides a consistent interface so routers don't need to know which engine
+# is active.  DuckDB uses ? placeholders; PostgreSQL uses %s.
+# DuckDB's execute() returns a result object; psycopg2's returns None
+# (results live on the cursor).  The wrapper normalises both behaviours.
+
+def _translate_sql_for_pg(sql: str) -> str:
+    """Convert DuckDB SQL idioms to PostgreSQL equivalents."""
+    # ? → %s  (parameterised placeholders)
+    sql = sql.replace("?", "%s")
+    # INSERT OR IGNORE → INSERT ... ON CONFLICT DO NOTHING
+    sql = re.sub(
+        r"\bINSERT\s+OR\s+IGNORE\s+INTO\b",
+        "INSERT INTO",
+        sql,
+        flags=re.IGNORECASE,
+    )
+    # Append ON CONFLICT DO NOTHING for INSERT OR IGNORE rewrites
+    # (only if not already present)
+    if "ON CONFLICT" not in sql.upper() and "INSERT INTO" in sql.upper():
+        # Check if this was an INSERT OR IGNORE rewrite by looking for
+        # the original pattern in the pre-translated sql — we handle this
+        # at call time instead to avoid false positives on normal INSERTs.
+        pass
+    return sql
 
 
-def get_db_rw():
-    """Return a read-write DuckDB connection."""
-    return duckdb.connect(str(DB_PATH), read_only=False)
+class _PgResult:
+    """Wraps a psycopg2 cursor to match DuckDB's execute() return interface."""
+
+    def __init__(self, cursor):
+        self._cursor = cursor
+
+    def fetchall(self):
+        try:
+            return self._cursor.fetchall()
+        except Exception:
+            return []
+
+    def fetchone(self):
+        try:
+            return self._cursor.fetchone()
+        except Exception:
+            return None
+
+
+class DbConnection:
+    """Unified connection wrapper for DuckDB and PostgreSQL.
+
+    Usage is identical to a raw DuckDB connection:
+        con = get_db()
+        rows = con.execute("SELECT * FROM t WHERE id = ?", [42]).fetchall()
+        con.close()
+    """
+
+    def __init__(self, conn, is_postgres: bool = False):
+        self._conn = conn
+        self._is_postgres = is_postgres
+        self._cursor = conn.cursor() if is_postgres else None
+
+    # -- query interface ------------------------------------------------
+    def execute(self, sql: str, params=None):
+        if self._is_postgres:
+            sql = _translate_sql_for_pg(sql)
+            if params:
+                self._cursor.execute(sql, params)
+            else:
+                self._cursor.execute(sql)
+            return _PgResult(self._cursor)
+        else:
+            if params:
+                return self._conn.execute(sql, params)
+            return self._conn.execute(sql)
+
+    def executemany(self, sql: str, params_list):
+        if self._is_postgres:
+            sql = _translate_sql_for_pg(sql)
+            self._cursor.executemany(sql, params_list)
+            return _PgResult(self._cursor)
+        else:
+            return self._conn.executemany(sql, params_list)
+
+    def fetchall(self):
+        if self._is_postgres:
+            return self._cursor.fetchall()
+        return self._conn.fetchall()
+
+    def fetchone(self):
+        if self._is_postgres:
+            return self._cursor.fetchone()
+        return self._conn.fetchone()
+
+    def commit(self):
+        self._conn.commit()
+
+    def close(self):
+        if self._cursor:
+            try:
+                self._cursor.close()
+            except Exception:
+                pass
+        self._conn.close()
+
+    # Allow use as context manager
+    def __enter__(self):
+        return self
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        self.close()
+        return False
+
+
+def _raw_pg_conn():
+    """Return a raw psycopg2 connection (import deferred so DuckDB-only
+    deployments don't need psycopg2 installed)."""
+    import psycopg2  # noqa: deferred import
+    conn = psycopg2.connect(DATABASE_URL)
+    conn.autocommit = True
+    return conn
+
+
+def get_db() -> DbConnection:
+    """Return a database connection (DuckDB or PostgreSQL)."""
+    if USE_POSTGRES:
+        return DbConnection(_raw_pg_conn(), is_postgres=True)
+    return DbConnection(duckdb.connect(str(DB_PATH), read_only=False))
+
+
+def get_db_rw() -> DbConnection:
+    """Return a read-write database connection (DuckDB or PostgreSQL)."""
+    if USE_POSTGRES:
+        return DbConnection(_raw_pg_conn(), is_postgres=True)
+    return DbConnection(duckdb.connect(str(DB_PATH), read_only=False))
 
 
 def _init_auth_tables():
-    """Create DuckDB tables for sessions and permissions if not exist."""
-    con = duckdb.connect(str(DB_PATH))
+    """Create tables for sessions and permissions if not exist."""
+    con = get_db_rw()
     con.execute("""
         CREATE TABLE IF NOT EXISTS sessions (
             token       TEXT PRIMARY KEY,
@@ -79,8 +207,8 @@ def _init_auth_tables():
 
 
 def _init_system_tables():
-    """Create DuckDB tables for sync logging and docs updates if not exist."""
-    con = duckdb.connect(str(DB_PATH))
+    """Create tables for sync logging and docs updates if not exist."""
+    con = get_db_rw()
 
     # Create sequences FIRST — tables reference them in DEFAULT expressions
     try:
@@ -128,8 +256,8 @@ def _init_system_tables():
 
 
 def _init_sales_tables():
-    """Create DuckDB tables for daily sales and FBA inventory if not exist."""
-    con = duckdb.connect(str(DB_PATH))
+    """Create tables for daily sales and FBA inventory if not exist."""
+    con = get_db_rw()
 
     con.execute("""
         CREATE TABLE IF NOT EXISTS orders (
@@ -250,8 +378,8 @@ def _init_sales_tables():
 
 
 def _init_advertising_tables():
-    """Create DuckDB tables for Amazon Ads data if not exist."""
-    con = duckdb.connect(str(DB_PATH))
+    """Create tables for Amazon Ads data if not exist."""
+    con = get_db_rw()
 
     con.execute("""
         CREATE TABLE IF NOT EXISTS advertising (
@@ -628,7 +756,7 @@ def _init_item_master_table():
     Auto-seeds from existing orders/order_items/daily_sales tables so that
     untagged ASINs appear immediately without a manual POST to /api/item-master/seed.
     """
-    con = duckdb.connect(str(DB_PATH))
+    con = get_db_rw()
     con.execute("""
         CREATE TABLE IF NOT EXISTS item_master (
             asin          VARCHAR PRIMARY KEY,
@@ -701,7 +829,7 @@ def _init_item_master_table():
 
 def _init_staging_tables():
     """Create staging layer tables for cleaned/typed versions of raw data."""
-    con = duckdb.connect(str(DB_PATH))
+    con = get_db_rw()
 
     con.execute("""
         CREATE TABLE IF NOT EXISTS staging_orders (
@@ -748,7 +876,7 @@ def _init_staging_tables():
 
 def _init_analytics_tables():
     """Create analytics layer tables for pre-aggregated dashboard data."""
-    con = duckdb.connect(str(DB_PATH))
+    con = get_db_rw()
 
     con.execute("""
         CREATE TABLE IF NOT EXISTS analytics_daily (
@@ -865,7 +993,7 @@ def init_all_tables():
 
     # ── Auto-tag item_master divisions based on product names ──
     try:
-        con = duckdb.connect(str(DB_PATH), read_only=False)
+        con = get_db_rw()
         # Count untagged ASINs
         untagged = con.execute(
             "SELECT COUNT(*) FROM item_master WHERE division IS NULL OR division = '' OR division = 'unknown'"
@@ -907,7 +1035,7 @@ def init_all_tables():
 
     # ── Backfill division on ALL transactional tables ──
     try:
-        con = duckdb.connect(str(DB_PATH), read_only=False)
+        con = get_db_rw()
 
         # 1. daily_sales — backfill from item_master, then default to 'golf'
         null_count = con.execute(

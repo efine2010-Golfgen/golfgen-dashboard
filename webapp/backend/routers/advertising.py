@@ -1,7 +1,6 @@
 """Amazon Advertising routes."""
 import logging
 import asyncio
-import duckdb
 from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
 from typing import Optional

@@ -3,7 +3,6 @@ import os
 import json
 import csv
 import logging
-import duckdb
 from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
 from pathlib import Path
@@ -12,6 +11,7 @@ from fastapi import APIRouter, Query, Request, UploadFile, File, HTTPException
 from fastapi.responses import JSONResponse
 
 from core.config import DB_PATH, DB_DIR, COGS_PATH, CONFIG_PATH, TIMEZONE
+from core.database import get_db
 from core.hierarchy import hierarchy_filter
 
 logger = logging.getLogger("golfgen")
@@ -24,10 +24,6 @@ _FBA_SHIPMENTS_CACHE_PATH = DB_DIR / "fba_shipments_cache.json"
 
 
 # ── Helper Functions ────────────────────────────────────────────
-
-def get_db():
-    """Return a read-only DuckDB connection."""
-    return duckdb.connect(str(DB_PATH), read_only=False)
 
 
 def load_json(filename: str) -> list:

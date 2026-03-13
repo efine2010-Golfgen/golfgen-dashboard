@@ -16,6 +16,12 @@ BASE_DIR = Path(__file__).resolve().parent.parent.parent  # GolfGen Amazon Dashb
 DB_DIR = Path(os.environ.get("DB_DIR", str(BASE_DIR / "data")))
 DB_PATH = DB_DIR / "golfgen_amazon.duckdb"
 COGS_PATH = DB_DIR / "cogs.csv"
+
+# ── Database Engine Detection ───────────────────────────
+# Set DATABASE_URL env var to a PostgreSQL connection string to use PostgreSQL.
+# When unset, DuckDB is used (current default).
+DATABASE_URL = os.environ.get("DATABASE_URL", "")
+USE_POSTGRES = bool(DATABASE_URL)
 CONFIG_PATH = BASE_DIR / "config" / "credentials.json"
 DOCS_DIR = Path("/app/docs")
 PRICING_CACHE_PATH = DB_DIR / "pricing_sync.json"

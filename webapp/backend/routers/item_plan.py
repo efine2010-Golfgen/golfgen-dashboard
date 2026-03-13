@@ -2,7 +2,6 @@
 import csv
 import json
 import logging
-import duckdb
 from datetime import datetime
 from zoneinfo import ZoneInfo
 from pathlib import Path
@@ -10,20 +9,21 @@ from fastapi import APIRouter, Query, Request, HTTPException
 from fastapi.responses import JSONResponse
 
 from core.config import DB_PATH, DB_DIR, TIMEZONE
+from core.database import get_db, get_db_rw
 
 logger = logging.getLogger("golfgen")
 router = APIRouter()
 
-# ── Database & Auth Helpers (from main.py, local to this module) ────────────────────────
+# ── Database & Auth Helpers ────────────────────────
 
 def _duck_rw():
-    """Return a read-write DuckDB connection for item plan operations."""
-    return duckdb.connect(str(DB_PATH), read_only=False)
+    """Return a read-write connection for item plan operations."""
+    return get_db_rw()
 
 
 def _duck():
-    """Return a read-only DuckDB connection for item plan queries."""
-    return duckdb.connect(str(DB_PATH), read_only=False)
+    """Return a connection for item plan queries."""
+    return get_db()
 
 
 def _require_auth(request: Request):

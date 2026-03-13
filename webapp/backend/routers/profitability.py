@@ -1,7 +1,6 @@
 """Profitability and P&L routes."""
 import csv
 import logging
-import duckdb
 from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
 from pathlib import Path
@@ -9,15 +8,11 @@ from typing import Optional
 from fastapi import APIRouter, Query
 
 from core.config import DB_PATH, COGS_PATH, TIMEZONE
+from core.database import get_db
 from core.hierarchy import hierarchy_filter
 
 logger = logging.getLogger("golfgen")
 router = APIRouter()
-
-
-def get_db():
-    """Get DuckDB connection."""
-    return duckdb.connect(str(DB_PATH), read_only=False)
 
 
 def get_today(con) -> datetime:
