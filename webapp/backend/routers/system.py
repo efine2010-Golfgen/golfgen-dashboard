@@ -763,3 +763,45 @@ async def get_disaster_recovery_doc(request: Request):
             "content": "Disaster recovery plan not yet generated. Run /api/docs/update to generate.",
             "last_updated": None
         }
+
+
+@router.post("/api/admin/init-tables")
+def init_tables(request: Request):
+    """Re-run all CREATE TABLE IF NOT EXISTS statements to ensure schema is current."""
+    sess = request.cookies.get("session_id")
+    if not sess:
+        from fastapi import HTTPException
+        raise HTTPException(status_code=401, detail="Not authenticated")
+    try:
+        from core.database import init_all_tables
+        init_all_tables()
+        return {"status": "ok", "message": "All tables initialized successfully"}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/api/admin/pg-ready")
+def pg_ready():
+    """Check PostgreSQL migration readiness."""
+    from pathlib import Path
+    try:
+        con = duckdb.connect(str(DB_PATH), read_only=True)
+        tables = [r[0] for r in con.execute("SHOW TABLES").fetchall()]
+        con.close()
+        export_path = Path("/app/data/pg_export")
+        manifest_path = export_path / "MANIFEST.txt"
+        return {
+            "duckdb_tables": len(tables),
+            "table_list": tables,
+            "export_ready": export_path.exists(),
+            "export_path": str(export_path),
+            "manifest_exists": manifest_path.exists(),
+        }
+    except Exception as e:
+        return {
+            "duckdb_tables": 0,
+            "export_ready": False,
+            "export_path": "/app/data/pg_export",
+            "manifest_exists": False,
+            "error": str(e),
+        }

@@ -108,6 +108,9 @@ export default function ItemMaster() {
   const [pricingStatus, setPricingStatus] = useState(null);
   const [syncing, setSyncing] = useState(false);
   const [pricingLastSync, setPricingLastSync] = useState(null);
+  const [untaggedItems, setUntaggedItems] = useState([]);
+  const [propagating, setPropagating] = useState(false);
+  const [seeding, setSeeding] = useState(false);
 
   // Load Amazon items (main item master) on mount
   const loadAmazon = useCallback(() => {
@@ -135,6 +138,99 @@ export default function ItemMaster() {
       api.itemMasterHousewares().then(d => { setHousewaresItems(d.items || []); setLoading(false); }).catch(() => { setHousewaresItems([]); setLoading(false); });
     }
   }, [division, golfSubTab, walmartItems, housewaresItems]);
+
+  // Load untagged ASINs from DuckDB item_master
+  useEffect(() => {
+    fetch("/api/item-master/untagged")
+      .then(r => r.json())
+      .then(d => setUntaggedItems(d.items || []))
+      .catch(() => {});
+  }, []);
+
+  const handleSeedItemMaster = async () => {
+    setSeeding(true);
+    try {
+      const r = await fetch("/api/item-master/seed", { method: "POST" });
+      const d = await r.json();
+      alert(`Seeded ${d.inserted} new ASINs into item_master (${d.existing} already existed)`);
+      // Refresh untagged list
+      fetch("/api/item-master/untagged").then(r => r.json()).then(d => setUntaggedItems(d.items || [])).catch(() => {});
+    } catch (e) { alert("Seed failed: " + e.message); }
+    setSeeding(false);
+  };
+
+  const handleSetDivisionTag = async (asin, div) => {
+    try {
+      await fetch(`/api/item-master/${asin}/division`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ division: div }),
+      });
+      setUntaggedItems(prev => prev.filter(i => i.asin !== asin));
+    } catch (e) { alert("Failed to set division: " + e.message); }
+  };
+
+  const handleBulkSetDivision = async (div) => {
+    const asins = untaggedItems.map(i => i.asin);
+    if (!asins.length) return;
+    if (!confirm(`Set ALL ${asins.length} untagged ASINs to "${div}"?`)) return;
+    try {
+      await fetch("/api/item-master/bulk-set-division", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ asins, division: div }),
+      });
+      setUntaggedItems([]);
+    } catch (e) { alert("Bulk set failed: " + e.message); }
+  };
+
+  const handlePropagate = async () => {
+    setPropagating(true);
+    try {
+      const r = await fetch("/api/item-master/propagate-division", { method: "POST" });
+      const d = await r.json();
+      const summary = Object.entries(d.updated || {}).map(([t, n]) => `${t}: ${n}`).join(", ");
+      alert(`Division tags propagated to all historical data!\n${summary}`);
+    } catch (e) { alert("Propagate failed: " + e.message); }
+    setPropagating(false);
+  };
+
+  const renderUntaggedBanner = () => {
+    if (!untaggedItems || untaggedItems.length === 0) return null;
+    return (
+      <div style={{ background: "#fff3cd", border: "1px solid #ffc107", borderRadius: 8, padding: 16, marginBottom: 20 }}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
+          <strong style={{ fontSize: 15 }}>⚠️ {untaggedItems.length} ASIN{untaggedItems.length > 1 ? "s" : ""} need division tagging</strong>
+          <div style={{ display: "flex", gap: 8 }}>
+            <button onClick={() => handleBulkSetDivision("golf")}
+              style={{ background: "#198754", color: "#fff", border: "none", borderRadius: 4, padding: "6px 12px", cursor: "pointer", fontSize: 13 }}>
+              Set All → Golf
+            </button>
+            <button onClick={() => handleBulkSetDivision("housewares")}
+              style={{ background: "#0d6efd", color: "#fff", border: "none", borderRadius: 4, padding: "6px 12px", cursor: "pointer", fontSize: 13 }}>
+              Set All → Housewares
+            </button>
+          </div>
+        </div>
+        <div style={{ maxHeight: 200, overflowY: "auto", marginBottom: 12 }}>
+          {untaggedItems.map(item => (
+            <div key={item.asin} style={{ display: "flex", alignItems: "center", gap: 10, padding: "4px 0", borderBottom: "1px solid #eee" }}>
+              <span style={{ fontFamily: "monospace", fontSize: 13, minWidth: 120 }}>{item.asin}</span>
+              <span style={{ flex: 1, fontSize: 13, color: "#555" }}>{item.product_name || "—"}</span>
+              <button onClick={() => handleSetDivisionTag(item.asin, "golf")}
+                style={{ background: "#198754", color: "#fff", border: "none", borderRadius: 4, padding: "3px 10px", cursor: "pointer", fontSize: 12 }}>Golf</button>
+              <button onClick={() => handleSetDivisionTag(item.asin, "housewares")}
+                style={{ background: "#0d6efd", color: "#fff", border: "none", borderRadius: 4, padding: "3px 10px", cursor: "pointer", fontSize: 12 }}>Housewares</button>
+            </div>
+          ))}
+        </div>
+        <button onClick={handlePropagate} disabled={propagating}
+          style={{ background: "#6f42c1", color: "#fff", border: "none", borderRadius: 4, padding: "8px 16px", cursor: "pointer", fontSize: 14, width: "100%" }}>
+          {propagating ? "Applying..." : "Apply Division Tags to All Historical Data"}
+        </button>
+      </div>
+    );
+  };
 
   const handlePricingSync = async () => {
     setSyncing(true);
@@ -217,6 +313,8 @@ export default function ItemMaster() {
               onClick={() => { setDivision(t); setSearch(""); setFilter("All"); }}>{t}</button>
           ))}
         </div>
+
+        {renderUntaggedBanner()}
 
         <div className="kpi-grid" style={{ marginBottom: 24 }}>
           <div className="kpi-card">
@@ -339,6 +437,8 @@ export default function ItemMaster() {
               onClick={() => { setGolfSubTab(t); setSearch(""); setFilter("All"); }}>{t}</button>
           ))}
         </div>
+
+        {renderUntaggedBanner()}
 
         <div className="kpi-grid" style={{ marginBottom: 24 }}>
           <div className="kpi-card">
@@ -566,6 +666,8 @@ export default function ItemMaster() {
           ))}
         </div>
 
+        {renderUntaggedBanner()}
+
         <div className="kpi-grid" style={{ marginBottom: 24 }}>
           <div className="kpi-card">
             <div className="kpi-label">Total SKUs</div>
@@ -718,6 +820,8 @@ export default function ItemMaster() {
             onClick={() => { setGolfSubTab(t); setSearch(""); setFilter("All"); }}>{t}</button>
         ))}
       </div>
+
+      {renderUntaggedBanner()}
 
       {/* Summary Cards */}
       <div className="kpi-grid" style={{ marginBottom: 24 }}>
