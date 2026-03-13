@@ -223,6 +223,14 @@ async def _sync_loop():
     except Exception as e:
         logger.error(f"Pricing/coupon sync error: {e}")
 
+    # Run analytics rollup on startup so analytics tables are populated immediately
+    try:
+        loop = asyncio.get_event_loop()
+        await loop.run_in_executor(None, run_full_rollup)
+        logger.info("Startup: analytics rollup completed — analytics tables populated")
+    except Exception as e:
+        logger.error(f"Startup analytics rollup error: {e}")
+
     # Initialize APScheduler
     if not scheduler:
         scheduler = AsyncIOScheduler(timezone="America/Chicago")
@@ -236,8 +244,8 @@ async def _sync_loop():
         # Schedule today-orders sync every hour on the half-hour (fast, ~10s)
         scheduler.add_job(_run_scheduled_today_sync, CronTrigger(minute=30, second=0, timezone="America/Chicago"), id="today_sync_hourly")
 
-        # Schedule ads sync every 2 hours
-        scheduler.add_job(_run_scheduled_ads_sync, CronTrigger(minute=0, second=0, timezone="America/Chicago"), id="ads_sync_hourly")
+        # Schedule ads sync every 2 hours (0, 2, 4, 6, 8, ... hours)
+        scheduler.add_job(_run_scheduled_ads_sync, CronTrigger(hour='*/2', minute=0, second=0, timezone="America/Chicago"), id="ads_sync_2hourly")
 
         # Schedule pricing sync every 2 hours (offset by 1 hour from ads)
         scheduler.add_job(_run_scheduled_pricing_sync, CronTrigger(minute=30, second=0, timezone="America/Chicago"), id="pricing_sync_hourly")

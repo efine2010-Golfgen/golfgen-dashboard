@@ -120,13 +120,17 @@ def _compute_master_curve() -> dict:
     con = _duck()
     try:
         # Get total units per (year, month) across all SKUs for LY
-        result = con.execute("""
-            SELECT year, month, SUM(units) as total_units
-            FROM monthly_sales_history
-            WHERE year IN (2025, 2026)
-            GROUP BY year, month
-            ORDER BY year, month
-        """).fetchall()
+        try:
+            result = con.execute("""
+                SELECT year, month, SUM(units) as total_units
+                FROM monthly_sales_history
+                WHERE year IN (2025, 2026)
+                GROUP BY year, month
+                ORDER BY year, month
+            """).fetchall()
+        except Exception as e:
+            logger.warning(f"Master curve: monthly_sales_history query failed: {e}")
+            result = []
 
         # Calculate total annual
         annual_total = sum(row[2] for row in result)
@@ -184,13 +188,11 @@ async def get_item_plan(request: Request):
     try:
         # ── Settings ──
         settings = {}
-        import logging as _logging
-        _log = _logging.getLogger("golfgen")
         try:
             for row in con.execute("SELECT key, value FROM item_plan_settings").fetchall():
                 settings[row[0]] = row[1]
         except Exception as e:
-            _log.warning(f"Item Plan settings query failed: {e}")
+            logger.warning(f"Item Plan settings query failed: {e}")
 
         # ── Seed JSON for metadata ──
         seed_data = {}
@@ -227,9 +229,15 @@ async def get_item_plan(request: Request):
             return ""  # no match — skip this SKU
 
         # Map every monthly_sales_history SKU to a canonical base SKU
-        all_hist_skus = con.execute(
-            "SELECT DISTINCT sku FROM monthly_sales_history ORDER BY sku"
-        ).fetchall()
+        # Gracefully handle missing table (returns empty plan if no history data)
+        try:
+            all_hist_skus = con.execute(
+                "SELECT DISTINCT sku FROM monthly_sales_history ORDER BY sku"
+            ).fetchall()
+        except Exception as e:
+            logger.warning(f"Item Plan: monthly_sales_history query failed (table may not exist): {e}")
+            all_hist_skus = []
+
         # Build {base_sku: [raw_sku1, raw_sku2, ...]}
         base_to_raw = {}
         for (raw,) in all_hist_skus:
@@ -429,9 +437,12 @@ async def get_item_plan_sales_curves(request: Request):
             stripped = _ext_re.sub('', s).strip()
             return stripped if stripped in canon_c else ""
 
-        all_raw = con.execute(
-            "SELECT DISTINCT sku FROM monthly_sales_history"
-        ).fetchall()
+        try:
+            all_raw = con.execute(
+                "SELECT DISTINCT sku FROM monthly_sales_history"
+            ).fetchall()
+        except Exception:
+            all_raw = []
         base_map = {}
         for (raw,) in all_raw:
             b = _base_c(raw)

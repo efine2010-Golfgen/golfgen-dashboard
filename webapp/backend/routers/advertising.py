@@ -31,7 +31,8 @@ def _safe_ads_query(con, query, params=None):
     """Run an ads query, returning empty list if tables don't exist yet."""
     try:
         return con.execute(query, params or []).fetchall()
-    except Exception:
+    except Exception as e:
+        logger.warning(f"Ads query error: {e}")
         return []
 
 
