@@ -141,10 +141,42 @@ def run_sku_rollup(con, period: str = 'last_30d'):
     return len(sku_data)
 
 
+def _has_hierarchy_columns(con, table: str) -> bool:
+    """Check if a table has division/customer/platform columns."""
+    try:
+        cols = [r[0] for r in con.execute(f"DESCRIBE {table}").fetchall()]
+        return 'division' in cols and 'customer' in cols
+    except Exception:
+        return False
+
+
 def run_full_rollup():
     """Run all rollups. Called by scheduler nightly at 2:30am Central."""
     con = duckdb.connect(str(DB_PATH), read_only=False)
     try:
+        # Check if hierarchy columns exist — if not, run migration first
+        if not _has_hierarchy_columns(con, 'orders'):
+            logger.warning("orders table missing hierarchy columns — running inline migration")
+            for table in ['orders', 'order_items', 'financial_events', 'fba_inventory',
+                          'daily_sales', 'advertising', 'ads_campaigns']:
+                for col, default in [('division', 'unknown'), ('customer', 'unknown'), ('platform', 'unknown')]:
+                    try:
+                        con.execute(f"ALTER TABLE {table} ADD COLUMN {col} VARCHAR DEFAULT '{default}'")
+                    except Exception:
+                        pass  # column already exists
+            # Tag existing rows as amazon/sp_api
+            for table in ['orders', 'financial_events', 'fba_inventory', 'daily_sales']:
+                try:
+                    con.execute(f"UPDATE {table} SET customer = 'amazon', platform = 'sp_api' WHERE customer = 'unknown' OR customer IS NULL")
+                except Exception:
+                    pass
+            # Add division to item_master
+            for col in ['division', 'category', 'brand']:
+                try:
+                    con.execute(f"ALTER TABLE item_master ADD COLUMN {col} VARCHAR")
+                except Exception:
+                    pass
+            logger.info("Inline migration complete")
         # Roll up last 7 days of daily analytics (catch any missed days)
         now = datetime.now(ZoneInfo("America/Chicago"))
         daily_total = 0

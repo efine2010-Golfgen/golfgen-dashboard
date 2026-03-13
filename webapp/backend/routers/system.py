@@ -688,15 +688,22 @@ async def trigger_analytics_rollup(request: Request):
         from fastapi import HTTPException
         raise HTTPException(status_code=401, detail="Not authenticated")
 
-    loop = asyncio.get_event_loop()
-    result = await loop.run_in_executor(None, run_full_rollup)
-    now = datetime.now(ZoneInfo("America/Chicago"))
-    return {
-        "status": "rollup_complete",
-        "daily_rows": result.get("daily_rows", 0),
-        "sku_rows": result.get("sku_rows", 0),
-        "completed_at": now.isoformat(),
-    }
+    try:
+        loop = asyncio.get_event_loop()
+        result = await loop.run_in_executor(None, run_full_rollup)
+        now = datetime.now(ZoneInfo("America/Chicago"))
+        return {
+            "status": "rollup_complete",
+            "daily_rows": result.get("daily_rows", 0),
+            "sku_rows": result.get("sku_rows", 0),
+            "completed_at": now.isoformat(),
+        }
+    except Exception as e:
+        import traceback
+        return JSONResponse(
+            status_code=500,
+            content={"detail": str(e), "traceback": traceback.format_exc()},
+        )
 
 
 @router.get("/api/docs/architecture")

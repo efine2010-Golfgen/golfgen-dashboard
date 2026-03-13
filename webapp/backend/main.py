@@ -187,16 +187,16 @@ async def tab_permission_middleware(request: Request, call_next):
                 if mfa_routes.get(tab_key, False):
                     # This route requires MFA
                     user_settings = get_mfa_settings(sess["user_name"])
-                    if not user_settings or not user_settings.get("mfa_enabled"):
-                        # User hasn't enrolled in MFA → 404 (hidden page behavior)
-                        return JSONResponse({"detail": "Not found"}, status_code=404)
-                    token = request.cookies.get("golfgen_session", "")
-                    if not is_session_mfa_verified(token):
-                        # MFA enabled but session not verified → prompt for MFA
-                        return JSONResponse(
-                            {"detail": "MFA verification required", "mfa_required": True},
-                            status_code=403,
-                        )
+                    # Only enforce MFA if user has actually enrolled
+                    if user_settings and user_settings.get("mfa_enabled"):
+                        token = request.cookies.get("golfgen_session", "")
+                        if not is_session_mfa_verified(token):
+                            # MFA enabled but session not verified → prompt for MFA
+                            return JSONResponse(
+                                {"detail": "MFA verification required", "mfa_required": True},
+                                status_code=403,
+                            )
+                    # If user hasn't enrolled in MFA, let them through
         except Exception:
             pass  # MFA tables may not exist yet on first run
 
