@@ -7,7 +7,7 @@ import hashlib
 from datetime import datetime
 from typing import Optional
 
-import duckdb
+from .database import get_db_rw
 import pyotp
 
 from .config import DB_PATH
@@ -62,7 +62,7 @@ def verify_backup_code(code: str, hashed_codes: list[str]) -> tuple[bool, list[s
 
 def get_mfa_settings(user_name: str) -> Optional[dict]:
     """Fetch MFA settings for a user, or None if not enrolled."""
-    con = duckdb.connect(str(DB_PATH))
+    con = get_db_rw()
     try:
         row = con.execute(
             "SELECT * FROM mfa_user_settings WHERE user_name = ?",
@@ -80,7 +80,7 @@ def save_mfa_enrollment(user_name: str, secret: str, backup_codes: list[str]):
     """Persist a new MFA enrollment."""
     hashed = json.dumps([hash_backup_code(c) for c in backup_codes])
     now = datetime.utcnow().isoformat()
-    con = duckdb.connect(str(DB_PATH))
+    con = get_db_rw()
     try:
         existing = con.execute(
             "SELECT user_name FROM mfa_user_settings WHERE user_name = ?",
@@ -108,7 +108,7 @@ def save_mfa_enrollment(user_name: str, secret: str, backup_codes: list[str]):
 def disable_mfa(user_name: str):
     """Admin reset — disable MFA for a user."""
     now = datetime.utcnow().isoformat()
-    con = duckdb.connect(str(DB_PATH))
+    con = get_db_rw()
     try:
         con.execute("""
             UPDATE mfa_user_settings
@@ -123,7 +123,7 @@ def disable_mfa(user_name: str):
 def update_backup_codes(user_name: str, hashed_codes: list[str]):
     """Update remaining backup codes after one is used."""
     now = datetime.utcnow().isoformat()
-    con = duckdb.connect(str(DB_PATH))
+    con = get_db_rw()
     try:
         con.execute("""
             UPDATE mfa_user_settings
@@ -138,7 +138,7 @@ def update_backup_codes(user_name: str, hashed_codes: list[str]):
 
 def get_mfa_protected_routes() -> dict[str, bool]:
     """Return {tab_key: mfa_required} for all routes."""
-    con = duckdb.connect(str(DB_PATH))
+    con = get_db_rw()
     try:
         rows = con.execute(
             "SELECT tab_key, mfa_required FROM mfa_protected_routes"
@@ -151,7 +151,7 @@ def get_mfa_protected_routes() -> dict[str, bool]:
 def set_route_mfa(tab_key: str, mfa_required: bool):
     """Toggle MFA requirement for a route."""
     now = datetime.utcnow().isoformat()
-    con = duckdb.connect(str(DB_PATH))
+    con = get_db_rw()
     try:
         existing = con.execute(
             "SELECT tab_key FROM mfa_protected_routes WHERE tab_key = ?",
@@ -177,7 +177,7 @@ def set_route_mfa(tab_key: str, mfa_required: bool):
 def mark_session_mfa_verified(session_token: str):
     """Set the mfa_verified_at timestamp on the session row."""
     now = datetime.utcnow().isoformat()
-    con = duckdb.connect(str(DB_PATH))
+    con = get_db_rw()
     try:
         con.execute("""
             UPDATE sessions SET mfa_verified_at = ? WHERE token = ?
@@ -188,7 +188,7 @@ def mark_session_mfa_verified(session_token: str):
 
 def is_session_mfa_verified(session_token: str) -> bool:
     """Check whether this session has passed MFA."""
-    con = duckdb.connect(str(DB_PATH))
+    con = get_db_rw()
     try:
         row = con.execute(
             "SELECT mfa_verified_at FROM sessions WHERE token = ?",
@@ -209,7 +209,7 @@ def log_mfa_event(
     user_agent: str = "",
 ):
     """Write an MFA audit log entry."""
-    con = duckdb.connect(str(DB_PATH))
+    con = get_db_rw()
     try:
         con.execute("""
             INSERT INTO mfa_audit_log
@@ -222,7 +222,7 @@ def log_mfa_event(
 
 def get_audit_log(limit: int = 100, offset: int = 0) -> list[dict]:
     """Retrieve recent MFA audit log entries."""
-    con = duckdb.connect(str(DB_PATH))
+    con = get_db_rw()
     try:
         rows = con.execute("""
             SELECT id, user_name, event_type, detail, ip_address,
@@ -240,7 +240,7 @@ def get_audit_log(limit: int = 100, offset: int = 0) -> list[dict]:
 
 def get_audit_log_count() -> int:
     """Total number of audit entries."""
-    con = duckdb.connect(str(DB_PATH))
+    con = get_db_rw()
     try:
         row = con.execute("SELECT COUNT(*) FROM mfa_audit_log").fetchone()
         return row[0] if row else 0

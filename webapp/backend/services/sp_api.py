@@ -8,7 +8,7 @@ import json
 import logging
 import threading
 import time as _time_mod
-import duckdb
+from core.database import get_db, get_db_rw
 from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
 from pathlib import Path
@@ -82,7 +82,7 @@ def _get_division_for_asin(asin: str, con=None) -> str:
     close_con = False
     try:
         if con is None:
-            con = duckdb.connect(str(DB_PATH), read_only=True)
+            con = get_db()
             close_con = True
         row = con.execute(
             "SELECT division FROM item_master WHERE asin = ?", [asin]
@@ -211,7 +211,7 @@ def _sync_today_orders_inner():
 
         logger.info(f"  Got {len(order_list)} orders from last 7 days")
 
-        con = duckdb.connect(str(DB_PATH), read_only=False)
+        con = get_db_rw()
         con.execute("BEGIN TRANSACTION")
 
         # Store raw orders
@@ -448,7 +448,7 @@ def _ensure_today_data():
 
     today_str = datetime.now(ZoneInfo("America/Chicago")).strftime("%Y-%m-%d")
     try:
-        con = duckdb.connect(str(DB_PATH), read_only=False)
+        con = get_db_rw()
         row = con.execute(
             "SELECT ordered_product_sales FROM daily_sales WHERE date = ? AND asin = 'ALL'",
             [today_str]
@@ -507,7 +507,7 @@ def _run_sp_api_sync_inner():
 
     # ── Ensure financial_events table exists ──────────────────────
     try:
-        _con = duckdb.connect(str(DB_PATH), read_only=False)
+        _con = get_db_rw()
         _con.execute("""
             CREATE TABLE IF NOT EXISTS financial_events (
                 date DATE,
@@ -596,7 +596,7 @@ def _run_sp_api_sync_inner():
                 break
 
         logger.info(f"  Total financial events: {len(all_shipment_events)} shipments, {len(all_refund_events)} refunds")
-        con = duckdb.connect(str(DB_PATH), read_only=False)
+        con = get_db_rw()
         con.execute("BEGIN TRANSACTION")
         fin_records = 0
 
@@ -870,7 +870,7 @@ def _run_sp_api_sync_inner():
         response = _fetch_inventory()
         summaries = response.payload.get("inventorySummaries", [])
         if summaries:
-            con = duckdb.connect(str(DB_PATH), read_only=False)
+            con = get_db_rw()
             con.execute("BEGIN TRANSACTION")
             try:
                 today = datetime.now(ZoneInfo("America/Chicago")).date()
@@ -959,7 +959,7 @@ def _run_sp_api_sync_inner():
             if isinstance(report_data, str):
                 report_data = json.loads(report_data)
 
-            con = duckdb.connect(str(DB_PATH), read_only=False)
+            con = get_db_rw()
             con.execute("BEGIN TRANSACTION")
             records = 0
 
@@ -1107,7 +1107,7 @@ def _backfill_orders_inner(days: int = 90):
     logger.info(f"Order backfill: got {len(all_orders)} orders total")
 
     # Insert all orders into the orders table
-    con = duckdb.connect(str(DB_PATH), read_only=False)
+    con = get_db_rw()
     con.execute("BEGIN TRANSACTION")
     inserted = 0
     try:

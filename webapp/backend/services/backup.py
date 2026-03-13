@@ -17,7 +17,7 @@ from datetime import datetime, timedelta
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
-import duckdb
+from core.database import get_db_rw
 from github import Github
 import base64
 
@@ -115,7 +115,7 @@ def run_backup() -> dict:
 
         # Step 1: Export DuckDB to Parquet
         logger.info(f"Backup: Exporting DuckDB to Parquet in {export_dir}")
-        con = duckdb.connect(str(DB_PATH), read_only=False)
+        con = get_db_rw()
         try:
             con.execute(f"EXPORT DATABASE '{export_dir}' (FORMAT PARQUET)")
         finally:
@@ -330,7 +330,7 @@ def run_github_backup() -> dict:
         files_to_commit = {}
 
         # ── File 1: Database manifest ──
-        con = duckdb.connect(str(DB_PATH), read_only=False)
+        con = get_db_rw()
         tables_raw = con.execute("SHOW TABLES").fetchall()
         manifest = {
             "backup_time": now.isoformat(),
@@ -448,7 +448,7 @@ def get_github_backup_status() -> dict:
     """
     repo_name = os.environ.get("BACKUP_GITHUB_REPO", "")
     try:
-        con = duckdb.connect(str(DB_PATH), read_only=False)
+        con = get_db_rw()
         row = con.execute("""
             SELECT started_at, completed_at, status,
                    records_processed, error_message

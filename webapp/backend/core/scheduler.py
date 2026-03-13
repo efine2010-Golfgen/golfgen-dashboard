@@ -6,7 +6,6 @@ import asyncio
 import logging
 import time
 import threading
-import duckdb
 from datetime import datetime
 from zoneinfo import ZoneInfo
 from pathlib import Path
@@ -41,7 +40,8 @@ _scheduler_locks = {
 def _log_docs_update(status: str = "in_progress", documents_updated: str = None, error_message: str = None, execution_time: float = None) -> int:
     """Log a docs update to the docs_update_log table. Returns the log ID."""
     try:
-        con = duckdb.connect(str(DB_PATH))
+        from .database import get_db
+        con = get_db()
         result = con.execute("""
             INSERT INTO docs_update_log (status, documents_updated, error_message, execution_time_seconds, completed_at)
             VALUES (?, ?, ?, ?, CASE WHEN ? = 'completed' OR ? = 'failed' THEN CURRENT_TIMESTAMP ELSE NULL END)
@@ -340,7 +340,8 @@ async def _startup_sync_catchup():
             ("pricing_sync", 60, _run_scheduled_pricing_sync),       # every hour (offset 30m)
         ]
 
-        con = duckdb.connect(str(DB_PATH), read_only=False)
+        from .database import get_db_rw
+        con = get_db_rw()
 
         for job_name, interval_minutes, job_fn in catchup_jobs:
             try:

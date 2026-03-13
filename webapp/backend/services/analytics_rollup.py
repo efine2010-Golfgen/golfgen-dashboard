@@ -9,7 +9,7 @@ Stage 2: run_daily_rollup() — Reads staging tables, aggregates into analytics_
 Stage 3: run_sku_rollup() — Reads staging + item_master, aggregates into analytics_sku
 """
 
-import duckdb
+from core.database import get_db_rw
 import logging
 from datetime import datetime, date, timedelta
 from zoneinfo import ZoneInfo
@@ -353,9 +353,8 @@ def run_full_rollup():
 
     Pipeline: populate staging → daily rollup → SKU rollup.
     """
-    db_path = str(DB_PATH)
-    logger.info(f"Starting full rollup, DB_PATH={db_path}")
-    con = duckdb.connect(db_path, read_only=False)
+    logger.info(f"Starting full rollup, DB_PATH={DB_PATH}")
+    con = get_db_rw()
     # Verify we have the right database
     try:
         tables = [r[0] for r in con.execute("SHOW TABLES").fetchall()]

@@ -9,7 +9,6 @@ from pathlib import Path
 from typing import Optional
 from contextlib import asynccontextmanager
 
-import duckdb
 import bcrypt as _bcrypt
 from fastapi import FastAPI, Request, HTTPException, Cookie
 from fastapi.middleware.cors import CORSMiddleware
@@ -24,7 +23,7 @@ from core.config import (
     SESSION_SECRET, ALLOWED_SSO_EMAILS,
     SESSION_MAX_AGE_HOURS, SESSION_IDLE_TIMEOUT_HOURS,
 )
-from core.database import init_all_tables
+from core.database import init_all_tables, get_db, get_db_rw
 
 logger = logging.getLogger("golfgen")
 
@@ -42,7 +41,7 @@ def _get_session(token: str):
     """Look up session from DuckDB. Returns dict or None."""
     if not token:
         return None
-    con = duckdb.connect(str(DB_PATH), read_only=False)
+    con = get_db_rw()
     rows = con.execute(
         "SELECT token, user_email, user_name, role FROM sessions WHERE token = ?",
         [token],
@@ -56,7 +55,7 @@ def _get_session(token: str):
 
 def _get_user_permissions(user_name: str):
     """Return set of enabled tab_keys for a user."""
-    con = duckdb.connect(str(DB_PATH), read_only=False)
+    con = get_db_rw()
     rows = con.execute(
         "SELECT tab_key FROM user_permissions WHERE user_name = ? AND enabled = TRUE",
         [user_name],
@@ -86,7 +85,7 @@ def _write_audit(user_email: str, user_name: str, action: str, detail: str = "",
                  ip_address: str = "", path: str = ""):
     """Write one row to the audit_log table."""
     try:
-        con = duckdb.connect(str(DB_PATH))
+        con = get_db()
         con.execute(
             "INSERT INTO audit_log (user_email, user_name, action, detail, ip_address, path) "
             "VALUES (?, ?, ?, ?, ?, ?)",
@@ -102,7 +101,7 @@ def _check_session_timeouts(token: str) -> bool:
     if not token:
         return False
     try:
-        con = duckdb.connect(str(DB_PATH))
+        con = get_db()
         row = con.execute(
             "SELECT created_at, last_active_at FROM sessions WHERE token = ?", [token]
         ).fetchone()
@@ -282,7 +281,7 @@ def login(req: MultiLoginRequest):
             raise HTTPException(status_code=401, detail="Invalid email or password.")
         # Create session for legacy login
         token = secrets.token_hex(32)
-        con = duckdb.connect(str(DB_PATH))
+        con = get_db()
         con.execute(
             "INSERT INTO sessions (token, user_email, user_name, role, login_method) VALUES (?, ?, ?, ?, 'legacy')",
             [token, req.email.lower().strip(), req.email.split("@")[0], "admin"],
@@ -302,7 +301,7 @@ def login(req: MultiLoginRequest):
         _write_audit(req.email, "", "login_failed", "Invalid password")
         raise HTTPException(status_code=401, detail="Invalid email or password.")
     token = secrets.token_hex(32)
-    con = duckdb.connect(str(DB_PATH))
+    con = get_db()
     con.execute(
         "INSERT INTO sessions (token, user_email, user_name, role, login_method) VALUES (?, ?, ?, ?, 'password')",
         [token, req.email.lower().strip(), user["name"], user["role"]],
@@ -332,7 +331,7 @@ def logout(request: Request, golfgen_session: Optional[str] = Cookie(None)):
     """Clear the session from DuckDB."""
     if golfgen_session:
         sess = _get_session(golfgen_session)
-        con = duckdb.connect(str(DB_PATH))
+        con = get_db()
         con.execute("DELETE FROM sessions WHERE token = ?", [golfgen_session])
         con.close()
         if sess:
@@ -412,7 +411,7 @@ async def google_callback(code: str = "", error: str = ""):
 
     # Create session
     session_token = secrets.token_hex(32)
-    con = duckdb.connect(str(DB_PATH))
+    con = get_db()
     con.execute(
         "INSERT INTO sessions (token, user_email, user_name, role, login_method) VALUES (?, ?, ?, ?, 'google_sso')",
         [session_token, email, user_name, role],
@@ -460,7 +459,7 @@ def get_all_permissions(request: Request):
     sess = _get_session(request.cookies.get("golfgen_session"))
     if not sess or sess["role"] != "admin":
         raise HTTPException(status_code=403, detail="Admin access required")
-    con = duckdb.connect(str(DB_PATH), read_only=False)
+    con = get_db_rw()
     rows = con.execute(
         "SELECT user_name, tab_key, enabled FROM user_permissions ORDER BY user_name, tab_key"
     ).fetchall()
@@ -495,7 +494,7 @@ def update_permission(req: PermissionUpdate, request: Request):
         raise HTTPException(status_code=403, detail="Admin access required")
     if req.user not in USERS or req.tab not in ALL_TABS:
         raise HTTPException(status_code=400, detail="Invalid user or tab")
-    con = duckdb.connect(str(DB_PATH))
+    con = get_db()
     con.execute("DELETE FROM user_permissions WHERE user_name = ? AND tab_key = ?",
                 [req.user, req.tab])
     con.execute("INSERT INTO user_permissions (user_name, tab_key, enabled) VALUES (?, ?, ?)",
@@ -512,7 +511,7 @@ def get_audit_log(request: Request, limit: int = 200, offset: int = 0):
     sess = _get_session(request.cookies.get("golfgen_session"))
     if not sess or sess["role"] != "admin":
         raise HTTPException(status_code=403, detail="Admin access required")
-    con = duckdb.connect(str(DB_PATH), read_only=True)
+    con = get_db()
     try:
         rows = con.execute(
             "SELECT ts, user_email, user_name, action, detail, ip_address, path "

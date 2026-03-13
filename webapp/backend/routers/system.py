@@ -3,7 +3,7 @@ import os
 import json
 import logging
 import asyncio
-import duckdb
+from core.database import get_db, get_db_rw
 from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
 from pathlib import Path
@@ -45,7 +45,7 @@ def health():
     }
 
     try:
-        con = duckdb.connect(str(DB_PATH), read_only=False)
+        con = get_db_rw()
         # Table row counts
         for tbl in ["orders", "daily_sales", "financial_events", "fba_inventory", "advertising", "ads_campaigns"]:
             try:
@@ -239,7 +239,7 @@ def debug_financial_events():
                 summary[k] = str(v)[:100]
 
         # Also check what's in the DB
-        con = duckdb.connect(str(DB_PATH), read_only=False)
+        con = get_db_rw()
         db_counts = con.execute("""
             SELECT event_type, COUNT(*), SUM(ABS(product_charges)),
                    SUM(ABS(fba_fees)), SUM(ABS(commission))
@@ -330,7 +330,7 @@ def backfill_historical(
                 if isinstance(report_data, str):
                     report_data = json.loads(report_data)
 
-                con = duckdb.connect(str(DB_PATH), read_only=False)
+                con = get_db_rw()
                 records = 0
 
                 for day_entry in report_data.get("salesAndTrafficByDate", []):
@@ -436,7 +436,7 @@ async def get_system_status(request: Request):
         from fastapi import HTTPException
         raise HTTPException(status_code=401, detail="Not authenticated")
 
-    con = duckdb.connect(str(DB_PATH), read_only=False)
+    con = get_db_rw()
     try:
         # Get last sync log entry
         last_sync = con.execute("""
@@ -515,7 +515,7 @@ async def get_sync_log(request: Request, limit: int = Query(50, ge=1, le=500)):
         from fastapi import HTTPException
         raise HTTPException(status_code=401, detail="Not authenticated")
 
-    con = duckdb.connect(str(DB_PATH), read_only=False)
+    con = get_db_rw()
     try:
         rows = con.execute("""
             SELECT id, job_name, started_at, completed_at, status,
@@ -650,7 +650,7 @@ async def get_docs_status(request: Request):
         from fastapi import HTTPException
         raise HTTPException(status_code=401, detail="Not authenticated")
 
-    con = duckdb.connect(str(DB_PATH), read_only=False)
+    con = get_db_rw()
     try:
         rows = con.execute("""
             SELECT id, started_at, completed_at, status, execution_time_seconds, error_message, documents_updated
@@ -785,7 +785,7 @@ def pg_ready():
     """Check PostgreSQL migration readiness."""
     from pathlib import Path
     try:
-        con = duckdb.connect(str(DB_PATH), read_only=True)
+        con = get_db()
         tables = [r[0] for r in con.execute("SHOW TABLES").fetchall()]
         con.close()
         export_path = Path("/app/data/pg_export")

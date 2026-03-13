@@ -13,7 +13,7 @@ from pathlib import Path
 from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
 
-import duckdb
+from core.database import get_db_rw
 
 from core.config import DB_PATH, DB_DIR, CONFIG_PATH, PRICING_CACHE_PATH, TIMEZONE
 
@@ -316,7 +316,7 @@ def _ensure_ads_tables():
     tables as fallback if database.py hasn't run yet. Uses DATE type to match
     the canonical definitions in database.py.
     """
-    con = duckdb.connect(str(DB_PATH), read_only=False)
+    con = get_db_rw()
 
     # Fallback CREATE IF NOT EXISTS — uses DATE type to match database.py
     con.execute("""
@@ -582,7 +582,7 @@ def _handle_campaign_report(data):
         logger.warning(f"Campaign report: expected list, got {type(data)}")
         return
 
-    con = duckdb.connect(str(DB_PATH), read_only=False)
+    con = get_db_rw()
     con.execute("BEGIN TRANSACTION")
     inserted = 0
     errors = 0
@@ -650,7 +650,7 @@ def _handle_targeting_report(data):
         logger.warning(f"Targeting report: expected list, got {type(data)}")
         return
 
-    con = duckdb.connect(str(DB_PATH), read_only=False)
+    con = get_db_rw()
     con.execute("BEGIN TRANSACTION")
     inserted = 0
     errors = 0
@@ -712,7 +712,7 @@ def _handle_search_term_report(data):
         logger.warning(f"Search term report: expected list, got {type(data)}")
         return
 
-    con = duckdb.connect(str(DB_PATH), read_only=False)
+    con = get_db_rw()
     con.execute("BEGIN TRANSACTION")
     inserted = 0
     errors = 0

@@ -12,7 +12,7 @@ import logging
 from datetime import datetime, timedelta, date as dt_date
 from zoneinfo import ZoneInfo
 
-import duckdb
+from core.database import get_db, get_db_rw
 
 from core.config import DB_PATH
 
@@ -29,7 +29,7 @@ def _auto_backfill_if_needed():
     from sp_api.api import Reports
     from sp_api.base import Marketplaces, ReportType
 
-    con = duckdb.connect(str(DB_PATH), read_only=False)
+    con = get_db_rw()
     try:
         earliest_row = con.execute(
             "SELECT MIN(date) FROM daily_sales WHERE asin = 'ALL'"
@@ -107,7 +107,7 @@ def _auto_backfill_if_needed():
                 if isinstance(report_data, str):
                     report_data = json.loads(report_data)
 
-                wcon = duckdb.connect(str(DB_PATH), read_only=False)
+                wcon = get_db_rw()
                 records = 0
 
                 for day_entry in report_data.get("salesAndTrafficByDate", []):
@@ -180,7 +180,7 @@ def _write_sync_log(job_name, started_at, status, inserted=0, error=None):
     try:
         completed_at = datetime.now(ZoneInfo("America/Chicago"))
         duration = (completed_at - started_at).total_seconds()
-        con = duckdb.connect(str(DB_PATH))
+        con = get_db()
         con.execute("""
             INSERT INTO sync_log
             (job_name, started_at, completed_at, status,
@@ -196,7 +196,7 @@ def _write_sync_log(job_name, started_at, status, inserted=0, error=None):
 def _log_sync(job_name: str, status: str = "in_progress", records_processed: int = 0, error_message: str = None, execution_time: float = None) -> int:
     """Legacy sync log helper. Returns the log ID."""
     try:
-        con = duckdb.connect(str(DB_PATH))
+        con = get_db()
         result = con.execute("""
             INSERT INTO sync_log (job_name, status, records_pulled, error_message, duration_seconds, completed_at)
             VALUES (?, ?, ?, ?, ?, CASE WHEN ? = 'completed' OR ? = 'failed' THEN CURRENT_TIMESTAMP ELSE NULL END)
@@ -212,7 +212,7 @@ def _log_sync(job_name: str, status: str = "in_progress", records_processed: int
 def _log_docs_update(status: str = "in_progress", documents_updated: str = None, error_message: str = None, execution_time: float = None) -> int:
     """Log a docs update to the docs_update_log table. Returns the log ID."""
     try:
-        con = duckdb.connect(str(DB_PATH))
+        con = get_db()
         result = con.execute("""
             INSERT INTO docs_update_log (status, documents_updated, error_message, execution_time_seconds, completed_at)
             VALUES (?, ?, ?, ?, CASE WHEN ? = 'completed' OR ? = 'failed' THEN CURRENT_TIMESTAMP ELSE NULL END)

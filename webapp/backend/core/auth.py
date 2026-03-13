@@ -97,9 +97,8 @@ def login_handler(req: MultiLoginRequest):
     if not _bcrypt.checkpw(req.password.encode("utf-8"), user["password_hash"].encode("utf-8")):
         raise HTTPException(status_code=401, detail="Invalid email or password.")
     token = secrets.token_hex(32)
-    con = get_db()  # This will be a read-only connection, so we need to use DB_PATH directly
-    import duckdb
-    con_rw = duckdb.connect(str(DB_PATH))
+    from .database import get_db_rw
+    con_rw = get_db_rw()
     con_rw.execute("INSERT INTO sessions (token, user_email, user_name, role) VALUES (?, ?, ?, ?)",
                    [token, req.email.lower().strip(), user["name"], user["role"]])
     con_rw.close()
@@ -118,8 +117,8 @@ def login_handler(req: MultiLoginRequest):
 def logout_handler(golfgen_session: Optional[str]):
     """Clear the session from DuckDB."""
     if golfgen_session:
-        import duckdb
-        con = duckdb.connect(str(DB_PATH))
+        from .database import get_db_rw
+        con = get_db_rw()
         con.execute("DELETE FROM sessions WHERE token = ?", [golfgen_session])
         con.close()
     response = JSONResponse({"ok": True})
@@ -183,8 +182,8 @@ def update_permission_handler(req: PermissionUpdate, request: Request):
         raise HTTPException(status_code=403, detail="Admin access required")
     if req.user not in USERS or req.tab not in ALL_TABS:
         raise HTTPException(status_code=400, detail="Invalid user or tab")
-    import duckdb
-    con = duckdb.connect(str(DB_PATH))
+    from .database import get_db_rw
+    con = get_db_rw()
     # Upsert
     con.execute("DELETE FROM user_permissions WHERE user_name = ? AND tab_key = ?", [req.user, req.tab])
     con.execute("INSERT INTO user_permissions (user_name, tab_key, enabled) VALUES (?, ?, ?)",
