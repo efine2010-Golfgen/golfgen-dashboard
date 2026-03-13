@@ -22,24 +22,75 @@ logger = logging.getLogger("golfgen")
 # DuckDB's execute() returns a result object; psycopg2's returns None
 # (results live on the cursor).  The wrapper normalises both behaviours.
 
+_TABLE_PKS: dict[str, list[str]] = {
+    "orders": ["order_id"],
+    "daily_sales": ["date", "asin"],
+    "fba_inventory": ["date", "asin", "condition"],
+    "financial_events": [],  # no PK
+    "advertising": ["date", "campaign_id"],
+    "ads_campaigns": ["date", "campaign_id"],
+    "item_master": ["asin"],
+    "sessions": ["token"],
+    "user_permissions": ["user_name", "tab_key"],
+    "item_plan_overrides": ["sku", "field", "month"],
+    "item_plan_curve_selection": ["sku"],
+    "item_plan_factory_orders": ["po_number"],
+    "item_plan_factory_order_items": ["id"],
+    "item_plan_settings": ["key"],
+    "monthly_sales_history": ["sku", "year", "month"],
+    "sync_log": ["id"],
+    "docs_update_log": ["id"],
+}
+
+_RE_INSERT_OR_IGNORE = re.compile(
+    r"\bINSERT\s+OR\s+IGNORE\s+INTO\b", re.IGNORECASE
+)
+_RE_INSERT_OR_REPLACE = re.compile(
+    r"\bINSERT\s+OR\s+REPLACE\s+INTO\s+(\w+)\s*\(([^)]+)\)",
+    re.IGNORECASE | re.DOTALL,
+)
+
+
 def _translate_sql_for_pg(sql: str) -> str:
     """Convert DuckDB SQL idioms to PostgreSQL equivalents."""
     # ? → %s  (parameterised placeholders)
     sql = sql.replace("?", "%s")
-    # INSERT OR IGNORE → INSERT ... ON CONFLICT DO NOTHING
-    sql = re.sub(
-        r"\bINSERT\s+OR\s+IGNORE\s+INTO\b",
-        "INSERT INTO",
-        sql,
-        flags=re.IGNORECASE,
-    )
-    # Append ON CONFLICT DO NOTHING for INSERT OR IGNORE rewrites
-    # (only if not already present)
-    if "ON CONFLICT" not in sql.upper() and "INSERT INTO" in sql.upper():
-        # Check if this was an INSERT OR IGNORE rewrite by looking for
-        # the original pattern in the pre-translated sql — we handle this
-        # at call time instead to avoid false positives on normal INSERTs.
-        pass
+
+    # ── INSERT OR IGNORE → ON CONFLICT DO NOTHING ──────────
+    if _RE_INSERT_OR_IGNORE.search(sql):
+        sql = _RE_INSERT_OR_IGNORE.sub("INSERT INTO", sql)
+        # Append ON CONFLICT DO NOTHING after the VALUES(...)
+        sql = sql.rstrip().rstrip(";")
+        sql += " ON CONFLICT DO NOTHING"
+
+    # ── INSERT OR REPLACE → ON CONFLICT (pk) DO UPDATE SET … ──
+    m = _RE_INSERT_OR_REPLACE.search(sql)
+    if m:
+        table = m.group(1).lower()
+        cols = [c.strip().strip('"') for c in m.group(2).split(",")]
+        pk_cols = _TABLE_PKS.get(table, [])
+        # Replace the INSERT OR REPLACE preamble
+        sql = _RE_INSERT_OR_REPLACE.sub(
+            f"INSERT INTO {table} ({m.group(2)})", sql, count=1
+        )
+        sql = sql.rstrip().rstrip(";")
+        if pk_cols:
+            non_pk = [c for c in cols if c.lower() not in
+                      {p.lower() for p in pk_cols}]
+            conflict_target = ", ".join(pk_cols)
+            if non_pk:
+                set_clause = ", ".join(
+                    f"{c} = EXCLUDED.{c}" for c in non_pk
+                )
+                sql += (f" ON CONFLICT ({conflict_target})"
+                        f" DO UPDATE SET {set_clause}")
+            else:
+                sql += (f" ON CONFLICT ({conflict_target})"
+                        f" DO NOTHING")
+        else:
+            # No known PK — fall back to DO NOTHING
+            sql += " ON CONFLICT DO NOTHING"
+
     return sql
 
 
