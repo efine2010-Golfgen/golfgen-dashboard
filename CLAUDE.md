@@ -252,21 +252,78 @@ curl -s https://golfgen-dashboard-production-ce30.up.railway.app/api/health | py
 
 Should return JSON with status: healthy and non-zero table row counts.
 
-## Current Known Issues (as of March 2026)
-- Monthly YOY tab returns 500 error — date_part CAST fix needed
-- Returns showing $0 — event_type column fix needed
-- Advertising sync showing 0 records — ads API fix needed
-- Item Plan tab returns 500 error — needs investigation
-- OTW tab missing ETD/ETA/port data — needs fix
-- division/customer/platform columns not yet added to tables — Phase 2
+## Current Known Issues (as of March 13, 2026)
+- ✅ FIXED: Monthly YOY tab 500 error — TRY_CAST fix applied
+- ✅ FIXED: Returns showing $0 — event_type column migration done
+- ✅ FIXED: Advertising sync 0 records — ads API profile/report fix deployed
+- ✅ FIXED: Item Plan tab 500 error — fixed
+- ✅ FIXED: OTW tab missing ETD/ETA/port — status + comments columns added
+- division/customer/platform columns not yet added to all tables — Phase 2
+- Advertising data still showing 0 rows in DB — ads API may need further
+  investigation (reports returning empty, possible campaign data gap)
+- 2-year historical backfill not yet run — daily_sales partial, orders
+  partial, financial_events partial, ads zero
 
-## Architecture Roadmap Summary
-Phase 1 (This Week): Bug fixes + security (Google SSO, 18hr sessions, audit log)
-Phase 2 (2-3 Weeks): PostgreSQL + staging/analytics layers + division/customer/platform columns
-Phase 3 (3-4 Weeks): Hot standby + backup verification + enhanced backup schedule
-Phase 4 (1 Month): File uploads + Google Drive automation + Scintilla/Belk/Albertsons/FD ingestion
-Phase 5 (6-8 Weeks): Walmart + Shopify + all platform integrations
-Phase 6 (2-3 Months): Advanced features + forecasting + anomaly alerts
+## Architecture Roadmap Summary (updated March 13, 2026)
+
+### Phase 1 — Bug Fixes + Security
+| Item                                       | Status      |
+|--------------------------------------------|-------------|
+| Monthly YOY 500 error fix (TRY_CAST)       | ✅ Done     |
+| Returns $0 fix (event_type migration)      | ✅ Done     |
+| Ads sync 0 records fix                     | ✅ Done     |
+| Item Plan 500 error fix                    | ✅ Done     |
+| OTW tab ETD/ETA/port fix                   | ✅ Done     |
+| Google SSO login                           | ✅ Done     |
+| 18-hour session lifetime + 2hr idle        | ✅ Done     |
+| Audit log (login, access, admin actions)   | ✅ Done     |
+| MFA / TOTP support                         | ✅ Done     |
+| Per-user tab permissions                   | ✅ Done     |
+| Sync mutex — prevent overlapping syncs     | ✅ Done     |
+| Transaction wrapping — rollback on failure | ✅ Done     |
+| Retry with exponential backoff             | ✅ Done     |
+| Scheduler-level mutex (all 7 job wrappers) | ✅ Done     |
+| Full 2-year historical backfill            | ❌ Not done |
+
+### Phase 2 — PostgreSQL + Analytics Layers
+| Item                                                  | Status        |
+|-------------------------------------------------------|---------------|
+| Migrate DuckDB → PostgreSQL                           | ❌ Not started |
+| Staging tables (staging_orders, staging_financial)     | ❌ Not started |
+| Analytics rollup tables (analytics_daily, sku, ads)    | ⚠️ Partial — rollup code exists, tables created, runs nightly |
+| division/customer/platform on all transactional tables | ⚠️ Partial — columns exist, not fully populated |
+| Item Master division tagging UI + propagation          | ✅ Done       |
+
+### Phase 3 — Reliability + Backup
+| Item                                       | Status        |
+|--------------------------------------------|---------------|
+| Google Drive nightly backup                | ✅ Done       |
+| GitHub nightly backup                      | ✅ Done       |
+| Hot standby / failover                     | ❌ Not started |
+| Backup verification (weekly integrity)     | ❌ Not started |
+| Enhanced backup schedule                   | ❌ Not started |
+
+### Phase 4 — File Uploads + Multi-Source Ingestion
+| Item                                          | Status        |
+|-----------------------------------------------|---------------|
+| Excel inventory upload (golf + housewares)    | ✅ Done       |
+| Google Drive automation                       | ❌ Not started |
+| Scintilla (Walmart stores) ingestion          | ❌ Not started |
+| Belk report ingestion                         | ❌ Not started |
+| Albertsons report ingestion                   | ❌ Not started |
+| Family Dollar report ingestion                | ❌ Not started |
+
+### Phase 5 — Platform Integrations
+| Item                                       | Status        |
+|--------------------------------------------|---------------|
+| Walmart Marketplace API                    | ❌ Not started |
+| Shopify API                                | ❌ Not started |
+
+### Phase 6 — Advanced Features
+| Item                                       | Status        |
+|--------------------------------------------|---------------|
+| Forecasting                                | ❌ Not started |
+| Anomaly alerts                             | ❌ Not started |
 
 ## Backup System
 - Google Drive: nightly 2am Central, 30-day retention
