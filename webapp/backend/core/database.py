@@ -211,6 +211,20 @@ def _init_sales_tables():
         )
     """)
 
+    # Ensure existing tables have hierarchy columns (safe ALTER for upgrades)
+    for tbl in ["orders", "daily_sales", "fba_inventory", "financial_events"]:
+        for col in ["division", "customer", "platform"]:
+            try:
+                con.execute(f"ALTER TABLE {tbl} ADD COLUMN {col} TEXT DEFAULT NULL")
+            except Exception:
+                pass  # column already exists
+
+    # Also add product_name column to daily_sales if missing (used by reports)
+    try:
+        con.execute("ALTER TABLE daily_sales ADD COLUMN product_name TEXT DEFAULT NULL")
+    except Exception:
+        pass
+
     con.close()
 
 
@@ -827,3 +841,41 @@ def init_all_tables():
         logger.info("MFA tables initialized")
     except Exception as e:
         logger.error(f"MFA table init error: {e}")
+
+    # ── Backfill division on daily_sales rows where it's NULL ──
+    try:
+        con = duckdb.connect(str(DB_PATH), read_only=False)
+        # Count rows needing backfill
+        null_count = con.execute(
+            "SELECT COUNT(*) FROM daily_sales WHERE division IS NULL OR division = ''"
+        ).fetchone()[0]
+        if null_count > 0:
+            logger.info(f"Backfilling division on {null_count} daily_sales rows from item_master...")
+            # Update from item_master lookup
+            updated = con.execute("""
+                UPDATE daily_sales
+                SET division = im.division,
+                    customer = COALESCE(daily_sales.customer, 'amazon'),
+                    platform = COALESCE(daily_sales.platform, 'sp_api')
+                FROM item_master im
+                WHERE daily_sales.asin = im.asin
+                  AND im.division IS NOT NULL
+                  AND im.division != ''
+                  AND im.division != 'unknown'
+                  AND (daily_sales.division IS NULL OR daily_sales.division = '')
+            """).fetchone()
+            # Set remaining NULLs to 'golf' (default for GolfGen Amazon data)
+            con.execute("""
+                UPDATE daily_sales
+                SET division = 'golf',
+                    customer = COALESCE(customer, 'amazon'),
+                    platform = COALESCE(platform, 'sp_api')
+                WHERE division IS NULL OR division = ''
+            """)
+            remaining = con.execute(
+                "SELECT COUNT(*) FROM daily_sales WHERE division IS NULL OR division = ''"
+            ).fetchone()[0]
+            logger.info(f"Division backfill complete: {null_count - remaining} rows updated, {remaining} still NULL")
+        con.close()
+    except Exception as e:
+        logger.warning(f"Division backfill error (non-fatal): {e}")

@@ -304,6 +304,9 @@ def _ensure_ads_tables():
             sales DOUBLE DEFAULT 0,
             orders INTEGER DEFAULT 0,
             units INTEGER DEFAULT 0,
+            division VARCHAR DEFAULT 'golf',
+            customer VARCHAR DEFAULT 'amazon',
+            platform VARCHAR DEFAULT 'sp_api',
             PRIMARY KEY (date, campaign_id)
         )
     """)
@@ -321,6 +324,9 @@ def _ensure_ads_tables():
             sales DOUBLE DEFAULT 0,
             orders INTEGER DEFAULT 0,
             units INTEGER DEFAULT 0,
+            division VARCHAR DEFAULT 'golf',
+            customer VARCHAR DEFAULT 'amazon',
+            platform VARCHAR DEFAULT 'sp_api',
             PRIMARY KEY (date, campaign_id)
         )
     """)
@@ -340,6 +346,9 @@ def _ensure_ads_tables():
             sales DOUBLE DEFAULT 0,
             orders INTEGER DEFAULT 0,
             units INTEGER DEFAULT 0,
+            division VARCHAR DEFAULT 'golf',
+            customer VARCHAR DEFAULT 'amazon',
+            platform VARCHAR DEFAULT 'sp_api',
             PRIMARY KEY (date, keyword_id)
         )
     """)
@@ -358,6 +367,9 @@ def _ensure_ads_tables():
             sales DOUBLE DEFAULT 0,
             orders INTEGER DEFAULT 0,
             units INTEGER DEFAULT 0,
+            division VARCHAR DEFAULT 'golf',
+            customer VARCHAR DEFAULT 'amazon',
+            platform VARCHAR DEFAULT 'sp_api',
             PRIMARY KEY (date, search_term, campaign_id)
         )
     """)
@@ -371,6 +383,13 @@ def _ensure_ads_tables():
             PRIMARY KEY (keyword_text, campaign_name)
         )
     """)
+    # Ensure existing tables have the hierarchy columns (safe ALTER for upgrades)
+    for tbl in ["advertising", "ads_campaigns", "ads_keywords", "ads_search_terms"]:
+        for col, default in [("division", "'golf'"), ("customer", "'amazon'"), ("platform", "'sp_api'")]:
+            try:
+                con.execute(f"ALTER TABLE {tbl} ADD COLUMN {col} VARCHAR DEFAULT {default}")
+            except Exception:
+                pass  # column already exists
     con.close()
 
 

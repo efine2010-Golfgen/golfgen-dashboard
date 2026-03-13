@@ -184,8 +184,13 @@ async def get_item_plan(request: Request):
     try:
         # ── Settings ──
         settings = {}
-        for row in con.execute("SELECT key, value FROM item_plan_settings").fetchall():
-            settings[row[0]] = row[1]
+        import logging as _logging
+        _log = _logging.getLogger("golfgen")
+        try:
+            for row in con.execute("SELECT key, value FROM item_plan_settings").fetchall():
+                settings[row[0]] = row[1]
+        except Exception as e:
+            _log.warning(f"Item Plan settings query failed: {e}")
 
         # ── Seed JSON for metadata ──
         seed_data = {}

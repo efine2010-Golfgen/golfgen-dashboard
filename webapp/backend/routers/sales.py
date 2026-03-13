@@ -681,17 +681,31 @@ def monthly_yoy(
     con = get_db()
     hf, hp = _hierarchy_filter(division, customer, platform)
 
-    rows = con.execute(f"""
-        SELECT
-            EXTRACT(YEAR FROM CAST(date AS DATE)) AS yr,
-            EXTRACT(MONTH FROM CAST(date AS DATE)) AS mo,
-            COALESCE(SUM(ordered_product_sales), 0) AS revenue
-        FROM daily_sales
-        WHERE asin = 'ALL'
-          AND CAST(date AS DATE) >= '2024-01-01'{hf}
-        GROUP BY EXTRACT(YEAR FROM CAST(date AS DATE)), EXTRACT(MONTH FROM CAST(date AS DATE))
-        ORDER BY yr, mo
-    """, hp).fetchall()
+    try:
+        # Use YEAR() and MONTH() functions which are more compatible across
+        # DuckDB versions than EXTRACT(YEAR FROM CAST(...))
+        rows = con.execute(f"""
+            SELECT
+                YEAR(CAST(date AS DATE)) AS yr,
+                MONTH(CAST(date AS DATE)) AS mo,
+                COALESCE(SUM(ordered_product_sales), 0) AS revenue
+            FROM daily_sales
+            WHERE asin = 'ALL'
+              AND date IS NOT NULL
+              AND date != ''
+              AND CAST(date AS DATE) >= '2024-01-01'{hf}
+            GROUP BY YEAR(CAST(date AS DATE)), MONTH(CAST(date AS DATE))
+            ORDER BY yr, mo
+        """, hp).fetchall()
+    except Exception as e:
+        con.close()
+        import logging
+        logging.getLogger("golfgen").error(f"monthly-yoy query error: {e}")
+        # Return empty structure so frontend doesn't crash
+        return {"years": [2024, 2025, 2026], "data": [
+            {"month": m, "2024": 0, "2025": 0, "2026": 0}
+            for m in ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"]
+        ]}
 
     con.close()
 

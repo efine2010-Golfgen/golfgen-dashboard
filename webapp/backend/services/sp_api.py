@@ -598,23 +598,55 @@ def _run_sp_api_sync_inner():
 
         # Helper: Amazon uses CurrencyAmount (not Amount) in money objects
         # sp_api may return model objects, dicts, Decimals, or strings
+        # The python-amazon-sp-api library may use PascalCase OR snake_case
+        # attributes depending on version, so we check both patterns.
         def _money(amt_obj):
             if amt_obj is None:
                 return 0.0
-            # Plain dict
+            # Plain dict — check multiple key conventions
             if isinstance(amt_obj, dict):
-                return float(amt_obj.get("CurrencyAmount", amt_obj.get("Amount", 0)) or 0)
-            # sp_api model object (has attributes instead of dict keys)
-            if hasattr(amt_obj, "CurrencyAmount"):
+                for key in ("CurrencyAmount", "Amount", "currency_amount", "amount", "value"):
+                    v = amt_obj.get(key)
+                    if v is not None:
+                        try:
+                            return float(v)
+                        except (ValueError, TypeError):
+                            continue
+                return 0.0
+            # Try converting model object to dict first (most reliable)
+            if hasattr(amt_obj, "to_dict"):
                 try:
-                    return float(amt_obj.CurrencyAmount or 0)
+                    d = amt_obj.to_dict()
+                    if isinstance(d, dict):
+                        for key in ("CurrencyAmount", "Amount", "currency_amount", "amount", "value"):
+                            v = d.get(key)
+                            if v is not None:
+                                try:
+                                    return float(v)
+                                except (ValueError, TypeError):
+                                    continue
                 except Exception:
                     pass
-            if hasattr(amt_obj, "Amount"):
-                try:
-                    return float(amt_obj.Amount or 0)
-                except Exception:
-                    pass
+            # sp_api model object — check PascalCase then snake_case attributes
+            for attr in ("CurrencyAmount", "currency_amount", "Amount", "amount", "value"):
+                if hasattr(amt_obj, attr):
+                    try:
+                        v = getattr(amt_obj, attr)
+                        if v is not None:
+                            return float(v)
+                    except (ValueError, TypeError):
+                        continue
+            # Try __dict__ as last resort for model objects
+            if hasattr(amt_obj, "__dict__"):
+                d = amt_obj.__dict__
+                for key in ("CurrencyAmount", "currency_amount", "Amount", "amount", "value",
+                            "_currency_amount", "_amount"):
+                    v = d.get(key)
+                    if v is not None:
+                        try:
+                            return float(v)
+                        except (ValueError, TypeError):
+                            continue
             # Already a number (Decimal, float, int)
             try:
                 return float(amt_obj)
@@ -675,10 +707,25 @@ def _run_sp_api_sync_inner():
                 if not first_shipment_logged and charge_list:
                     first_c = charge_list[0]
                     ca = _safe_get(first_c, "ChargeAmount")
-                    logger.info(f"  DEBUG charge structure: type={type(first_c).__name__}, "
+                    # Deep introspection for diagnosis
+                    ca_dict = None
+                    if hasattr(ca, "to_dict"):
+                        try:
+                            ca_dict = ca.to_dict()
+                        except Exception:
+                            pass
+                    ca_attrs = None
+                    if hasattr(ca, "__dict__"):
+                        ca_attrs = {k: v for k, v in ca.__dict__.items() if not k.startswith("__")}
+                    logger.info(f"  DEBUG charge obj type={type(first_c).__name__}, "
                                f"ChargeAmount type={type(ca).__name__}, "
-                               f"ChargeAmount value={ca}, "
+                               f"ChargeAmount repr={repr(ca)}, "
+                               f"to_dict={ca_dict}, "
+                               f"__dict__={ca_attrs}, "
                                f"parsed_val={_money(ca)}")
+                    # Also log the item-level structure
+                    item_keys = list(first_c.keys()) if isinstance(first_c, dict) else dir(first_c)
+                    logger.info(f"  DEBUG charge item keys={item_keys}")
                     first_shipment_logged = True
 
                 fba_fees_val = 0.0
