@@ -576,6 +576,13 @@ def item_master_by_division(division: Optional[str] = None):
     from core.database import get_db
     con = get_db()
     try:
+        # Ensure division/customer columns exist
+        cols = [r[0] for r in con.execute("DESCRIBE item_master").fetchall()]
+        if 'division' not in cols:
+            con.execute("ALTER TABLE item_master ADD COLUMN division VARCHAR")
+        if 'customer' not in cols:
+            con.execute("ALTER TABLE item_master ADD COLUMN customer VARCHAR")
+
         if division:
             rows = con.execute(
                 "SELECT asin, sku, product_name, division, customer FROM item_master WHERE division = ? ORDER BY sku",
@@ -590,6 +597,9 @@ def item_master_by_division(division: Optional[str] = None):
             for r in rows
         ]
         return {"items": items, "count": len(items)}
+    except Exception as e:
+        logger.error(f"by-division error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
     finally:
         con.close()
 
@@ -600,6 +610,13 @@ def item_master_untagged():
     from core.database import get_db
     con = get_db()
     try:
+        # Ensure division/customer columns exist
+        cols = [r[0] for r in con.execute("DESCRIBE item_master").fetchall()]
+        if 'division' not in cols:
+            con.execute("ALTER TABLE item_master ADD COLUMN division VARCHAR")
+        if 'customer' not in cols:
+            con.execute("ALTER TABLE item_master ADD COLUMN customer VARCHAR")
+
         rows = con.execute(
             "SELECT asin, sku, product_name, customer FROM item_master WHERE division IS NULL OR division = '' ORDER BY sku"
         ).fetchall()
@@ -608,6 +625,9 @@ def item_master_untagged():
             for r in rows
         ]
         return {"items": items, "count": len(items)}
+    except Exception as e:
+        logger.error(f"untagged error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
     finally:
         con.close()
 
