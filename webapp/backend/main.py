@@ -137,10 +137,11 @@ async def tab_permission_middleware(request: Request, call_next):
     if method == "OPTIONS" or not path.startswith("/api/"):
         return await call_next(request)
 
-    # Skip auth endpoints, system endpoints, upload endpoints
+    # Skip auth endpoints, system endpoints, upload endpoints, MFA endpoints
     if (path.startswith("/api/auth/") or
         path.startswith("/api/me") or
         path.startswith("/api/permissions") or
+        path.startswith("/api/mfa/") or
         path.startswith("/api/upload/") or
         path.startswith("/api/debug/") or
         path in ("/api/health", "/api/sync", "/api/backfill") or
@@ -172,6 +173,32 @@ async def tab_permission_middleware(request: Request, call_next):
                     )
             except Exception:
                 pass  # DuckDB error — allow through
+
+    # ── MFA enforcement ──────────────────────────────────────
+    # Skip MFA check for MFA endpoints themselves, auth, and static
+    mfa_skip_prefixes = ("/api/auth/", "/api/mfa/", "/api/me")
+    if not any(path.startswith(p) for p in mfa_skip_prefixes):
+        try:
+            from core.mfa import get_mfa_settings, is_session_mfa_verified, get_mfa_protected_routes
+
+            tab_key = _tab_key_for_path(path)
+            if tab_key:
+                mfa_routes = get_mfa_protected_routes()
+                if mfa_routes.get(tab_key, False):
+                    # This route requires MFA
+                    user_settings = get_mfa_settings(sess["user_name"])
+                    if not user_settings or not user_settings.get("mfa_enabled"):
+                        # User hasn't enrolled in MFA → 404 (hidden page behavior)
+                        return JSONResponse({"detail": "Not found"}, status_code=404)
+                    token = request.cookies.get("golfgen_session", "")
+                    if not is_session_mfa_verified(token):
+                        # MFA enabled but session not verified → prompt for MFA
+                        return JSONResponse(
+                            {"detail": "MFA verification required", "mfa_required": True},
+                            status_code=403,
+                        )
+        except Exception:
+            pass  # MFA tables may not exist yet on first run
 
     return await call_next(request)
 
@@ -330,6 +357,7 @@ from routers.factory_po import router as factory_po_router
 from routers.otw import router as otw_router
 from routers.item_plan import router as item_plan_router
 from routers.system import router as system_router
+from routers.mfa import router as mfa_router
 
 app.include_router(sales_router)
 app.include_router(profitability_router)
@@ -340,6 +368,7 @@ app.include_router(factory_po_router)
 app.include_router(otw_router)
 app.include_router(item_plan_router)
 app.include_router(system_router)
+app.include_router(mfa_router)
 
 
 # ── Static Frontend (React SPA) ──────────────────────────

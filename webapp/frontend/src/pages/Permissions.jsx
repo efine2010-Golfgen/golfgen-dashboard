@@ -1,5 +1,6 @@
 import { useState, useEffect } from "react";
 import { api } from "../lib/api";
+import MfaAdmin from "./MfaAdmin";
 
 const TAB_LABELS = {
   dashboard: "Dashboard",
@@ -119,6 +120,9 @@ export default function Permissions() {
           </tbody>
         </table>
       </div>
+
+      {/* MFA Administration */}
+      <MfaAdmin />
     </div>
   );
 }

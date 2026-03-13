@@ -2,7 +2,20 @@ const API_BASE = import.meta.env.VITE_API_URL || "";
 
 async function fetchJSON(path) {
   const res = await fetch(`${API_BASE}${path}`, { credentials: "include" });
-  if (!res.ok) throw new Error(`API error: ${res.status}`);
+  if (!res.ok) {
+    if (res.status === 403) {
+      try {
+        const data = await res.json();
+        if (data.mfa_required) {
+          window.dispatchEvent(new CustomEvent("mfa-required"));
+          throw new Error("MFA verification required");
+        }
+      } catch (e) {
+        if (e.message === "MFA verification required") throw e;
+      }
+    }
+    throw new Error(`API error: ${res.status}`);
+  }
   return res.json();
 }
 
