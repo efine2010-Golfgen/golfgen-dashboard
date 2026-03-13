@@ -842,40 +842,161 @@ def init_all_tables():
     except Exception as e:
         logger.error(f"MFA table init error: {e}")
 
-    # ── Backfill division on daily_sales rows where it's NULL ──
+    # ── Auto-tag item_master divisions based on product names ──
     try:
         con = duckdb.connect(str(DB_PATH), read_only=False)
-        # Count rows needing backfill
+        # Count untagged ASINs
+        untagged = con.execute(
+            "SELECT COUNT(*) FROM item_master WHERE division IS NULL OR division = '' OR division = 'unknown'"
+        ).fetchone()[0]
+        if untagged > 0:
+            logger.info(f"Auto-tagging division on {untagged} item_master ASINs...")
+            # Housewares keywords (Elite Global Brands products)
+            con.execute("""
+                UPDATE item_master
+                SET division = 'housewares'
+                WHERE (division IS NULL OR division = '' OR division = 'unknown')
+                  AND (
+                    LOWER(product_name) LIKE '%casserole%'
+                    OR LOWER(product_name) LIKE '%tumbler%'
+                    OR LOWER(product_name) LIKE '%kitchen%'
+                    OR LOWER(product_name) LIKE '%carrier%'
+                    OR LOWER(product_name) LIKE '%insulated%'
+                    OR LOWER(product_name) LIKE '%food%'
+                    OR LOWER(product_name) LIKE '%baking%'
+                    OR LOWER(product_name) LIKE '%oven%'
+                    OR LOWER(product_name) LIKE '%cookware%'
+                    OR LOWER(brand) LIKE '%elite%'
+                    OR LOWER(brand) LIKE '%egb%'
+                  )
+            """)
+            # Default remaining untagged to 'golf' (GolfGen is primary business)
+            con.execute("""
+                UPDATE item_master
+                SET division = 'golf'
+                WHERE division IS NULL OR division = '' OR division = 'unknown'
+            """)
+            tagged = untagged - con.execute(
+                "SELECT COUNT(*) FROM item_master WHERE division IS NULL OR division = '' OR division = 'unknown'"
+            ).fetchone()[0]
+            logger.info(f"item_master auto-tag complete: {tagged} ASINs tagged")
+        con.close()
+    except Exception as e:
+        logger.warning(f"item_master auto-tag error (non-fatal): {e}")
+
+    # ── Backfill division on ALL transactional tables ──
+    try:
+        con = duckdb.connect(str(DB_PATH), read_only=False)
+
+        # 1. daily_sales — backfill from item_master, then default to 'golf'
         null_count = con.execute(
-            "SELECT COUNT(*) FROM daily_sales WHERE division IS NULL OR division = ''"
+            "SELECT COUNT(*) FROM daily_sales WHERE division IS NULL OR division = '' OR division = 'unknown'"
         ).fetchone()[0]
         if null_count > 0:
-            logger.info(f"Backfilling division on {null_count} daily_sales rows from item_master...")
-            # Update from item_master lookup
-            updated = con.execute("""
+            logger.info(f"Backfilling division on {null_count} daily_sales rows...")
+            con.execute("""
                 UPDATE daily_sales
                 SET division = im.division,
                     customer = COALESCE(daily_sales.customer, 'amazon'),
                     platform = COALESCE(daily_sales.platform, 'sp_api')
                 FROM item_master im
                 WHERE daily_sales.asin = im.asin
-                  AND im.division IS NOT NULL
-                  AND im.division != ''
-                  AND im.division != 'unknown'
-                  AND (daily_sales.division IS NULL OR daily_sales.division = '')
-            """).fetchone()
-            # Set remaining NULLs to 'golf' (default for GolfGen Amazon data)
+                  AND im.division IS NOT NULL AND im.division != '' AND im.division != 'unknown'
+                  AND (daily_sales.division IS NULL OR daily_sales.division = '' OR daily_sales.division = 'unknown')
+            """)
             con.execute("""
                 UPDATE daily_sales
                 SET division = 'golf',
                     customer = COALESCE(customer, 'amazon'),
                     platform = COALESCE(platform, 'sp_api')
-                WHERE division IS NULL OR division = ''
+                WHERE division IS NULL OR division = '' OR division = 'unknown'
             """)
             remaining = con.execute(
                 "SELECT COUNT(*) FROM daily_sales WHERE division IS NULL OR division = ''"
             ).fetchone()[0]
-            logger.info(f"Division backfill complete: {null_count - remaining} rows updated, {remaining} still NULL")
+            logger.info(f"daily_sales backfill: {null_count - remaining} updated, {remaining} still NULL")
+
+        # 2. financial_events — backfill from item_master by asin
+        null_count = con.execute(
+            "SELECT COUNT(*) FROM financial_events WHERE division IS NULL OR division = '' OR division = 'unknown'"
+        ).fetchone()[0]
+        if null_count > 0:
+            logger.info(f"Backfilling division on {null_count} financial_events rows...")
+            con.execute("""
+                UPDATE financial_events
+                SET division = im.division,
+                    customer = COALESCE(financial_events.customer, 'amazon'),
+                    platform = COALESCE(financial_events.platform, 'sp_api')
+                FROM item_master im
+                WHERE financial_events.asin = im.asin
+                  AND im.division IS NOT NULL AND im.division != '' AND im.division != 'unknown'
+                  AND (financial_events.division IS NULL OR financial_events.division = '' OR financial_events.division = 'unknown')
+            """)
+            con.execute("""
+                UPDATE financial_events
+                SET division = 'golf',
+                    customer = COALESCE(customer, 'amazon'),
+                    platform = COALESCE(platform, 'sp_api')
+                WHERE division IS NULL OR division = '' OR division = 'unknown'
+            """)
+            logger.info("financial_events backfill complete")
+
+        # 3. fba_inventory — backfill from item_master by asin
+        null_count = con.execute(
+            "SELECT COUNT(*) FROM fba_inventory WHERE division IS NULL OR division = '' OR division = 'unknown'"
+        ).fetchone()[0]
+        if null_count > 0:
+            logger.info(f"Backfilling division on {null_count} fba_inventory rows...")
+            con.execute("""
+                UPDATE fba_inventory
+                SET division = im.division,
+                    customer = COALESCE(fba_inventory.customer, 'amazon'),
+                    platform = COALESCE(fba_inventory.platform, 'sp_api')
+                FROM item_master im
+                WHERE fba_inventory.asin = im.asin
+                  AND im.division IS NOT NULL AND im.division != '' AND im.division != 'unknown'
+                  AND (fba_inventory.division IS NULL OR fba_inventory.division = '' OR fba_inventory.division = 'unknown')
+            """)
+            con.execute("""
+                UPDATE fba_inventory
+                SET division = 'golf',
+                    customer = COALESCE(customer, 'amazon'),
+                    platform = COALESCE(platform, 'sp_api')
+                WHERE division IS NULL OR division = '' OR division = 'unknown'
+            """)
+            logger.info("fba_inventory backfill complete")
+
+        # 4. orders — backfill via order_items ASIN join (orders don't have asin column)
+        null_count = con.execute(
+            "SELECT COUNT(*) FROM orders WHERE division IS NULL OR division = '' OR division = 'unknown'"
+        ).fetchone()[0]
+        if null_count > 0:
+            logger.info(f"Backfilling division on {null_count} orders rows via order_items...")
+            try:
+                con.execute("""
+                    UPDATE orders
+                    SET division = sub.division
+                    FROM (
+                        SELECT DISTINCT oi.order_id, im.division
+                        FROM order_items oi
+                        JOIN item_master im ON oi.asin = im.asin
+                        WHERE im.division IS NOT NULL AND im.division != '' AND im.division != 'unknown'
+                    ) sub
+                    WHERE orders.order_id = sub.order_id
+                      AND (orders.division IS NULL OR orders.division = '' OR orders.division = 'unknown')
+                """)
+            except Exception as e:
+                logger.warning(f"orders backfill via order_items: {e}")
+            # Default remaining to golf
+            con.execute("""
+                UPDATE orders
+                SET division = 'golf',
+                    customer = COALESCE(customer, 'amazon'),
+                    platform = COALESCE(platform, 'sp_api')
+                WHERE division IS NULL OR division = '' OR division = 'unknown'
+            """)
+            logger.info("orders backfill complete")
+
         con.close()
     except Exception as e:
         logger.warning(f"Division backfill error (non-fatal): {e}")

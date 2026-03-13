@@ -270,21 +270,52 @@ def summary(
     customer: str | None = Query(None),
     platform: str | None = Query(None),
 ):
-    """High-level KPIs: revenue, units, orders, sessions, AUR, conv rate."""
+    """High-level KPIs: revenue, units, orders, sessions, AUR, conv rate.
+
+    Tries analytics_daily first (pre-aggregated), falls back to daily_sales.
+    Sessions/page_views always come from daily_sales (not in analytics layer).
+    """
     con = get_db()
     cutoff = (get_today(con) - timedelta(days=days)).strftime("%Y-%m-%d") if days > 0 else get_today(con).strftime("%Y-%m-%d")
     hf, hp = _hierarchy_filter(division, customer, platform)
 
-    row = con.execute(f"""
-        SELECT
-            COALESCE(SUM(ordered_product_sales), 0) AS revenue,
-            COALESCE(SUM(units_ordered), 0) AS units,
-            COALESCE(SUM(page_views), 0) AS sessions
+    # Try analytics_daily for revenue and units (pre-aggregated, division-aware)
+    revenue = 0
+    units = 0
+    used_analytics = False
+    try:
+        analytics_row = con.execute(f"""
+            SELECT
+                COALESCE(SUM(gross_revenue), 0) AS revenue,
+                COALESCE(SUM(units_sold), 0) AS units
+            FROM analytics_daily
+            WHERE date >= ?{hf}
+        """, [cutoff] + hp).fetchone()
+        if analytics_row and analytics_row[0] > 0:
+            revenue, units = float(analytics_row[0]), int(analytics_row[1])
+            used_analytics = True
+    except Exception:
+        pass
+
+    # Fallback to daily_sales if analytics is empty
+    if not used_analytics:
+        row = con.execute(f"""
+            SELECT
+                COALESCE(SUM(ordered_product_sales), 0) AS revenue,
+                COALESCE(SUM(units_ordered), 0) AS units
+            FROM daily_sales
+            WHERE date >= ? AND asin = 'ALL'{hf}
+        """, [cutoff] + hp).fetchone()
+        revenue, units = float(row[0]), int(row[1])
+
+    # Sessions always from daily_sales (not in analytics layer)
+    sessions_row = con.execute(f"""
+        SELECT COALESCE(SUM(page_views), 0) AS sessions
         FROM daily_sales
         WHERE date >= ? AND asin = 'ALL'{hf}
     """, [cutoff] + hp).fetchone()
+    sessions = int(sessions_row[0])
 
-    revenue, units, sessions = row
     orders = units  # total_order_items is not populated; use units as proxy
     aur = round(revenue / units, 2) if units else 0
     conv_rate = round(units / sessions * 100, 1) if sessions else 0
@@ -325,11 +356,35 @@ def get_daily_sales(
     customer: str | None = Query(None),
     platform: str | None = Query(None),
 ):
-    """Time-series sales data for charts. Granularity: daily or weekly."""
+    """Time-series sales data for charts. Granularity: daily or weekly.
+
+    Tries analytics_daily first (pre-aggregated), falls back to daily_sales.
+    Sessions always come from daily_sales (not in analytics layer).
+    """
     con = get_db()
     cutoff = (get_today(con) - timedelta(days=days)).strftime("%Y-%m-%d")
     hf, hp = _hierarchy_filter(division, customer, platform)
 
+    # Try analytics_daily for revenue/units time series
+    analytics_data = {}
+    try:
+        analytics_rows = con.execute(f"""
+            SELECT
+                date,
+                SUM(gross_revenue) AS revenue,
+                SUM(units_sold) AS units
+            FROM analytics_daily
+            WHERE date >= ?{hf}
+            GROUP BY date
+            ORDER BY date
+        """, [cutoff] + hp).fetchall()
+        if analytics_rows and len(analytics_rows) > 0:
+            for r in analytics_rows:
+                analytics_data[str(r[0])] = {"revenue": float(r[1] or 0), "units": int(r[2] or 0)}
+    except Exception:
+        pass
+
+    # Always get sessions from daily_sales (not in analytics layer)
     rows = con.execute(f"""
         SELECT
             date,
@@ -344,11 +399,18 @@ def get_daily_sales(
 
     data = []
     for r in rows:
-        revenue_val = r[1]
-        units_val = r[2] or 0
-        sessions_val = r[3] or 0
+        date_str = fmt_date(r[0])
+        # Prefer analytics data for revenue/units if available
+        if date_str in analytics_data:
+            revenue_val = analytics_data[date_str]["revenue"]
+            units_val = analytics_data[date_str]["units"]
+        else:
+            revenue_val = float(r[1])
+            units_val = int(r[2] or 0)
+        sessions_val = int(r[3] or 0)
+
         data.append({
-            "date": fmt_date(r[0]),
+            "date": date_str,
             "revenue": round(revenue_val, 2),
             "units": units_val,
             "orders": units_val,  # total_order_items not populated; use units
@@ -677,35 +739,55 @@ def monthly_yoy(
     platform: str | None = Query(None),
 ):
     """Monthly revenue broken down by year for YoY comparison.
-    Always returns 12 months with bars for 2024, 2025, 2026."""
+    Always returns 12 months with bars for 2024, 2025, 2026.
+
+    Tries analytics_daily first, falls back to daily_sales.
+    """
     con = get_db()
     hf, hp = _hierarchy_filter(division, customer, platform)
 
+    rows = None
+
+    # Try analytics_daily first
     try:
-        # Use YEAR() and MONTH() functions which are more compatible across
-        # DuckDB versions than EXTRACT(YEAR FROM CAST(...))
-        rows = con.execute(f"""
+        analytics_rows = con.execute(f"""
             SELECT
-                YEAR(CAST(date AS DATE)) AS yr,
-                MONTH(CAST(date AS DATE)) AS mo,
-                COALESCE(SUM(ordered_product_sales), 0) AS revenue
-            FROM daily_sales
-            WHERE asin = 'ALL'
-              AND date IS NOT NULL
-              AND date != ''
-              AND CAST(date AS DATE) >= '2024-01-01'{hf}
-            GROUP BY YEAR(CAST(date AS DATE)), MONTH(CAST(date AS DATE))
+                YEAR(date) AS yr,
+                MONTH(date) AS mo,
+                COALESCE(SUM(gross_revenue), 0) AS revenue
+            FROM analytics_daily
+            WHERE date >= '2024-01-01'{hf}
+            GROUP BY YEAR(date), MONTH(date)
             ORDER BY yr, mo
         """, hp).fetchall()
-    except Exception as e:
-        con.close()
-        import logging
-        logging.getLogger("golfgen").error(f"monthly-yoy query error: {e}")
-        # Return empty structure so frontend doesn't crash
-        return {"years": [2024, 2025, 2026], "data": [
-            {"month": m, "2024": 0, "2025": 0, "2026": 0}
-            for m in ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"]
-        ]}
+        if analytics_rows and len(analytics_rows) > 0 and any(r[2] > 0 for r in analytics_rows):
+            rows = analytics_rows
+    except Exception:
+        pass
+
+    # Fallback to daily_sales
+    if rows is None:
+        try:
+            rows = con.execute(f"""
+                SELECT
+                    YEAR(CAST(date AS DATE)) AS yr,
+                    MONTH(CAST(date AS DATE)) AS mo,
+                    COALESCE(SUM(ordered_product_sales), 0) AS revenue
+                FROM daily_sales
+                WHERE asin = 'ALL'
+                  AND date IS NOT NULL
+                  AND date != ''
+                  AND CAST(date AS DATE) >= '2024-01-01'{hf}
+                GROUP BY YEAR(CAST(date AS DATE)), MONTH(CAST(date AS DATE))
+                ORDER BY yr, mo
+            """, hp).fetchall()
+        except Exception as e:
+            con.close()
+            logger.error(f"monthly-yoy query error: {e}")
+            return {"years": [2024, 2025, 2026], "data": [
+                {"month": m, "2024": 0, "2025": 0, "2026": 0}
+                for m in ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"]
+            ]}
 
     con.close()
 
