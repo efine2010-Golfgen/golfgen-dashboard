@@ -15,7 +15,7 @@ from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.cron import CronTrigger
 
 from core.config import DB_PATH, DB_DIR, TIMEZONE, SYNC_INTERVAL_HOURS
-from services.sp_api import _sync_today_orders, _run_sp_api_sync
+from services.sp_api import _sync_today_orders, _run_sp_api_sync, _backfill_orders
 from services.ads_api import _sync_ads_data, _sync_pricing_and_coupons
 from services.sync_engine import _auto_backfill_if_needed, _log_sync, _write_sync_log
 
@@ -186,6 +186,14 @@ async def _sync_loop():
         await loop.run_in_executor(None, _auto_backfill_if_needed)
     except Exception as e:
         logger.error(f"Auto-backfill error: {e}")
+
+    # Backfill historical orders (quota-safe, fills orders table + today's revenue)
+    try:
+        loop = asyncio.get_event_loop()
+        await loop.run_in_executor(None, lambda: _backfill_orders(days=90))
+        logger.info("Startup: order backfill completed (90 days)")
+    except Exception as e:
+        logger.error(f"Order backfill error: {e}")
 
     # Sync ads data
     try:

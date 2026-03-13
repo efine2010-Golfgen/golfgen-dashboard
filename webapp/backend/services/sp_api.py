@@ -810,3 +810,187 @@ def _run_sp_api_sync():
         logger.error(f"  Sales sync error: {e}")
 
     logger.info("SP-API background sync complete.")
+
+
+def _backfill_orders(days: int = 90):
+    """Backfill historical orders using the Orders API.
+
+    Quota-safe: burst 25 getOrderItems calls, then 2s sleep.
+    Pulls ALL orders from the last `days` days, inserts into orders table,
+    fetches item-level pricing, and re-aggregates daily_sales.
+    """
+    import time as _t
+
+    credentials = _load_sp_api_credentials()
+    if not credentials:
+        logger.error("Order backfill: no SP-API credentials")
+        return {"error": "No credentials"}
+
+    try:
+        from sp_api.api import Orders as OrdersAPI
+        from sp_api.base import Marketplaces
+    except ImportError:
+        logger.error("Order backfill: SP-API library not installed")
+        return {"error": "SP-API not installed"}
+
+    now_utc = datetime.now(ZoneInfo("UTC"))
+    after_date = (now_utc - timedelta(days=days)).strftime("%Y-%m-%dT%H:%M:%SZ")
+    logger.info(f"Order backfill: pulling orders from last {days} days...")
+
+    orders_api = OrdersAPI(credentials=credentials, marketplace=Marketplaces.US)
+
+    # Fetch all orders with pagination
+    all_orders = []
+    try:
+        response = orders_api.get_orders(
+            CreatedAfter=after_date,
+            MarketplaceIds=["ATVPDKIKX0DER"],
+            MaxResultsPerPage=100
+        )
+        all_orders.extend(response.payload.get("Orders", []))
+        next_token = response.payload.get("NextToken")
+
+        page = 1
+        while next_token and page < 50:
+            page += 1
+            _t.sleep(1)
+            try:
+                next_resp = orders_api.get_orders(
+                    NextToken=next_token,
+                    MarketplaceIds=["ATVPDKIKX0DER"],
+                )
+                all_orders.extend(next_resp.payload.get("Orders", []))
+                next_token = next_resp.payload.get("NextToken")
+            except Exception as e:
+                logger.warning(f"Order backfill pagination error page {page}: {e}")
+                break
+    except Exception as e:
+        logger.error(f"Order backfill: Orders API call failed: {e}")
+        return {"error": str(e)}
+
+    logger.info(f"Order backfill: got {len(all_orders)} orders total")
+
+    # Insert all orders into the orders table
+    con = duckdb.connect(str(DB_PATH), read_only=False)
+    inserted = 0
+    for order in all_orders:
+        try:
+            order_total = order.get("OrderTotal", {})
+            con.execute("""
+                INSERT OR REPLACE INTO orders
+                (order_id, purchase_date, order_status, fulfillment_channel,
+                 sales_channel, order_total, currency_code, number_of_items,
+                 ship_city, ship_state, ship_postal_code,
+                 is_business_order, is_prime)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """, [
+                order.get("AmazonOrderId"),
+                order.get("PurchaseDate"),
+                order.get("OrderStatus"),
+                order.get("FulfillmentChannel"),
+                order.get("SalesChannel"),
+                float(order_total.get("Amount", 0)) if order_total else 0,
+                order_total.get("CurrencyCode", "USD") if order_total else "USD",
+                order.get("NumberOfItemsShipped", 0) + order.get("NumberOfItemsUnshipped", 0),
+                order.get("ShippingAddress", {}).get("City", ""),
+                order.get("ShippingAddress", {}).get("StateOrRegion", ""),
+                order.get("ShippingAddress", {}).get("PostalCode", ""),
+                order.get("IsBusinessOrder", False),
+                order.get("IsPrime", False),
+            ])
+            inserted += 1
+        except Exception as e:
+            logger.warning(f"Order insert error: {e}")
+
+    # Fetch item-level detail for accurate revenue
+    daily_agg = defaultdict(lambda: {"revenue": 0.0, "units": 0, "orders": 0})
+    items_fetched = 0
+    burst_count = 0
+
+    for order in all_orders:
+        status = order.get("OrderStatus", "")
+        if status in ("Canceled", "Cancelled"):
+            continue
+
+        purchase_date = order.get("PurchaseDate", "")
+        if not purchase_date:
+            continue
+        try:
+            if "T" in purchase_date:
+                dt = datetime.fromisoformat(purchase_date.replace("Z", "+00:00"))
+                dt = dt.astimezone(ZoneInfo("America/Chicago"))
+                day_str = dt.strftime("%Y-%m-%d")
+            else:
+                day_str = purchase_date[:10]
+        except Exception:
+            day_str = purchase_date[:10]
+
+        order_id = order.get("AmazonOrderId", "")
+        total_from_items = 0.0
+        total_qty = 0
+
+        try:
+            items_resp = orders_api.get_order_items(order_id)
+            item_list = items_resp.payload.get("OrderItems", [])
+            for item in item_list:
+                qty = int(item.get("QuantityOrdered", 0) or 0)
+                price = item.get("ItemPrice")
+                item_amount = 0.0
+                if price and isinstance(price, dict):
+                    try:
+                        item_amount = float(price.get("Amount", "0"))
+                    except (ValueError, TypeError):
+                        pass
+                total_from_items += item_amount
+                total_qty += qty
+            items_fetched += 1
+            burst_count += 1
+            if burst_count > 25:
+                _t.sleep(2.0)
+                burst_count = 0
+        except Exception:
+            order_total = order.get("OrderTotal", {})
+            total_from_items = float(order_total.get("Amount", 0)) if order_total else 0
+            total_qty = order.get("NumberOfItemsShipped", 0) + order.get("NumberOfItemsUnshipped", 0)
+
+        daily_agg[day_str]["revenue"] += total_from_items
+        daily_agg[day_str]["units"] += total_qty
+        daily_agg[day_str]["orders"] += 1
+
+    # Write daily aggregates — only update if Orders API data is better
+    days_updated = 0
+    now_central = datetime.now(ZoneInfo("America/Chicago"))
+    today_str = now_central.strftime("%Y-%m-%d")
+    yesterday_str = (now_central - timedelta(days=1)).strftime("%Y-%m-%d")
+
+    for day_str in sorted(daily_agg.keys()):
+        agg = daily_agg[day_str]
+        if agg["revenue"] <= 0:
+            continue
+        existing = con.execute(
+            "SELECT ordered_product_sales FROM daily_sales WHERE date = ? AND asin = 'ALL'",
+            [day_str]
+        ).fetchone()
+        existing_rev = float(existing[0]) if existing and existing[0] else 0.0
+
+        is_recent = day_str in (today_str, yesterday_str)
+        if is_recent or agg["revenue"] >= existing_rev:
+            con.execute("""
+                INSERT OR REPLACE INTO daily_sales
+                (date, asin, units_ordered, ordered_product_sales,
+                 sessions, session_percentage, page_views,
+                 buy_box_percentage, unit_session_percentage)
+                VALUES (?, 'ALL', ?, ?, 0, 0, 0, 0, 0)
+            """, [day_str, agg["units"], agg["revenue"]])
+            days_updated += 1
+
+    con.close()
+    result = {
+        "status": "done",
+        "orders_found": len(all_orders),
+        "orders_inserted": inserted,
+        "items_fetched": items_fetched,
+        "days_updated": days_updated,
+    }
+    logger.info(f"Order backfill complete: {result}")
+    return result
