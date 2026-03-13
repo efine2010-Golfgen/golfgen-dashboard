@@ -529,3 +529,10 @@ def init_all_tables():
         logger.info("Item Plan tables initialized")
     except Exception as e:
         logger.error(f"Item Plan table init error: {e}")
+
+    try:
+        from .mfa_database import _init_mfa_tables
+        _init_mfa_tables()
+        logger.info("MFA tables initialized")
+    except Exception as e:
+        logger.error(f"MFA table init error: {e}")
