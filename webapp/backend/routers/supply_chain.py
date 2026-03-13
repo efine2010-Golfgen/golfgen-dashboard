@@ -347,14 +347,9 @@ async def upload_supply_chain(file: UploadFile = File(...), _user=Depends(requir
                     rec["container_eta"] = ship_data["container_eta"]
                     rec["eta_month"] = _derive_eta_month(ship_data["container_eta"])
 
-    # ── Merge into data store ──
+    # ── Replace entire data store (clean slate each upload) ──
     store = _load_store()
-    existing = {r["record_id"]: r for r in store.get("records", [])}
-
-    for rec in po_records:
-        existing[rec["record_id"]] = rec  # upsert
-
-    store["records"] = list(existing.values())
+    store["records"] = po_records  # full replace, no merge with old data
     store["lastUpload"] = datetime.now(TZ).isoformat()
     store["sourceFile"] = file.filename
     _save_store(store)

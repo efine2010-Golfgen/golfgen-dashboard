@@ -403,6 +403,26 @@ def backfill_historical(
     }
 
 
+@router.post("/api/sync/backfill-orders")
+async def backfill_orders(
+    request: Request,
+    days: int = Query(90, description="How many days back to backfill")
+):
+    """Backfill historical orders using the Orders API (authenticated endpoint)."""
+    from core.auth import get_session
+    from services.sp_api import _backfill_orders
+
+    token = request.cookies.get("golfgen_session")
+    sess = get_session(token)
+    if not sess:
+        from fastapi import HTTPException
+        raise HTTPException(status_code=401, detail="Not authenticated")
+
+    loop = asyncio.get_event_loop()
+    result = await loop.run_in_executor(None, lambda: _backfill_orders(days=days))
+    return result
+
+
 @router.get("/api/system/status")
 async def get_system_status(request: Request):
     """Get system status including last sync times, scheduler status, and recent logs."""

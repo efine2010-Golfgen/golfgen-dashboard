@@ -15,7 +15,7 @@ from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.cron import CronTrigger
 
 from core.config import DB_PATH, DB_DIR, TIMEZONE, SYNC_INTERVAL_HOURS
-from services.sp_api import _sync_today_orders, _run_sp_api_sync
+from services.sp_api import _sync_today_orders, _run_sp_api_sync, _backfill_orders
 from services.ads_api import _sync_ads_data, _sync_pricing_and_coupons
 from services.sync_engine import _auto_backfill_if_needed, _log_sync, _write_sync_log
 
@@ -187,6 +187,14 @@ async def _sync_loop():
     except Exception as e:
         logger.error(f"Auto-backfill error: {e}")
 
+    # Backfill historical orders (quota-safe, fills orders table + today's revenue)
+    try:
+        loop = asyncio.get_event_loop()
+        await loop.run_in_executor(None, lambda: _backfill_orders(days=90))
+        logger.info("Startup: order backfill completed (90 days)")
+    except Exception as e:
+        logger.error(f"Order backfill error: {e}")
+
     # Sync ads data
     try:
         loop = asyncio.get_event_loop()
@@ -210,6 +218,9 @@ async def _sync_loop():
         scheduler.add_job(_run_scheduled_sp_api_sync, CronTrigger(hour=12, minute=0, timezone="America/Chicago"), id="sp_api_sync_12pm")
         scheduler.add_job(_run_scheduled_sp_api_sync, CronTrigger(hour=15, minute=0, timezone="America/Chicago"), id="sp_api_sync_3pm")
         scheduler.add_job(_run_scheduled_sp_api_sync, CronTrigger(hour=18, minute=0, timezone="America/Chicago"), id="sp_api_sync_6pm")
+
+        # Schedule today-orders sync every hour on the half-hour (fast, ~10s)
+        scheduler.add_job(_run_scheduled_today_sync, CronTrigger(minute=30, second=0, timezone="America/Chicago"), id="today_sync_hourly")
 
         # Schedule ads sync every 2 hours
         scheduler.add_job(_run_scheduled_ads_sync, CronTrigger(minute=0, second=0, timezone="America/Chicago"), id="ads_sync_hourly")
