@@ -211,6 +211,27 @@ def _init_sales_tables():
         )
     """)
 
+    # ── Migration: rename transaction_type → event_type if old column exists ──
+    # Production table may have been created with old column name before code rename.
+    # CREATE TABLE IF NOT EXISTS does NOT alter existing schemas, so old column persists.
+    try:
+        cols = [r[0] for r in con.execute(
+            "SELECT column_name FROM information_schema.columns WHERE table_name='financial_events'"
+        ).fetchall()]
+        if "transaction_type" in cols and "event_type" not in cols:
+            con.execute("ALTER TABLE financial_events RENAME COLUMN transaction_type TO event_type")
+            logger.info("Migrated financial_events: transaction_type → event_type")
+        elif "transaction_type" in cols and "event_type" in cols:
+            # Both exist (shouldn't happen) — copy data and drop old
+            con.execute("UPDATE financial_events SET event_type = transaction_type WHERE event_type IS NULL OR event_type = ''")
+            logger.info("Copied transaction_type data into event_type")
+        elif "event_type" not in cols:
+            # Neither exists — add it
+            con.execute("ALTER TABLE financial_events ADD COLUMN event_type VARCHAR")
+            logger.info("Added missing event_type column to financial_events")
+    except Exception as e:
+        logger.warning(f"financial_events event_type migration check: {e}")
+
     # Ensure existing tables have hierarchy columns (safe ALTER for upgrades)
     for tbl in ["orders", "daily_sales", "fba_inventory", "financial_events"]:
         for col in ["division", "customer", "platform"]:

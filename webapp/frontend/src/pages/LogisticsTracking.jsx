@@ -189,12 +189,12 @@ export default function LogisticsTracking() {
         ))}
         {view === "shipments" && (
           <div style={{ marginLeft: "auto", display: "flex", gap: 4 }}>
-            {["ALL", "DELIVER", "TRANSIT"].map(f => (
+            {["ALL", "DELIVER", "TRANSIT", "PENDING"].map(f => (
               <button key={f} onClick={() => setStatusFilter(f)}
                 style={{ padding: "4px 12px", borderRadius: 12, border: "none", fontSize: 10, fontWeight: 600, cursor: "pointer",
-                  background: statusFilter === f ? (f === "DELIVER" ? "#22A387" : f === "TRANSIT" ? "#3E658C" : "var(--navy)") : "#eee",
+                  background: statusFilter === f ? (f === "DELIVER" ? "#22A387" : f === "TRANSIT" ? "#3E658C" : f === "PENDING" ? "#F5B731" : "var(--navy)") : "#eee",
                   color: statusFilter === f ? "#fff" : "var(--muted)" }}>
-                {f === "ALL" ? "All" : f === "DELIVER" ? "Delivered" : "In Transit"}
+                {f === "ALL" ? "All" : f === "DELIVER" ? "Delivered" : f === "TRANSIT" ? "In Transit" : "Pending"}
               </button>
             ))}
           </div>
@@ -204,9 +204,10 @@ export default function LogisticsTracking() {
       {/* Shipment Log Table */}
       {view === "shipments" && (
         <div style={{ background: "#fff", borderRadius: 12, overflow: "auto", boxShadow: "var(--card-shadow)" }}>
-          <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 11, minWidth: 1200 }}>
+          <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 11, minWidth: 1400 }}>
             <thead>
               <tr style={{ background: "var(--navy)", color: "#fff" }}>
+                <th style={th}>Status</th>
                 <th style={th}>Shipper</th>
                 <th style={th}>Factory</th>
                 <th style={th}>HB#</th>
@@ -220,11 +221,13 @@ export default function LogisticsTracking() {
                 <th style={th}>ETA Deliv.</th>
                 <th style={th}>Deliv. Location</th>
                 <th style={th}>Act. Delivery</th>
+                <th style={th}>Comments</th>
               </tr>
             </thead>
             <tbody>
               {filteredShipments.map((s, i) => (
                 <tr key={i} style={{ borderBottom: "1px solid var(--border)", background: i % 2 ? "#FAFBFC" : "#fff" }}>
+                  <td style={td}>{STATUS_BADGE(s.status)}</td>
                   <td style={{...td, fontSize: 10, fontWeight: 600, maxWidth: 160, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap"}}>{s.shipper || "—"}</td>
                   <td style={{...td, fontSize: 10}}>{s.factory || "—"}</td>
                   <td style={{...td, fontFamily: "monospace", fontSize: 10, fontWeight: 600}}>{s.hbl || "—"}</td>
@@ -238,6 +241,7 @@ export default function LogisticsTracking() {
                   <td style={{...td, fontSize: 10}}>{s.etaFinal || "—"}</td>
                   <td style={{...td, fontSize: 10}}>{s.finalLocation || "—"}</td>
                   <td style={{...td, fontSize: 10, fontWeight: 600, color: s.deliveryDate ? "#22A387" : "var(--muted)"}}>{s.deliveryDate || "—"}</td>
+                  <td style={{...td, fontSize: 10, maxWidth: 200, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", color: "var(--muted)"}}>{s.comments || "—"}</td>
                 </tr>
               ))}
             </tbody>
