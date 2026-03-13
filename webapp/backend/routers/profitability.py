@@ -167,8 +167,10 @@ def load_item_master() -> list:
                     "asin": (row.get("asin") or "").strip(),
                     "sku": (row.get("sku") or "").strip(),
                     "product_name": (row.get("product_name") or "").strip(),
-                    "listPrice": float(row.get("listPrice") or 0),
-                    "salePrice": float(row.get("salePrice") or 0),
+                    "listPrice": float(row.get("list_price") or row.get("listPrice") or 0),
+                    "salePrice": float(row.get("sale_price") or row.get("salePrice") or 0),
+                    "salePriceStartDate": (row.get("sale_price_start_date") or "").strip(),
+                    "salePriceEndDate": (row.get("sale_price_end_date") or "").strip(),
                 })
             except (ValueError, KeyError):
                 pass
@@ -349,9 +351,9 @@ def profitability_items(days: int = Query(365)):
                    SUM(ABS(promotion_amount)) AS promo,
                    SUM(ABS(shipping_charges)) AS shipping,
                    SUM(ABS(other_fees)) AS other,
-                   SUM(CASE WHEN event_type LIKE '%Refund%' OR event_type LIKE '%Return%'
+                   SUM(CASE WHEN event_type ILIKE '%refund%' OR event_type ILIKE '%return%'
                        THEN ABS(product_charges) ELSE 0 END) AS refund_amt,
-                   COUNT(CASE WHEN event_type LIKE '%Refund%' OR event_type LIKE '%Return%'
+                   COUNT(CASE WHEN event_type ILIKE '%refund%' OR event_type ILIKE '%return%'
                        THEN 1 END) AS refund_count
             FROM financial_events
             WHERE date >= ?
@@ -433,8 +435,9 @@ def profitability_items(days: int = Query(365)):
             sale_price = master["salePrice"]
         if list_price is None and master.get("listPrice", 0) > 0:
             list_price = master["listPrice"]
-        # sale_price_end_date: not available from getCompetitivePricing API
-        # Would require SP-API getListingOffers for sale schedule data
+        # Sale price start/end dates from item master
+        sale_price_start_date = master.get("salePriceStartDate", "")
+        sale_price_end_date = master.get("salePriceEndDate", "")
 
         items.append({
             "asin": asin,
@@ -466,6 +469,7 @@ def profitability_items(days: int = Query(365)):
             "couponType": coupon_type,
             "salePrice": sale_price,
             "listPrice": list_price,
+            "salePriceStartDate": sale_price_start_date,
             "salePriceEndDate": sale_price_end_date,
         })
 
@@ -506,9 +510,9 @@ def _build_waterfall(con, cogs_data, start: str, end: str) -> dict:
                    SUM(ABS(promotion_amount)) AS promo,
                    SUM(ABS(shipping_charges)) AS shipping,
                    SUM(ABS(other_fees)) AS other,
-                   SUM(CASE WHEN event_type LIKE '%Refund%' OR event_type LIKE '%Return%'
+                   SUM(CASE WHEN event_type ILIKE '%refund%' OR event_type ILIKE '%return%'
                        THEN ABS(product_charges) ELSE 0 END) AS refund_amt,
-                   COUNT(CASE WHEN event_type LIKE '%Refund%' OR event_type LIKE '%Return%'
+                   COUNT(CASE WHEN event_type ILIKE '%refund%' OR event_type ILIKE '%return%'
                        THEN 1 END) AS refund_count
             FROM financial_events
             WHERE date >= ? AND date < ?
@@ -555,9 +559,9 @@ def _build_waterfall(con, cogs_data, start: str, end: str) -> dict:
                    SUM(ABS(promotion_amount)),
                    SUM(ABS(shipping_charges)),
                    SUM(ABS(other_fees)),
-                   SUM(CASE WHEN event_type LIKE '%Refund%' OR event_type LIKE '%Return%'
+                   SUM(CASE WHEN event_type ILIKE '%refund%' OR event_type ILIKE '%return%'
                        THEN ABS(product_charges) ELSE 0 END),
-                   COUNT(CASE WHEN event_type LIKE '%Refund%' OR event_type LIKE '%Return%'
+                   COUNT(CASE WHEN event_type ILIKE '%refund%' OR event_type ILIKE '%return%'
                        THEN 1 END)
             FROM financial_events
             WHERE date >= ? AND date < ?

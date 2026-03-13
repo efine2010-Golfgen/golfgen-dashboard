@@ -324,6 +324,7 @@ export default function Profitability() {
                     <th style={staticThStyle}>Coupon</th>
                     <th style={staticThStyle}>Coupon End</th>
                     <th style={staticThStyle}>Sale Price</th>
+                    <th style={staticThStyle}>Sale Dates</th>
                     <SortTh label="Units" col="units" sortCol={sortCol} sortDir={sortDir} onClick={handleSort} />
                     <SortTh label="Sales" col="sales" sortCol={sortCol} sortDir={sortDir} onClick={handleSort} />
                     <SortTh label="Ad Spend" col="adSpend" sortCol={sortCol} sortDir={sortDir} onClick={handleSort} />
@@ -360,6 +361,17 @@ export default function Profitability() {
                                 ${item.listPrice.toFixed(2)}
                               </span>
                             )}
+                          </span>
+                        ) : (
+                          <span style={{ color: "var(--muted)" }}>—</span>
+                        )}
+                      </td>
+                      <td style={{ ...cellStyle, textAlign: "center", fontSize: 10 }}>
+                        {item.salePriceStartDate || item.salePriceEndDate ? (
+                          <span>
+                            {item.salePriceStartDate ? fmtDate(item.salePriceStartDate) : "—"}
+                            <span style={{ color: "var(--muted)", margin: "0 2px" }}>→</span>
+                            {item.salePriceEndDate ? fmtDate(item.salePriceEndDate) : "—"}
                           </span>
                         ) : (
                           <span style={{ color: "var(--muted)" }}>—</span>

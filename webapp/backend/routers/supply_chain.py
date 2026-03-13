@@ -140,12 +140,19 @@ async def upload_supply_chain(file: UploadFile = File(...), _user=Depends(requir
     po_sheet = None
     ship_sheet = None
 
+    inv_sheet = None  # optional separate Invoice Summary tab
+
     for name in sheet_names:
         lower = name.lower()
         if "po" in lower and ("invoice" in lower or "data" in lower):
             po_sheet = wb[name]
+        elif lower.strip() in ("po summary", "po_summary", "po data", "purchase orders"):
+            if po_sheet is None:
+                po_sheet = wb[name]
         elif "ship" in lower or "logistics" in lower or "otw" in lower:
             ship_sheet = wb[name]
+        elif "invoice" in lower and "summary" in lower:
+            inv_sheet = wb[name]
 
     # Fallback: try by position if we have exactly 2 sheets
     if po_sheet is None and ship_sheet is None and len(sheet_names) >= 2:
@@ -189,6 +196,10 @@ async def upload_supply_chain(file: UploadFile = File(...), _user=Depends(requir
                     po_col_map["units"] = c
                 elif "cbm" in hdr:
                     po_col_map["cbm"] = c
+                elif "fob" in hdr and ("date" in hdr or hdr == "fob"):
+                    po_col_map["fob_date"] = c
+                elif "payment" in hdr and "term" in hdr:
+                    po_col_map["payment_terms"] = c
                 elif "arrival" in hdr or "eta" in hdr or "est" in hdr:
                     po_col_map["est_arrival"] = c
                 elif "status" in hdr:
@@ -210,11 +221,13 @@ async def upload_supply_chain(file: UploadFile = File(...), _user=Depends(requir
             continue
 
         factory = _dash(_str(_cell_val(po_sheet, r, po_col_map.get("factory", 2))))
+        payment_terms = _dash(_str(_cell_val(po_sheet, r, po_col_map.get("payment_terms", 0)))) if po_col_map.get("payment_terms") else "—"
         invoice = _dash(_str(_cell_val(po_sheet, r, po_col_map.get("invoice_number", 3))))
         container = _dash(_str(_cell_val(po_sheet, r, po_col_map.get("container_number", 4))))
         desc = _dash(_str(_cell_val(po_sheet, r, po_col_map.get("description", 7))))
         units = _int_or_zero(_cell_val(po_sheet, r, po_col_map.get("units", 8)))
         cbm = _float_or_zero(_cell_val(po_sheet, r, po_col_map.get("cbm", 9)))
+        fob_date = _parse_date(_cell_val(po_sheet, r, po_col_map.get("fob_date", 0))) if po_col_map.get("fob_date") else "—"
         est_arrival = _parse_date(_cell_val(po_sheet, r, po_col_map.get("est_arrival", 10)))
         status = _dash(_str(_cell_val(po_sheet, r, po_col_map.get("status", 11))))
 
@@ -236,13 +249,15 @@ async def upload_supply_chain(file: UploadFile = File(...), _user=Depends(requir
             "record_id": record_id,
             "po_number": po_num,
             "factory": factory,
+            "payment_terms": payment_terms,
             "invoice_number": invoice,
-            "invoice_date": "—",  # will be enriched from shipment data or future uploads
+            "invoice_date": "—",  # will be enriched from Invoice Summary tab
             "container_number": container,
             "sku": sku,
             "description": desc,
             "units": units,
             "cbm": cbm,
+            "x_factory_date": fob_date,
             "container_eta": est_arrival,
             "eta_month": _derive_eta_month(est_arrival),
             "status": status,
@@ -274,9 +289,9 @@ async def upload_supply_chain(file: UploadFile = File(...), _user=Depends(requir
                     hdr = _str(_cell_val(ship_sheet, r, c)).lower()
                     if not hdr:
                         continue
-                    if "container" in hdr and "#" in hdr:
+                    if ("container" in hdr and "#" in hdr) or hdr in ("cntr#", "cntr #", "container#"):
                         ship_col_map["container_number"] = c
-                    elif "po" in hdr:
+                    elif "po" in hdr and ("invoice" not in hdr):
                         ship_col_map["po_number"] = c
                     elif "shipper" in hdr:
                         ship_col_map["shipper"] = c
@@ -286,20 +301,30 @@ async def upload_supply_chain(file: UploadFile = File(...), _user=Depends(requir
                         ship_col_map["container_type"] = c
                     elif "vessel" in hdr:
                         ship_col_map["vessel"] = c
-                    elif "etd" in hdr and "port" not in hdr:
+                    elif ("etd" in hdr and "port" not in hdr) or "departure" in hdr and "port" not in hdr:
                         ship_col_map["etd"] = c
-                    elif "etd" in hdr and "port" in hdr:
+                    elif ("etd" in hdr and "port" in hdr) or "departure" in hdr and "port" in hdr:
                         ship_col_map["etd_port"] = c
-                    elif ("eta" in hdr and "port" in hdr and "deliv" not in hdr and "dest" not in hdr):
+                    elif ("arrival" in hdr and "port" in hdr) or ("eta" in hdr and "port" in hdr and "deliv" not in hdr and "dest" not in hdr and "final" not in hdr):
                         ship_col_map["eta_port"] = c
-                    elif "eta" in hdr and ("deliv" in hdr or "dest" in hdr):
+                    elif "eta" in hdr and ("deliv" in hdr or "dest" in hdr or "final" in hdr):
                         ship_col_map["eta_delivery"] = c
-                    elif "eta" in hdr and "port" not in hdr and "deliv" not in hdr and "dest" not in hdr:
+                    elif ("eta" in hdr or "discharge" in hdr) and "port" not in hdr and "deliv" not in hdr and "dest" not in hdr and "final" not in hdr:
                         ship_col_map["eta"] = c
-                    elif "delivery" in hdr and "location" in hdr:
+                    elif ("delivery" in hdr and "location" in hdr) or "final location" in hdr or "final" in hdr and "location" in hdr:
                         ship_col_map["delivery_location"] = c
-                    elif "actual" in hdr and "delivery" in hdr:
+                    elif ("actual" in hdr and "delivery" in hdr) or "delivery date" in hdr:
                         ship_col_map["actual_delivery"] = c
+                    elif "factory" in hdr and "invoice" in hdr:
+                        ship_col_map["invoice_number"] = c
+                    elif "invoice" in hdr:
+                        ship_col_map["invoice_number"] = c
+                    elif "unit" in hdr:
+                        ship_col_map["units"] = c
+                    elif "cbm" in hdr:
+                        ship_col_map["cbm"] = c
+                    elif "status" in hdr:
+                        ship_col_map["status"] = c
                 break
 
         if ship_header_row:
@@ -346,6 +371,84 @@ async def upload_supply_chain(file: UploadFile = File(...), _user=Depends(requir
                 if ship_data.get("container_eta", "—") != "—":
                     rec["container_eta"] = ship_data["container_eta"]
                     rec["eta_month"] = _derive_eta_month(ship_data["container_eta"])
+
+    # ── Enrich from Invoice Summary sheet (if present) ──
+    if inv_sheet is not None:
+        inv_header_row = None
+        inv_col_map = {}
+        for r in range(1, min(inv_sheet.max_row + 1, 15)):
+            row_vals = [_str(_cell_val(inv_sheet, r, c)).lower() for c in range(1, inv_sheet.max_column + 1)]
+            joined = " ".join(row_vals)
+            if "invoice" in joined and ("po" in joined or "date" in joined or "unit" in joined):
+                inv_header_row = r
+                for c in range(1, inv_sheet.max_column + 1):
+                    hdr = _str(_cell_val(inv_sheet, r, c)).lower()
+                    if not hdr:
+                        continue
+                    if "po" in hdr and "#" in hdr or hdr in ("po#", "po #", "po number"):
+                        inv_col_map["po_number"] = c
+                    elif "container" in hdr and ("#" in hdr or "number" in hdr or "num" in hdr):
+                        inv_col_map["container_number"] = c
+                    elif ("invoice" in hdr and ("#" in hdr or "number" in hdr or "num" in hdr)) or hdr in ("invoice #", "invoice#"):
+                        inv_col_map["invoice_number"] = c
+                    elif "invoice" in hdr and "date" in hdr:
+                        inv_col_map["invoice_date"] = c
+                    elif "unit" in hdr or "qty" in hdr:
+                        inv_col_map["inv_units"] = c
+                    elif "cbm" in hdr:
+                        inv_col_map["inv_cbm"] = c
+                    elif "shipper" in hdr:
+                        inv_col_map["invoice_shipper"] = c
+                    elif "sold" in hdr:
+                        inv_col_map["sold_to"] = c
+                break
+
+        if inv_header_row and inv_col_map.get("invoice_date"):
+            # Build lookup: (po_number, container_number) -> invoice_date
+            inv_date_map = {}
+            for r in range(inv_header_row + 1, inv_sheet.max_row + 1):
+                po = _str(_cell_val(inv_sheet, r, inv_col_map.get("po_number", 1)))
+                cntr = _str(_cell_val(inv_sheet, r, inv_col_map.get("container_number", 2)))
+                inv_num = _str(_cell_val(inv_sheet, r, inv_col_map.get("invoice_number", 3)))
+                inv_date = _parse_date(_cell_val(inv_sheet, r, inv_col_map.get("invoice_date", 4)))
+                if not po or po.lower() in ("total", "subtotal"):
+                    continue
+                # Key by PO + container
+                if cntr:
+                    inv_date_map[(po, cntr)] = {"invoice_date": inv_date, "invoice_number": inv_num}
+                # Also key by PO + invoice for matching
+                if inv_num:
+                    inv_date_map[("inv", po, inv_num)] = {"invoice_date": inv_date}
+
+            # Enrich PO records with invoice dates
+            for rec in po_records:
+                po = rec["po_number"]
+                cntr = rec["container_number"]
+                inv_num = rec["invoice_number"]
+                # Try by PO + container first
+                inv_data = inv_date_map.get((po, cntr))
+                if inv_data is None and inv_num != "—":
+                    inv_data = inv_date_map.get(("inv", po, inv_num))
+                if inv_data:
+                    if inv_data.get("invoice_date", "—") != "—":
+                        rec["invoice_date"] = inv_data["invoice_date"]
+                    if inv_data.get("invoice_number") and rec["invoice_number"] == "—":
+                        rec["invoice_number"] = inv_data["invoice_number"]
+
+    # Also enrich invoice_number from shipment data if present
+    for rec in po_records:
+        if rec["invoice_number"] == "—":
+            cntr = rec["container_number"]
+            po = rec["po_number"]
+            if cntr != "—":
+                ship_data = shipment_map.get((cntr, po))
+                if ship_data is None:
+                    for (c, p), sd in shipment_map.items():
+                        if c == cntr:
+                            ship_data = sd
+                            break
+                if ship_data and ship_data.get("invoice_number", "—") != "—":
+                    rec["invoice_number"] = ship_data["invoice_number"]
 
     # ── Merge into data store ──
     store = _load_store()
@@ -418,6 +521,7 @@ async def get_otw_summary(_user=Depends(require_auth)):
                 "eta_month": rec.get("eta_month", "—"),
                 "container_type": rec.get("container_type", "—"),
                 "shipper": rec.get("shipper", "—"),
+                "x_factory_date": rec.get("x_factory_date", "—"),
             }
 
         container_groups[key]["units"] += rec.get("units", 0)
@@ -513,7 +617,8 @@ async def get_po_summary(_user=Depends(require_auth)):
                 "cbm": 0.0,
                 "container_number": cntr,
                 "invoice_number": rec.get("invoice_number", "—"),
-                "x_factory_date": "—",  # from etd if available
+                "payment_terms": rec.get("payment_terms", "—"),
+                "x_factory_date": rec.get("x_factory_date", "—"),
                 "etd": rec.get("etd", "—"),
                 "etd_port": rec.get("etd_port", "—"),
                 "eta_month": rec.get("eta_month", "—"),

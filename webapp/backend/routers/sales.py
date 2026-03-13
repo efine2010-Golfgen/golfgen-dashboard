@@ -632,13 +632,13 @@ def monthly_yoy():
 
     rows = con.execute("""
         SELECT
-            EXTRACT(YEAR FROM date) AS yr,
-            EXTRACT(MONTH FROM date) AS mo,
+            EXTRACT(YEAR FROM CAST(date AS DATE)) AS yr,
+            EXTRACT(MONTH FROM CAST(date AS DATE)) AS mo,
             COALESCE(SUM(ordered_product_sales), 0) AS revenue
         FROM daily_sales
         WHERE asin = 'ALL'
-          AND EXTRACT(YEAR FROM date) >= 2024
-        GROUP BY EXTRACT(YEAR FROM date), EXTRACT(MONTH FROM date)
+          AND CAST(date AS DATE) >= '2024-01-01'
+        GROUP BY EXTRACT(YEAR FROM CAST(date AS DATE)), EXTRACT(MONTH FROM CAST(date AS DATE))
         ORDER BY yr, mo
     """).fetchall()
 

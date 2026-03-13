@@ -56,6 +56,8 @@ def load_item_master() -> list:
                 "plannedAnnualUnits": int(float(row.get("planned_annual_units") or 0)),
                 "listPrice": float(row.get("list_price") or 0),
                 "salePrice": float(row.get("sale_price") or 0),
+                "salePriceStartDate": (row.get("sale_price_start_date") or "").strip(),
+                "salePriceEndDate": (row.get("sale_price_end_date") or "").strip(),
                 "referralPct": float(row.get("referral_pct") or 15),
                 "couponType": (row.get("coupon_type") or "").strip(),
                 "couponValue": float(row.get("coupon_value") or 0),
@@ -74,7 +76,8 @@ def save_item_master(items: list):
         "asin", "sku", "product_name", "color", "brand", "series",
         "product_type", "piece_count", "orientation", "category", "unit_cost",
         "fba_stock", "ly_aur", "ly_revenue", "ly_units", "ly_profit",
-        "planned_annual_units", "list_price", "sale_price", "referral_pct",
+        "planned_annual_units", "list_price", "sale_price",
+        "sale_price_start_date", "sale_price_end_date", "referral_pct",
         "coupon_type", "coupon_value", "carton_pack", "carton_length",
         "carton_width", "carton_height", "carton_weight",
     ]
@@ -102,6 +105,8 @@ def save_item_master(items: list):
                 "planned_annual_units": item.get("plannedAnnualUnits", 0),
                 "list_price": item.get("listPrice", 0),
                 "sale_price": item.get("salePrice", 0),
+                "sale_price_start_date": item.get("salePriceStartDate", ""),
+                "sale_price_end_date": item.get("salePriceEndDate", ""),
                 "referral_pct": item.get("referralPct", 15),
                 "coupon_type": item.get("couponType", ""),
                 "coupon_value": item.get("couponValue", 0),
@@ -295,7 +300,8 @@ def update_item_master(asin: str, body: dict = Body(...)):
         if item["asin"] == asin:
             # Only update fields that are provided
             updatable = [
-                "listPrice", "salePrice", "referralPct", "couponType",
+                "listPrice", "salePrice", "salePriceStartDate", "salePriceEndDate",
+                "referralPct", "couponType",
                 "couponValue", "cartonPack", "cartonLength", "cartonWidth",
                 "cartonHeight", "cartonWeight", "unitCost", "plannedAnnualUnits",
                 "color", "series", "productType", "pieceCount", "orientation",

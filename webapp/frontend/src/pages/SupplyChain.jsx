@@ -1,12 +1,17 @@
 import { useState, useEffect, useMemo, useRef } from "react";
 import { api } from "../lib/api";
+import {
+  BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer,
+  PieChart, Pie, Cell,
+} from "recharts";
 
-/* ── Status colors matching spec ─────────────────────────────── */
+/* ── Status colors matching app style ────────────────────────── */
 const STATUS_COLORS = {
   Delivered: { bg: "#D4F5E9", text: "#0d6939", dot: "#22c55e" },
   "In Transit": { bg: "#FFF3CD", text: "#856404", dot: "#f59e0b" },
   Open: { bg: "#E2E8F0", text: "#475569", dot: "#94a3b8" },
 };
+const PIE_COLORS = ["#22c55e", "#f59e0b", "#94a3b8"];
 
 function StatusBadge({ status }) {
   const s = STATUS_COLORS[status] || STATUS_COLORS.Open;
@@ -45,7 +50,6 @@ function fmtNum(n) {
   return Number(n).toLocaleString();
 }
 
-/* ── Sub-tab button component ─────────────────────────────────── */
 function SubTab({ label, active, onClick }) {
   return (
     <button
@@ -61,9 +65,67 @@ function SubTab({ label, active, onClick }) {
   );
 }
 
+/* ── Status Pie Chart (shared) ───────────────────────────────── */
+function StatusPieChart({ delivered = 0, inTransit = 0, open = 0 }) {
+  const data = [
+    { name: "Delivered", value: delivered },
+    { name: "In Transit", value: inTransit },
+    { name: "Open", value: open },
+  ].filter(d => d.value > 0);
+  if (data.length === 0) return null;
+  return (
+    <div style={{ width: 220, height: 200 }}>
+      <ResponsiveContainer>
+        <PieChart>
+          <Pie data={data} dataKey="value" nameKey="name" cx="50%" cy="50%" outerRadius={70}
+            label={({ name, value }) => `${name}: ${value}`} labelLine={false} fontSize={11}>
+            {data.map((_, i) => <Cell key={i} fill={PIE_COLORS[i % PIE_COLORS.length]} />)}
+          </Pie>
+          <Tooltip />
+        </PieChart>
+      </ResponsiveContainer>
+    </div>
+  );
+}
+
+/* ── Units by ETA Month Bar Chart (shared) ───────────────────── */
+function UnitsByMonthChart({ rows, unitsKey = "units" }) {
+  const monthData = useMemo(() => {
+    const map = {};
+    rows.forEach(r => {
+      const mo = r.eta_month || "—";
+      if (mo === "—") return;
+      if (!map[mo]) map[mo] = { month: mo, units: 0 };
+      map[mo].units += r[unitsKey] || 0;
+    });
+    const arr = Object.values(map);
+    // Sort by date
+    arr.sort((a, b) => {
+      try {
+        return new Date("1 " + a.month) - new Date("1 " + b.month);
+      } catch { return 0; }
+    });
+    return arr;
+  }, [rows, unitsKey]);
+  if (monthData.length === 0) return null;
+  return (
+    <div style={{ width: "100%", height: 220 }}>
+      <ResponsiveContainer>
+        <BarChart data={monthData} margin={{ top: 5, right: 20, bottom: 5, left: 10 }}>
+          <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" />
+          <XAxis dataKey="month" fontSize={11} />
+          <YAxis fontSize={11} />
+          <Tooltip formatter={(v) => fmtNum(v)} />
+          <Bar dataKey="units" fill="#2ECFAA" radius={[4, 4, 0, 0]} name="Units" />
+        </BarChart>
+      </ResponsiveContainer>
+    </div>
+  );
+}
+
 /* ═══════════════════════════════════════════════════════════════ */
 export default function SupplyChain() {
-  const [view, setView] = useState("otw"); // otw | po | invoices
+  const [view, setView] = useState("otw");
   const [otwData, setOtwData] = useState(null);
   const [poData, setPoData] = useState(null);
   const [invData, setInvData] = useState(null);
@@ -128,7 +190,7 @@ export default function SupplyChain() {
         <div>
           <h2>Supply Chain Report</h2>
           <p style={{ color: "var(--muted)", marginTop: 4, fontSize: 13 }}>
-            PO &bull; OTW &bull; Invoice — Unified View
+            OTW &bull; PO &bull; Invoice — Unified View
             {lastUpload && <span> &bull; Last upload: {new Date(lastUpload).toLocaleDateString()}</span>}
             {sourceFile && <span> ({sourceFile})</span>}
           </p>
@@ -146,8 +208,8 @@ export default function SupplyChain() {
 
       {uploadMsg && (
         <div style={{ margin: "0 0 12px", padding: "8px 14px", borderRadius: 6,
-          background: uploadMsg.startsWith("Upload") && !uploadMsg.includes("error") && !uploadMsg.includes("fail") ? "#D4F5E9" : "#FEE2E2",
-          color: uploadMsg.startsWith("Upload") && !uploadMsg.includes("error") && !uploadMsg.includes("fail") ? "#0d6939" : "#991b1b",
+          background: uploadMsg.includes("error") || uploadMsg.includes("fail") ? "#FEE2E2" : "#D4F5E9",
+          color: uploadMsg.includes("error") || uploadMsg.includes("fail") ? "#991b1b" : "#0d6939",
           fontSize: 13 }}>
           {uploadMsg}
         </div>
@@ -155,7 +217,6 @@ export default function SupplyChain() {
 
       {error && <div className="login-error" style={{ margin: "0 0 16px" }}>{error}</div>}
 
-      {/* Sub-tab navigation */}
       <div style={{ display: "flex", gap: 4, marginBottom: 0 }}>
         <SubTab label="OTW Summary" active={view === "otw"} onClick={() => setView("otw")} />
         <SubTab label="PO Summary" active={view === "po"} onClick={() => setView("po")} />
@@ -176,10 +237,10 @@ export default function SupplyChain() {
 function OTWSummaryView({ data }) {
   const { rows, summary, itemPivot, allContainers } = data;
   const [showItems, setShowItems] = useState(false);
+  const [showCharts, setShowCharts] = useState(true);
 
   return (
     <div className="section-card" style={{ borderRadius: "0 8px 8px 8px" }}>
-      {/* KPI Cards */}
       <div style={{ display: "flex", flexWrap: "wrap", gap: 12, marginBottom: 20 }}>
         <KPICard label="Total Containers" value={summary.totalContainers} />
         <KPICard label="Total Units" value={fmtNum(summary.totalUnits)} />
@@ -189,7 +250,30 @@ function OTWSummaryView({ data }) {
         <KPICard label="Open" value={summary.open} />
       </div>
 
-      {/* Main table */}
+      {/* Charts */}
+      {rows.length > 0 && (
+        <div style={{ marginBottom: 20 }}>
+          <button onClick={() => setShowCharts(!showCharts)} style={{
+            background: "none", border: "1px solid var(--border, #ddd)", borderRadius: 6,
+            padding: "6px 14px", cursor: "pointer", fontSize: 13, fontWeight: 600, marginBottom: 12,
+          }}>
+            {showCharts ? "▾ Hide" : "▸ Show"} Charts
+          </button>
+          {showCharts && (
+            <div style={{ display: "flex", flexWrap: "wrap", gap: 24, alignItems: "flex-start" }}>
+              <div>
+                <div style={{ fontSize: 12, fontWeight: 600, color: "var(--muted)", marginBottom: 4 }}>Status Breakdown</div>
+                <StatusPieChart delivered={summary.delivered} inTransit={summary.inTransit} open={summary.open} />
+              </div>
+              <div style={{ flex: 1, minWidth: 300 }}>
+                <div style={{ fontSize: 12, fontWeight: 600, color: "var(--muted)", marginBottom: 4 }}>Units by ETA Month</div>
+                <UnitsByMonthChart rows={rows} unitsKey="units" />
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+
       <div style={{ overflowX: "auto" }}>
         <table className="data-table">
           <thead>
@@ -249,7 +333,6 @@ function OTWSummaryView({ data }) {
         </div>
       )}
 
-      {/* Item Detail toggle */}
       {itemPivot && itemPivot.length > 0 && (
         <div style={{ marginTop: 24 }}>
           <button onClick={() => setShowItems(!showItems)} style={{
@@ -272,10 +355,18 @@ function OTWSummaryView({ data }) {
 function POSummaryView({ data }) {
   const { rows, summary, itemPivot, allPOs } = data;
   const [showItems, setShowItems] = useState(false);
+  const [showCharts, setShowCharts] = useState(true);
+
+  // Build units by month from rows for chart
+  const poChartRows = useMemo(() => {
+    return rows.map(r => ({
+      ...r,
+      units: r.units_shipped || 0,
+    }));
+  }, [rows]);
 
   return (
     <div className="section-card" style={{ borderRadius: "0 8px 8px 8px" }}>
-      {/* KPI Cards */}
       <div style={{ display: "flex", flexWrap: "wrap", gap: 12, marginBottom: 20 }}>
         <KPICard label="Total POs" value={summary.totalPOs} />
         <KPICard label="Units Ordered" value={fmtNum(summary.unitsOrdered)} />
@@ -285,7 +376,29 @@ function POSummaryView({ data }) {
         <KPICard label="Open" value={summary.open} />
       </div>
 
-      {/* Main table */}
+      {rows.length > 0 && (
+        <div style={{ marginBottom: 20 }}>
+          <button onClick={() => setShowCharts(!showCharts)} style={{
+            background: "none", border: "1px solid var(--border, #ddd)", borderRadius: 6,
+            padding: "6px 14px", cursor: "pointer", fontSize: 13, fontWeight: 600, marginBottom: 12,
+          }}>
+            {showCharts ? "▾ Hide" : "▸ Show"} Charts
+          </button>
+          {showCharts && (
+            <div style={{ display: "flex", flexWrap: "wrap", gap: 24, alignItems: "flex-start" }}>
+              <div>
+                <div style={{ fontSize: 12, fontWeight: 600, color: "var(--muted)", marginBottom: 4 }}>Status Breakdown</div>
+                <StatusPieChart delivered={summary.delivered} inTransit={summary.inTransit} open={summary.open} />
+              </div>
+              <div style={{ flex: 1, minWidth: 300 }}>
+                <div style={{ fontSize: 12, fontWeight: 600, color: "var(--muted)", marginBottom: 4 }}>Units Shipped by ETA Month</div>
+                <UnitsByMonthChart rows={poChartRows} unitsKey="units" />
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+
       <div style={{ overflowX: "auto" }}>
         <table className="data-table">
           <thead>
@@ -298,6 +411,7 @@ function POSummaryView({ data }) {
               <th style={{ textAlign: "right" }}>CBM</th>
               <th>Container #</th>
               <th>Invoice #</th>
+              <th>FOB Date</th>
               <th>ETD</th>
               <th>ETD Port</th>
               <th>ETA Month</th>
@@ -322,6 +436,7 @@ function POSummaryView({ data }) {
                   <td style={{ textAlign: "right" }}>{r.cbm}</td>
                   <td>{r.container_number}</td>
                   <td>{r.invoice_number}</td>
+                  <td>{fmtDate(r.x_factory_date)}</td>
                   <td>{fmtDate(r.etd)}</td>
                   <td>{r.etd_port}</td>
                   <td>{r.eta_month}</td>
@@ -337,7 +452,7 @@ function POSummaryView({ data }) {
                 <td style={{ textAlign: "right" }}>{fmtNum(summary.unitsOrdered)}</td>
                 <td style={{ textAlign: "right" }}>{fmtNum(summary.unitsShipped)}</td>
                 <td style={{ textAlign: "right", color: "#dc2626" }}>{fmtNum(summary.unitsOrdered - summary.unitsShipped)}</td>
-                <td colSpan={9}></td>
+                <td colSpan={10}></td>
               </tr>
             )}
           </tbody>
@@ -372,10 +487,17 @@ function POSummaryView({ data }) {
 function InvoiceSummaryView({ data }) {
   const { rows, summary, itemPivot, allInvoices } = data;
   const [showItems, setShowItems] = useState(false);
+  const [showCharts, setShowCharts] = useState(true);
+
+  const invChartRows = useMemo(() => {
+    return rows.map(r => ({
+      ...r,
+      units: r.total_units || 0,
+    }));
+  }, [rows]);
 
   return (
     <div className="section-card" style={{ borderRadius: "0 8px 8px 8px" }}>
-      {/* KPI Cards */}
       <div style={{ display: "flex", flexWrap: "wrap", gap: 12, marginBottom: 20 }}>
         <KPICard label="Total Invoices" value={summary.totalInvoices} />
         <KPICard label="Total Units" value={fmtNum(summary.totalUnits)} />
@@ -385,7 +507,29 @@ function InvoiceSummaryView({ data }) {
         <KPICard label="Open" value={summary.open} />
       </div>
 
-      {/* Main table */}
+      {rows.length > 0 && (
+        <div style={{ marginBottom: 20 }}>
+          <button onClick={() => setShowCharts(!showCharts)} style={{
+            background: "none", border: "1px solid var(--border, #ddd)", borderRadius: 6,
+            padding: "6px 14px", cursor: "pointer", fontSize: 13, fontWeight: 600, marginBottom: 12,
+          }}>
+            {showCharts ? "▾ Hide" : "▸ Show"} Charts
+          </button>
+          {showCharts && (
+            <div style={{ display: "flex", flexWrap: "wrap", gap: 24, alignItems: "flex-start" }}>
+              <div>
+                <div style={{ fontSize: 12, fontWeight: 600, color: "var(--muted)", marginBottom: 4 }}>Status Breakdown</div>
+                <StatusPieChart delivered={summary.delivered} inTransit={summary.inTransit} open={summary.open} />
+              </div>
+              <div style={{ flex: 1, minWidth: 300 }}>
+                <div style={{ fontSize: 12, fontWeight: 600, color: "var(--muted)", marginBottom: 4 }}>Invoice Units by ETA Month</div>
+                <UnitsByMonthChart rows={invChartRows} unitsKey="units" />
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+
       <div style={{ overflowX: "auto" }}>
         <table className="data-table">
           <thead>
