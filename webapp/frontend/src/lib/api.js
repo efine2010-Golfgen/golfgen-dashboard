@@ -74,12 +74,12 @@ export const api = {
   // Advertising endpoints
   adsSummary: (days = 30, h = {}) => fetchJSON(`/api/ads/summary?days=${days}${_hq(h)}`),
   adsDaily: (days = 30, h = {}) => fetchJSON(`/api/ads/daily?days=${days}${_hq(h)}`),
-  adsCampaigns: (days = 30) => fetchJSON(`/api/ads/campaigns?days=${days}`),
-  adsKeywords: (days = 30, limit = 50) =>
-    fetchJSON(`/api/ads/keywords?days=${days}&limit=${limit}`),
-  adsSearchTerms: (days = 30, limit = 50) =>
-    fetchJSON(`/api/ads/search-terms?days=${days}&limit=${limit}`),
-  adsNegativeKeywords: () => fetchJSON(`/api/ads/negative-keywords`),
+  adsCampaigns: (days = 30, h = {}) => fetchJSON(`/api/ads/campaigns?days=${days}${_hq(h)}`),
+  adsKeywords: (days = 30, limit = 50, h = {}) =>
+    fetchJSON(`/api/ads/keywords?days=${days}&limit=${limit}${_hq(h)}`),
+  adsSearchTerms: (days = 30, limit = 50, h = {}) =>
+    fetchJSON(`/api/ads/search-terms?days=${days}&limit=${limit}${_hq(h)}`),
+  adsNegativeKeywords: (h = {}) => fetchJSON(`/api/ads/negative-keywords${_hq(h) ? '?' + _hq(h).slice(1) : ''}`),
 
   // Original Warehouse (Moose 3PL grouped)
   warehouse: () => fetchJSON(`/api/warehouse`),

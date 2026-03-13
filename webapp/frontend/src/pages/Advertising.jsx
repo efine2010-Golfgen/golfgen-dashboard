@@ -43,13 +43,13 @@ export default function Advertising({ filters = {} }) {
     if (tab === "overview") {
       promises.push(api.adsDaily(days, h));
     } else if (tab === "campaigns") {
-      promises.push(api.adsCampaigns(days));
+      promises.push(api.adsCampaigns(days, h));
     } else if (tab === "keywords") {
-      promises.push(api.adsKeywords(days, 100));
+      promises.push(api.adsKeywords(days, 100, h));
     } else if (tab === "searchTerms") {
-      promises.push(api.adsSearchTerms(days, 100));
+      promises.push(api.adsSearchTerms(days, 100, h));
     } else if (tab === "negKeywords") {
-      promises.push(api.adsNegativeKeywords());
+      promises.push(api.adsNegativeKeywords(h));
     }
 
     Promise.all(promises).then(([s, detail]) => {

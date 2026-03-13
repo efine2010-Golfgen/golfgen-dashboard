@@ -12,6 +12,7 @@ from zoneinfo import ZoneInfo
 from fastapi import APIRouter, Query
 
 from core.config import DB_PATH, DB_DIR, COGS_PATH
+from core.hierarchy import hierarchy_filter as _hierarchy_filter
 
 logger = logging.getLogger("golfgen")
 router = APIRouter()
@@ -239,25 +240,7 @@ def _aggregate_weekly(daily_data: list) -> list:
     return result
 
 
-# ── Hierarchy Filter Helper ──────────────────────────────
-
-def _hierarchy_filter(division: str | None, customer: str | None, platform: str | None) -> tuple[str, list]:
-    """Build optional WHERE clause fragments for division/customer/platform filtering.
-    Returns (sql_fragment, params) where sql_fragment starts with ' AND ...' if any filters set."""
-    clauses = []
-    params = []
-    if division:
-        clauses.append("division = ?")
-        params.append(division)
-    if customer:
-        clauses.append("customer = ?")
-        params.append(customer)
-    if platform:
-        clauses.append("platform = ?")
-        params.append(platform)
-    if clauses:
-        return " AND " + " AND ".join(clauses), params
-    return "", []
+# ── Hierarchy filter imported from core.hierarchy ────────
 
 
 # ── API Routes ──────────────────────────────────────────

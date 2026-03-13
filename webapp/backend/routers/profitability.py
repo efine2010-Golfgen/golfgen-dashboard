@@ -9,6 +9,7 @@ from typing import Optional
 from fastapi import APIRouter, Query
 
 from core.config import DB_PATH, COGS_PATH, TIMEZONE
+from core.hierarchy import hierarchy_filter
 
 logger = logging.getLogger("golfgen")
 router = APIRouter()
@@ -55,16 +56,11 @@ def load_cogs() -> dict:
     return cogs
 
 
-def _build_product_list(con, cutoff: str, division: str = None, customer: str = None) -> list:
+def _build_product_list(con, cutoff: str, division: str = None, customer: str = None, platform: str = None) -> list:
     """Build per-ASIN product list with revenue, units, COGS, fees, and ad spend."""
-    filters = "WHERE date >= ? AND asin <> 'ALL'"
-    params = [cutoff]
-    if division:
-        filters += " AND division = ?"
-        params.append(division)
-    if customer:
-        filters += " AND customer = ?"
-        params.append(customer)
+    hf, hp = hierarchy_filter(division, customer, platform)
+    filters = "WHERE date >= ? AND asin <> 'ALL'" + hf
+    params = [cutoff] + hp
     asin_rows = con.execute(f"""
         SELECT asin,
                COALESCE(SUM(ordered_product_sales), 0) AS revenue,
@@ -104,14 +100,8 @@ def _build_product_list(con, cutoff: str, division: str = None, customer: str = 
         cogsPerUnit = cpu
 
         # Financial data
-        fin_filter = "WHERE asin = ? AND date >= ?"
-        fin_params = [asin, cutoff]
-        if division:
-            fin_filter += " AND division = ?"
-            fin_params.append(division)
-        if customer:
-            fin_filter += " AND customer = ?"
-            fin_params.append(customer)
+        fin_filter = "WHERE asin = ? AND date >= ?" + hf
+        fin_params = [asin, cutoff] + hp
         fin_row = con.execute(f"""
             SELECT COALESCE(SUM(ABS(fba_fees)), 0),
                    COALESCE(SUM(ABS(commission)), 0)
@@ -224,27 +214,22 @@ def _ensure_today_data():
 
 
 @router.get("/api/pnl")
-def pnl_waterfall(days: int = Query(365), division: Optional[str] = None, customer: Optional[str] = None):
+def pnl_waterfall(days: int = Query(365), division: Optional[str] = None, customer: Optional[str] = None, platform: Optional[str] = None):
     """Profit & Loss waterfall data, scaled to actual revenue from ALL rows."""
     con = get_db()
     cutoff = (datetime.now(ZoneInfo("America/Chicago")) - timedelta(days=days)).strftime("%Y-%m-%d")
 
     # Actual revenue from 'ALL' daily rows
-    rev_filter = "WHERE date >= ? AND asin = 'ALL'"
-    rev_params = [cutoff]
-    if division:
-        rev_filter += " AND division = ?"
-        rev_params.append(division)
-    if customer:
-        rev_filter += " AND customer = ?"
-        rev_params.append(customer)
+    hf, hp = hierarchy_filter(division, customer, platform)
+    rev_filter = "WHERE date >= ? AND asin = 'ALL'" + hf
+    rev_params = [cutoff] + hp
     actual_rev = con.execute(f"""
         SELECT COALESCE(SUM(ordered_product_sales), 0)
         FROM daily_sales {rev_filter}
     """, rev_params).fetchone()[0]
 
     # Cost breakdown from per-ASIN data
-    products = _build_product_list(con, cutoff, division, customer)
+    products = _build_product_list(con, cutoff, division, customer, platform)
     con.close()
 
     prod_rev = sum(p["rev"] for p in products)
@@ -274,7 +259,7 @@ def pnl_waterfall(days: int = Query(365), division: Optional[str] = None, custom
 
 
 @router.get("/api/profitability")
-def profitability(view: str = Query("realtime"), division: Optional[str] = None, customer: Optional[str] = None):
+def profitability(view: str = Query("realtime"), division: Optional[str] = None, customer: Optional[str] = None, platform: Optional[str] = None):
     """Sellerboard-style profit waterfall with same period views as comparison.
 
     Waterfall: Sales - Promo - Ads - Shipping - Refunds - Amazon Fees - COGS - Indirect = Net Profit
@@ -360,7 +345,7 @@ def profitability(view: str = Query("realtime"), division: Optional[str] = None,
 
     results = []
     for p in periods:
-        wf = _build_waterfall(con, cogs_data, p["start"], p["end"], division, customer)
+        wf = _build_waterfall(con, cogs_data, p["start"], p["end"], division, customer, platform)
         wf["label"] = p["label"]
         wf["sub"] = p.get("sub", "")
         results.append(wf)
@@ -370,21 +355,16 @@ def profitability(view: str = Query("realtime"), division: Optional[str] = None,
 
 
 @router.get("/api/profitability/items")
-def profitability_items(days: int = Query(365), division: Optional[str] = None, customer: Optional[str] = None):
+def profitability_items(days: int = Query(365), division: Optional[str] = None, customer: Optional[str] = None, platform: Optional[str] = None):
     """Per-ASIN profitability breakdown matching Sellerboard item view."""
     con = get_db()
     cutoff = (datetime.now(ZoneInfo("America/Chicago")) - timedelta(days=days)).strftime("%Y-%m-%d")
-    products = _build_product_list(con, cutoff, division, customer)
+    products = _build_product_list(con, cutoff, division, customer, platform)
 
     # Get per-ASIN financial event data for the period
-    fin_filter = "WHERE date >= ?"
-    fin_params = [cutoff]
-    if division:
-        fin_filter += " AND division = ?"
-        fin_params.append(division)
-    if customer:
-        fin_filter += " AND customer = ?"
-        fin_params.append(customer)
+    hf, hp = hierarchy_filter(division, customer, platform)
+    fin_filter = "WHERE date >= ?" + hf
+    fin_params = [cutoff] + hp
     fin_by_asin = {}
     try:
         fin_rows = con.execute(f"""
@@ -406,14 +386,8 @@ def profitability_items(days: int = Query(365), division: Optional[str] = None, 
         pass
 
     # Get per-ASIN ad spend from advertising table
-    ad_filter = "WHERE date >= ?"
-    ad_params = [cutoff]
-    if division:
-        ad_filter += " AND division = ?"
-        ad_params.append(division)
-    if customer:
-        ad_filter += " AND customer = ?"
-        ad_params.append(customer)
+    ad_filter = "WHERE date >= ?" + hf
+    ad_params = [cutoff] + hp
     ad_by_asin = {}
     try:
         ad_rows = con.execute(f"""
@@ -527,17 +501,10 @@ def profitability_items(days: int = Query(365), division: Optional[str] = None, 
     return {"days": days, "items": items}
 
 
-def _build_waterfall(con, cogs_data, start: str, end: str, division: str = None, customer: str = None) -> dict:
+def _build_waterfall(con, cogs_data, start: str, end: str, division: str = None, customer: str = None, platform: str = None) -> dict:
     """Build Sellerboard-style waterfall for a single period."""
     # Build dynamic filter fragments
-    div_cust_sql = ""
-    div_cust_params = []
-    if division:
-        div_cust_sql += " AND division = ?"
-        div_cust_params.append(division)
-    if customer:
-        div_cust_sql += " AND customer = ?"
-        div_cust_params.append(customer)
+    div_cust_sql, div_cust_params = hierarchy_filter(division, customer, platform)
 
     # Account-level revenue
     row = con.execute(f"""
@@ -723,7 +690,7 @@ def _build_waterfall(con, cogs_data, start: str, end: str, division: str = None,
     elif sales > 0:
         # No per-ASIN data for this period — use global cost ratios
         # This happens when SP-API per-ASIN report data has different dates
-        all_products = _build_product_list(con, "2020-01-01", division, customer)
+        all_products = _build_product_list(con, "2020-01-01", division, customer, platform)
         total_prd_rev = sum(p["rev"] for p in all_products)
         if total_prd_rev > 0:
             cogs_pct = sum(p["cogsTotal"] for p in all_products) / total_prd_rev
