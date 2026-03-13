@@ -145,8 +145,7 @@ async def tab_permission_middleware(request: Request, call_next):
         path.startswith("/api/upload/") or
         path.startswith("/api/debug/") or
         path in ("/api/health", "/api/sync", "/api/backfill") or
-        path.startswith("/api/refresh") or
-        path in ("/api/backup/run", "/api/backup/run-status")):
+        path.startswith("/api/refresh")):
         return await call_next(request)
 
     # Check session
@@ -359,6 +358,7 @@ from routers.otw import router as otw_router
 from routers.item_plan import router as item_plan_router
 from routers.system import router as system_router
 from routers.mfa import router as mfa_router
+from routers.supply_chain import router as supply_chain_router
 
 app.include_router(sales_router)
 app.include_router(profitability_router)
@@ -370,6 +370,7 @@ app.include_router(otw_router)
 app.include_router(item_plan_router)
 app.include_router(system_router)
 app.include_router(mfa_router)
+app.include_router(supply_chain_router)
 
 
 # ── Static Frontend (React SPA) ──────────────────────────

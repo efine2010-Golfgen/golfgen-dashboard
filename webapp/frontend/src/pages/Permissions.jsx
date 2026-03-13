@@ -12,6 +12,7 @@ const TAB_LABELS = {
   "item-master": "Item Master",
   "factory-po": "Factory PO",
   logistics: "OTW / Logistics",
+  "supply-chain": "Supply Chain",
   "fba-shipments": "Shipments to FBA",
   "item-planning": "Item Planning",
 };

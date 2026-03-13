@@ -122,26 +122,24 @@ export const api = {
   uploadLogistics: (file) => {
     const fd = new FormData();
     fd.append("file", file);
-    return fetch(`${API_BASE}/api/logistics/upload`, { method: "POST", body: fd, credentials: "include" })
-      .then(async r => {
-        const text = await r.text();
-        try { var data = JSON.parse(text); } catch { throw new Error(text || `Server error ${r.status}`); }
-        if (!r.ok) throw new Error(data.detail || data.error || `Upload failed (${r.status})`);
-        return data;
-      });
+    return fetch(`${API_BASE}/api/logistics/upload`, { method: "POST", body: fd, credentials: "include" }).then(r => r.json());
   },
 
   // Combined Supply Chain Upload (Factory PO + Logistics in one file)
   uploadSupplyChain: (file) => {
     const fd = new FormData();
     fd.append("file", file);
-    return fetch(`${API_BASE}/api/supply-chain/upload`, { method: "POST", body: fd, credentials: "include" })
-      .then(async r => {
-        const text = await r.text();
-        try { var data = JSON.parse(text); } catch { throw new Error(text || `Server error ${r.status}`); }
-        if (!r.ok) throw new Error(data.detail || data.error || `Upload failed (${r.status})`);
-        return data;
-      });
+    return fetch(`${API_BASE}/api/supply-chain/upload`, { method: "POST", body: fd, credentials: "include" }).then(r => r.json());
+  },
+
+  // Supply Chain (unified PO / OTW / Invoice)
+  supplyChainOTW: () => fetchJSON(`/api/supply-chain/otw`),
+  supplyChainPO: () => fetchJSON(`/api/supply-chain/po`),
+  supplyChainInvoices: () => fetchJSON(`/api/supply-chain/invoices`),
+  uploadSupplyChainV2: (file) => {
+    const fd = new FormData();
+    fd.append("file", file);
+    return fetch(`${API_BASE}/api/supply-chain/upload`, { method: "POST", body: fd, credentials: "include" }).then(r => r.json());
   },
 
   // FBA Shipments (SP-API)

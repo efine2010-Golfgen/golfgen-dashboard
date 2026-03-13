@@ -39,6 +39,7 @@ ALL_TABS = {
     "item-master": "Item Master",
     "factory-po": "Factory PO",
     "logistics": "OTW / Logistics",
+    "supply-chain": "Supply Chain",
     "fba-shipments": "Shipments to FBA",
     "item-planning": "Item Planning",
 }
@@ -53,7 +54,8 @@ TAB_API_PREFIXES = {
     "golfgen-inventory": ["/api/warehouse"],
     "item-master": ["/api/item-master", "/api/pricing"],
     "factory-po": ["/api/factory-po"],
-    "logistics": ["/api/logistics", "/api/supply-chain"],
+    "logistics": ["/api/logistics"],
+    "supply-chain": ["/api/supply-chain"],
     "fba-shipments": ["/api/fba-shipments"],
     "item-planning": ["/api/item-plan", "/api/item-planning", "/api/factory-on-order", "/api/dashboard-settings"],
 }

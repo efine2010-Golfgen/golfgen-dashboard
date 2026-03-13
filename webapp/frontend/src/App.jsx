@@ -11,6 +11,7 @@ import Advertising from "./pages/Advertising";
 import ItemMaster from "./pages/ItemMaster";
 import FactoryPO from "./pages/FactoryPO";
 import LogisticsTracking from "./pages/LogisticsTracking";
+import SupplyChain from "./pages/SupplyChain";
 import ItemPlanning from "./pages/ItemPlanning";
 import FBAShipments from "./pages/FBAShipments";
 import Permissions from "./pages/Permissions";
@@ -31,8 +32,7 @@ const LOGISTICS_TABS = [
   { key: "inventory", path: "/inventory", label: "Amazon FBA", icon: "🏭" },
   { key: "golfgen-inventory", path: "/golfgen-inventory", label: "GolfGen Inventory", icon: "📦" },
   { key: "item-master", path: "/item-master", label: "Item Master", icon: "📋" },
-  { key: "factory-po", path: "/factory-po", label: "Factory PO", icon: "🏭" },
-  { key: "logistics", path: "/logistics", label: "OTW", icon: "🚢" },
+  { key: "supply-chain", path: "/supply-chain", label: "Supply Chain", icon: "🚢" },
   { key: "fba-shipments", path: "/fba-shipments", label: "Shipments to FBA", icon: "📦" },
   { key: "item-planning", path: "/item-planning", label: "Item Planning", icon: "📋" },
 ];
@@ -221,6 +221,7 @@ export default function App() {
             {allowed["item-master"] !== false && <Route path="/item-master" element={<ItemMaster />} />}
             {allowed["factory-po"] !== false && <Route path="/factory-po" element={<FactoryPO />} />}
             {allowed["logistics"] !== false && <Route path="/logistics" element={<LogisticsTracking />} />}
+            {allowed["supply-chain"] !== false && <Route path="/supply-chain" element={<SupplyChain />} />}
             {allowed["fba-shipments"] !== false && <Route path="/fba-shipments" element={<FBAShipments />} />}
             {allowed["item-planning"] !== false && <Route path="/item-planning" element={<ItemPlanning />} />}
             <Route path="/account/security/mfa-setup" element={<MfaSetup />} />
