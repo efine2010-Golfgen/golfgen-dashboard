@@ -8,6 +8,7 @@ from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
 from pathlib import Path
 from fastapi import APIRouter, Query, Request
+from fastapi.responses import JSONResponse
 
 from core.config import DB_PATH, DB_DIR, TIMEZONE, DOCS_DIR
 
