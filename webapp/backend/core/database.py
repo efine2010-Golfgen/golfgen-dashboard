@@ -563,6 +563,113 @@ def _init_item_plan_tables():
         con.close()
 
 
+def _init_staging_tables():
+    """Create staging layer tables for cleaned/typed versions of raw data."""
+    con = duckdb.connect(str(DB_PATH))
+
+    con.execute("""
+        CREATE TABLE IF NOT EXISTS staging_orders (
+            staging_id        VARCHAR PRIMARY KEY,
+            source_order_id   VARCHAR,
+            division          VARCHAR NOT NULL,
+            customer          VARCHAR NOT NULL,
+            platform          VARCHAR NOT NULL,
+            order_date        DATE,
+            asin              VARCHAR,
+            product_name      VARCHAR,
+            units             INTEGER,
+            gross_amount      DECIMAL(12,2),
+            currency          VARCHAR DEFAULT 'USD',
+            marketplace       VARCHAR,
+            fulfillment_type  VARCHAR,
+            status            VARCHAR,
+            staged_at         TIMESTAMP,
+            is_processed      BOOLEAN DEFAULT FALSE
+        )
+    """)
+
+    con.execute("""
+        CREATE TABLE IF NOT EXISTS staging_financial_events (
+            staging_id        VARCHAR PRIMARY KEY,
+            source_event_id   VARCHAR,
+            division          VARCHAR NOT NULL,
+            customer          VARCHAR NOT NULL,
+            platform          VARCHAR NOT NULL,
+            event_date        DATE,
+            event_type        VARCHAR,
+            asin              VARCHAR,
+            description       VARCHAR,
+            amount            DECIMAL(12,2),
+            currency          VARCHAR DEFAULT 'USD',
+            fee_type          VARCHAR,
+            staged_at         TIMESTAMP,
+            is_processed      BOOLEAN DEFAULT FALSE
+        )
+    """)
+
+    con.close()
+
+
+def _init_analytics_tables():
+    """Create analytics layer tables for pre-aggregated dashboard data."""
+    con = duckdb.connect(str(DB_PATH))
+
+    con.execute("""
+        CREATE TABLE IF NOT EXISTS analytics_daily (
+            id                VARCHAR PRIMARY KEY,
+            date              DATE NOT NULL,
+            division          VARCHAR NOT NULL,
+            customer          VARCHAR NOT NULL,
+            platform          VARCHAR NOT NULL,
+            units_sold        INTEGER DEFAULT 0,
+            gross_revenue     DECIMAL(12,2) DEFAULT 0,
+            returns_units     INTEGER DEFAULT 0,
+            returns_amount    DECIMAL(12,2) DEFAULT 0,
+            net_revenue       DECIMAL(12,2) DEFAULT 0,
+            amazon_fees       DECIMAL(12,2) DEFAULT 0,
+            advertising_spend DECIMAL(12,2) DEFAULT 0,
+            net_profit        DECIMAL(12,2) DEFAULT 0,
+            updated_at        TIMESTAMP
+        )
+    """)
+
+    con.execute("""
+        CREATE TABLE IF NOT EXISTS analytics_sku (
+            id               VARCHAR PRIMARY KEY,
+            asin             VARCHAR NOT NULL,
+            product_name     VARCHAR,
+            division         VARCHAR NOT NULL,
+            customer         VARCHAR NOT NULL,
+            period           VARCHAR NOT NULL,
+            units_sold       INTEGER DEFAULT 0,
+            revenue          DECIMAL(12,2) DEFAULT 0,
+            return_rate      DECIMAL(5,2) DEFAULT 0,
+            acos             DECIMAL(5,2) DEFAULT 0,
+            rank_in_division INTEGER,
+            updated_at       TIMESTAMP
+        )
+    """)
+
+    con.execute("""
+        CREATE TABLE IF NOT EXISTS analytics_ads (
+            id               VARCHAR PRIMARY KEY,
+            date             DATE NOT NULL,
+            division         VARCHAR NOT NULL,
+            customer         VARCHAR NOT NULL,
+            campaign_name    VARCHAR,
+            impressions      INTEGER DEFAULT 0,
+            clicks           INTEGER DEFAULT 0,
+            spend            DECIMAL(12,2) DEFAULT 0,
+            sales            DECIMAL(12,2) DEFAULT 0,
+            acos             DECIMAL(5,2) DEFAULT 0,
+            roas             DECIMAL(5,2) DEFAULT 0,
+            updated_at       TIMESTAMP
+        )
+    """)
+
+    con.close()
+
+
 def init_all_tables():
     """Initialize all DuckDB tables on startup."""
     try:
@@ -594,6 +701,18 @@ def init_all_tables():
         logger.info("Item Plan tables initialized")
     except Exception as e:
         logger.error(f"Item Plan table init error: {e}")
+
+    try:
+        _init_staging_tables()
+        logger.info("Staging tables initialized")
+    except Exception as e:
+        logger.error(f"Staging table init error: {e}")
+
+    try:
+        _init_analytics_tables()
+        logger.info("Analytics tables initialized")
+    except Exception as e:
+        logger.error(f"Analytics table init error: {e}")
 
     try:
         from .mfa_database import _init_mfa_tables

@@ -18,6 +18,7 @@ from core.config import DB_PATH, DB_DIR, TIMEZONE, SYNC_INTERVAL_HOURS
 from services.sp_api import _sync_today_orders, _run_sp_api_sync, _backfill_orders
 from services.ads_api import _sync_ads_data, _sync_pricing_and_coupons
 from services.sync_engine import _auto_backfill_if_needed, _log_sync, _write_sync_log
+from services.analytics_rollup import run_full_rollup
 
 logger = logging.getLogger("golfgen")
 
@@ -101,6 +102,19 @@ def _run_scheduled_docs_update():
         _write_sync_log("docs_update", started_at, "FAILED", error=str(e))
         _log_docs_update("failed", error_message=str(e), execution_time=0)
         logger.error(f"Scheduled docs update failed: {e}")
+
+
+def _run_scheduled_analytics_rollup():
+    """Wrapper for scheduled analytics rollup with logging."""
+    started_at = datetime.now(ZoneInfo("America/Chicago"))
+    try:
+        result = run_full_rollup()
+        _write_sync_log("analytics_rollup", started_at, "SUCCESS",
+                        inserted=(result.get("daily_rows", 0) + result.get("sku_rows", 0)))
+        logger.info(f"Scheduled analytics rollup completed: {result}")
+    except Exception as e:
+        _write_sync_log("analytics_rollup", started_at, "FAILED", error=str(e))
+        logger.error(f"Scheduled analytics rollup failed: {e}")
 
 
 def _run_duckdb_backup():
@@ -234,6 +248,9 @@ async def _sync_loop():
 
         # Schedule nightly DuckDB backup at 2am Central (Prompt 2 implementation)
         scheduler.add_job(_run_duckdb_backup, CronTrigger(hour=2, minute=0, timezone="America/Chicago"), id="duckdb_backup_2am")
+
+        # Schedule analytics rollup at 2:30am Central (after backup completes)
+        scheduler.add_job(_run_scheduled_analytics_rollup, CronTrigger(hour=2, minute=30, timezone="America/Chicago"), id="analytics_rollup_230am", misfire_grace_time=3600)
 
         await scheduler.start()
         logger.info("APScheduler started with 4 daily SP-API syncs, hourly ads/pricing, docs updates, and nightly backup (America/Chicago)")

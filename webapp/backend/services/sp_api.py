@@ -17,6 +17,47 @@ from core.config import DB_PATH, DB_DIR, CONFIG_PATH, TIMEZONE, COGS_PATH
 
 logger = logging.getLogger("golfgen")
 
+# ── Division lookup cache ──────────────────────────────────────
+_division_cache: dict[str, str] = {}
+
+
+def _get_division_for_asin(asin: str, con=None) -> str:
+    """Look up the division for an ASIN from item_master.
+
+    Returns the division string ('golf' or 'housewares').
+    Falls back to 'golf' if the ASIN isn't in item_master yet.
+    Results are cached in-memory for the lifetime of the process.
+    """
+    if not asin or asin == "ALL":
+        return "golf"
+
+    # Check cache first
+    if asin in _division_cache:
+        return _division_cache[asin]
+
+    # Query item_master
+    close_con = False
+    try:
+        if con is None:
+            con = duckdb.connect(str(DB_PATH), read_only=True)
+            close_con = True
+        row = con.execute(
+            "SELECT division FROM item_master WHERE asin = ?", [asin]
+        ).fetchone()
+        division = row[0] if row and row[0] else "golf"
+        _division_cache[asin] = division
+        if close_con:
+            con.close()
+        return division
+    except Exception:
+        _division_cache[asin] = "golf"
+        if close_con:
+            try:
+                con.close()
+            except Exception:
+                pass
+        return "golf"
+
 
 def _load_sp_api_credentials() -> dict | None:
     """Load SP-API credentials from env vars (Railway) or config file (local dev).
@@ -579,17 +620,19 @@ def _run_sp_api_sync():
                 net = product_charges + shipping_ch - fba_fees_val - commission_val + promo_val
 
                 try:
+                    _div = _get_division_for_asin(asin_val)
                     con.execute("""
                         INSERT INTO financial_events
                         (date, asin, sku, order_id, event_type,
                          product_charges, shipping_charges, fba_fees,
                          commission, promotion_amount, other_fees, net_proceeds,
                          division, customer, platform)
-                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'golf', 'amazon', 'sp_api')
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'amazon', 'sp_api')
                     """, [
                         date_str, asin_val, sku, order_id, "Shipment",
                         product_charges, shipping_ch,
-                        fba_fees_val, commission_val, promo_val, other_val, net
+                        fba_fees_val, commission_val, promo_val, other_val, net,
+                        _div
                     ])
                     fin_records += 1
                 except Exception as ins_err:
@@ -646,18 +689,20 @@ def _run_sp_api_sync():
                         refund_comm += abs(val)
 
                 try:
+                    _div = _get_division_for_asin(asin_val)
                     con.execute("""
                         INSERT INTO financial_events
                         (date, asin, sku, order_id, event_type,
                          product_charges, shipping_charges, fba_fees,
                          commission, promotion_amount, other_fees, net_proceeds,
                          division, customer, platform)
-                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'golf', 'amazon', 'sp_api')
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'amazon', 'sp_api')
                     """, [
                         date_str,
                         asin_val, sku, order_id, "Refund",
                         abs(refund_amount), 0, refund_fba, refund_comm, 0, refund_other,
-                        abs(refund_amount)
+                        abs(refund_amount),
+                        _div
                     ])
                     fin_records += 1
                     logger.info(f"  Inserted refund: order={order_id}, asin={asin_val}, amount=${abs(refund_amount):.2f}")
@@ -687,6 +732,8 @@ def _run_sp_api_sync():
                 fulfillable = inv.get("fulfillableQuantity", 0) or item.get("totalQuantity", 0)
                 reserved = inv.get("reservedQuantity", {})
                 reserved_qty = reserved.get("totalReservedQuantity", 0) if isinstance(reserved, dict) else int(reserved or 0)
+                _inv_asin = item.get("asin", "")
+                _div = _get_division_for_asin(_inv_asin)
                 con.execute("""
                     INSERT OR REPLACE INTO fba_inventory
                     (date, asin, sku, product_name, condition,
@@ -694,9 +741,9 @@ def _run_sp_api_sync():
                      inbound_shipped_quantity, inbound_receiving_quantity,
                      reserved_quantity, unfulfillable_quantity, total_quantity,
                      division, customer, platform)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'golf', 'amazon', 'sp_api')
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'amazon', 'sp_api')
                 """, [
-                    today, item.get("asin", ""),
+                    today, _inv_asin,
                     item.get("sellerSku", item.get("fnSku", "")),
                     item.get("productName", "")[:200],
                     item.get("condition", "NewItem"),
@@ -706,6 +753,7 @@ def _run_sp_api_sync():
                     int(inv.get("inboundReceivingQuantity", 0) or 0),
                     int(reserved_qty or 0), 0,
                     int(item.get("totalQuantity", 0)),
+                    _div
                 ])
             con.close()
             logger.info(f"  Inventory sync done: {len(summaries)} items")
@@ -792,13 +840,14 @@ def _run_sp_api_sync():
                 ordered_sales = sales_info.get("orderedProductSales", {})
                 sales_amount = float(ordered_sales.get("amount", 0)) if isinstance(ordered_sales, dict) else float(ordered_sales or 0)
 
+                _div = _get_division_for_asin(asin)
                 con.execute("""
                     INSERT OR REPLACE INTO daily_sales
                     (date, asin, units_ordered, ordered_product_sales,
                      sessions, session_percentage, page_views,
                      buy_box_percentage, unit_session_percentage,
                      division, customer, platform)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'golf', 'amazon', 'sp_api')
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'amazon', 'sp_api')
                 """, [
                     entry_date, asin,
                     int(sales_info.get("unitsOrdered", 0)),
@@ -808,6 +857,7 @@ def _run_sp_api_sync():
                     int(traffic.get("pageViews", 0)),
                     float(traffic.get("buyBoxPercentage", 0)),
                     float(traffic.get("unitSessionPercentage", 0)),
+                    _div
                 ])
                 records += 1
 

@@ -155,28 +155,44 @@ def save_item_master(items: list):
 
 
 @router.get("/api/inventory")
-def inventory():
+def inventory(division: Optional[str] = None, customer: Optional[str] = None):
     """Current FBA inventory with days-of-supply calculations."""
     con = get_db()
     cogs_data = load_cogs()
 
-    inv_rows = con.execute("""
+    inv_filter = ""
+    inv_params = []
+    if division:
+        inv_filter += " WHERE division = ?" if not inv_filter else " AND division = ?"
+        inv_params.append(division)
+    if customer:
+        inv_filter += " WHERE customer = ?" if not inv_filter else " AND customer = ?"
+        inv_params.append(customer)
+
+    inv_rows = con.execute(f"""
         SELECT asin, sku, product_name,
                COALESCE(fulfillable_quantity, 0) AS fba_stock,
                COALESCE(inbound_working_quantity, 0) + COALESCE(inbound_shipped_quantity, 0) + COALESCE(inbound_receiving_quantity, 0) AS inbound,
                COALESCE(reserved_quantity, 0) AS reserved
-        FROM fba_inventory
-    """).fetchall()
+        FROM fba_inventory{inv_filter}
+    """, inv_params).fetchall()
 
     # Get avg daily units for last 30 days
+    vel_filter = "WHERE date >= CURRENT_DATE - INTERVAL '30 days' AND asin != 'ALL'"
+    vel_params = []
+    if division:
+        vel_filter += " AND division = ?"
+        vel_params.append(division)
+    if customer:
+        vel_filter += " AND customer = ?"
+        vel_params.append(customer)
     velocity = {}
-    vel_rows = con.execute("""
+    vel_rows = con.execute(f"""
         SELECT asin, SUM(units_ordered) AS units
         FROM daily_sales
-        WHERE date >= CURRENT_DATE - INTERVAL '30 days'
-          AND asin != 'ALL'
+        {vel_filter}
         GROUP BY asin
-    """).fetchall()
+    """, vel_params).fetchall()
     for vr in vel_rows:
         velocity[vr[0]] = round(vr[1] / 30, 1)
 

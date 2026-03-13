@@ -35,7 +35,7 @@ const WATERFALL_COLORS = {
   netProfit_neg: "#D03030",
 };
 
-export default function Profitability() {
+export default function Profitability({ filters = {} }) {
   const [view, setView] = useState("realtime");
   const [periods, setPeriods] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -48,20 +48,20 @@ export default function Profitability() {
   // Load waterfall periods
   useEffect(() => {
     setLoading(true);
-    api.profitability(view).then(data => {
+    api.profitability(view, filters).then(data => {
       setPeriods(data.periods || []);
       setLoading(false);
     }).catch(() => setLoading(false));
-  }, [view]);
+  }, [view, filters.division, filters.customer]);
 
   // Load item-level data
   useEffect(() => {
     setItemLoading(true);
-    api.profitabilityItems(itemDays).then(data => {
+    api.profitabilityItems(itemDays, filters).then(data => {
       setItems(data.items || []);
       setItemLoading(false);
     }).catch(() => setItemLoading(false));
-  }, [itemDays]);
+  }, [itemDays, filters.division, filters.customer]);
 
   // Sort items
   const sortedItems = [...items].sort((a, b) => {

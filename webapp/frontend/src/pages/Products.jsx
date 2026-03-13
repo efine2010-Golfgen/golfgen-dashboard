@@ -12,7 +12,7 @@ const RANGES = [
   { label: "1Y", days: 365 },
 ];
 
-export default function Products() {
+export default function Products({ filters = {} }) {
   const [days, setDays] = useState(365);
   const [products, setProducts] = useState([]);
   const [productMix, setProductMix] = useState([]);
@@ -33,15 +33,16 @@ export default function Products() {
 
   useEffect(() => {
     setLoading(true);
+    const h = filters;
     Promise.all([
-      api.products(days),
-      api.productMix(days),
+      api.products(days, h),
+      api.productMix(days, h),
     ]).then(([d, mix]) => {
       setProducts(d.products);
       setProductMix(mix.products || []);
       setLoading(false);
     });
-  }, [days]);
+  }, [days, filters.division, filters.customer]);
 
   const handleSort = (key) => {
     if (sortKey === key) {

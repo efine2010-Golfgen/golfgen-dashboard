@@ -56,10 +56,10 @@ export const api = {
   daily: (days = 365, granularity = "daily", h = {}) =>
     fetchJSON(`/api/daily?days=${days}&granularity=${granularity}${_hq(h)}`),
   products: (days = 365, h = {}) => fetchJSON(`/api/products?days=${days}${_hq(h)}`),
-  inventory: () => fetchJSON(`/api/inventory`),
+  inventory: (h = {}) => fetchJSON(`/api/inventory${_hq(h) ? '?' + _hq(h).slice(1) : ''}`),
   productDetail: (asin, days = 365) =>
     fetchJSON(`/api/product/${asin}?days=${days}`),
-  pnl: (days = 365) => fetchJSON(`/api/pnl?days=${days}`),
+  pnl: (days = 365, h = {}) => fetchJSON(`/api/pnl?days=${days}${_hq(h)}`),
 
   // Dashboard analytics
   comparison: (view = "realtime", h = {}) => fetchJSON(`/api/comparison?view=${view}${_hq(h)}`),
@@ -68,12 +68,12 @@ export const api = {
   colorMix: (days = 365, h = {}) => fetchJSON(`/api/color-mix?days=${days}${_hq(h)}`),
 
   // Profitability (Sellerboard-style)
-  profitability: (view = "realtime") => fetchJSON(`/api/profitability?view=${view}`),
-  profitabilityItems: (days = 365) => fetchJSON(`/api/profitability/items?days=${days}`),
+  profitability: (view = "realtime", h = {}) => fetchJSON(`/api/profitability?view=${view}${_hq(h)}`),
+  profitabilityItems: (days = 365, h = {}) => fetchJSON(`/api/profitability/items?days=${days}${_hq(h)}`),
 
   // Advertising endpoints
-  adsSummary: (days = 30) => fetchJSON(`/api/ads/summary?days=${days}`),
-  adsDaily: (days = 30) => fetchJSON(`/api/ads/daily?days=${days}`),
+  adsSummary: (days = 30, h = {}) => fetchJSON(`/api/ads/summary?days=${days}${_hq(h)}`),
+  adsDaily: (days = 30, h = {}) => fetchJSON(`/api/ads/daily?days=${days}${_hq(h)}`),
   adsCampaigns: (days = 30) => fetchJSON(`/api/ads/campaigns?days=${days}`),
   adsKeywords: (days = 30, limit = 50) =>
     fetchJSON(`/api/ads/keywords?days=${days}&limit=${limit}`),

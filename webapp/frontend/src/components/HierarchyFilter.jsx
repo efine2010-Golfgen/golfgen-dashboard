@@ -1,40 +1,66 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 
+/**
+ * Division → Customer mapping.
+ * Golf: amazon, walmart_marketplace, walmart_stores, shopify, first_tee
+ * Housewares: amazon, walmart_marketplace, walmart_stores, belk, hobby_lobby, albertsons, family_dollar
+ */
 const DIVISIONS = [
   { value: "", label: "All Divisions" },
   { value: "golf", label: "Golf (PGAT)" },
   { value: "housewares", label: "Housewares" },
 ];
 
-const CUSTOMERS = [
-  { value: "", label: "All Customers" },
-  { value: "amazon", label: "Amazon" },
-  { value: "walmart_stores", label: "Walmart Stores" },
-  { value: "first_tee", label: "First Tee" },
-];
+const CUSTOMERS_BY_DIVISION = {
+  "": [
+    { value: "", label: "All Customers" },
+    { value: "amazon", label: "Amazon" },
+    { value: "walmart_marketplace", label: "Walmart Marketplace" },
+    { value: "walmart_stores", label: "Walmart Stores" },
+    { value: "shopify", label: "Shopify" },
+    { value: "first_tee", label: "First Tee" },
+    { value: "belk", label: "Belk" },
+    { value: "hobby_lobby", label: "Hobby Lobby" },
+    { value: "albertsons", label: "Albertsons" },
+    { value: "family_dollar", label: "Family Dollar" },
+  ],
+  golf: [
+    { value: "", label: "All Customers" },
+    { value: "amazon", label: "Amazon" },
+    { value: "walmart_marketplace", label: "Walmart Marketplace" },
+    { value: "walmart_stores", label: "Walmart Stores" },
+    { value: "shopify", label: "Shopify" },
+    { value: "first_tee", label: "First Tee" },
+  ],
+  housewares: [
+    { value: "", label: "All Customers" },
+    { value: "amazon", label: "Amazon" },
+    { value: "walmart_marketplace", label: "Walmart Marketplace" },
+    { value: "walmart_stores", label: "Walmart Stores" },
+    { value: "belk", label: "Belk" },
+    { value: "hobby_lobby", label: "Hobby Lobby" },
+    { value: "albertsons", label: "Albertsons" },
+    { value: "family_dollar", label: "Family Dollar" },
+  ],
+};
 
-const PLATFORMS = [
-  { value: "", label: "All Platforms" },
-  { value: "sp_api", label: "SP-API (Amazon)" },
-  { value: "walmart_api", label: "Walmart API" },
-  { value: "manual_entry", label: "Manual Entry" },
-];
+export default function HierarchyFilter({ division, customer, onChange, compact = false }) {
+  const customers = CUSTOMERS_BY_DIVISION[division || ""] || CUSTOMERS_BY_DIVISION[""];
 
-export default function HierarchyFilter({ onChange, compact = false }) {
-  const [division, setDivision] = useState("");
-  const [customer, setCustomer] = useState("");
-  const [platform, setPlatform] = useState("");
+  // Reset customer when division changes and current customer isn't valid for new division
+  useEffect(() => {
+    if (customer && !customers.find(c => c.value === customer)) {
+      onChange?.({ division, customer: "" });
+    }
+  }, [division]);
 
-  const handleChange = (field, value) => {
-    const next = { division, customer, platform, [field]: value };
-    if (field === "division") next[field] = value;
-    if (field === "customer") next[field] = value;
-    if (field === "platform") next[field] = value;
+  const handleDivisionChange = (value) => {
+    // Reset customer when division changes
+    onChange?.({ division: value, customer: "" });
+  };
 
-    setDivision(next.division);
-    setCustomer(next.customer);
-    setPlatform(next.platform);
-    onChange?.(next);
+  const handleCustomerChange = (value) => {
+    onChange?.({ division, customer: value });
   };
 
   const selectStyle = {
@@ -51,8 +77,8 @@ export default function HierarchyFilter({ onChange, compact = false }) {
   return (
     <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
       <select
-        value={division}
-        onChange={e => handleChange("division", e.target.value)}
+        value={division || ""}
+        onChange={e => handleDivisionChange(e.target.value)}
         style={selectStyle}
       >
         {DIVISIONS.map(d => (
@@ -60,21 +86,12 @@ export default function HierarchyFilter({ onChange, compact = false }) {
         ))}
       </select>
       <select
-        value={customer}
-        onChange={e => handleChange("customer", e.target.value)}
+        value={customer || ""}
+        onChange={e => handleCustomerChange(e.target.value)}
         style={selectStyle}
       >
-        {CUSTOMERS.map(c => (
+        {customers.map(c => (
           <option key={c.value} value={c.value}>{c.label}</option>
-        ))}
-      </select>
-      <select
-        value={platform}
-        onChange={e => handleChange("platform", e.target.value)}
-        style={selectStyle}
-      >
-        {PLATFORMS.map(p => (
-          <option key={p.value} value={p.value}>{p.label}</option>
         ))}
       </select>
     </div>

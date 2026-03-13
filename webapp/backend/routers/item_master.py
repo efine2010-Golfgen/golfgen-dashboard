@@ -567,6 +567,122 @@ def item_master_housewares():
     return {"items": result, "count": len(result)}
 
 
+# ── Division Management Endpoints ─────────────────────────────
+
+
+@router.get("/api/item-master/by-division")
+def item_master_by_division(division: Optional[str] = None):
+    """Return item_master rows grouped by division. If division is specified, filter to it."""
+    from core.database import get_db
+    con = get_db()
+    try:
+        if division:
+            rows = con.execute(
+                "SELECT asin, sku, product_name, division, customer FROM item_master WHERE division = ? ORDER BY sku",
+                [division],
+            ).fetchall()
+        else:
+            rows = con.execute(
+                "SELECT asin, sku, product_name, division, customer FROM item_master ORDER BY division, sku"
+            ).fetchall()
+        items = [
+            {"asin": r[0], "sku": r[1], "productName": r[2], "division": r[3], "customer": r[4]}
+            for r in rows
+        ]
+        return {"items": items, "count": len(items)}
+    finally:
+        con.close()
+
+
+@router.get("/api/item-master/untagged")
+def item_master_untagged():
+    """Return ASINs that have no division set (NULL or empty string)."""
+    from core.database import get_db
+    con = get_db()
+    try:
+        rows = con.execute(
+            "SELECT asin, sku, product_name, customer FROM item_master WHERE division IS NULL OR division = '' ORDER BY sku"
+        ).fetchall()
+        items = [
+            {"asin": r[0], "sku": r[1], "productName": r[2], "customer": r[3]}
+            for r in rows
+        ]
+        return {"items": items, "count": len(items)}
+    finally:
+        con.close()
+
+
+@router.put("/api/item-master/{asin}/division")
+def set_item_division(asin: str, body: dict = Body(...)):
+    """Set the division for a single ASIN in item_master.
+    Body: { "division": "golf" | "housewares" }
+    """
+    division = body.get("division", "").strip().lower()
+    if division not in ("golf", "housewares"):
+        raise HTTPException(status_code=400, detail="Division must be 'golf' or 'housewares'")
+
+    from core.database import get_db
+    con = get_db()
+    try:
+        result = con.execute("UPDATE item_master SET division = ? WHERE asin = ?", [division, asin])
+        affected = result.fetchone()
+        # DuckDB UPDATE doesn't return rowcount easily; verify the ASIN exists
+        check = con.execute("SELECT asin FROM item_master WHERE asin = ?", [asin]).fetchone()
+        if not check:
+            raise HTTPException(status_code=404, detail=f"ASIN {asin} not found in item_master")
+        con.close()
+
+        # Clear the in-memory division cache so the next lookup picks up the change
+        try:
+            from services.sp_api import _division_cache
+            _division_cache.pop(asin, None)
+        except Exception:
+            pass
+
+        return {"status": "ok", "asin": asin, "division": division}
+    except HTTPException:
+        con.close()
+        raise
+    except Exception as e:
+        con.close()
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/api/item-master/bulk-set-division")
+def bulk_set_division(body: dict = Body(...)):
+    """Bulk-set division for multiple ASINs.
+    Body: { "asins": ["B0...", "B0..."], "division": "golf" | "housewares" }
+    """
+    division = body.get("division", "").strip().lower()
+    asins = body.get("asins", [])
+    if division not in ("golf", "housewares"):
+        raise HTTPException(status_code=400, detail="Division must be 'golf' or 'housewares'")
+    if not asins:
+        return {"status": "ok", "updated": 0}
+
+    from core.database import get_db
+    con = get_db()
+    try:
+        updated = 0
+        for asin in asins:
+            con.execute("UPDATE item_master SET division = ? WHERE asin = ?", [division, asin.strip()])
+            updated += 1
+        con.close()
+
+        # Clear cache for updated ASINs
+        try:
+            from services.sp_api import _division_cache
+            for asin in asins:
+                _division_cache.pop(asin.strip(), None)
+        except Exception:
+            pass
+
+        return {"status": "ok", "updated": updated, "division": division}
+    except Exception as e:
+        con.close()
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 @router.get("/api/item-master/other")
 def item_master_other():
     """Items in warehouse inventory that are not in Amazon or Walmart item masters."""

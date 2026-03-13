@@ -18,6 +18,7 @@ import Permissions from "./pages/Permissions";
 import System from "./pages/System";
 import MfaSetup from "./pages/MfaSetup";
 import MfaVerify from "./pages/MfaVerify";
+import HierarchyFilter from "./components/HierarchyFilter";
 import "./App.css";
 
 /* ── Category definitions with view mappings ── */
@@ -192,6 +193,15 @@ export default function App() {
   const [mfaProtected, setMfaProtected] = useState({});
   const [userMfaEnabled, setUserMfaEnabled] = useState(false);
 
+  // Global hierarchy filter state
+  const [division, setDivision] = useState("");
+  const [customer, setCustomer] = useState("");
+  const handleFilterChange = ({ division: d, customer: c }) => {
+    setDivision(d);
+    setCustomer(c);
+  };
+  const filters = { division, customer };
+
   const loadMfaState = async () => {
     try {
       const [protectedRes, statusRes] = await Promise.all([
@@ -279,12 +289,15 @@ export default function App() {
                 <div className="brand-tagline">GOLF FOR EVERYONE. SERIOUSLY EVERYONE.</div>
               </div>
 
-              {/* Center: Title */}
+              {/* Center: Title + Filters */}
               <div className="header-center">
                 <div className="brand-title">
                   <h1>Golfgen/EGB Analytics</h1>
                 </div>
-                {user && <span className="user-name">{user.name}{isAdmin && <span className="admin-badge">Admin</span>}</span>}
+                <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+                  <HierarchyFilter division={division} customer={customer} onChange={handleFilterChange} compact />
+                  {user && <span className="user-name">{user.name}{isAdmin && <span className="admin-badge">Admin</span>}</span>}
+                </div>
               </div>
 
               {/* Right: Buttons Grid */}
@@ -318,13 +331,13 @@ export default function App() {
         {/* ── Main Content ── */}
         <main className="main-content">
           <Routes>
-            {allowed["dashboard"] !== false && <Route path="/" element={<Dashboard />} />}
-            {allowed["products"] !== false && <Route path="/products" element={<Products />} />}
-            {allowed["profitability"] !== false && <Route path="/profitability" element={<Profitability />} />}
-            {allowed["inventory"] !== false && <Route path="/inventory" element={<Inventory />} />}
-            {allowed["golfgen-inventory"] !== false && <Route path="/golfgen-inventory" element={<GolfGenInventory />} />}
-            {allowed["advertising"] !== false && <Route path="/advertising" element={<Advertising />} />}
-            {allowed["item-master"] !== false && <Route path="/item-master" element={<ItemMaster />} />}
+            {allowed["dashboard"] !== false && <Route path="/" element={<Dashboard filters={filters} />} />}
+            {allowed["products"] !== false && <Route path="/products" element={<Products filters={filters} />} />}
+            {allowed["profitability"] !== false && <Route path="/profitability" element={<Profitability filters={filters} />} />}
+            {allowed["inventory"] !== false && <Route path="/inventory" element={<Inventory filters={filters} />} />}
+            {allowed["golfgen-inventory"] !== false && <Route path="/golfgen-inventory" element={<GolfGenInventory filters={filters} />} />}
+            {allowed["advertising"] !== false && <Route path="/advertising" element={<Advertising filters={filters} />} />}
+            {allowed["item-master"] !== false && <Route path="/item-master" element={<ItemMaster filters={filters} />} />}
             {allowed["factory-po"] !== false && <Route path="/factory-po" element={<FactoryPO />} />}
             {allowed["logistics"] !== false && <Route path="/logistics" element={<LogisticsTracking />} />}
             {allowed["supply-chain"] !== false && <Route path="/supply-chain" element={<SupplyChain />} />}

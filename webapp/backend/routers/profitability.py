@@ -5,6 +5,7 @@ import duckdb
 from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
 from pathlib import Path
+from typing import Optional
 from fastapi import APIRouter, Query
 
 from core.config import DB_PATH, COGS_PATH, TIMEZONE
@@ -54,17 +55,25 @@ def load_cogs() -> dict:
     return cogs
 
 
-def _build_product_list(con, cutoff: str) -> list:
+def _build_product_list(con, cutoff: str, division: str = None, customer: str = None) -> list:
     """Build per-ASIN product list with revenue, units, COGS, fees, and ad spend."""
-    asin_rows = con.execute("""
+    filters = "WHERE date >= ? AND asin <> 'ALL'"
+    params = [cutoff]
+    if division:
+        filters += " AND division = ?"
+        params.append(division)
+    if customer:
+        filters += " AND customer = ?"
+        params.append(customer)
+    asin_rows = con.execute(f"""
         SELECT asin,
                COALESCE(SUM(ordered_product_sales), 0) AS revenue,
                COALESCE(SUM(units_ordered), 0) AS units
         FROM daily_sales
-        WHERE date >= ? AND asin <> 'ALL'
+        {filters}
         GROUP BY asin
         ORDER BY revenue DESC
-    """, [cutoff]).fetchall()
+    """, params).fetchall()
 
     cogs_data = load_cogs()
     # Get names/SKUs from inventory table
@@ -95,12 +104,20 @@ def _build_product_list(con, cutoff: str) -> list:
         cogsPerUnit = cpu
 
         # Financial data
-        fin_row = con.execute("""
+        fin_filter = "WHERE asin = ? AND date >= ?"
+        fin_params = [asin, cutoff]
+        if division:
+            fin_filter += " AND division = ?"
+            fin_params.append(division)
+        if customer:
+            fin_filter += " AND customer = ?"
+            fin_params.append(customer)
+        fin_row = con.execute(f"""
             SELECT COALESCE(SUM(ABS(fba_fees)), 0),
                    COALESCE(SUM(ABS(commission)), 0)
             FROM financial_events
-            WHERE asin = ? AND date >= ?
-        """, [asin, cutoff]).fetchone()
+            {fin_filter}
+        """, fin_params).fetchone()
         fba_actual, comm_actual = fin_row if fin_row else (0, 0)
 
         fbaTotal = fba_actual if fba_actual > 0 else round(rev * 0.12, 2)
@@ -109,11 +126,19 @@ def _build_product_list(con, cutoff: str) -> list:
         # Ad spend (advertising table may not have asin column)
         adSpend = 0
         try:
-            ad_row = con.execute("""
+            ad_filter = "WHERE asin = ? AND date >= ?"
+            ad_params = [asin, cutoff]
+            if division:
+                ad_filter += " AND division = ?"
+                ad_params.append(division)
+            if customer:
+                ad_filter += " AND customer = ?"
+                ad_params.append(customer)
+            ad_row = con.execute(f"""
                 SELECT COALESCE(SUM(spend), 0)
                 FROM advertising
-                WHERE asin = ? AND date >= ?
-            """, [asin, cutoff]).fetchone()
+                {ad_filter}
+            """, ad_params).fetchone()
             adSpend = ad_row[0] if ad_row else 0
         except Exception:
             pass
@@ -199,19 +224,27 @@ def _ensure_today_data():
 
 
 @router.get("/api/pnl")
-def pnl_waterfall(days: int = Query(365)):
+def pnl_waterfall(days: int = Query(365), division: Optional[str] = None, customer: Optional[str] = None):
     """Profit & Loss waterfall data, scaled to actual revenue from ALL rows."""
     con = get_db()
     cutoff = (datetime.now(ZoneInfo("America/Chicago")) - timedelta(days=days)).strftime("%Y-%m-%d")
 
     # Actual revenue from 'ALL' daily rows
-    actual_rev = con.execute("""
+    rev_filter = "WHERE date >= ? AND asin = 'ALL'"
+    rev_params = [cutoff]
+    if division:
+        rev_filter += " AND division = ?"
+        rev_params.append(division)
+    if customer:
+        rev_filter += " AND customer = ?"
+        rev_params.append(customer)
+    actual_rev = con.execute(f"""
         SELECT COALESCE(SUM(ordered_product_sales), 0)
-        FROM daily_sales WHERE date >= ? AND asin = 'ALL'
-    """, [cutoff]).fetchone()[0]
+        FROM daily_sales {rev_filter}
+    """, rev_params).fetchone()[0]
 
     # Cost breakdown from per-ASIN data
-    products = _build_product_list(con, cutoff)
+    products = _build_product_list(con, cutoff, division, customer)
     con.close()
 
     prod_rev = sum(p["rev"] for p in products)
@@ -241,7 +274,7 @@ def pnl_waterfall(days: int = Query(365)):
 
 
 @router.get("/api/profitability")
-def profitability(view: str = Query("realtime")):
+def profitability(view: str = Query("realtime"), division: Optional[str] = None, customer: Optional[str] = None):
     """Sellerboard-style profit waterfall with same period views as comparison.
 
     Waterfall: Sales - Promo - Ads - Shipping - Refunds - Amazon Fees - COGS - Indirect = Net Profit
@@ -327,7 +360,7 @@ def profitability(view: str = Query("realtime")):
 
     results = []
     for p in periods:
-        wf = _build_waterfall(con, cogs_data, p["start"], p["end"])
+        wf = _build_waterfall(con, cogs_data, p["start"], p["end"], division, customer)
         wf["label"] = p["label"]
         wf["sub"] = p.get("sub", "")
         results.append(wf)
@@ -337,16 +370,24 @@ def profitability(view: str = Query("realtime")):
 
 
 @router.get("/api/profitability/items")
-def profitability_items(days: int = Query(365)):
+def profitability_items(days: int = Query(365), division: Optional[str] = None, customer: Optional[str] = None):
     """Per-ASIN profitability breakdown matching Sellerboard item view."""
     con = get_db()
     cutoff = (datetime.now(ZoneInfo("America/Chicago")) - timedelta(days=days)).strftime("%Y-%m-%d")
-    products = _build_product_list(con, cutoff)
+    products = _build_product_list(con, cutoff, division, customer)
 
     # Get per-ASIN financial event data for the period
+    fin_filter = "WHERE date >= ?"
+    fin_params = [cutoff]
+    if division:
+        fin_filter += " AND division = ?"
+        fin_params.append(division)
+    if customer:
+        fin_filter += " AND customer = ?"
+        fin_params.append(customer)
     fin_by_asin = {}
     try:
-        fin_rows = con.execute("""
+        fin_rows = con.execute(f"""
             SELECT asin,
                    SUM(ABS(promotion_amount)) AS promo,
                    SUM(ABS(shipping_charges)) AS shipping,
@@ -356,23 +397,31 @@ def profitability_items(days: int = Query(365)):
                    COUNT(CASE WHEN event_type ILIKE '%refund%' OR event_type ILIKE '%return%'
                        THEN 1 END) AS refund_count
             FROM financial_events
-            WHERE date >= ?
+            {fin_filter}
             GROUP BY asin
-        """, [cutoff]).fetchall()
+        """, fin_params).fetchall()
         fin_by_asin = {r[0]: {"promo": r[1], "shipping": r[2], "other": r[3],
                                 "refund_amt": r[4], "refund_count": r[5]} for r in fin_rows}
     except Exception:
         pass
 
     # Get per-ASIN ad spend from advertising table
+    ad_filter = "WHERE date >= ?"
+    ad_params = [cutoff]
+    if division:
+        ad_filter += " AND division = ?"
+        ad_params.append(division)
+    if customer:
+        ad_filter += " AND customer = ?"
+        ad_params.append(customer)
     ad_by_asin = {}
     try:
-        ad_rows = con.execute("""
+        ad_rows = con.execute(f"""
             SELECT asin, COALESCE(SUM(spend), 0) AS spend
             FROM advertising
-            WHERE date >= ?
+            {ad_filter}
             GROUP BY asin
-        """, [cutoff]).fetchall()
+        """, ad_params).fetchall()
         ad_by_asin = {r[0]: r[1] for r in ad_rows}
     except Exception:
         pass
@@ -478,32 +527,42 @@ def profitability_items(days: int = Query(365)):
     return {"days": days, "items": items}
 
 
-def _build_waterfall(con, cogs_data, start: str, end: str) -> dict:
+def _build_waterfall(con, cogs_data, start: str, end: str, division: str = None, customer: str = None) -> dict:
     """Build Sellerboard-style waterfall for a single period."""
+    # Build dynamic filter fragments
+    div_cust_sql = ""
+    div_cust_params = []
+    if division:
+        div_cust_sql += " AND division = ?"
+        div_cust_params.append(division)
+    if customer:
+        div_cust_sql += " AND customer = ?"
+        div_cust_params.append(customer)
+
     # Account-level revenue
-    row = con.execute("""
+    row = con.execute(f"""
         SELECT COALESCE(SUM(ordered_product_sales), 0),
                COALESCE(SUM(units_ordered), 0)
         FROM daily_sales
-        WHERE date >= ? AND date < ? AND asin = 'ALL'
-    """, [start, end]).fetchone()
+        WHERE date >= ? AND date < ? AND asin = 'ALL'{div_cust_sql}
+    """, [start, end] + div_cust_params).fetchone()
     sales, units = row[0], row[1]
 
     # Per-ASIN cost breakdown
-    asin_rows = con.execute("""
+    asin_rows = con.execute(f"""
         SELECT asin,
                COALESCE(SUM(ordered_product_sales), 0) AS revenue,
                COALESCE(SUM(units_ordered), 0) AS units
         FROM daily_sales
-        WHERE date >= ? AND date < ? AND asin <> 'ALL'
+        WHERE date >= ? AND date < ? AND asin <> 'ALL'{div_cust_sql}
         GROUP BY asin
-    """, [start, end]).fetchall()
+    """, [start, end] + div_cust_params).fetchall()
 
     # Financial data (date-filtered for the period)
     # Per-ASIN breakdown (may use SKU identifiers instead of ASINs)
     fin_rows = []
     try:
-        fin_rows = con.execute("""
+        fin_rows = con.execute(f"""
             SELECT asin,
                    SUM(ABS(fba_fees)) AS fba,
                    SUM(ABS(commission)) AS comm,
@@ -515,9 +574,9 @@ def _build_waterfall(con, cogs_data, start: str, end: str) -> dict:
                    COUNT(CASE WHEN event_type ILIKE '%refund%' OR event_type ILIKE '%return%'
                        THEN 1 END) AS refund_count
             FROM financial_events
-            WHERE date >= ? AND date < ?
+            WHERE date >= ? AND date < ?{div_cust_sql}
             GROUP BY asin
-        """, [start, end]).fetchall()
+        """, [start, end] + div_cust_params).fetchall()
     except Exception:
         pass
 
@@ -553,7 +612,7 @@ def _build_waterfall(con, cogs_data, start: str, end: str) -> dict:
     acct_fin = {"fba": 0, "comm": 0, "promo": 0, "shipping": 0, "other": 0,
                 "refund_amt": 0, "refund_count": 0}
     try:
-        acct_row = con.execute("""
+        acct_row = con.execute(f"""
             SELECT SUM(ABS(fba_fees)),
                    SUM(ABS(commission)),
                    SUM(ABS(promotion_amount)),
@@ -564,8 +623,8 @@ def _build_waterfall(con, cogs_data, start: str, end: str) -> dict:
                    COUNT(CASE WHEN event_type ILIKE '%refund%' OR event_type ILIKE '%return%'
                        THEN 1 END)
             FROM financial_events
-            WHERE date >= ? AND date < ?
-        """, [start, end]).fetchone()
+            WHERE date >= ? AND date < ?{div_cust_sql}
+        """, [start, end] + div_cust_params).fetchone()
         if acct_row and acct_row[0] is not None:
             acct_fin = {"fba": acct_row[0], "comm": acct_row[1], "promo": acct_row[2],
                         "shipping": acct_row[3], "other": acct_row[4],
@@ -576,11 +635,11 @@ def _build_waterfall(con, cogs_data, start: str, end: str) -> dict:
     # Ad spend from the *advertising* table (the actual table name in this DB)
     total_ad = 0
     try:
-        ad_row = con.execute("""
+        ad_row = con.execute(f"""
             SELECT COALESCE(SUM(spend), 0)
             FROM advertising
-            WHERE date >= ? AND date < ?
-        """, [start, end]).fetchone()
+            WHERE date >= ? AND date < ?{div_cust_sql}
+        """, [start, end] + div_cust_params).fetchone()
         total_ad = ad_row[0] if ad_row else 0
     except Exception:
         pass
@@ -664,7 +723,7 @@ def _build_waterfall(con, cogs_data, start: str, end: str) -> dict:
     elif sales > 0:
         # No per-ASIN data for this period — use global cost ratios
         # This happens when SP-API per-ASIN report data has different dates
-        all_products = _build_product_list(con, "2020-01-01")
+        all_products = _build_product_list(con, "2020-01-01", division, customer)
         total_prd_rev = sum(p["rev"] for p in all_products)
         if total_prd_rev > 0:
             cogs_pct = sum(p["cogsTotal"] for p in all_products) / total_prd_rev
