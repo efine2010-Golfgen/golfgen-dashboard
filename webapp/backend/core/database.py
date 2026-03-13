@@ -563,6 +563,24 @@ def _init_item_plan_tables():
         con.close()
 
 
+def _init_item_master_table():
+    """Create DuckDB item_master table if not exist (source of truth for division mapping)."""
+    con = duckdb.connect(str(DB_PATH))
+    con.execute("""
+        CREATE TABLE IF NOT EXISTS item_master (
+            asin          VARCHAR PRIMARY KEY,
+            sku           VARCHAR,
+            product_name  VARCHAR,
+            division      VARCHAR,
+            customer      VARCHAR,
+            platform      VARCHAR DEFAULT 'sp_api',
+            category      VARCHAR,
+            brand         VARCHAR
+        )
+    """)
+    con.close()
+
+
 def _init_staging_tables():
     """Create staging layer tables for cleaned/typed versions of raw data."""
     con = duckdb.connect(str(DB_PATH))
@@ -701,6 +719,12 @@ def init_all_tables():
         logger.info("Item Plan tables initialized")
     except Exception as e:
         logger.error(f"Item Plan table init error: {e}")
+
+    try:
+        _init_item_master_table()
+        logger.info("Item Master table initialized")
+    except Exception as e:
+        logger.error(f"Item Master table init error: {e}")
 
     try:
         _init_staging_tables()
