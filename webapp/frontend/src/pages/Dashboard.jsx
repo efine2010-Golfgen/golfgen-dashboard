@@ -48,7 +48,7 @@ const COMP_VIEWS = [
 ];
 
 export default function Dashboard() {
-  const [days, setDays] = useState(365);
+  const [days, setDays] = useState(90);
   const [summary, setSummary] = useState(null);
   const [daily, setDaily] = useState([]);
   const [pnl, setPnl] = useState(null);
@@ -59,23 +59,24 @@ export default function Dashboard() {
   const [colorData, setColorData] = useState([]);
   const [loading, setLoading] = useState(true);
 
-  // Load main dashboard data
+  // Load main dashboard data — each call independent so one failure doesn't kill all charts
   useEffect(() => {
     setLoading(true);
+    const safe = (p, fallback) => p.catch(e => { console.error("Dashboard fetch error:", e); return fallback; });
     Promise.all([
-      api.summary(days),
-      api.daily(days, days <= 90 ? "daily" : "weekly"),
-      api.pnl(days),
-      api.comparison(compView),
-      api.monthlyYoY(),
-      api.colorMix(days),
+      safe(api.summary(days), null),
+      safe(api.daily(days, days <= 90 ? "daily" : "weekly"), { data: [] }),
+      safe(api.pnl(days), null),
+      safe(api.comparison(compView), { periods: [] }),
+      safe(api.monthlyYoY(), { years: [], data: [] }),
+      safe(api.colorMix(days), { colors: [] }),
     ]).then(([s, d, p, comp, yoy, colors]) => {
-      setSummary(s);
-      setDaily(d.data);
-      setPnl(p);
-      setComparison(comp.periods || []);
-      setMonthlyYoY(yoy);
-      setColorData(colors.colors || []);
+      if (s) setSummary(s);
+      setDaily(d?.data || []);
+      if (p) setPnl(p);
+      setComparison(comp?.periods || []);
+      setMonthlyYoY(yoy || { years: [], data: [] });
+      setColorData(colors?.colors || []);
       setLoading(false);
     }).catch(() => setLoading(false));
   }, [days]);

@@ -292,10 +292,11 @@ def _sync_today_orders():
             ).fetchone()
             existing_rev = float(existing[0]) if existing and existing[0] else 0.0
 
-            # For today/yesterday: always overwrite with latest Orders API data (most current)
-            # For older days: only overwrite if new revenue is higher (don't clobber Sales Report data)
-            is_recent = day_str in (today_str, yesterday_str)
-            if is_recent or agg["revenue"] >= existing_rev:
+            # Always use the HIGHER of Orders API vs existing data.
+            # Sales & Traffic Report data is more accurate for historical days,
+            # Orders API may undercount (missing item prices on Pending orders).
+            # Only overwrite if new revenue is >= existing — never lose data.
+            if agg["revenue"] >= existing_rev:
                 con.execute("""
                     INSERT OR REPLACE INTO daily_sales
                     (date, asin, units_ordered, ordered_product_sales,
@@ -957,12 +958,9 @@ def _backfill_orders(days: int = 90):
         daily_agg[day_str]["units"] += total_qty
         daily_agg[day_str]["orders"] += 1
 
-    # Write daily aggregates — only update if Orders API data is better
+    # Write daily aggregates — only update if Orders API revenue >= existing
+    # Never overwrite with lower data — Sales & Traffic Report is more accurate
     days_updated = 0
-    now_central = datetime.now(ZoneInfo("America/Chicago"))
-    today_str = now_central.strftime("%Y-%m-%d")
-    yesterday_str = (now_central - timedelta(days=1)).strftime("%Y-%m-%d")
-
     for day_str in sorted(daily_agg.keys()):
         agg = daily_agg[day_str]
         if agg["revenue"] <= 0:
@@ -973,8 +971,7 @@ def _backfill_orders(days: int = 90):
         ).fetchone()
         existing_rev = float(existing[0]) if existing and existing[0] else 0.0
 
-        is_recent = day_str in (today_str, yesterday_str)
-        if is_recent or agg["revenue"] >= existing_rev:
+        if agg["revenue"] >= existing_rev:
             con.execute("""
                 INSERT OR REPLACE INTO daily_sales
                 (date, asin, units_ordered, ordered_product_sales,
