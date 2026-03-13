@@ -132,6 +132,16 @@ export const api = {
     return fetch(`${API_BASE}/api/supply-chain/upload`, { method: "POST", body: fd, credentials: "include" }).then(r => r.json());
   },
 
+  // Supply Chain (unified PO / OTW / Invoice)
+  supplyChainOTW: () => fetchJSON(`/api/supply-chain/otw`),
+  supplyChainPO: () => fetchJSON(`/api/supply-chain/po`),
+  supplyChainInvoices: () => fetchJSON(`/api/supply-chain/invoices`),
+  uploadSupplyChainV2: (file) => {
+    const fd = new FormData();
+    fd.append("file", file);
+    return fetch(`${API_BASE}/api/supply-chain/upload`, { method: "POST", body: fd, credentials: "include" }).then(r => r.json());
+  },
+
   // FBA Shipments (SP-API)
   fbaShipments: (refresh = false) => fetchJSON(`/api/fba-shipments${refresh ? "?refresh=true" : ""}`),
   fbaShipmentsSync: () =>
