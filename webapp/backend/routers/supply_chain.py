@@ -118,10 +118,13 @@ def _int_or_zero(v):
 @router.post("/upload")
 async def upload_supply_chain(file: UploadFile = File(...), _user=Depends(require_auth)):
     """
-    Upload a single Excel file with 2 tabs:
-      Tab 1: PO & Invoice Data (SKU-level)
-      Tab 2: Shipment Data (container-level logistics)
-    Merges into the data store by record_id = {PO#}_{Container#}_{SKU}.
+    Upload a single Excel file with up to 3 tabs:
+      - PO Summary: PO-level data (Factory, PO#, Units, FOB Date, Status, financials)
+      - Logistics Tracking: Container-level shipping data (Container#, PO#, ETD, ETA, etc.)
+      - Invoice Summary: Invoice-level data (PO#, Container#, Invoice#, Date)
+
+    Records are keyed by {PO#}_{Container#} for container-level, or {PO#}_PO for PO-only.
+    Handles both SKU-level and PO-level spreadsheets.
     """
     import tempfile
     tmp = tempfile.NamedTemporaryFile(delete=False, suffix=".xlsx")
@@ -135,338 +138,395 @@ async def upload_supply_chain(file: UploadFile = File(...), _user=Depends(requir
         os.unlink(tmp.name)
         return {"status": "error", "message": f"Cannot read Excel file: {e}"}
 
-    # ── Find the two tabs ──
-    sheet_names = wb.sheetnames
-    po_sheet = None
-    ship_sheet = None
+    try:
+        return _parse_workbook(wb, file.filename)
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        return {"status": "error", "message": f"Parse error: {e}"}
+    finally:
+        os.unlink(tmp.name)
 
-    inv_sheet = None  # optional separate Invoice Summary tab
 
-    for name in sheet_names:
-        lower = name.lower()
-        if "po" in lower and ("invoice" in lower or "data" in lower):
+def _normalize_status(raw: str) -> str:
+    """Normalize status text to one of: Delivered, In Transit, Open, Closed, or —."""
+    if raw == "—":
+        return "—"
+    sl = raw.lower().strip()
+    if "deliver" in sl:
+        return "Delivered"
+    elif "transit" in sl or "ship" in sl or "sail" in sl:
+        return "In Transit"
+    elif "close" in sl:
+        return "Closed"
+    elif "open" in sl or "pending" in sl or "order" in sl:
+        return "Open"
+    return raw
+
+
+def _find_header_row(ws, required_keywords: list[str], max_scan: int = 15) -> tuple:
+    """Scan first N rows for a header row containing required keywords. Returns (row_number, col_map) or (None, {})."""
+    for r in range(1, min(ws.max_row + 1, max_scan)):
+        row_vals = [_str(_cell_val(ws, r, c)).lower() for c in range(1, ws.max_column + 1)]
+        joined = " ".join(row_vals)
+        if all(kw in joined for kw in required_keywords):
+            return r, row_vals
+    return None, []
+
+
+def _map_columns(ws, header_row: int, mappings: dict) -> dict:
+    """Build column map from header row. mappings = {field_name: [list of possible header substrings]}."""
+    col_map = {}
+    for c in range(1, ws.max_column + 1):
+        hdr = _str(_cell_val(ws, header_row, c)).lower()
+        if not hdr:
+            continue
+        for field, matchers in mappings.items():
+            if field in col_map:
+                continue  # already mapped, don't overwrite
+            for m in matchers:
+                if callable(m):
+                    if m(hdr):
+                        col_map[field] = c
+                        break
+                elif m == hdr:
+                    col_map[field] = c
+                    break
+    return col_map
+
+
+def _parse_workbook(wb, filename: str) -> dict:
+    """Core parser: reads PO Summary, Logistics Tracking, and Invoice Summary sheets."""
+
+    # ── Detect sheets ──
+    po_sheet = ship_sheet = inv_sheet = None
+    for name in wb.sheetnames:
+        lower = name.lower().strip()
+        if lower in ("po summary", "po_summary", "po data", "purchase orders", "factory po summary"):
             po_sheet = wb[name]
-        elif lower.strip() in ("po summary", "po_summary", "po data", "purchase orders"):
+        elif "po" in lower and ("invoice" in lower or "data" in lower):
             if po_sheet is None:
                 po_sheet = wb[name]
-        elif "ship" in lower or "logistics" in lower or "otw" in lower:
+        elif "logistics" in lower or "shipment" in lower or "otw" in lower or "shipping" in lower:
             ship_sheet = wb[name]
         elif "invoice" in lower and "summary" in lower:
             inv_sheet = wb[name]
 
-    # Fallback: try by position if we have exactly 2 sheets
-    if po_sheet is None and ship_sheet is None and len(sheet_names) >= 2:
-        po_sheet = wb[sheet_names[0]]
-        ship_sheet = wb[sheet_names[1]]
-    elif po_sheet is None and len(sheet_names) >= 1:
-        po_sheet = wb[sheet_names[0]]
+    if po_sheet is None and ship_sheet is None:
+        return {"status": "error", "message": "Could not find PO Summary or Logistics Tracking sheet in the workbook."}
 
-    if po_sheet is None:
-        os.unlink(tmp.name)
-        return {"status": "error", "message": "Could not find PO & Invoice Data tab in the workbook."}
+    records = {}  # keyed by record_id
+    now_iso = datetime.now(TZ).isoformat()
 
-    # ── Parse Tab 1: PO & Invoice Data ──
-    # Find header row (look for PO # in first 10 rows)
-    po_header_row = None
-    po_col_map = {}
-    for r in range(1, min(po_sheet.max_row + 1, 15)):
-        row_vals = [_str(_cell_val(po_sheet, r, c)).lower() for c in range(1, po_sheet.max_column + 1)]
-        # Check if this looks like a header row
-        joined = " ".join(row_vals)
-        if "po" in joined and ("sku" in joined or "item" in joined or "unit" in joined):
-            po_header_row = r
-            # Map column names
-            for c in range(1, po_sheet.max_column + 1):
-                hdr = _str(_cell_val(po_sheet, r, c)).lower()
-                if not hdr:
-                    continue
-                if "po" in hdr and "#" in hdr or hdr == "po #" or hdr == "po#" or hdr == "po number":
-                    po_col_map["po_number"] = c
-                elif "factory" in hdr or "supplier" in hdr:
-                    po_col_map["factory"] = c
-                elif "invoice" in hdr and ("#" in hdr or "number" in hdr or "num" in hdr):
-                    po_col_map["invoice_number"] = c
-                elif "container" in hdr and ("#" in hdr or "number" in hdr or "num" in hdr):
-                    po_col_map["container_number"] = c
-                elif hdr in ("sku", "item #", "item#", "item number", "item no"):
-                    po_col_map["sku"] = c
-                elif "description" in hdr or "desc" in hdr:
-                    po_col_map["description"] = c
-                elif hdr in ("units", "qty", "quantity") or ("unit" in hdr and "order" not in hdr):
-                    po_col_map["units"] = c
-                elif "cbm" in hdr:
-                    po_col_map["cbm"] = c
-                elif "fob" in hdr and ("date" in hdr or hdr == "fob"):
-                    po_col_map["fob_date"] = c
-                elif "payment" in hdr and "term" in hdr:
-                    po_col_map["payment_terms"] = c
-                elif "arrival" in hdr or "eta" in hdr or "est" in hdr:
-                    po_col_map["est_arrival"] = c
-                elif "status" in hdr:
-                    po_col_map["status"] = c
-            break
+    def _make_record(po_num, container="—"):
+        container_key = container if container != "—" else "PO"
+        rid = f"{po_num}_{container_key}"
+        if rid not in records:
+            records[rid] = {
+                "record_id": rid, "po_number": po_num, "factory": "—",
+                "payment_terms": "—", "invoice_number": "—", "invoice_date": "—",
+                "container_number": container, "sku": "—", "description": "—",
+                "units": 0, "cbm": 0.0, "x_factory_date": "—",
+                "container_eta": "—", "eta_month": "—", "status": "—",
+                "shipper": "—", "hb_number": "—", "container_type": "—",
+                "vessel": "—", "etd": "—", "etd_port": "—", "eta_port": "—",
+                "eta_delivery": "—", "delivery_location": "—", "actual_delivery": "—",
+                "total_cost": 0.0, "landed_cost": 0.0, "freight_cost": 0.0,
+                "duty_cost": 0.0, "last_updated": now_iso,
+            }
+        return records[rid]
 
-    if po_header_row is None:
-        os.unlink(tmp.name)
-        return {"status": "error", "message": "Could not find header row in PO & Invoice Data tab. Expected columns: PO #, SKU, Units, etc."}
-
-    # Parse PO data rows
-    po_records = []
-    for r in range(po_header_row + 1, po_sheet.max_row + 1):
-        po_num = _str(_cell_val(po_sheet, r, po_col_map.get("po_number", 1)))
-        sku = _str(_cell_val(po_sheet, r, po_col_map.get("sku", 6)))
-        if not po_num and not sku:
-            continue  # skip empty rows
-        if not po_num or po_num.lower() in ("total", "subtotal", "grand total"):
-            continue
-
-        factory = _dash(_str(_cell_val(po_sheet, r, po_col_map.get("factory", 2))))
-        payment_terms = _dash(_str(_cell_val(po_sheet, r, po_col_map.get("payment_terms", 0)))) if po_col_map.get("payment_terms") else "—"
-        invoice = _dash(_str(_cell_val(po_sheet, r, po_col_map.get("invoice_number", 3))))
-        container = _dash(_str(_cell_val(po_sheet, r, po_col_map.get("container_number", 4))))
-        desc = _dash(_str(_cell_val(po_sheet, r, po_col_map.get("description", 7))))
-        units = _int_or_zero(_cell_val(po_sheet, r, po_col_map.get("units", 8)))
-        cbm = _float_or_zero(_cell_val(po_sheet, r, po_col_map.get("cbm", 9)))
-        fob_date = _parse_date(_cell_val(po_sheet, r, po_col_map.get("fob_date", 0))) if po_col_map.get("fob_date") else "—"
-        est_arrival = _parse_date(_cell_val(po_sheet, r, po_col_map.get("est_arrival", 10)))
-        status = _dash(_str(_cell_val(po_sheet, r, po_col_map.get("status", 11))))
-
-        # Normalize status
-        if status != "—":
-            sl = status.lower()
-            if "deliver" in sl:
-                status = "Delivered"
-            elif "transit" in sl or "ship" in sl:
-                status = "In Transit"
-            elif "open" in sl or "pending" in sl or "order" in sl:
-                status = "Open"
-
-        # Generate record_id
-        container_key = container if container != "—" else "UNSHIPPED"
-        record_id = f"{po_num}_{container_key}_{sku}"
-
-        po_records.append({
-            "record_id": record_id,
-            "po_number": po_num,
-            "factory": factory,
-            "payment_terms": payment_terms,
-            "invoice_number": invoice,
-            "invoice_date": "—",  # will be enriched from Invoice Summary tab
-            "container_number": container,
-            "sku": sku,
-            "description": desc,
-            "units": units,
-            "cbm": cbm,
-            "x_factory_date": fob_date,
-            "container_eta": est_arrival,
-            "eta_month": _derive_eta_month(est_arrival),
-            "status": status,
-            # Shipment fields — will be enriched from Tab 2
-            "shipper": "—",
-            "hb_number": "—",
-            "container_type": "—",
-            "vessel": "—",
-            "etd": "—",
-            "etd_port": "—",
-            "eta_port": "—",
-            "eta_delivery": "—",
-            "delivery_location": "—",
-            "actual_delivery": "—",
-            "last_updated": datetime.now(TZ).isoformat(),
-        })
-
-    # ── Parse Tab 2: Shipment Data (if present) ──
-    shipment_map = {}  # keyed by (container_number, po_number)
+    # ── 1. Parse Logistics Tracking (container × PO level) ──
     if ship_sheet is not None:
-        ship_header_row = None
-        ship_col_map = {}
-        for r in range(1, min(ship_sheet.max_row + 1, 15)):
-            row_vals = [_str(_cell_val(ship_sheet, r, c)).lower() for c in range(1, ship_sheet.max_column + 1)]
-            joined = " ".join(row_vals)
-            if "container" in joined and ("po" in joined or "vessel" in joined or "shipper" in joined):
-                ship_header_row = r
-                for c in range(1, ship_sheet.max_column + 1):
-                    hdr = _str(_cell_val(ship_sheet, r, c)).lower()
-                    if not hdr:
-                        continue
-                    if ("container" in hdr and "#" in hdr) or hdr in ("cntr#", "cntr #", "container#"):
-                        ship_col_map["container_number"] = c
-                    elif "po" in hdr and ("invoice" not in hdr):
-                        ship_col_map["po_number"] = c
-                    elif "shipper" in hdr:
-                        ship_col_map["shipper"] = c
-                    elif "hb" in hdr or "hbl" in hdr or "house bill" in hdr:
-                        ship_col_map["hb_number"] = c
-                    elif "type" in hdr or "mode" in hdr:
-                        ship_col_map["container_type"] = c
-                    elif "vessel" in hdr:
-                        ship_col_map["vessel"] = c
-                    elif ("etd" in hdr and "port" not in hdr) or "departure" in hdr and "port" not in hdr:
-                        ship_col_map["etd"] = c
-                    elif ("etd" in hdr and "port" in hdr) or "departure" in hdr and "port" in hdr:
-                        ship_col_map["etd_port"] = c
-                    elif ("arrival" in hdr and "port" in hdr) or ("eta" in hdr and "port" in hdr and "deliv" not in hdr and "dest" not in hdr and "final" not in hdr):
-                        ship_col_map["eta_port"] = c
-                    elif "eta" in hdr and ("deliv" in hdr or "dest" in hdr or "final" in hdr):
-                        ship_col_map["eta_delivery"] = c
-                    elif ("eta" in hdr or "discharge" in hdr) and "port" not in hdr and "deliv" not in hdr and "dest" not in hdr and "final" not in hdr:
-                        ship_col_map["eta"] = c
-                    elif ("delivery" in hdr and "location" in hdr) or "final location" in hdr or "final" in hdr and "location" in hdr:
-                        ship_col_map["delivery_location"] = c
-                    elif ("actual" in hdr and "delivery" in hdr) or "delivery date" in hdr:
-                        ship_col_map["actual_delivery"] = c
-                    elif "factory" in hdr and "invoice" in hdr:
-                        ship_col_map["invoice_number"] = c
-                    elif "invoice" in hdr:
-                        ship_col_map["invoice_number"] = c
-                    elif "unit" in hdr:
-                        ship_col_map["units"] = c
-                    elif "cbm" in hdr:
-                        ship_col_map["cbm"] = c
-                    elif "status" in hdr:
-                        ship_col_map["status"] = c
-                break
+        hr, _ = _find_header_row(ship_sheet, ["po"])
+        if hr is None:
+            hr, _ = _find_header_row(ship_sheet, ["container"])
+        if hr is not None:
+            sc = _map_columns(ship_sheet, hr, {
+                "container_number": [lambda h: ("container" in h and "#" in h) or h in ("cntr#", "cntr #", "container#")],
+                "po_number": [lambda h: "po" in h and "invoice" not in h and "#" in h or h in ("po#", "po #", "po")],
+                "shipper": [lambda h: "shipper" in h],
+                "hb_number": [lambda h: "hb" in h or "hbl" in h],
+                "container_type": [lambda h: "mode" in h or ("type" in h and "delivery" not in h)],
+                "vessel": [lambda h: "vessel" in h],
+                "etd": [lambda h: ("etd" in h and "port" not in h) or h == "etd origin"],
+                "etd_port": [lambda h: ("departure" in h and "port" in h)],
+                "eta_discharge": [lambda h: ("eta" in h and "discharge" in h) or (h == "eta discharge")],
+                "eta_port": [lambda h: "arrival" in h and "port" in h],
+                "eta_delivery": [lambda h: "eta" in h and ("final" in h or "deliv" in h or "dest" in h)],
+                "delivery_location": [lambda h: "final" in h and "location" in h],
+                "actual_delivery": [lambda h: "delivery" in h and "date" in h],
+                "invoice_number": [lambda h: "invoice" in h],
+                "units": [lambda h: h in ("units", "qty", "quantity") or (h == "unit")],
+                "cbm": [lambda h: "cbm" in h],
+                "status": [lambda h: h == "status"],
+                "freight_cost": [lambda h: "freight" in h and "cost" in h],
+                "duty_cost": [lambda h: "duty" in h and "cost" in h],
+            })
 
-        if ship_header_row:
-            for r in range(ship_header_row + 1, ship_sheet.max_row + 1):
-                cntr = _str(_cell_val(ship_sheet, r, ship_col_map.get("container_number", 1)))
-                po = _str(_cell_val(ship_sheet, r, ship_col_map.get("po_number", 2)))
-                if not cntr or cntr.lower() in ("total", "subtotal", "..."):
+            for r in range(hr + 1, ship_sheet.max_row + 1):
+                cntr = _str(_cell_val(ship_sheet, r, sc.get("container_number", 1)))
+                po = _str(_cell_val(ship_sheet, r, sc.get("po_number", 2)))
+                if not cntr and not po:
                     continue
+                if not po or po.lower() in ("total", "subtotal", "grand total"):
+                    continue
+                if not cntr:
+                    cntr = "—"
 
-                key = (cntr, po)
-                shipment_map[key] = {
-                    "shipper": _dash(_str(_cell_val(ship_sheet, r, ship_col_map.get("shipper", 3)))),
-                    "hb_number": _dash(_str(_cell_val(ship_sheet, r, ship_col_map.get("hb_number", 4)))),
-                    "container_type": _dash(_str(_cell_val(ship_sheet, r, ship_col_map.get("container_type", 5)))),
-                    "vessel": _dash(_str(_cell_val(ship_sheet, r, ship_col_map.get("vessel", 6)))),
-                    "etd": _parse_date(_cell_val(ship_sheet, r, ship_col_map.get("etd", 7))),
-                    "etd_port": _dash(_str(_cell_val(ship_sheet, r, ship_col_map.get("etd_port", 8)))),
-                    "eta_port": _dash(_str(_cell_val(ship_sheet, r, ship_col_map.get("eta_port", 10)))),
-                    "eta_delivery": _parse_date(_cell_val(ship_sheet, r, ship_col_map.get("eta_delivery", 11))),
-                    "delivery_location": _dash(_str(_cell_val(ship_sheet, r, ship_col_map.get("delivery_location", 12)))),
-                    "actual_delivery": _parse_date(_cell_val(ship_sheet, r, ship_col_map.get("actual_delivery", 13))),
-                }
-                # Also use ETA from shipment tab if available
-                eta_val = _parse_date(_cell_val(ship_sheet, r, ship_col_map.get("eta", 9)))
+                rec = _make_record(po, cntr)
+                rec["shipper"] = _dash(_str(_cell_val(ship_sheet, r, sc.get("shipper", 0)))) if sc.get("shipper") else rec["shipper"]
+                rec["hb_number"] = _dash(_str(_cell_val(ship_sheet, r, sc.get("hb_number", 0)))) if sc.get("hb_number") else rec["hb_number"]
+                rec["container_type"] = _dash(_str(_cell_val(ship_sheet, r, sc.get("container_type", 0)))) if sc.get("container_type") else rec["container_type"]
+                rec["vessel"] = _dash(_str(_cell_val(ship_sheet, r, sc.get("vessel", 0)))) if sc.get("vessel") else rec["vessel"]
+                rec["etd"] = _parse_date(_cell_val(ship_sheet, r, sc["etd"])) if sc.get("etd") else rec["etd"]
+                rec["etd_port"] = _dash(_str(_cell_val(ship_sheet, r, sc["etd_port"]))) if sc.get("etd_port") else rec["etd_port"]
+                rec["eta_port"] = _dash(_str(_cell_val(ship_sheet, r, sc["eta_port"]))) if sc.get("eta_port") else rec["eta_port"]
+                rec["eta_delivery"] = _parse_date(_cell_val(ship_sheet, r, sc["eta_delivery"])) if sc.get("eta_delivery") else rec["eta_delivery"]
+                rec["delivery_location"] = _dash(_str(_cell_val(ship_sheet, r, sc["delivery_location"]))) if sc.get("delivery_location") else rec["delivery_location"]
+                rec["actual_delivery"] = _parse_date(_cell_val(ship_sheet, r, sc["actual_delivery"])) if sc.get("actual_delivery") else rec["actual_delivery"]
+                # ETA (discharge / arrival)
+                eta_val = _parse_date(_cell_val(ship_sheet, r, sc["eta_discharge"])) if sc.get("eta_discharge") else "—"
                 if eta_val != "—":
-                    shipment_map[key]["container_eta"] = eta_val
+                    rec["container_eta"] = eta_val
+                    rec["eta_month"] = _derive_eta_month(eta_val)
+                # Invoice from logistics
+                inv = _dash(_str(_cell_val(ship_sheet, r, sc["invoice_number"]))) if sc.get("invoice_number") else "—"
+                if inv != "—":
+                    rec["invoice_number"] = inv
+                # Units and CBM
+                if sc.get("units"):
+                    rec["units"] = _int_or_zero(_cell_val(ship_sheet, r, sc["units"]))
+                if sc.get("cbm"):
+                    rec["cbm"] = _float_or_zero(_cell_val(ship_sheet, r, sc["cbm"]))
+                # Status
+                if sc.get("status"):
+                    rec["status"] = _normalize_status(_dash(_str(_cell_val(ship_sheet, r, sc["status"]))))
+                # Freight / duty costs
+                if sc.get("freight_cost"):
+                    rec["freight_cost"] = _float_or_zero(_cell_val(ship_sheet, r, sc["freight_cost"]))
+                if sc.get("duty_cost"):
+                    rec["duty_cost"] = _float_or_zero(_cell_val(ship_sheet, r, sc["duty_cost"]))
 
-    # ── Enrich PO records with shipment data ──
-    for rec in po_records:
-        cntr = rec["container_number"]
-        po = rec["po_number"]
-        if cntr != "—":
-            ship_data = shipment_map.get((cntr, po))
-            if ship_data is None:
-                # Try matching by container only (some POs share containers)
-                for (c, p), sd in shipment_map.items():
-                    if c == cntr:
-                        ship_data = sd
-                        break
-            if ship_data:
-                for field in ("shipper", "hb_number", "container_type", "vessel", "etd", "etd_port", "eta_port", "eta_delivery", "delivery_location", "actual_delivery"):
-                    if ship_data.get(field, "—") != "—":
-                        rec[field] = ship_data[field]
-                if ship_data.get("container_eta", "—") != "—":
-                    rec["container_eta"] = ship_data["container_eta"]
-                    rec["eta_month"] = _derive_eta_month(ship_data["container_eta"])
+    # ── 2. Parse PO Summary (PO-level data) ──
+    if po_sheet is not None:
+        hr, _ = _find_header_row(po_sheet, ["po", "unit"])
+        if hr is None:
+            hr, _ = _find_header_row(po_sheet, ["po#"])
+        if hr is not None:
+            pc = _map_columns(po_sheet, hr, {
+                "po_number": [lambda h: ("po" in h and "#" in h) or h in ("po#", "po #", "po number")],
+                "factory": [lambda h: "factory" in h or "supplier" in h],
+                "payment_terms": [lambda h: "payment" in h and "term" in h],
+                "sku": [lambda h: h in ("sku", "item #", "item#", "item number", "item no")],
+                "description": [lambda h: "description" in h or "desc" in h],
+                "units": [lambda h: h in ("units", "qty", "quantity") or (h == "unit")],
+                "cbm": [lambda h: h == "cbm"],
+                "fob_date": [lambda h: "fob" in h and ("date" in h or h == "fob")],
+                "est_arrival": [lambda h: ("est" in h and "arrival" in h) or h == "est arrival"],
+                "status": [lambda h: h == "status"],
+                "total_cost": [lambda h: "total" in h and "$" in h],
+                "landed_cost": [lambda h: "landed" in h and "$" in h],
+                "ocean_freight": [lambda h: "ocean" in h and "frt" in h],
+                "customs": [lambda h: "customs" in h and "$" in h],
+            })
 
-    # ── Enrich from Invoice Summary sheet (if present) ──
-    if inv_sheet is not None:
-        inv_header_row = None
-        inv_col_map = {}
-        for r in range(1, min(inv_sheet.max_row + 1, 15)):
-            row_vals = [_str(_cell_val(inv_sheet, r, c)).lower() for c in range(1, inv_sheet.max_column + 1)]
-            joined = " ".join(row_vals)
-            if "invoice" in joined and ("po" in joined or "date" in joined or "unit" in joined):
-                inv_header_row = r
-                for c in range(1, inv_sheet.max_column + 1):
-                    hdr = _str(_cell_val(inv_sheet, r, c)).lower()
-                    if not hdr:
-                        continue
-                    if "po" in hdr and "#" in hdr or hdr in ("po#", "po #", "po number"):
-                        inv_col_map["po_number"] = c
-                    elif "container" in hdr and ("#" in hdr or "number" in hdr or "num" in hdr):
-                        inv_col_map["container_number"] = c
-                    elif ("invoice" in hdr and ("#" in hdr or "number" in hdr or "num" in hdr)) or hdr in ("invoice #", "invoice#"):
-                        inv_col_map["invoice_number"] = c
-                    elif "invoice" in hdr and "date" in hdr:
-                        inv_col_map["invoice_date"] = c
-                    elif "unit" in hdr or "qty" in hdr:
-                        inv_col_map["inv_units"] = c
-                    elif "cbm" in hdr:
-                        inv_col_map["inv_cbm"] = c
-                    elif "shipper" in hdr:
-                        inv_col_map["invoice_shipper"] = c
-                    elif "sold" in hdr:
-                        inv_col_map["sold_to"] = c
-                break
+            has_sku = "sku" in pc
 
-        if inv_header_row and inv_col_map.get("invoice_date"):
-            # Build lookup: (po_number, container_number) -> invoice_date
-            inv_date_map = {}
-            for r in range(inv_header_row + 1, inv_sheet.max_row + 1):
-                po = _str(_cell_val(inv_sheet, r, inv_col_map.get("po_number", 1)))
-                cntr = _str(_cell_val(inv_sheet, r, inv_col_map.get("container_number", 2)))
-                inv_num = _str(_cell_val(inv_sheet, r, inv_col_map.get("invoice_number", 3)))
-                inv_date = _parse_date(_cell_val(inv_sheet, r, inv_col_map.get("invoice_date", 4)))
-                if not po or po.lower() in ("total", "subtotal"):
+            for r in range(hr + 1, po_sheet.max_row + 1):
+                po_num = _str(_cell_val(po_sheet, r, pc.get("po_number", 1)))
+                if not po_num or po_num.lower() in ("total", "subtotal", "grand total"):
                     continue
-                # Key by PO + container
-                if cntr:
-                    inv_date_map[(po, cntr)] = {"invoice_date": inv_date, "invoice_number": inv_num}
-                # Also key by PO + invoice for matching
-                if inv_num:
-                    inv_date_map[("inv", po, inv_num)] = {"invoice_date": inv_date}
 
-            # Enrich PO records with invoice dates
-            for rec in po_records:
+                # Determine if we already have container-level records for this PO
+                existing_po_recs = [rid for rid in records if rid.startswith(f"{po_num}_") and not rid.endswith("_PO")]
+
+                if has_sku:
+                    # SKU-level sheet: create individual records
+                    sku = _str(_cell_val(po_sheet, r, pc["sku"]))
+                    container = _dash(_str(_cell_val(po_sheet, r, pc.get("container_number", 0)))) if pc.get("container_number") else "—"
+                    container_key = container if container != "—" else "PO"
+                    rid = f"{po_num}_{container_key}_{sku}" if sku else f"{po_num}_{container_key}"
+                    if rid not in records:
+                        records[rid] = _make_record(po_num, container).copy()
+                        records[rid]["record_id"] = rid
+                    rec = records[rid]
+                    rec["sku"] = _dash(sku)
+                    rec["description"] = _dash(_str(_cell_val(po_sheet, r, pc["description"]))) if pc.get("description") else "—"
+                else:
+                    # PO-level sheet (no SKU): enrich existing container records, or create PO-level record
+                    if existing_po_recs:
+                        # Enrich all container-level records for this PO with PO-level fields
+                        for rid in existing_po_recs:
+                            rec = records[rid]
+                            rec["factory"] = _dash(_str(_cell_val(po_sheet, r, pc["factory"]))) if pc.get("factory") else rec.get("factory", "—")
+                            rec["payment_terms"] = _dash(_str(_cell_val(po_sheet, r, pc["payment_terms"]))) if pc.get("payment_terms") else rec.get("payment_terms", "—")
+                            if pc.get("units"):
+                                u = _int_or_zero(_cell_val(po_sheet, r, pc["units"]))
+                                if u > 0 and rec["units"] == 0:
+                                    rec["units"] = u
+                            if pc.get("cbm"):
+                                c = _float_or_zero(_cell_val(po_sheet, r, pc["cbm"]))
+                                if c > 0 and rec["cbm"] == 0.0:
+                                    rec["cbm"] = c
+                            rec["x_factory_date"] = _parse_date(_cell_val(po_sheet, r, pc["fob_date"])) if pc.get("fob_date") else rec.get("x_factory_date", "—")
+                            if pc.get("est_arrival"):
+                                ea = _parse_date(_cell_val(po_sheet, r, pc["est_arrival"]))
+                                if ea != "—" and rec.get("container_eta", "—") == "—":
+                                    rec["container_eta"] = ea
+                                    rec["eta_month"] = _derive_eta_month(ea)
+                            if pc.get("status"):
+                                s = _normalize_status(_dash(_str(_cell_val(po_sheet, r, pc["status"]))))
+                                if s != "—" and rec.get("status", "—") == "—":
+                                    rec["status"] = s
+                            if pc.get("total_cost"):
+                                rec["total_cost"] = _float_or_zero(_cell_val(po_sheet, r, pc["total_cost"]))
+                            if pc.get("landed_cost"):
+                                rec["landed_cost"] = _float_or_zero(_cell_val(po_sheet, r, pc["landed_cost"]))
+                            if pc.get("ocean_freight"):
+                                rec["freight_cost"] = _float_or_zero(_cell_val(po_sheet, r, pc["ocean_freight"]))
+                            if pc.get("customs"):
+                                rec["duty_cost"] = _float_or_zero(_cell_val(po_sheet, r, pc["customs"]))
+                        continue  # don't create a duplicate PO-level record
+                    else:
+                        rec = _make_record(po_num, "—")
+
+                # Set PO-level fields
+                rec["factory"] = _dash(_str(_cell_val(po_sheet, r, pc["factory"]))) if pc.get("factory") else rec.get("factory", "—")
+                rec["payment_terms"] = _dash(_str(_cell_val(po_sheet, r, pc["payment_terms"]))) if pc.get("payment_terms") else rec.get("payment_terms", "—")
+                if pc.get("units"):
+                    u = _int_or_zero(_cell_val(po_sheet, r, pc["units"]))
+                    if u > 0:
+                        rec["units"] = u
+                if pc.get("cbm"):
+                    c = _float_or_zero(_cell_val(po_sheet, r, pc["cbm"]))
+                    if c > 0:
+                        rec["cbm"] = c
+                rec["x_factory_date"] = _parse_date(_cell_val(po_sheet, r, pc["fob_date"])) if pc.get("fob_date") else rec.get("x_factory_date", "—")
+                if pc.get("est_arrival"):
+                    ea = _parse_date(_cell_val(po_sheet, r, pc["est_arrival"]))
+                    if ea != "—":
+                        rec["container_eta"] = ea
+                        rec["eta_month"] = _derive_eta_month(ea)
+                if pc.get("status"):
+                    s = _normalize_status(_dash(_str(_cell_val(po_sheet, r, pc["status"]))))
+                    if s != "—":
+                        rec["status"] = s
+                if pc.get("total_cost"):
+                    rec["total_cost"] = _float_or_zero(_cell_val(po_sheet, r, pc["total_cost"]))
+                if pc.get("landed_cost"):
+                    rec["landed_cost"] = _float_or_zero(_cell_val(po_sheet, r, pc["landed_cost"]))
+                if pc.get("ocean_freight"):
+                    rec["freight_cost"] = _float_or_zero(_cell_val(po_sheet, r, pc["ocean_freight"]))
+                if pc.get("customs"):
+                    rec["duty_cost"] = _float_or_zero(_cell_val(po_sheet, r, pc["customs"]))
+
+            # For PO-level sheets without SKU, enrich existing container records with PO-level data
+            if not has_sku:
+                # Build PO -> fields lookup from PO-only records
+                po_fields = {}
+                for rid, rec in records.items():
+                    if rid.endswith("_PO"):
+                        po_fields[rec["po_number"]] = rec
+                # Propagate PO-level fields to container records
+                for rid, rec in records.items():
+                    if not rid.endswith("_PO") and rec["po_number"] in po_fields:
+                        po_rec = po_fields[rec["po_number"]]
+                        for f in ("factory", "payment_terms", "x_factory_date", "total_cost", "landed_cost"):
+                            if rec.get(f, "—") == "—" and po_rec.get(f, "—") != "—":
+                                rec[f] = po_rec[f]
+                        # Update status from PO if container status is missing
+                        if rec.get("status", "—") == "—" and po_rec.get("status", "—") != "—":
+                            rec["status"] = po_rec["status"]
+                        # Update ETA from PO if missing
+                        if rec.get("container_eta", "—") == "—" and po_rec.get("container_eta", "—") != "—":
+                            rec["container_eta"] = po_rec["container_eta"]
+                            rec["eta_month"] = po_rec["eta_month"]
+
+                # Remove PO-level records that are duplicated by container records
+                po_nums_with_containers = set()
+                for rid in records:
+                    if not rid.endswith("_PO"):
+                        po_num = rid.rsplit("_", 1)[0] if "_" in rid else rid
+                        # Extract PO number (first part before _)
+                        po_nums_with_containers.add(records[rid]["po_number"])
+                to_remove = [rid for rid, rec in records.items()
+                             if rid.endswith("_PO") and rec["po_number"] in po_nums_with_containers]
+                for rid in to_remove:
+                    del records[rid]
+
+    # ── 3. Parse Invoice Summary (invoice-level enrichment) ──
+    if inv_sheet is not None:
+        hr, _ = _find_header_row(inv_sheet, ["invoice"])
+        if hr is not None:
+            ic = _map_columns(inv_sheet, hr, {
+                "po_number": [lambda h: ("po" in h and "#" in h) or h in ("po#", "po #", "po number")],
+                "container_number": [lambda h: "container" in h and ("#" in h or "number" in h)],
+                "invoice_number": [lambda h: "invoice" in h and ("#" in h or "number" in h or h == "invoice #")],
+                "invoice_date": [lambda h: "invoice" in h and "date" in h],
+                "inv_units": [lambda h: "unit" in h or "qty" in h],
+                "inv_cbm": [lambda h: "cbm" in h],
+                "invoice_shipper": [lambda h: "shipper" in h],
+                "sold_to": [lambda h: "sold" in h],
+            })
+
+            # Build lookup tables
+            inv_by_po_cntr = {}  # (po, container) -> {invoice_date, invoice_number, units, cbm, shipper, sold_to}
+            inv_by_po = {}       # po -> [{invoice_number, invoice_date, ...}]
+
+            for r in range(hr + 1, inv_sheet.max_row + 1):
+                po = _str(_cell_val(inv_sheet, r, ic.get("po_number", 1)))
+                cntr = _str(_cell_val(inv_sheet, r, ic.get("container_number", 2)))
+                inv_num = _dash(_str(_cell_val(inv_sheet, r, ic.get("invoice_number", 3))))
+                inv_date = _parse_date(_cell_val(inv_sheet, r, ic.get("invoice_date", 4))) if ic.get("invoice_date") else "—"
+                inv_units = _int_or_zero(_cell_val(inv_sheet, r, ic.get("inv_units", 5))) if ic.get("inv_units") else 0
+                inv_cbm = _float_or_zero(_cell_val(inv_sheet, r, ic.get("inv_cbm", 6))) if ic.get("inv_cbm") else 0.0
+                shipper = _dash(_str(_cell_val(inv_sheet, r, ic.get("invoice_shipper", 7)))) if ic.get("invoice_shipper") else "—"
+                sold_to = _dash(_str(_cell_val(inv_sheet, r, ic.get("sold_to", 8)))) if ic.get("sold_to") else "—"
+
+                if not po or po.lower() in ("total", "subtotal", "grand total"):
+                    continue
+
+                inv_data = {"invoice_number": inv_num, "invoice_date": inv_date,
+                            "inv_units": inv_units, "inv_cbm": inv_cbm,
+                            "invoice_shipper": shipper, "sold_to": sold_to}
+
+                if cntr:
+                    inv_by_po_cntr[(po, cntr)] = inv_data
+                if po not in inv_by_po:
+                    inv_by_po[po] = []
+                inv_by_po[po].append(inv_data)
+
+            # Enrich records with invoice data
+            for rid, rec in records.items():
                 po = rec["po_number"]
                 cntr = rec["container_number"]
-                inv_num = rec["invoice_number"]
-                # Try by PO + container first
-                inv_data = inv_date_map.get((po, cntr))
-                if inv_data is None and inv_num != "—":
-                    inv_data = inv_date_map.get(("inv", po, inv_num))
+                inv_data = None
+                if cntr != "—":
+                    inv_data = inv_by_po_cntr.get((po, cntr))
+                if inv_data is None and po in inv_by_po:
+                    # Take first matching invoice for this PO
+                    inv_data = inv_by_po[po][0]
                 if inv_data:
                     if inv_data.get("invoice_date", "—") != "—":
                         rec["invoice_date"] = inv_data["invoice_date"]
-                    if inv_data.get("invoice_number") and rec["invoice_number"] == "—":
+                    if inv_data.get("invoice_number", "—") != "—" and rec["invoice_number"] == "—":
                         rec["invoice_number"] = inv_data["invoice_number"]
 
-    # Also enrich invoice_number from shipment data if present
-    for rec in po_records:
-        if rec["invoice_number"] == "—":
-            cntr = rec["container_number"]
-            po = rec["po_number"]
-            if cntr != "—":
-                ship_data = shipment_map.get((cntr, po))
-                if ship_data is None:
-                    for (c, p), sd in shipment_map.items():
-                        if c == cntr:
-                            ship_data = sd
-                            break
-                if ship_data and ship_data.get("invoice_number", "—") != "—":
-                    rec["invoice_number"] = ship_data["invoice_number"]
-
-    # ── Merge into data store ──
+    # ── Save to store ──
+    all_records = list(records.values())
     store = _load_store()
     existing = {r["record_id"]: r for r in store.get("records", [])}
-
-    for rec in po_records:
-        existing[rec["record_id"]] = rec  # upsert
-
+    for rec in all_records:
+        existing[rec["record_id"]] = rec
     store["records"] = list(existing.values())
     store["lastUpload"] = datetime.now(TZ).isoformat()
-    store["sourceFile"] = file.filename
+    store["sourceFile"] = filename
     _save_store(store)
-
-    os.unlink(tmp.name)
 
     return {
         "status": "ok",
-        "records_parsed": len(po_records),
+        "records_parsed": len(all_records),
         "total_records": len(store["records"]),
         "lastUpload": store["lastUpload"],
         "sourceFile": store["sourceFile"],
