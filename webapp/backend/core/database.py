@@ -1200,3 +1200,120 @@ def init_all_tables():
         con.close()
     except Exception as e:
         logger.warning(f"Division backfill error (non-fatal): {e}")
+
+
+def auto_migrate_from_duckdb():
+    """
+    Auto-migrate data from DuckDB to PostgreSQL on first startup with Postgres.
+    Only runs when:
+      1. USE_POSTGRES is True (DATABASE_URL is set)
+      2. PostgreSQL tables are empty (daily_sales has 0 rows)
+      3. DuckDB file exists on disk (from the Railway volume)
+    """
+    if not USE_POSTGRES:
+        return
+
+    import psycopg2
+    from psycopg2.extras import execute_batch
+
+    duckdb_path = DB_PATH
+    if not duckdb_path.exists():
+        logger.info("Auto-migrate: No DuckDB file found, skipping migration")
+        return
+
+    # Check if Postgres already has data
+    try:
+        pg_conn = psycopg2.connect(DATABASE_URL)
+        cursor = pg_conn.cursor()
+        cursor.execute("SELECT COUNT(*) FROM daily_sales")
+        pg_rows = cursor.fetchone()[0]
+        cursor.close()
+        pg_conn.close()
+        if pg_rows > 0:
+            logger.info(f"Auto-migrate: PostgreSQL already has {pg_rows} daily_sales rows, skipping")
+            return
+    except Exception as e:
+        logger.info(f"Auto-migrate: Postgres check failed ({e}), will attempt migration")
+
+    logger.info("=" * 60)
+    logger.info("AUTO-MIGRATION: DuckDB → PostgreSQL starting")
+    logger.info(f"  DuckDB: {duckdb_path}")
+    logger.info(f"  PostgreSQL: {DATABASE_URL[:40]}...")
+    logger.info("=" * 60)
+
+    # Tables to migrate in dependency order
+    tables = [
+        "sessions", "user_permissions", "audit_log", "sync_log", "docs_update_log",
+        "orders", "daily_sales", "fba_inventory", "financial_events",
+        "advertising", "ads_campaigns", "ads_keywords", "ads_search_terms",
+        "ads_negative_keywords", "monthly_sales_history",
+        "item_plan_overrides", "item_plan_curve_selection",
+        "item_plan_factory_orders", "item_plan_factory_order_items",
+        "item_plan_settings", "item_master",
+        "staging_orders", "staging_financial_events",
+        "analytics_daily", "analytics_sku", "analytics_ads",
+    ]
+
+    try:
+        duck_conn = duckdb.connect(str(duckdb_path), read_only=True)
+        pg_conn = psycopg2.connect(DATABASE_URL)
+        pg_conn.autocommit = False
+
+        success = 0
+        failed = []
+
+        for table in tables:
+            try:
+                # Get row count from DuckDB
+                try:
+                    duck_count = duck_conn.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0]
+                except Exception:
+                    logger.warning(f"  {table}: not found in DuckDB, skipping")
+                    continue
+
+                if duck_count == 0:
+                    logger.info(f"  {table}: empty in DuckDB, skipping")
+                    success += 1
+                    continue
+
+                # Get column names
+                schema = duck_conn.execute(f"PRAGMA table_info('{table}')").fetchall()
+                columns = [col[1] for col in schema]
+
+                # Fetch all rows
+                rows = duck_conn.execute(f"SELECT * FROM {table}").fetchall()
+
+                # Build INSERT with ON CONFLICT DO NOTHING
+                placeholders = ", ".join(["%s"] * len(columns))
+                insert_sql = f"INSERT INTO {table} ({', '.join(columns)}) VALUES ({placeholders}) ON CONFLICT DO NOTHING"
+
+                # Batch insert
+                cursor = pg_conn.cursor()
+                batch_size = 1000
+                inserted = 0
+                for i in range(0, len(rows), batch_size):
+                    batch = rows[i:i + batch_size]
+                    execute_batch(cursor, insert_sql, batch)
+                    pg_conn.commit()
+                    inserted += len(batch)
+
+                cursor.close()
+                logger.info(f"  {table}: migrated {inserted}/{duck_count} rows")
+                success += 1
+
+            except Exception as e:
+                logger.error(f"  {table}: migration failed: {e}")
+                pg_conn.rollback()
+                failed.append(table)
+
+        duck_conn.close()
+        pg_conn.close()
+
+        logger.info("=" * 60)
+        logger.info(f"AUTO-MIGRATION COMPLETE: {success} tables OK, {len(failed)} failed")
+        if failed:
+            logger.info(f"  Failed tables: {', '.join(failed)}")
+        logger.info("=" * 60)
+
+    except Exception as e:
+        logger.error(f"Auto-migration failed: {e}")

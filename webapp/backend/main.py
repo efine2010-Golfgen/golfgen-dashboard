@@ -23,7 +23,7 @@ from core.config import (
     SESSION_SECRET, ALLOWED_SSO_EMAILS,
     SESSION_MAX_AGE_HOURS, SESSION_IDLE_TIMEOUT_HOURS,
 )
-from core.database import init_all_tables, get_db, get_db_rw
+from core.database import init_all_tables, auto_migrate_from_duckdb, get_db, get_db_rw
 
 logger = logging.getLogger("golfgen")
 
@@ -141,9 +141,15 @@ async def lifespan(app: FastAPI):
     """Initialize DB tables and start background sync on startup."""
     import asyncio
 
-    # Initialize all DuckDB tables
+    # Initialize all tables (DuckDB or PostgreSQL)
     init_all_tables()
     logger.info("All tables initialized")
+
+    # Auto-migrate DuckDB → PostgreSQL if Postgres is empty and DuckDB exists
+    try:
+        auto_migrate_from_duckdb()
+    except Exception as e:
+        logger.error(f"Auto-migration error (non-fatal): {e}")
 
     # Start background sync (imports scheduler module which imports services)
     task = None
