@@ -34,9 +34,13 @@ BACKUP_FOLDER_ID = os.environ.get("BACKUP_DRIVE_FOLDER_ID", "")
 def _get_settings():
     """Return backup configuration from environment variables."""
     sa_json = os.environ.get("GOOGLE_SERVICE_ACCOUNT_JSON", "")
+    oauth_token = os.environ.get("GOOGLE_OAUTH_REFRESH_TOKEN", "")
+    oauth_client = os.environ.get("GOOGLE_OAUTH_CLIENT_ID", "")
+    oauth_secret = os.environ.get("GOOGLE_OAUTH_CLIENT_SECRET", "")
     folder_id = os.environ.get("BACKUP_DRIVE_FOLDER_ID", "")
+    has_oauth = bool(oauth_token and oauth_client and oauth_secret)
     return {
-        "has_credentials": bool(sa_json),
+        "has_credentials": has_oauth or bool(sa_json),
         "has_folder_id": bool(folder_id),
         "folder_id": folder_id,
         "retention_days": RETENTION_DAYS,
