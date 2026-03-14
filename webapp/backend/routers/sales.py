@@ -382,16 +382,37 @@ def sales_summary(
         ly_sd = sd - timedelta(days=364)
         ly_ed = ed - timedelta(days=364)
 
-        def _sum_sales(s, e, extra_params):
-            row = con.execute(f"""
-                SELECT COALESCE(SUM(ordered_product_sales), 0),
-                       COALESCE(SUM(units_ordered), 0),
-                       COALESCE(SUM(sessions), 0),
-                       COALESCE(SUM(page_views), 0)
-                FROM daily_sales
-                WHERE asin = 'ALL' AND date >= ? AND date <= ? {hw}
-            """, [str(s), str(e)] + extra_params).fetchone()
-            return float(row[0]), int(row[1]), int(row[2]), int(row[3])
+        def _sum_sales(s, e, extra_params, use_individual=False):
+            if use_individual:
+                # For today/yesterday: individual ASIN rows are more up-to-date than
+                # the asin='ALL' aggregate (which comes from S&T report with ~24h lag).
+                row = con.execute(f"""
+                    SELECT COALESCE(SUM(ordered_product_sales), 0),
+                           COALESCE(SUM(units_ordered), 0),
+                           0, 0
+                    FROM daily_sales
+                    WHERE asin != 'ALL' AND date >= ? AND date <= ? {hw}
+                """, [str(s), str(e)] + extra_params).fetchone()
+                rev_ind = float(row[0])
+                units_ind = int(row[1])
+                # Still fetch sessions/page_views from ALL row (aggregate metric)
+                sess_row = con.execute(f"""
+                    SELECT COALESCE(SUM(sessions), 0),
+                           COALESCE(SUM(page_views), 0)
+                    FROM daily_sales
+                    WHERE asin = 'ALL' AND date >= ? AND date <= ? {hw}
+                """, [str(s), str(e)] + extra_params).fetchone()
+                return rev_ind, units_ind, int(sess_row[0]), int(sess_row[1])
+            else:
+                row = con.execute(f"""
+                    SELECT COALESCE(SUM(ordered_product_sales), 0),
+                           COALESCE(SUM(units_ordered), 0),
+                           COALESCE(SUM(sessions), 0),
+                           COALESCE(SUM(page_views), 0)
+                    FROM daily_sales
+                    WHERE asin = 'ALL' AND date >= ? AND date <= ? {hw}
+                """, [str(s), str(e)] + extra_params).fetchone()
+                return float(row[0]), int(row[1]), int(row[2]), int(row[3])
 
         def _count_orders(s, e, extra_params):
             """Count distinct orders from orders table for true AOV."""
@@ -405,23 +426,29 @@ def sales_summary(
             except Exception:
                 return 0
 
-        ty_sales, ty_units, ty_sessions, ty_gv = _sum_sales(sd, ed, hp)
+        # For today/yesterday use individual ASIN rows (more current than ALL aggregate).
+        # For all other periods use the ALL aggregate row.
+        is_recent = period in ('today', 'yesterday', '2_days_ago', '3_days_ago')
+        ty_sales, ty_units, ty_sessions, ty_gv = _sum_sales(sd, ed, hp, use_individual=is_recent)
 
-        # Supplement TY from orders table for recent periods where S&T report lags.
-        # fell_back stays False — kept in return payload for frontend compatibility.
+        # Supplement TY from orders table ONLY if daily_sales has no data at all.
+        # (The individual ASIN rows are the primary source for recent periods.)
         fell_back = False
         if period in ('today', 'yesterday'):
-            o_sales, o_units, o_cnt = _orders_supplement(con, sd, ed, hw, hp)
-            if o_sales > 0 or o_cnt > 0:
-                ty_sales, ty_units = o_sales, o_units
+            if ty_sales == 0 and ty_units == 0:
+                # daily_sales empty — fall back to orders table
+                o_sales, o_units, o_cnt = _orders_supplement(con, sd, ed, hw, hp)
+                if o_sales > 0 or o_cnt > 0:
+                    ty_sales, ty_units = o_sales, o_units
 
-        ly_sales, ly_units, ly_sessions, ly_gv = _sum_sales(ly_sd, ly_ed, hp)
+        ly_sales, ly_units, ly_sessions, ly_gv = _sum_sales(ly_sd, ly_ed, hp, use_individual=is_recent)
 
-        # Supplement LY from orders table — same logic, same helper.
+        # Supplement LY from orders table — same fallback logic.
         if period in ('today', 'yesterday'):
-            lo_sales, lo_units, lo_cnt = _orders_supplement(con, ly_sd, ly_ed, hw, hp)
-            if lo_sales > 0 or lo_cnt > 0:
-                ly_sales, ly_units = lo_sales, lo_units
+            if ly_sales == 0 and ly_units == 0:
+                lo_sales, lo_units, lo_cnt = _orders_supplement(con, ly_sd, ly_ed, hw, hp)
+                if lo_sales > 0 or lo_cnt > 0:
+                    ly_sales, ly_units = lo_sales, lo_units
 
         ty_aur = round(ty_sales / ty_units, 2) if ty_units else 0
         ly_aur = round(ly_sales / ly_units, 2) if ly_units else 0
@@ -682,34 +709,53 @@ def sales_period_comparison(
         periods_map = view_periods.get(view, view_periods["exec"])
         result = {}
 
-        def _daily_sales_sum(s, e, extra_params):
-            r = con.execute(f"""
-                SELECT COALESCE(SUM(ordered_product_sales), 0),
-                       COALESCE(SUM(units_ordered), 0),
-                       COALESCE(SUM(sessions), 0),
-                       COALESCE(SUM(page_views), 0)
-                FROM daily_sales
-                WHERE asin = 'ALL' AND date >= ? AND date <= ? {hw}
-            """, [str(s), str(e)] + extra_params).fetchone()
-            return float(r[0]), int(r[1]), int(r[2]), int(r[3])
+        def _daily_sales_sum(s, e, extra_params, use_individual=False):
+            if use_individual:
+                # For recent periods: per-ASIN rows are more current than asin='ALL' aggregate.
+                r = con.execute(f"""
+                    SELECT COALESCE(SUM(ordered_product_sales), 0),
+                           COALESCE(SUM(units_ordered), 0),
+                           0, 0
+                    FROM daily_sales
+                    WHERE asin != 'ALL' AND date >= ? AND date <= ? {hw}
+                """, [str(s), str(e)] + extra_params).fetchone()
+                rev = float(r[0]); units_r = int(r[1])
+                sess_r = con.execute(f"""
+                    SELECT COALESCE(SUM(sessions), 0), COALESCE(SUM(page_views), 0)
+                    FROM daily_sales
+                    WHERE asin = 'ALL' AND date >= ? AND date <= ? {hw}
+                """, [str(s), str(e)] + extra_params).fetchone()
+                return rev, units_r, int(sess_r[0]), int(sess_r[1])
+            else:
+                r = con.execute(f"""
+                    SELECT COALESCE(SUM(ordered_product_sales), 0),
+                           COALESCE(SUM(units_ordered), 0),
+                           COALESCE(SUM(sessions), 0),
+                           COALESCE(SUM(page_views), 0)
+                    FROM daily_sales
+                    WHERE asin = 'ALL' AND date >= ? AND date <= ? {hw}
+                """, [str(s), str(e)] + extra_params).fetchone()
+                return float(r[0]), int(r[1]), int(r[2]), int(r[3])
 
         for label, period_key in periods_map.items():
             sd, ed = _period_to_dates(period_key)
-            sales, units, sessions, glance_views = _daily_sales_sum(sd, ed, hp)
+            use_ind = period_key in ('today', 'yesterday', '2_days_ago', '3_days_ago')
+            sales, units, sessions, glance_views = _daily_sales_sum(sd, ed, hp, use_individual=use_ind)
 
             if period_key == 'today':
-                # S&T never has today's data — always pull from orders table.
-                o_sales, o_units, o_cnt = _orders_supplement(con, sd, ed, hw, hp)
-                if o_sales > 0 or o_cnt > 0:
-                    sales, units = o_sales, o_units
+                # Use individual ASIN rows as primary source.
+                # Only fall back to orders table if daily_sales is empty.
+                if sales == 0 and units == 0:
+                    o_sales, o_units, o_cnt = _orders_supplement(con, sd, ed, hw, hp)
+                    if o_sales > 0 or o_cnt > 0:
+                        sales, units = o_sales, o_units
 
             elif period_key == 'yesterday':
-                # S&T may lag — supplement with orders table.
-                o_sales, o_units, o_cnt = _orders_supplement(con, sd, ed, hw, hp)
-                if sales == 0 and o_sales > 0:
-                    sales, units = o_sales, o_units
-                elif o_units > units:
-                    units = o_units
+                # Same logic — individual ASIN rows are primary, orders is fallback.
+                if sales == 0 and units == 0:
+                    o_sales, o_units, o_cnt = _orders_supplement(con, sd, ed, hw, hp)
+                    if o_sales > 0 or o_cnt > 0:
+                        sales, units = o_sales, o_units
 
             elif sales == 0 and units == 0:
                 # For longer periods (WTD, MTD, etc.) only: step back up to 3 days if no data
@@ -1363,14 +1409,12 @@ def debug_summary_today():
         ed = sd
         hw, hp = "", []
 
-        # Step 1: daily_sales asin='ALL'
+        # Step 1: daily_sales — individual ASIN rows (more current than asin='ALL' for today)
         ds_row = con.execute(f"""
             SELECT COALESCE(SUM(ordered_product_sales), 0),
-                   COALESCE(SUM(units_ordered), 0),
-                   COALESCE(SUM(sessions), 0),
-                   COALESCE(SUM(page_views), 0)
+                   COALESCE(SUM(units_ordered), 0)
             FROM daily_sales
-            WHERE asin = 'ALL' AND date >= ? AND date <= ?
+            WHERE asin != 'ALL' AND date >= ? AND date <= ?
         """, [str(sd), str(ed)]).fetchone()
         ty_sales = float(ds_row[0])
         ty_units = int(ds_row[1])
