@@ -165,43 +165,110 @@ function heatmapSVG(data, W=1100) {
 
 function funnelSVG(data) {
   if (!data || data.length === 0) return '<div style="color:#374f66;padding:20px;text-align:center;font-size:12px">No funnel data</div>';
-  const W=1100, H=320, padL=70, padR=70, padT=30, padB=24;
+  // Extra height for metric summary row at bottom
+  const W=1100, H=380, padL=90, padR=260, padT=30, padB=60;
   const iw=W-padL-padR, ih=H-padT-padB;
   const n=data.length, rowH=ih/n;
   const maxVal=Math.max(data[0].ty, data[0].ly, 1);
   const stageW = val => Math.max(iw*.13, (val/maxVal)*(iw*.88));
+
+  // Pre-compute key derived metrics
+  const sessIdx = data.findIndex(d => d.label === 'Sessions');
+  const atcIdx  = data.findIndex(d => d.label === 'Add to Cart');
+  const ordIdx  = data.findIndex(d => d.label === 'Orders');
+  const sess_ty = sessIdx >= 0 ? data[sessIdx].ty : 0;
+  const sess_ly = sessIdx >= 0 ? data[sessIdx].ly : 0;
+  const atc_ty  = atcIdx  >= 0 ? data[atcIdx].ty  : 0;
+  const atc_ly  = atcIdx  >= 0 ? data[atcIdx].ly  : 0;
+  const ord_ty  = ordIdx  >= 0 ? data[ordIdx].ty  : 0;
+  const ord_ly  = ordIdx  >= 0 ? data[ordIdx].ly  : 0;
+  const atcPct_ty  = sess_ty > 0 ? (atc_ty  / sess_ty * 100).toFixed(1) : null;
+  const atcPct_ly  = sess_ly > 0 ? (atc_ly  / sess_ly * 100).toFixed(1) : null;
+  const conv_ty    = sess_ty > 0 ? (ord_ty  / sess_ty * 100).toFixed(2) : null;
+  const conv_ly    = sess_ly > 0 ? (ord_ly  / sess_ly * 100).toFixed(2) : null;
+
   let s = `<svg width="100%" viewBox="0 0 ${W} ${H}" style="overflow:visible;display:block">`;
   s += `<defs>${data.map((_,i)=>`<linearGradient id="fg${i}" x1="0" y1="0" x2="1" y2="0"><stop offset="0%" stop-color="${B.b1}" stop-opacity=".92"/><stop offset="100%" stop-color="${B.b3}" stop-opacity=".92"/></linearGradient>`).join('')}</defs>`;
+
+  const cx = (W - padR + padL) / 2;
+
   data.forEach((f,i) => {
     const tyW = stageW(f.ty), lyW = stageW(f.ly);
     const nextTyW = i<n-1 ? stageW(data[i+1].ty) : tyW*.55;
     const nextLyW = i<n-1 ? stageW(data[i+1].ly) : lyW*.55;
-    const cy = padT+i*rowH, cx = W/2, segH = rowH-4;
-    // Pre-compute this stage's YOY pass-through change for the right-side label
-    let stageChg = null;
-    if (i < n-1) {
-      const convTY = f.ty > 0 ? data[i+1].ty/f.ty : 0;
-      const convLY = f.ly > 0 ? data[i+1].ly/f.ly : 0;
-      stageChg = convLY > 0 ? dp(convTY, convLY) : null;
-    }
-    s += `<path d="M${cx-lyW/2},${cy} L${cx+lyW/2},${cy} L${cx+nextLyW/2},${cy+segH} L${cx-nextLyW/2},${cy+segH} Z" fill="${B.dim}" opacity=".32"/>`;
+    const cy = padT+i*rowH, segH = rowH-4;
+
+    // LY shape: semi-transparent fill + dashed stroke outline so it shows around TY
+    s += `<path d="M${cx-lyW/2},${cy} L${cx+lyW/2},${cy} L${cx+nextLyW/2},${cy+segH} L${cx-nextLyW/2},${cy+segH} Z" fill="${B.dim}" fill-opacity=".18" stroke="${B.sub}" stroke-width="1.2" stroke-dasharray="5 3" opacity=".7"/>`;
+    // TY shape
     s += `<path d="M${cx-tyW/2},${cy+2} L${cx+tyW/2},${cy+2} L${cx+nextTyW/2},${cy+segH-1} L${cx-nextTyW/2},${cy+segH-1} Z" fill="url(#fg${i})" opacity=".92"/>`;
-    s += `<text x="${padL-10}" y="${cy+rowH/2+4}" text-anchor="end" font-size="11" font-weight="600" fill="#e2e8f0">${f.label}</text>`;
+
+    // Stage label (left side)
+    s += `<text x="${padL-12}" y="${cy+rowH/2+4}" text-anchor="end" font-size="11" font-weight="600" fill="#e2e8f0">${f.label}</text>`;
+    // TY value (center of TY bar)
     s += `<text x="${cx}" y="${cy+rowH/2+4}" text-anchor="middle" font-size="13" font-weight="700" fill="#fff">${fN(f.ty)}</text>`;
-    // Right-side: LY value on first line, YOY chg% directly below it
-    const rxBase = cx + Math.max(tyW, lyW) / 2 + 14;
-    s += `<text x="${rxBase}" y="${cy+rowH/2-2}" text-anchor="start" font-size="9" fill="${B.sub}">LY ${fN(f.ly)}</text>`;
-    if (stageChg != null) {
-      const chgColor = stageChg >= 0 ? '#4ade80' : '#fb923c';
-      s += `<text x="${rxBase}" y="${cy+rowH/2+11}" text-anchor="start" font-size="9" font-weight="700" fill="${chgColor}">${stageChg>=0?'\u25B2':'\u25BC'}${Math.abs(stageChg).toFixed(1)}% vs LY</text>`;
+
+    // Right panel: TY value, LY value, YOY delta — all stacked neatly
+    const rx = W - padR + 16;
+    const rowMid = cy + rowH/2;
+    const lyDelta = f.ly > 0 ? dp(f.ty, f.ly) : null;
+    const deltaColor = lyDelta != null ? (lyDelta >= 0 ? '#4ade80' : '#fb923c') : B.sub;
+    s += `<text x="${rx}" y="${rowMid-8}" text-anchor="start" font-size="12" font-weight="700" fill="#e2e8f0">${fN(f.ty)}</text>`;
+    s += `<text x="${rx+90}" y="${rowMid-8}" text-anchor="start" font-size="10" fill="${B.sub}">vs LY ${fN(f.ly)}</text>`;
+    if (lyDelta != null) {
+      s += `<text x="${rx}" y="${rowMid+8}" text-anchor="start" font-size="10" font-weight="700" fill="${deltaColor}">${lyDelta>=0?'\u25B2':'\u25BC'} ${Math.abs(lyDelta).toFixed(1)}% YOY</text>`;
     }
+
+    // Pass-through % between stages (center, small)
     if (i < n-1) {
-      const passThru = f.ty > 0 ? ((data[i+1].ty/f.ty)*100).toFixed(1) : '0.0';
-      // Pass-through label stays in center — chg% is now on the right side above
-      s += `<text x="${cx}" y="${cy+segH+12}" text-anchor="middle" font-size="9" fill="${B.dim}">\u25BC ${passThru}% pass through</text>`;
+      // Only show pass-through when values differ enough to be meaningful
+      const pct = f.ty > 0 ? (data[i+1].ty/f.ty*100) : 0;
+      const lyPct = f.ly > 0 ? (data[i+1].ly/f.ly*100) : 0;
+      const pctChg = lyPct > 0 ? dp(pct, lyPct) : null;
+      const ptColor = pctChg != null ? (pctChg >= 0 ? '#4ade80' : '#fb923c') : B.dim;
+      s += `<text x="${cx}" y="${cy+segH+11}" text-anchor="middle" font-size="9" fill="${B.dim}">\u25BC ${pct.toFixed(1)}% pass through`;
+      if (pctChg != null) s += ` <tspan font-weight="700" fill="${ptColor}">(${pctChg>=0?'+':''}${pctChg.toFixed(1)}% vs LY)</tspan>`;
+      s += `</text>`;
     }
   });
-  s += `<g transform="translate(${padL},${H-padB+2})"><rect width="10" height="10" y="-1" rx="2" fill="${B.b2}" opacity=".9"/><text x="14" y="8" font-size="9" fill="${B.sub}">This Year</text><rect x="85" width="10" height="10" y="-1" rx="2" fill="${B.dim}" opacity=".5"/><text x="99" y="8" font-size="9" fill="${B.sub}">Last Year</text></g>`;
+
+  // ── Derived metric summary row at bottom ──
+  const sumY = padT + n*rowH + 18;
+  const metrics = [];
+  if (atcPct_ty != null) {
+    const atcChg = atcPct_ly != null ? dp(parseFloat(atcPct_ty), parseFloat(atcPct_ly)) : null;
+    const atcColor = atcChg != null ? (atcChg >= 0 ? '#4ade80' : '#fb923c') : B.sub;
+    metrics.push([`ATC % of Sessions`, `${atcPct_ty}%`, atcPct_ly != null ? `LY ${atcPct_ly}%` : null, atcChg, atcColor]);
+  }
+  if (conv_ty != null) {
+    const convChg = conv_ly != null ? dp(parseFloat(conv_ty), parseFloat(conv_ly)) : null;
+    const convColor = convChg != null ? (convChg >= 0 ? '#4ade80' : '#fb923c') : B.sub;
+    metrics.push([`Conversion %`, `${conv_ty}%`, conv_ly != null ? `LY ${conv_ly}%` : null, convChg, convColor]);
+  }
+  if (metrics.length > 0) {
+    const mw = (W - padL - 20) / metrics.length;
+    s += `<line x1="${padL}" y1="${sumY-6}" x2="${W-20}" y2="${sumY-6}" stroke="${B.brd}" stroke-width="0.5"/>`;
+    metrics.forEach(([label, tyVal, lyVal, chg, chgColor], mi) => {
+      const mx = padL + mi * mw + mw/2;
+      s += `<text x="${mx}" y="${sumY+6}" text-anchor="middle" font-size="9" font-weight="700" fill="${B.sub}" text-transform="uppercase">${label}</text>`;
+      s += `<text x="${mx}" y="${sumY+22}" text-anchor="middle" font-size="14" font-weight="800" fill="#e2e8f0">${tyVal}</text>`;
+      if (lyVal) s += `<text x="${mx-20}" y="${sumY+36}" text-anchor="middle" font-size="9" fill="${B.sub}">${lyVal}</text>`;
+      if (chg != null) {
+        s += `<text x="${mx+22}" y="${sumY+36}" text-anchor="middle" font-size="9" font-weight="700" fill="${chgColor}">${chg>=0?'\u25B2':'\u25BC'}${Math.abs(chg).toFixed(1)}%</text>`;
+      }
+    });
+  }
+
+  // Legend
+  s += `<g transform="translate(${padL},${H-14})">`;
+  s += `<rect width="10" height="10" y="-1" rx="2" fill="${B.b2}" opacity=".9"/><text x="14" y="8" font-size="9" fill="${B.sub}">This Year</text>`;
+  s += `<rect x="90" width="10" height="8" y="0" rx="2" fill="${B.dim}" fill-opacity=".3" stroke="${B.sub}" stroke-width="1" stroke-dasharray="4 2"/><text x="104" y="8" font-size="9" fill="${B.sub}">Last Year outline</text>`;
+  s += `</g>`;
+
+  // Right panel header
+  s += `<line x1="${W-padR+8}" y1="${padT-4}" x2="${W-6}" y2="${padT-4}" stroke="${B.brd}" stroke-width="0.5"/>`;
+  s += `<text x="${W-padR+16}" y="${padT-10}" font-size="9" font-weight="700" fill="${B.sub}" text-transform="uppercase" letter-spacing="1">COMPARISON</text>`;
+
   return s + '</svg>';
 }
 
@@ -300,25 +367,26 @@ function MetricCard({ label, value, ly, delta, expandContent, invert }) {
   const deltaEl = delta != null ? (
     <span style={{fontSize:9,fontWeight:700,padding:'2px 5px',borderRadius:6,
       color:isPos?'#4ade80':'#fb923c',
-      background:isPos?'rgba(74,222,128,.1)':'rgba(251,146,60,.12)',whiteSpace:'nowrap'}}>
+      background:isPos?'rgba(74,222,128,.1)':'rgba(251,146,60,.12)',whiteSpace:'nowrap',flexShrink:0}}>
       {delta > 0 ? '\u25B2' : '\u25BC'}&nbsp;{Math.abs(delta).toFixed(1)}%
     </span>
   ) : null;
   return (
-    <div style={{flex:'1 1 0',minWidth:148,background:'linear-gradient(145deg,var(--card),var(--card2))',borderRadius:12,padding:'11px 12px 10px',border:'1px solid var(--brd)',transition:'background .3s'}}>
+    <div style={{flex:'1 1 0',minWidth:155,background:'linear-gradient(145deg,var(--card),var(--card2))',borderRadius:12,padding:'10px 12px 9px',border:'1px solid var(--brd)',transition:'background .3s'}}>
       {/* Label */}
-      <div style={{fontSize:9,color:'var(--txt3)',textTransform:'uppercase',letterSpacing:'.07em',marginBottom:6,whiteSpace:'nowrap'}}>{label}</div>
-      {/* TY value — big and bold */}
-      <div style={{fontSize:17,fontWeight:800,letterSpacing:'-.02em',color:'var(--txt)',lineHeight:1,marginBottom:5}}>{value}</div>
-      {/* LY + delta on the same row below TY */}
-      {(ly || delta != null) && (
-        <div style={{display:'flex',alignItems:'center',gap:6,flexWrap:'wrap'}}>
-          {ly && <span style={{fontSize:10,color:'var(--txt3)',whiteSpace:'nowrap',letterSpacing:'-.01em'}}>LY&nbsp;{ly}</span>}
-          {deltaEl}
-        </div>
-      )}
+      <div style={{fontSize:9,color:'var(--txt3)',textTransform:'uppercase',letterSpacing:'.07em',marginBottom:5,whiteSpace:'nowrap'}}>{label}</div>
+      {/* Single row: TY value | LY | delta badge */}
+      <div style={{display:'flex',alignItems:'center',gap:7,flexWrap:'nowrap',overflow:'hidden'}}>
+        <span style={{fontSize:16,fontWeight:800,letterSpacing:'-.02em',color:'var(--txt)',lineHeight:1,flexShrink:0}}>{value}</span>
+        {ly && (
+          <span style={{fontSize:10,color:'var(--txt3)',whiteSpace:'nowrap',letterSpacing:'-.01em',flexShrink:0,borderLeft:'1px solid var(--brd2)',paddingLeft:7}}>
+            LY&nbsp;<span style={{color:'var(--txt2)'}}>{ly}</span>
+          </span>
+        )}
+        {deltaEl}
+      </div>
       {expandContent && (
-        <div style={{marginTop:8}}>
+        <div style={{marginTop:7}}>
           <button onClick={() => setExpanded(e => !e)}
             style={{fontSize:9,padding:'2px 7px',borderRadius:99,border:'1px solid var(--brd)',background:'transparent',color:'var(--txt3)',cursor:'pointer',fontWeight:600,whiteSpace:'nowrap'}}>
             {expanded ? '\u25B2 hide' : '\u25BC detail'}
