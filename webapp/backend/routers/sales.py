@@ -380,6 +380,30 @@ def sales_summary(
         ty_gm_pct = round(ty_gm / ty_sales, 4) if ty_sales else 0
         ly_gm_pct = round(ly_gm / ly_sales, 4) if ly_sales else 0
 
+        # Inventory: current stock and days of supply
+        try:
+            inv_row = con.execute("""
+                SELECT COALESCE(SUM(fulfillable_quantity), 0),
+                       COALESCE(SUM(total_quantity), 0)
+                FROM fba_inventory
+                WHERE date = (SELECT MAX(date) FROM fba_inventory)
+            """).fetchone()
+            stock_units = int(inv_row[0]) if inv_row else 0
+            # Avg daily units last 30 days for DOS
+            avg_row = con.execute(f"""
+                SELECT COALESCE(AVG(daily_units), 0) FROM (
+                    SELECT date, SUM(units_ordered) AS daily_units
+                    FROM daily_sales
+                    WHERE asin = 'ALL' AND date >= ? AND date <= ? {hw}
+                    GROUP BY date
+                )
+            """, [str(ed - timedelta(days=30)), str(ed)] + hp).fetchone()
+            avg_daily = float(avg_row[0]) if avg_row else 0
+            dos = round(stock_units / avg_daily) if avg_daily > 0 else 0
+        except Exception:
+            stock_units = 0
+            dos = 0
+
         con.close()
         return {
             "sales": round(ty_sales, 2), "unit_sales": ty_units, "aur": ty_aur,
@@ -396,6 +420,7 @@ def sales_summary(
             "ly_ctr": ly_ctr, "ly_conversion": ly_conv,
             "ly_orders": ly_orders, "ly_aov": ly_aov,
             "ly_ad_spend": round(ly_ad_spend, 2), "ly_roas": ly_roas, "ly_tacos": ly_tacos,
+            "dos": dos, "stock_units": stock_units,
         }
     except Exception as e:
         logger.error(f"sales/summary error: {e}")

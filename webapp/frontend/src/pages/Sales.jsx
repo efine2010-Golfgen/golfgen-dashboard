@@ -162,7 +162,7 @@ function funnelSVG(data) {
   const W=1100, H=320, padL=70, padR=70, padT=30, padB=24;
   const iw=W-padL-padR, ih=H-padT-padB;
   const n=data.length, rowH=ih/n;
-  const maxVal=data[0].ty;
+  const maxVal=Math.max(data[0].ty, data[0].ly, 1);
   const stageW = val => Math.max(iw*.13, (val/maxVal)*(iw*.88));
   let s = `<svg width="100%" viewBox="0 0 ${W} ${H}" style="overflow:visible;display:block">`;
   s += `<defs>${data.map((_,i)=>`<linearGradient id="fg${i}" x1="0" y1="0" x2="1" y2="0"><stop offset="0%" stop-color="${B.b1}" stop-opacity=".92"/><stop offset="100%" stop-color="${B.b3}" stop-opacity=".92"/></linearGradient>`).join('')}</defs>`;
@@ -177,9 +177,10 @@ function funnelSVG(data) {
     s += `<text x="${cx}" y="${cy+rowH/2+4}" text-anchor="middle" font-size="13" font-weight="700" fill="#fff">${fN(f.ty)}</text>`;
     s += `<text x="${cx+tyW/2+10}" y="${cy+rowH/2-4}" text-anchor="start" font-size="9" fill="${B.sub}">LY ${fN(f.ly)}</text>`;
     if (i < n-1) {
-      const passThru = ((data[i+1].ty/f.ty)*100).toFixed(1);
-      const convTY = data[i+1].ty/f.ty, convLY = data[i+1].ly/f.ly;
-      const chg = dp(convTY, convLY);
+      const passThru = f.ty > 0 ? ((data[i+1].ty/f.ty)*100).toFixed(1) : '0.0';
+      const convTY = f.ty > 0 ? data[i+1].ty/f.ty : 0;
+      const convLY = f.ly > 0 ? data[i+1].ly/f.ly : 0;
+      const chg = convLY > 0 ? dp(convTY, convLY) : null;
       const chgColor = chg >= 0 ? '#4ade80' : '#fb923c';
       s += `<text x="${cx}" y="${cy+segH+12}" text-anchor="middle" font-size="9" fill="${B.dim}">\u25BC ${passThru}% pass through</text>`;
       if (chg != null) s += `<text x="${cx+82}" y="${cy+segH+12}" text-anchor="start" font-size="9" fill="${chgColor}" font-weight="600">${chg>=0?'\u25B2':'\u25BC'}${Math.abs(chg).toFixed(1)}% vs LY</text>`;
@@ -231,8 +232,8 @@ function adQuadrantSVG(data) {
   // Callout
   s+=`<rect x="${tyx+18}" y="${tyy-30}" width="155" height="56" rx="6" fill="#122138" stroke="#1a2f4a" stroke-width="1"/>`;
   s+=`<text x="${tyx+26}" y="${tyy-14}" font-size="10" font-weight="700" fill="#f1f5f9">ACOS: ${(tyAcos*100).toFixed(1)}%  ROAS: ${tyRoas.toFixed(2)}x</text>`;
-  const acosChg = ((1-tyAcos/lyAcos)*100).toFixed(1);
-  const roasChg = ((tyRoas/lyRoas-1)*100).toFixed(1);
+  const acosChg = lyAcos > 0 ? ((1-tyAcos/lyAcos)*100).toFixed(1) : '0.0';
+  const roasChg = lyRoas > 0 ? ((tyRoas/lyRoas-1)*100).toFixed(1) : '0.0';
   s+=`<text x="${tyx+26}" y="${tyy+2}" font-size="9" fill="${B.t2}">\u25B2 ${acosChg}% ACOS improvement</text>`;
   s+=`<text x="${tyx+26}" y="${tyy+18}" font-size="9" fill="${B.t2}">\u25B2 ${roasChg}% ROAS improvement</text>`;
   // Axis labels
