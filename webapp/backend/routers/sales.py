@@ -618,28 +618,36 @@ def sales_period_comparison(
         periods_map = view_periods.get(view, view_periods["exec"])
         result = {}
 
+        def _daily_sales_sum(s, e, extra_params):
+            r = con.execute(f"""
+                SELECT COALESCE(SUM(ordered_product_sales), 0),
+                       COALESCE(SUM(units_ordered), 0),
+                       COALESCE(SUM(sessions), 0),
+                       COALESCE(SUM(page_views), 0)
+                FROM daily_sales
+                WHERE asin = 'ALL' AND date >= ? AND date <= ? {hw}
+            """, [str(s), str(e)] + extra_params).fetchone()
+            return float(r[0]), int(r[1]), int(r[2]), int(r[3])
+
         for label, period_key in periods_map.items():
             sd, ed = _period_to_dates(period_key)
+            sales, units, sessions, glance_views = _daily_sales_sum(sd, ed, hp)
+
+            # Amazon Sales & Traffic report lags 1-2 days.  For single-day periods
+            # that return no data, step back until we find a day with data (max 3 steps).
+            if period_key in ('today', 'yesterday') and sales == 0 and units == 0:
+                for step in range(1, 4):
+                    sd_fb = sd - timedelta(days=step)
+                    ed_fb = ed - timedelta(days=step)
+                    s_fb, u_fb, sess_fb, gv_fb = _daily_sales_sum(sd_fb, ed_fb, hp)
+                    if s_fb > 0 or u_fb > 0:
+                        sd, ed = sd_fb, ed_fb
+                        sales, units, sessions, glance_views = s_fb, u_fb, sess_fb, gv_fb
+                        break
+
             ly_sd = sd - timedelta(days=364)
             ly_ed = ed - timedelta(days=364)
-            row = con.execute(f"""
-                SELECT COALESCE(SUM(ordered_product_sales), 0),
-                       COALESCE(SUM(units_ordered), 0),
-                       COALESCE(SUM(sessions), 0),
-                       COALESCE(SUM(page_views), 0)
-                FROM daily_sales
-                WHERE asin = 'ALL' AND date >= ? AND date <= ? {hw}
-            """, [str(sd), str(ed)] + hp).fetchone()
-            sales, units, sessions, glance_views = float(row[0]), int(row[1]), int(row[2]), int(row[3])
-            ly_row = con.execute(f"""
-                SELECT COALESCE(SUM(ordered_product_sales), 0),
-                       COALESCE(SUM(units_ordered), 0),
-                       COALESCE(SUM(sessions), 0),
-                       COALESCE(SUM(page_views), 0)
-                FROM daily_sales
-                WHERE asin = 'ALL' AND date >= ? AND date <= ? {hw}
-            """, [str(ly_sd), str(ly_ed)] + hp).fetchone()
-            ly_sales, ly_units, ly_sessions, ly_gv = float(ly_row[0]), int(ly_row[1]), int(ly_row[2]), int(ly_row[3])
+            ly_sales, ly_units, ly_sessions, ly_gv = _daily_sales_sum(ly_sd, ly_ed, hp)
             # True order count from orders table
             try:
                 o_row = con.execute(f"""
