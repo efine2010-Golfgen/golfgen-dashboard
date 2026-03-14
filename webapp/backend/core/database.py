@@ -242,6 +242,31 @@ def get_db_rw() -> DbConnection:
     return DbConnection(duckdb.connect(str(DB_PATH), read_only=False))
 
 
+# ── Portable schema helpers (work with both DuckDB and PostgreSQL) ────────
+
+def list_tables(con) -> list[str]:
+    """List all user tables, compatible with both DuckDB and PostgreSQL."""
+    if USE_POSTGRES:
+        rows = con.execute(
+            "SELECT tablename FROM pg_tables WHERE schemaname = 'public'"
+        ).fetchall()
+    else:
+        rows = con.execute("SHOW TABLES").fetchall()
+    return [r[0] for r in rows]
+
+
+def get_columns(con, table: str) -> list[str]:
+    """Get column names for a table, compatible with both DuckDB and PostgreSQL."""
+    if USE_POSTGRES:
+        rows = con.execute(
+            "SELECT column_name FROM information_schema.columns WHERE table_name = ?",
+            [table],
+        ).fetchall()
+    else:
+        rows = con.execute(f"DESCRIBE {table}").fetchall()
+    return [r[0] for r in rows]
+
+
 def _init_auth_tables():
     """Create tables for sessions and permissions if not exist."""
     con = get_db_rw()

@@ -9,7 +9,7 @@ Stage 2: run_daily_rollup() — Reads staging tables, aggregates into analytics_
 Stage 3: run_sku_rollup() — Reads staging + item_master, aggregates into analytics_sku
 """
 
-from core.database import get_db_rw
+from core.database import get_db_rw, list_tables as _list_tables, get_columns as _get_columns
 import logging
 from datetime import datetime, date, timedelta
 from zoneinfo import ZoneInfo
@@ -30,7 +30,7 @@ def populate_staging_orders(con, target_date: date = None):
 
     # Check tables exist
     try:
-        tables = [r[0] for r in con.execute("SHOW TABLES").fetchall()]
+        tables = _list_tables(con)
         if 'orders' not in tables or 'staging_orders' not in tables:
             logger.warning(f"Staging orders skipped: missing tables. Have: {tables}")
             return 0
@@ -86,7 +86,7 @@ def populate_staging_financial(con, target_date: date = None):
     now = datetime.now(ZoneInfo("America/Chicago"))
 
     try:
-        tables = [r[0] for r in con.execute("SHOW TABLES").fetchall()]
+        tables = _list_tables(con)
         if 'financial_events' not in tables or 'staging_financial_events' not in tables:
             logger.warning(f"Staging financial skipped: missing tables.")
             return 0
@@ -159,7 +159,7 @@ def run_daily_rollup(con, target_date: date = None):
 
     # Check required tables exist
     try:
-        tables = [r[0] for r in con.execute("SHOW TABLES").fetchall()]
+        tables = _list_tables(con)
         if 'analytics_daily' not in tables:
             logger.warning(f"Daily rollup skipped: analytics_daily missing")
             return 0
@@ -206,7 +206,7 @@ def run_daily_rollup(con, target_date: date = None):
     else:
         # Fallback: read from raw tables
         try:
-            cols = [r[0] for r in con.execute("DESCRIBE orders").fetchall()]
+            cols = _get_columns(con, 'orders')
             if 'division' not in cols:
                 logger.warning("Daily rollup skipped: orders table missing division column")
                 return 0
@@ -291,7 +291,7 @@ def run_sku_rollup(con, period: str = 'last_30d'):
 
     # Check if required tables exist
     try:
-        tables = [r[0] for r in con.execute("SHOW TABLES").fetchall()]
+        tables = _list_tables(con)
         if 'item_master' not in tables or 'daily_sales' not in tables:
             logger.warning(f"SKU rollup skipped: missing tables. Have: {tables}")
             return 0
@@ -342,7 +342,7 @@ def run_sku_rollup(con, period: str = 'last_30d'):
 def _has_hierarchy_columns(con, table: str) -> bool:
     """Check if a table has division/customer/platform columns."""
     try:
-        cols = [r[0] for r in con.execute(f"DESCRIBE {table}").fetchall()]
+        cols = _get_columns(con, table)
         return 'division' in cols and 'customer' in cols
     except Exception:
         return False
@@ -357,7 +357,7 @@ def run_full_rollup():
     con = get_db_rw()
     # Verify we have the right database
     try:
-        tables = [r[0] for r in con.execute("SHOW TABLES").fetchall()]
+        tables = _list_tables(con)
         logger.info(f"Tables in DB: {tables}")
     except Exception as e:
         logger.error(f"Cannot list tables: {e}")

@@ -12,6 +12,7 @@ from fastapi import APIRouter, Query, Body, Request, HTTPException, UploadFile, 
 import duckdb
 
 from core.config import DB_PATH, DB_DIR, TIMEZONE
+from core.database import get_columns as _get_columns
 
 logger = logging.getLogger("golfgen")
 router = APIRouter()
@@ -577,7 +578,7 @@ def item_master_by_division(division: Optional[str] = None):
     con = get_db()
     try:
         # Ensure division/customer columns exist
-        cols = [r[0] for r in con.execute("DESCRIBE item_master").fetchall()]
+        cols = _get_columns(con, 'item_master')
         if 'division' not in cols:
             con.execute("ALTER TABLE item_master ADD COLUMN division VARCHAR")
         if 'customer' not in cols:
@@ -611,7 +612,7 @@ def item_master_untagged():
     con = get_db()
     try:
         # Ensure division/customer columns exist
-        cols = [r[0] for r in con.execute("DESCRIBE item_master").fetchall()]
+        cols = _get_columns(con, 'item_master')
         if 'division' not in cols:
             con.execute("ALTER TABLE item_master ADD COLUMN division VARCHAR")
         if 'customer' not in cols:
@@ -852,7 +853,7 @@ def seed_item_master():
     con = get_db()
     try:
         # Ensure item_master has the right columns
-        cols = [r[0] for r in con.execute("DESCRIBE item_master").fetchall()]
+        cols = _get_columns(con, 'item_master')
         for col in ['division', 'customer', 'platform', 'category', 'brand']:
             if col not in cols:
                 try:

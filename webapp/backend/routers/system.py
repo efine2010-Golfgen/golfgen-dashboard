@@ -965,7 +965,12 @@ def pg_ready():
     from pathlib import Path
     try:
         con = get_db()
-        tables = [r[0] for r in con.execute("SHOW TABLES").fetchall()]
+        if USE_POSTGRES:
+            tables = [r[0] for r in con.execute(
+                "SELECT tablename FROM pg_tables WHERE schemaname = 'public'"
+            ).fetchall()]
+        else:
+            tables = [r[0] for r in con.execute("SHOW TABLES").fetchall()]
         con.close()
         export_path = Path("/app/data/pg_export")
         manifest_path = export_path / "MANIFEST.txt"
