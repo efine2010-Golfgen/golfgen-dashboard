@@ -111,7 +111,7 @@ GOOGLE_CLIENT_ID = os.environ.get("GOOGLE_CLIENT_ID") or os.environ.get("GOOGLE_
 GOOGLE_CLIENT_SECRET = os.environ.get("GOOGLE_CLIENT_SECRET") or os.environ.get("GOOGLE_OAUTH_CLIENT_SECRET", "")
 GOOGLE_REDIRECT_URI = (
     os.environ.get("GOOGLE_REDIRECT_URI")
-    or "https://golfgen-dashboard-production-ce30.up.railway.app/api/auth/google/callback"
+    or "https://golfgen-dashboard-production.up.railway.app/api/auth/google/callback"
 )
 SESSION_SECRET = os.environ.get("SESSION_SECRET", secrets.token_hex(32))
 

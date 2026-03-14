@@ -3,8 +3,9 @@ Sync orchestration and logging for GolfGen Dashboard.
 
 Provides:
 - _auto_backfill_if_needed: Auto-backfill historical data on startup
-- _log_sync: Log sync job execution
+- _write_sync_log: Write a completed sync log entry
 - _log_docs_update: Log docs update execution
+- run_nightly_deep_sync: Comprehensive overnight gap-fill sync
 """
 
 import json

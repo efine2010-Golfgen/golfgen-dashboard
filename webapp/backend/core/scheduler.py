@@ -17,7 +17,7 @@ from apscheduler.triggers.cron import CronTrigger
 from core.config import DB_PATH, DB_DIR, TIMEZONE, SYNC_INTERVAL_HOURS
 from services.sp_api import _sync_today_orders, _run_sp_api_sync, _backfill_orders
 from services.ads_api import _sync_ads_data, _sync_pricing_and_coupons
-from services.sync_engine import _auto_backfill_if_needed, _log_sync, _write_sync_log, run_nightly_deep_sync
+from services.sync_engine import _auto_backfill_if_needed, _write_sync_log, run_nightly_deep_sync
 from services.analytics_rollup import run_full_rollup
 from services.backup import restore_from_latest_backup
 
