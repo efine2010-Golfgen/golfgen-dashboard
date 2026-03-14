@@ -250,7 +250,7 @@ function adQuadrantSVG(data) {
 // ── SUB-COMPONENTS ─────────────────────────────────────────────────
 function Spinner() {
   return (
-    <div style={{display:'flex',justifyContent:'center',padding:'32px',color:B.sub,fontSize:12}}>
+    <div style={{display:'flex',justifyContent:'center',padding:'32px',color:'var(--txt3)',fontSize:12}}>
       Loading...
     </div>
   );
@@ -258,9 +258,9 @@ function Spinner() {
 
 function ChartCard({ title, badge, children, noMargin }) {
   return (
-    <div style={{background:B.surf,border:`1px solid ${B.brd}`,borderRadius:14,padding:16,marginBottom:noMargin?0:12}}>
+    <div style={{background:'var(--surf)',border:'1px solid var(--brd)',borderRadius:14,padding:16,marginBottom:noMargin?0:12,transition:'background .3s'}}>
       <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:14}}>
-        <span style={{fontSize:13,fontWeight:700,color:'#e2e8f0'}}>{title}</span>
+        <span style={{fontSize:13,fontWeight:700,color:'var(--txt)'}}>{title}</span>
         {badge && <span style={{fontSize:10,padding:'2px 9px',borderRadius:99,background:'rgba(46,111,187,.15)',color:B.b3,border:'1px solid rgba(46,111,187,.2)'}}>{badge}</span>}
       </div>
       {children}
@@ -272,7 +272,7 @@ function Legend({ items }) {
   return (
     <div style={{display:'flex',gap:12,flexWrap:'wrap',marginTop:8}}>
       {items.map(([label, color, dashed]) => (
-        <div key={label} style={{display:'flex',alignItems:'center',gap:5,fontSize:10,color:B.sub}}>
+        <div key={label} style={{display:'flex',alignItems:'center',gap:5,fontSize:10,color:'var(--txt3)'}}>
           <div style={{width:8,height:8,borderRadius:2,background:color,opacity:dashed?.45:1,flexShrink:0}}/>
           <span>{label}</span>
         </div>
@@ -292,21 +292,21 @@ function MetricCard({ label, value, ly, delta, expandContent, invert }) {
     </span>
   ) : null;
   return (
-    <div style={{flex:'1 1 0',minWidth:115,background:'linear-gradient(145deg,#122138,#0e1c30)',borderRadius:12,padding:'12px 10px',border:`1px solid ${B.brd}`,position:'relative',overflow:'hidden'}}>
-      <div style={{fontSize:9,color:B.sub,textTransform:'uppercase',letterSpacing:'.07em',marginBottom:5,whiteSpace:'nowrap'}}>{label}</div>
-      <div style={{fontSize:18,fontWeight:800,letterSpacing:'-.02em',color:'#f1f5f9',lineHeight:1}}>{value}</div>
-      {ly && <div style={{fontSize:9,color:B.dim,marginTop:3}}>LY: {ly}</div>}
+    <div style={{flex:'1 1 0',minWidth:115,background:'linear-gradient(145deg,var(--card),var(--card2))',borderRadius:12,padding:'12px 10px',border:'1px solid var(--brd)',position:'relative',overflow:'hidden',transition:'background .3s'}}>
+      <div style={{fontSize:9,color:'var(--txt3)',textTransform:'uppercase',letterSpacing:'.07em',marginBottom:5,whiteSpace:'nowrap'}}>{label}</div>
+      <div style={{fontSize:18,fontWeight:800,letterSpacing:'-.02em',color:'var(--txt)',lineHeight:1}}>{value}</div>
+      {ly && <div style={{fontSize:9,color:'var(--txt3)',marginTop:3}}>LY: {ly}</div>}
       <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',marginTop:6,minHeight:20,gap:4}}>
         {deltaEl}
         {expandContent && (
           <button onClick={() => setExpanded(e => !e)}
-            style={{fontSize:9,padding:'2px 7px',borderRadius:99,border:`1px solid ${B.brd}`,background:'transparent',color:B.dim,cursor:'pointer',fontWeight:600,whiteSpace:'nowrap',flexShrink:0}}>
+            style={{fontSize:9,padding:'2px 7px',borderRadius:99,border:'1px solid var(--brd)',background:'transparent',color:'var(--txt3)',cursor:'pointer',fontWeight:600,whiteSpace:'nowrap',flexShrink:0}}>
             {expanded ? '\u25B2' : '\u25BC'}
           </button>
         )}
       </div>
       {expanded && expandContent && (
-        <div style={{marginTop:10,paddingTop:10,borderTop:`1px solid ${B.brd}`}}>
+        <div style={{marginTop:10,paddingTop:10,borderTop:'1px solid var(--brd)'}}>
           {expandContent}
         </div>
       )}
@@ -317,20 +317,20 @@ function MetricCard({ label, value, ly, delta, expandContent, invert }) {
 function SectionDivider({ label }) {
   return (
     <div style={{display:'flex',alignItems:'center',gap:10,margin:'24px 0 14px'}}>
-      <div style={{width:12,height:1,background:B.brd}}/>
-      <span style={{fontSize:9,fontWeight:700,textTransform:'uppercase',letterSpacing:'.14em',color:'#2a4a6a',whiteSpace:'nowrap'}}>{label}</span>
-      <div style={{flex:1,height:1,background:B.brd}}/>
+      <div style={{width:12,height:1,background:'var(--brd)'}}/>
+      <span style={{fontSize:9,fontWeight:700,textTransform:'uppercase',letterSpacing:'.14em',color:'var(--txt3)',whiteSpace:'nowrap'}}>{label}</span>
+      <div style={{flex:1,height:1,background:'var(--brd)'}}/>
     </div>
   );
 }
 
 function PeriodBar({ value, onChange }) {
   return (
-    <div style={{display:'flex',gap:2,padding:4,borderRadius:10,background:B.surf,border:'1px solid #243d5c'}}>
+    <div style={{display:'flex',gap:2,padding:4,borderRadius:10,background:'var(--surf)',border:'1px solid var(--brd2)'}}>
       {CHART_PERIODS.map(p => (
         <button key={p} onClick={() => onChange(p)}
           style={{padding:'4px 13px',borderRadius:7,fontSize:12,fontWeight:600,border:'none',cursor:'pointer',
-            background:value===p?B.b1:'transparent',color:value===p?'#fff':'#4d6d8a',transition:'all .15s'}}>
+            background:value===p?B.b1:'transparent',color:value===p?'#fff':'var(--txt3)',transition:'all .15s'}}>
           {p}
         </button>
       ))}
@@ -446,13 +446,13 @@ export default function Sales() {
   const periods = viewTab === 'Custom' ? [] : PERIODS[viewTab] || [];
 
   return (
-    <div style={{minHeight:'100vh',padding:'20px 24px',background:'#07111f',fontFamily:"-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif",color:'#f1f5f9'}}>
+    <div style={{fontFamily:"'Sora',-apple-system,BlinkMacSystemFont,sans-serif",color:'var(--txt)'}}>
 
       {/* HEADER */}
       <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',flexWrap:'wrap',gap:10,marginBottom:20}}>
         <div>
-          <h2 style={{fontSize:20,fontWeight:700,letterSpacing:'-.02em',margin:0}}>Performance Snapshot</h2>
-          <div style={{fontSize:12,color:B.sub,marginTop:3}}>
+          <h2 style={{fontFamily:"'DM Serif Display',Georgia,serif",fontSize:22,fontWeight:400,margin:0,color:'var(--txt)'}}>Performance Snapshot</h2>
+          <div style={{fontSize:12,color:'var(--txt3)',marginTop:3,fontFamily:"'Space Grotesk',monospace"}}>
             {division === 'Total' ? 'All Divisions' : division}
             {customer !== 'All Channels' ? ` \u00B7 ${customer}` : ''}
             {fellBack && <span style={{marginLeft:8,color:B.o3,fontStyle:'italic'}}>{m.period_label}</span>}
@@ -462,15 +462,15 @@ export default function Sales() {
           {/* Division dropdown */}
           <div style={{position:'relative'}} data-dd="div">
             <button onClick={() => setDivOpen(o => !o)}
-              style={{display:'flex',alignItems:'center',gap:7,padding:'6px 14px',borderRadius:9,fontSize:13,fontWeight:600,border:'1px solid #243d5c',background:'#122138',color:'#e2e8f0',cursor:'pointer'}}>
+              style={{display:'flex',alignItems:'center',gap:7,padding:'6px 14px',borderRadius:9,fontSize:13,fontWeight:600,border:'1px solid var(--brd2)',background:'var(--card)',color:'var(--txt)',cursor:'pointer'}}>
               <span>{division}</span>
-              <svg width="11" height="11" viewBox="0 0 12 12" fill="none"><path d="M2 4l4 4 4-4" stroke={B.sub} strokeWidth="1.5" strokeLinecap="round"/></svg>
+              <svg width="11" height="11" viewBox="0 0 12 12" fill="none"><path d="M2 4l4 4 4-4" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" opacity=".5"/></svg>
             </button>
             {divOpen && (
-              <div style={{position:'absolute',top:'calc(100% + 4px)',left:0,background:'#122138',border:'1px solid #243d5c',borderRadius:12,zIndex:99,minWidth:160,overflow:'hidden',boxShadow:'0 20px 60px rgba(0,0,0,.7)'}}>
+              <div style={{position:'absolute',top:'calc(100% + 4px)',left:0,background:'var(--card)',border:'1px solid var(--brd2)',borderRadius:12,zIndex:99,minWidth:160,overflow:'hidden',boxShadow:'var(--shad)'}}>
                 {['Total','Golf','Housewares'].map(d => (
                   <button key={d} onClick={() => handleDivision(d)}
-                    style={{display:'block',width:'100%',textAlign:'left',padding:'9px 16px',fontSize:13,border:'none',background:division===d?'rgba(46,111,187,.18)':'transparent',color:division===d?B.b3:'#cbd5e1',cursor:'pointer',fontWeight:division===d?600:400}}>
+                    style={{display:'block',width:'100%',textAlign:'left',padding:'9px 16px',fontSize:13,border:'none',background:division===d?'var(--atab)':'transparent',color:division===d?'#fff':'var(--txt2)',cursor:'pointer',fontWeight:division===d?600:400}}>
                     {d}
                   </button>
                 ))}
@@ -480,15 +480,15 @@ export default function Sales() {
           {/* Customer dropdown */}
           <div style={{position:'relative'}} data-dd="cust">
             <button onClick={() => setCustOpen(o => !o)}
-              style={{display:'flex',alignItems:'center',gap:7,padding:'6px 14px',borderRadius:9,fontSize:13,fontWeight:600,border:'1px solid #243d5c',background:'#122138',color:'#e2e8f0',cursor:'pointer'}}>
+              style={{display:'flex',alignItems:'center',gap:7,padding:'6px 14px',borderRadius:9,fontSize:13,fontWeight:600,border:'1px solid var(--brd2)',background:'var(--card)',color:'var(--txt)',cursor:'pointer'}}>
               <span>{customer}</span>
-              <svg width="11" height="11" viewBox="0 0 12 12" fill="none"><path d="M2 4l4 4 4-4" stroke={B.sub} strokeWidth="1.5" strokeLinecap="round"/></svg>
+              <svg width="11" height="11" viewBox="0 0 12 12" fill="none"><path d="M2 4l4 4 4-4" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" opacity=".5"/></svg>
             </button>
             {custOpen && (
-              <div style={{position:'absolute',top:'calc(100% + 4px)',left:0,background:'#122138',border:'1px solid #243d5c',borderRadius:12,zIndex:99,minWidth:160,overflow:'hidden',boxShadow:'0 20px 60px rgba(0,0,0,.7)'}}>
+              <div style={{position:'absolute',top:'calc(100% + 4px)',left:0,background:'var(--card)',border:'1px solid var(--brd2)',borderRadius:12,zIndex:99,minWidth:160,overflow:'hidden',boxShadow:'var(--shad)'}}>
                 {custOptions.map(c => (
                   <button key={c} onClick={() => handleCustomer(c)}
-                    style={{display:'block',width:'100%',textAlign:'left',padding:'9px 16px',fontSize:13,border:'none',background:customer===c?'rgba(46,111,187,.18)':'transparent',color:customer===c?B.b3:'#cbd5e1',cursor:'pointer',fontWeight:customer===c?600:400}}>
+                    style={{display:'block',width:'100%',textAlign:'left',padding:'9px 16px',fontSize:13,border:'none',background:customer===c?'var(--atab)':'transparent',color:customer===c?'#fff':'var(--txt2)',cursor:'pointer',fontWeight:customer===c?600:400}}>
                     {c}
                   </button>
                 ))}
@@ -499,11 +499,11 @@ export default function Sales() {
       </div>
 
       {/* VIEW TABS */}
-      <div style={{display:'flex',gap:2,padding:4,borderRadius:12,background:'#0c1a2e',border:'1px solid #243d5c',width:'fit-content',marginBottom:18}}>
+      <div style={{display:'flex',gap:2,padding:4,borderRadius:12,background:'var(--surf)',border:'1px solid var(--brd2)',width:'fit-content',marginBottom:18}}>
         {VIEW_TABS.map(t => (
           <button key={t} onClick={() => handleViewTab(t)}
             style={{padding:'6px 18px',borderRadius:8,fontSize:13,fontWeight:600,border:'none',cursor:'pointer',
-              background:viewTab===t?B.b1:'transparent',color:viewTab===t?'#fff':'#5b7fa0',
+              background:viewTab===t?B.b1:'transparent',color:viewTab===t?'#fff':'var(--txt3)',
               boxShadow:viewTab===t?'0 0 18px rgba(27,79,138,.5)':'none',transition:'all .15s'}}>
             {t}
           </button>
@@ -512,19 +512,19 @@ export default function Sales() {
 
       {/* CUSTOM DATE PICKER */}
       {viewTab === 'Custom' && (
-        <div style={{background:'#122138',border:'1px solid #243d5c',borderRadius:14,padding:16,marginBottom:18}}>
-          <div style={{fontSize:13,fontWeight:700,marginBottom:12,color:'#e2e8f0'}}>Custom Date Range</div>
+        <div style={{background:'var(--card)',border:'1px solid var(--brd2)',borderRadius:14,padding:16,marginBottom:18,transition:'background .3s'}}>
+          <div style={{fontSize:13,fontWeight:700,marginBottom:12,color:'var(--txt)'}}>Custom Date Range</div>
           <div style={{display:'flex',gap:10,alignItems:'flex-end',flexWrap:'wrap'}}>
             {[['Start',customStart,setCustomStart],['End',customEnd,setCustomEnd]].map(([l,v,s]) => (
               <div key={l}>
-                <label style={{display:'block',fontSize:10,color:B.sub,marginBottom:4}}>{l} Date</label>
+                <label style={{display:'block',fontSize:10,color:'var(--txt3)',marginBottom:4}}>{l} Date</label>
                 <input type="date" value={v} onChange={e => s(e.target.value)}
-                  style={{padding:'6px 12px',borderRadius:8,border:'1px solid #243d5c',background:'#0c1a2e',color:'#e2e8f0',fontSize:12,outline:'none',colorScheme:'dark'}}/>
+                  style={{padding:'6px 12px',borderRadius:8,border:'1px solid var(--brd2)',background:'var(--surf)',color:'var(--txt)',fontSize:12,outline:'none',colorScheme:'dark'}}/>
               </div>
             ))}
             {[7,30,90].map(d => (
               <button key={d} onClick={() => { const e=new Date(),s=new Date();s.setDate(s.getDate()-d);setCustomStart(s.toISOString().split('T')[0]);setCustomEnd(e.toISOString().split('T')[0]); }}
-                style={{padding:'5px 11px',borderRadius:8,border:'1px solid #243d5c',background:'transparent',color:'#5b7fa0',fontSize:11,cursor:'pointer'}}>
+                style={{padding:'5px 11px',borderRadius:8,border:'1px solid var(--brd)',background:'transparent',color:'var(--txt3)',fontSize:11,cursor:'pointer'}}>
                 Last {d}d
               </button>
             ))}
@@ -538,9 +538,9 @@ export default function Sales() {
           {periods.map(p => (
             <button key={p} onClick={() => setActivePeriod(p)}
               style={{padding:'4px 13px',borderRadius:99,fontSize:12,fontWeight:600,
-                border:`1px solid ${activePeriod===p?'#2E6FBB':'#243d5c'}`,cursor:'pointer',
-                background:activePeriod===p?'rgba(46,111,187,.2)':'transparent',
-                color:activePeriod===p?B.b3:'#4d6d8a',transition:'all .15s'}}>
+                border:`1px solid ${activePeriod===p?'transparent':'var(--brd)'}`,cursor:'pointer',
+                background:activePeriod===p?'var(--apill)':'transparent',
+                color:activePeriod===p?'#fff':'var(--txt3)',transition:'all .15s'}}>
               {p}
             </button>
           ))}
@@ -554,12 +554,12 @@ export default function Sales() {
             const d = periodCols[p] || {};
             const rows = [['Sales $',f$(d.sales)],['Units',fN(d.units)],['AUR',f$(d.aur)],['Orders',fN(d.orders)],['AOV',f$(d.aov)],['Sessions',fN(d.sessions)],['Glance Views',fN(d.glance_views)],['CTR',fP(d.ctr)],['Conv %',fP(d.conversion)]];
             return (
-              <div key={p} style={{flex:'1 1 120px',minWidth:110,background:'#0c1a2e',border:`1px solid ${B.brd}`,borderRadius:12,padding:12}}>
-                <div style={{fontSize:9,fontWeight:700,textTransform:'uppercase',letterSpacing:'.12em',color:B.b2,paddingBottom:8,borderBottom:`1px solid ${B.brd}`,marginBottom:8}}>{p}</div>
+              <div key={p} style={{flex:'1 1 120px',minWidth:110,background:'var(--card2)',border:'1px solid var(--brd)',borderRadius:12,padding:12,transition:'background .3s'}}>
+                <div style={{fontSize:9,fontWeight:700,textTransform:'uppercase',letterSpacing:'.12em',color:B.b2,paddingBottom:8,borderBottom:'1px solid var(--brd)',marginBottom:8}}>{p}</div>
                 {rows.map(([l,v]) => (
                   <div key={l} style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:5}}>
-                    <span style={{fontSize:10,color:'#4d6d8a'}}>{l}</span>
-                    <span style={{fontSize:10,fontWeight:600,color:'#cbd5e1'}}>{v}</span>
+                    <span style={{fontSize:10,color:'var(--txt3)'}}>{l}</span>
+                    <span style={{fontSize:10,fontWeight:600,color:'var(--txt)'}}>{v}</span>
                   </div>
                 ))}
               </div>
@@ -577,7 +577,7 @@ export default function Sales() {
           <MetricCard label="AUR"           value={f$(m.aur)}            ly={f$(ly('aur'))}           delta={dp(m.aur,ly('aur'))}/>
           <MetricCard label="COGS"          value={f$(m.cogs)}           ly={f$(ly('cogs'))}          delta={dp(m.cogs,ly('cogs'))}/>
           <MetricCard label="Amazon Fees"   value={f$(m.amazon_fees)}    ly={f$(ly('amazon_fees'))}   delta={dp(m.amazon_fees,ly('amazon_fees'))}
-            expandContent={feeBreak && Array.isArray(feeBreak) && <div>{feeBreak.map(f=><div key={f.type} style={{display:'flex',justifyContent:'space-between',fontSize:10,marginBottom:5}}><span style={{color:B.sub}}>{f.type}</span><span style={{fontWeight:600,color:'#cbd5e1'}}>{f$(f.amount)}</span></div>)}</div>}/>
+            expandContent={feeBreak && Array.isArray(feeBreak) && <div>{feeBreak.map(f=><div key={f.type} style={{display:'flex',justifyContent:'space-between',fontSize:10,marginBottom:5}}><span style={{color:'var(--txt3)'}}>{f.type}</span><span style={{fontWeight:600,color:'var(--txt)'}}>{f$(f.amount)}</span></div>)}</div>}/>
           <MetricCard label="Gross Margin $"  value={f$(m.gross_margin)}     ly={f$(ly('gross_margin'))}     delta={dp(m.gross_margin,ly('gross_margin'))}/>
           <MetricCard label="Gross Margin %"  value={fP(m.gross_margin_pct)} ly={fP(ly('gross_margin_pct'))} delta={dp(m.gross_margin_pct,ly('gross_margin_pct'))}/>
         </>}
@@ -585,7 +585,7 @@ export default function Sales() {
 
       {/* Sales Charts period bar */}
       <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',flexWrap:'wrap',gap:8,margin:'6px 0 10px'}}>
-        <div style={{fontSize:10,color:'#2a4a6a',fontWeight:600,textTransform:'uppercase',letterSpacing:'.08em'}}>Charts</div>
+        <div style={{fontSize:10,color:'var(--txt3)',fontWeight:600,textTransform:'uppercase',letterSpacing:'.08em'}}>Charts</div>
         <PeriodBar value={cpSales} onChange={setCpSales}/>
       </div>
 
@@ -644,7 +644,7 @@ export default function Sales() {
         </>}
       </div>
       <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',flexWrap:'wrap',gap:8,margin:'6px 0 10px'}}>
-        <div style={{fontSize:10,color:'#2a4a6a',fontWeight:600,textTransform:'uppercase',letterSpacing:'.08em'}}>Charts</div>
+        <div style={{fontSize:10,color:'var(--txt3)',fontWeight:600,textTransform:'uppercase',letterSpacing:'.08em'}}>Charts</div>
         <PeriodBar value={cpTraffic} onChange={setCpTraffic}/>
       </div>
       <ChartCard title="Traffic & Conversion" badge={cpTraffic}>
@@ -662,7 +662,7 @@ export default function Sales() {
       <div style={{display:'flex',gap:8,marginBottom:14,overflowX:'auto',paddingBottom:2}}>
         {loading.metrics ? <Spinner/> : <>
           <MetricCard label="Ad Spend $" value={f$(m.ad_spend)} ly={f$(ly('ad_spend'))} delta={dp(m.ad_spend,ly('ad_spend'))} invert
-            expandContent={adBreak && Array.isArray(adBreak) && <div>{adBreak.map(a=><div key={a.type} style={{marginBottom:6}}><div style={{display:'flex',justifyContent:'space-between',fontSize:10}}><span style={{color:B.sub}}>{a.type}</span><span style={{fontWeight:600,color:'#cbd5e1'}}>{f$(a.spend)}</span></div><div style={{display:'flex',justifyContent:'space-between',fontSize:10,marginTop:2}}><span style={{color:B.dim,paddingLeft:8}}>ROAS</span><span style={{fontWeight:600,color:'#4ade80'}}>{fX(a.roas)}</span></div></div>)}</div>}/>
+            expandContent={adBreak && Array.isArray(adBreak) && <div>{adBreak.map(a=><div key={a.type} style={{marginBottom:6}}><div style={{display:'flex',justifyContent:'space-between',fontSize:10}}><span style={{color:'var(--txt3)'}}>{a.type}</span><span style={{fontWeight:600,color:'var(--txt)'}}>{f$(a.spend)}</span></div><div style={{display:'flex',justifyContent:'space-between',fontSize:10,marginTop:2}}><span style={{color:'var(--txt3)',paddingLeft:8}}>ROAS</span><span style={{fontWeight:600,color:'#4ade80'}}>{fX(a.roas)}</span></div></div>)}</div>}/>
           <MetricCard label="ROAS"  value={fX(m.roas)}  ly={fX(ly('roas'))}  delta={dp(m.roas,ly('roas'))}/>
           <MetricCard label="TACOS" value={fP(m.tacos)} ly={fP(ly('tacos'))} delta={dp(m.tacos,ly('tacos'))} invert/>
         </>}
@@ -679,7 +679,7 @@ export default function Sales() {
             <div key={l}><div style={{fontSize:9,textTransform:'uppercase',letterSpacing:'.08em',color:B.sub}}>{l}</div><div style={{fontSize:18,fontWeight:700,color:c,marginTop:2}}>{v}</div></div>
           ))}
         </div>
-        <div style={{height:6,borderRadius:3,background:'#122138',overflow:'hidden',marginBottom:14}}>
+        <div style={{height:6,borderRadius:3,background:'var(--card)',overflow:'hidden',marginBottom:14}}>
           <div style={{height:'100%',width:`${Math.min(100,((m.dos||0)/90)*100)}%`,background:`linear-gradient(90deg,${B.o1},${B.o2},${B.t2})`,borderRadius:3}}/>
         </div>
         <Legend items={[['DOS This Year',B.t2],['DOS Last Year',B.sub,true]]}/>
