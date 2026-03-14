@@ -247,9 +247,9 @@ def _sync_today_orders_inner():
         now_central = datetime.now(ZoneInfo("America/Chicago"))
         today_str = now_central.strftime("%Y-%m-%d")
         yesterday_str = (now_central - timedelta(days=1)).strftime("%Y-%m-%d")
-        # Build set of recent dates we want item-level detail for
+        # Build set of recent dates we want item-level detail for (today + yesterday only)
         recent_dates = set()
-        for d in range(7):
+        for d in range(2):
             recent_dates.add((now_central - timedelta(days=d)).strftime("%Y-%m-%d"))
 
         # Build ASIN price lookup from historical data for fallback
@@ -300,8 +300,13 @@ def _sync_today_orders_inner():
             if not order_id:
                 continue
 
+            # Cap at 50 orders to prevent long-running syncs
+            if items_fetched + items_failed >= 50:
+                logger.info(f"  Reached 50-order cap for today sync, stopping item fetch")
+                break
+
             try:
-                @retry_with_backoff(max_retries=5, base_delay=2.0, max_delay=60.0)
+                @retry_with_backoff(max_retries=3, base_delay=1.0, max_delay=15.0)
                 def _fetch_items(oid):
                     return orders_api.get_order_items(oid)
 
@@ -341,10 +346,10 @@ def _sync_today_orders_inner():
                 order["_item_qty"] = total_qty
                 items_fetched += 1
 
-                # Adaptive rate limiting: burst first 25, then sleep
+                # Adaptive rate limiting: burst first 15, then sleep
                 burst_count += 1
-                if burst_count > 25:
-                    _time_mod.sleep(2.0)  # Stay well under rate limit
+                if burst_count > 15:
+                    _time_mod.sleep(1.0)  # Stay well under rate limit
             except Exception as e:
                 items_failed += 1
                 logger.warning(f"  getOrderItems failed for {order_id} after retries: {e}")
