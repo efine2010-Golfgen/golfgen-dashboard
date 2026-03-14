@@ -212,6 +212,156 @@ def inventory(division: Optional[str] = None, customer: Optional[str] = None, pl
     return {"items": items}
 
 
+@router.get("/api/inventory/kpis")
+def inventory_kpis(division: Optional[str] = None, customer: Optional[str] = None, platform: Optional[str] = None):
+    """Advanced inventory KPIs: Days of Cover, Weeks of Cover, Reorder Point,
+    Sell-Through Rate, and Return Rate — per ASIN.
+
+    These were defined in metrics.py as planned_phase4 and are now surfaced.
+    Data comes from fba_inventory (current stock), daily_sales (velocity),
+    financial_events (refunds), and item_master (lead time / safety stock).
+    """
+    con = get_db()
+    hf, hp = hierarchy_filter(division, customer, platform)
+
+    # ── 1. Current FBA inventory ──────────────────────────────────────────────
+    inv_where = (" WHERE " + hf.lstrip(" AND ")) if hf else ""
+    inv_rows = con.execute(f"""
+        SELECT asin, COALESCE(fulfillable_quantity, 0) AS fulfillable,
+               COALESCE(inbound_working_quantity, 0) + COALESCE(inbound_shipped_quantity, 0)
+                 + COALESCE(inbound_receiving_quantity, 0) AS inbound,
+               product_name
+        FROM fba_inventory{inv_where}
+    """, hp).fetchall()
+    inv_map = {r[0]: {"fulfillable": r[1], "inbound": r[2], "name": r[3] or ""} for r in inv_rows}
+
+    # ── 2. Sales velocity (7d and 30d avg daily units) ────────────────────────
+    vel_filter = "WHERE asin != 'ALL' AND date >= CURRENT_DATE - INTERVAL '30 days'" + hf
+    vel_rows = con.execute(f"""
+        SELECT asin,
+               SUM(CASE WHEN date >= CURRENT_DATE - INTERVAL '7 days' THEN units_ordered ELSE 0 END) AS units_7d,
+               SUM(units_ordered) AS units_30d
+        FROM daily_sales
+        {vel_filter}
+        GROUP BY asin
+    """, hp).fetchall()
+    vel_map = {}
+    for r in vel_rows:
+        vel_map[r[0]] = {
+            "units_7d": r[1] or 0,
+            "avg_daily_7d": round((r[1] or 0) / 7.0, 2),
+            "units_30d": r[2] or 0,
+            "avg_daily_30d": round((r[2] or 0) / 30.0, 2),
+        }
+
+    # ── 3. 90-day units for sell-through rate ─────────────────────────────────
+    str_filter = "WHERE asin != 'ALL' AND date >= CURRENT_DATE - INTERVAL '90 days'" + hf
+    str_rows = con.execute(f"""
+        SELECT asin, SUM(units_ordered) AS units_90d
+        FROM daily_sales
+        {str_filter}
+        GROUP BY asin
+    """, hp).fetchall()
+    str_map = {r[0]: r[1] or 0 for r in str_rows}
+
+    # ── 4. Return data from financial_events ──────────────────────────────────
+    try:
+        refund_rows = con.execute(f"""
+            SELECT asin, COUNT(*) AS refund_count,
+                   SUM(ABS(COALESCE(total_amount, 0))) AS refund_amount
+            FROM financial_events
+            WHERE event_type ILIKE '%refund%'
+              AND posted_date >= CURRENT_DATE - INTERVAL '90 days'
+            GROUP BY asin
+        """).fetchall()
+        refund_map = {r[0]: {"count": r[1], "amount": round(r[2] or 0, 2)} for r in refund_rows}
+    except Exception:
+        refund_map = {}
+
+    # ── 5. Total units ordered per ASIN (90d) for return rate denominator ─────
+    total_units_90d = {}
+    try:
+        tu_rows = con.execute(f"""
+            SELECT asin, SUM(units_ordered) AS total_units
+            FROM daily_sales
+            WHERE asin != 'ALL' AND date >= CURRENT_DATE - INTERVAL '90 days'
+            GROUP BY asin
+        """).fetchall()
+        total_units_90d = {r[0]: r[1] or 0 for r in tu_rows}
+    except Exception:
+        pass
+
+    con.close()
+
+    # ── Build KPI response per ASIN ───────────────────────────────────────────
+    # Default lead time and safety stock (can be overridden from item_master later)
+    DEFAULT_LEAD_TIME_DAYS = 45  # typical ocean freight + customs
+    DEFAULT_SAFETY_STOCK_DAYS = 14  # 2 weeks safety buffer
+
+    all_asins = set(inv_map.keys()) | set(vel_map.keys())
+    items = []
+
+    for asin in all_asins:
+        inv = inv_map.get(asin, {"fulfillable": 0, "inbound": 0, "name": ""})
+        vel = vel_map.get(asin, {"units_7d": 0, "avg_daily_7d": 0, "units_30d": 0, "avg_daily_30d": 0})
+        avg_daily = vel["avg_daily_7d"]
+        fulfillable = inv["fulfillable"]
+
+        # Days of Cover
+        days_of_cover = round(fulfillable / avg_daily, 1) if avg_daily > 0 else None
+        weeks_of_cover = round(days_of_cover / 7.0, 1) if days_of_cover is not None else None
+
+        # Reorder Point = (velocity * lead_time) + safety_stock
+        safety_stock = round(avg_daily * DEFAULT_SAFETY_STOCK_DAYS)
+        reorder_point = round(avg_daily * DEFAULT_LEAD_TIME_DAYS) + safety_stock
+
+        # Stockout risk flag
+        stockout_risk = (days_of_cover is not None and days_of_cover < DEFAULT_LEAD_TIME_DAYS)
+
+        # Sell-Through Rate (90d units / avg inventory)
+        units_90d = str_map.get(asin, 0)
+        sell_through_rate = round(units_90d / fulfillable, 2) if fulfillable > 0 else None
+
+        # Return Rate
+        refunds = refund_map.get(asin, {"count": 0, "amount": 0})
+        total_units = total_units_90d.get(asin, 0)
+        return_rate = round(refunds["count"] / total_units, 4) if total_units > 0 else None
+
+        items.append({
+            "asin": asin,
+            "name": inv.get("name", ""),
+            "fulfillable": fulfillable,
+            "inbound": inv["inbound"],
+            "avgDaily7d": vel["avg_daily_7d"],
+            "avgDaily30d": vel["avg_daily_30d"],
+            "daysOfCover": days_of_cover,
+            "weeksOfCover": weeks_of_cover,
+            "reorderPoint": reorder_point,
+            "safetyStock": safety_stock,
+            "stockoutRisk": stockout_risk,
+            "sellThroughRate": sell_through_rate,
+            "units90d": units_90d,
+            "returnRate": return_rate,
+            "refundCount90d": refunds["count"],
+            "refundAmount90d": refunds["amount"],
+        })
+
+    # Sort by stockout risk first, then days of cover ascending
+    items.sort(key=lambda x: (
+        0 if x["stockoutRisk"] else 1,
+        x["daysOfCover"] if x["daysOfCover"] is not None else 9999
+    ))
+
+    return {
+        "items": items,
+        "defaults": {
+            "leadTimeDays": DEFAULT_LEAD_TIME_DAYS,
+            "safetyStockDays": DEFAULT_SAFETY_STOCK_DAYS,
+        },
+        "count": len(items),
+    }
+
+
 @router.post("/api/upload/warehouse-excel")
 async def upload_warehouse_excel(file: UploadFile = File(...)):
     """Upload an Excel file to refresh warehouse data and optionally item master.

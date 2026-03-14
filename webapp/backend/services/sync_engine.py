@@ -32,7 +32,7 @@ logger = logging.getLogger("golfgen")
 #   startup backfill  = max 3 calls/startup (throttled to 1 per 4h)
 #   Budget cap of 14 leaves headroom and resets at midnight Central.
 
-_HISTORICAL_REPORT_BUDGET = 14      # max historical createReport calls per day
+_HISTORICAL_REPORT_BUDGET = 30      # max historical createReport calls per day (raised for 2-year backfill)
 _report_budget: dict = {"date": None, "used": 0}
 _report_budget_lock = threading.Lock()
 
@@ -76,7 +76,7 @@ def _auto_backfill_if_needed():
     - Stops immediately on QuotaExceeded (don't hammer 14 dead chunks)
     - The nightly deep sync (3am) is the real workhorse for full gap-fill
     """
-    MAX_CHUNKS_PER_RUN = 3      # How many 30-day chunks to pull per startup call
+    MAX_CHUNKS_PER_RUN = 25     # How many 30-day chunks to pull per startup call (raised for 2-year backfill)
     THROTTLE_HOURS = 4          # Skip if a backfill ran within this many hours
     import time as _time
     import gzip as gz
@@ -108,7 +108,8 @@ def _auto_backfill_if_needed():
         logger.warning(f"Auto-backfill: throttle check error: {te}")
 
     # ── Coverage check ────────────────────────────────────────────────────────
-    expected_start = dt_date(2024, 4, 1)
+    # Full 2-year backfill window — S&T report supports up to 2 years of history
+    expected_start = dt_date(2024, 3, 14)
     expected_end = datetime.now(ZoneInfo("America/Chicago")).date() - timedelta(days=1)
     expected_days = (expected_end - expected_start).days + 1
 
@@ -120,7 +121,7 @@ def _auto_backfill_if_needed():
         total_days = count_row[0] if count_row else 0
 
         existing_rows = con.execute(
-            "SELECT DISTINCT date FROM daily_sales WHERE asin = 'ALL' AND date >= '2024-04-01'"
+            "SELECT DISTINCT date FROM daily_sales WHERE asin = 'ALL' AND date >= '2024-03-14'"
         ).fetchall()
         existing_dates: set = set()
         for r in existing_rows:
@@ -421,14 +422,14 @@ def run_nightly_deep_sync():
     reports_api = Reports(credentials=creds, marketplace=Marketplaces.US)
     today = datetime.now(ZoneInfo("America/Chicago")).date()
     yesterday = today - timedelta(days=1)
-    backfill_start = dt_date(2024, 4, 1)
+    backfill_start = dt_date(2024, 3, 14)  # Full 2-year window
 
     # ── Step 1: Detect date gaps ──────────────────────────────────
     con = get_db_rw()
     try:
         existing_dates = set()
         rows = con.execute(
-            "SELECT DISTINCT date FROM daily_sales WHERE asin = 'ALL' AND date >= '2024-04-01'"
+            "SELECT DISTINCT date FROM daily_sales WHERE asin = 'ALL' AND date >= '2024-03-14'"
         ).fetchall()
         for r in rows:
             d = r[0]
@@ -637,6 +638,73 @@ def run_nightly_deep_sync():
     }
 
 
+# ── Daily FBA Inventory Snapshot ──────────────────────────────────────────
+def run_fba_inventory_snapshot():
+    """Snapshot current fba_inventory into fba_inventory_snapshots for historical trends.
+
+    Required for sell-through rate trends and inventory health tracking.
+    Runs once daily (scheduled at 11pm Central after all syncs are done).
+    Copies all current fba_inventory rows into the snapshot table with today's date.
+    Idempotent: uses INSERT OR REPLACE so re-runs on the same day just update.
+    """
+    started = datetime.now(ZoneInfo("America/Chicago"))
+    today = started.date()
+
+    try:
+        con = get_db()
+        inv_rows = con.execute("""
+            SELECT asin, sku, product_name,
+                   COALESCE(fulfillable_quantity, 0),
+                   COALESCE(inbound_working_quantity, 0),
+                   COALESCE(inbound_shipped_quantity, 0),
+                   COALESCE(inbound_receiving_quantity, 0),
+                   COALESCE(reserved_quantity, 0),
+                   COALESCE(unfulfillable_quantity, 0),
+                   COALESCE(division, 'unknown'),
+                   COALESCE(customer, 'amazon'),
+                   COALESCE(platform, 'sp_api')
+            FROM fba_inventory
+        """).fetchall()
+        con.close()
+
+        if not inv_rows:
+            logger.info("FBA snapshot: no inventory rows to snapshot")
+            _write_sync_log("fba_inventory_snapshot", started, "SUCCESS", inserted=0)
+            return {"status": "SUCCESS", "rows": 0}
+
+        wcon = get_db_rw()
+        inserted = 0
+        for r in inv_rows:
+            wcon.execute("""
+                INSERT INTO fba_inventory_snapshots
+                (snapshot_date, asin, sku, product_name,
+                 fulfillable_quantity, inbound_working_quantity,
+                 inbound_shipped_quantity, inbound_receiving_quantity,
+                 reserved_quantity, unfulfillable_quantity,
+                 division, customer, platform)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT (snapshot_date, asin) DO UPDATE SET
+                    fulfillable_quantity = EXCLUDED.fulfillable_quantity,
+                    inbound_working_quantity = EXCLUDED.inbound_working_quantity,
+                    inbound_shipped_quantity = EXCLUDED.inbound_shipped_quantity,
+                    inbound_receiving_quantity = EXCLUDED.inbound_receiving_quantity,
+                    reserved_quantity = EXCLUDED.reserved_quantity,
+                    unfulfillable_quantity = EXCLUDED.unfulfillable_quantity,
+                    created_at = CURRENT_TIMESTAMP
+            """, [str(today), r[0], r[1], r[2], r[3], r[4], r[5], r[6], r[7], r[8], r[9], r[10], r[11]])
+            inserted += 1
+        wcon.close()
+
+        logger.info(f"FBA snapshot: {inserted} rows captured for {today}")
+        _write_sync_log("fba_inventory_snapshot", started, "SUCCESS", inserted=inserted)
+        return {"status": "SUCCESS", "rows": inserted, "date": str(today)}
+
+    except Exception as e:
+        logger.error(f"FBA snapshot error: {e}")
+        _write_sync_log("fba_inventory_snapshot", started, "FAILED", error=str(e))
+        return {"status": "FAILED", "error": str(e)}
+
+
 # ── Incremental Gap Fill (runs every 2 hours) ──────────────────────────────
 def run_incremental_gap_fill():
     """Pull exactly ONE missing historical chunk (30 days) every 2 hours.
@@ -658,7 +726,7 @@ def run_incremental_gap_fill():
     started = datetime.now(ZoneInfo("America/Chicago"))
 
     # ── Find missing dates ────────────────────────────────────────────────────
-    expected_start = dt_date(2024, 4, 1)
+    expected_start = dt_date(2024, 3, 14)  # Full 2-year window
     expected_end = datetime.now(ZoneInfo("America/Chicago")).date() - timedelta(days=1)
     expected_days = (expected_end - expected_start).days + 1
 
@@ -670,7 +738,7 @@ def run_incremental_gap_fill():
         total_days = count_row[0] if count_row else 0
 
         existing_rows = con.execute(
-            "SELECT DISTINCT date FROM daily_sales WHERE asin = 'ALL' AND date >= '2024-04-01'"
+            "SELECT DISTINCT date FROM daily_sales WHERE asin = 'ALL' AND date >= '2024-03-14'"
         ).fetchall()
         existing_dates: set = set()
         for r in existing_rows:

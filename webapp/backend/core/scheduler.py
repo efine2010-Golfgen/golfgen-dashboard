@@ -17,7 +17,7 @@ from apscheduler.triggers.cron import CronTrigger
 from core.config import DB_PATH, DB_DIR, TIMEZONE, SYNC_INTERVAL_HOURS
 from services.sp_api import _sync_today_orders, _run_sp_api_sync, _backfill_orders
 from services.ads_api import _sync_ads_data, _sync_pricing_and_coupons
-from services.sync_engine import _auto_backfill_if_needed, _write_sync_log, run_nightly_deep_sync, run_incremental_gap_fill
+from services.sync_engine import _auto_backfill_if_needed, _write_sync_log, run_nightly_deep_sync, run_incremental_gap_fill, run_fba_inventory_snapshot
 from services.analytics_rollup import run_full_rollup
 from services.backup import restore_from_latest_backup
 
@@ -35,6 +35,7 @@ _scheduler_locks = {
     "analytics": threading.Lock(),
     "backup": threading.Lock(),
     "docs": threading.Lock(),
+    "inventory_snapshot": threading.Lock(),
 }
 
 
@@ -222,6 +223,20 @@ def _run_scheduled_gap_fill():
         _scheduler_locks["sp_api"].release()
 
 
+def _run_scheduled_inventory_snapshot():
+    """Wrapper for daily FBA inventory snapshot with scheduler-level mutex."""
+    if not _scheduler_locks["inventory_snapshot"].acquire(blocking=False):
+        logger.warning("Skipping inventory snapshot — previous run still active")
+        return
+    try:
+        result = run_fba_inventory_snapshot()
+        logger.info(f"Daily FBA inventory snapshot: {result}")
+    except Exception as e:
+        logger.error(f"FBA inventory snapshot failed: {e}")
+    finally:
+        _scheduler_locks["inventory_snapshot"].release()
+
+
 def _run_duckdb_backup():
     """Nightly backup: Google Drive (full DB) then GitHub (manifest + docs). Scheduler-level mutex."""
     if not _scheduler_locks["backup"].acquire(blocking=False):
@@ -373,8 +388,8 @@ async def _sync_loop():
         scheduler.add_job(_run_scheduled_sp_api_sync, CronTrigger(hour=15, minute=0, timezone="America/Chicago"), id="sp_api_sync_3pm")
         scheduler.add_job(_run_scheduled_sp_api_sync, CronTrigger(hour=18, minute=0, timezone="America/Chicago"), id="sp_api_sync_6pm")
 
-        # Schedule today-orders sync every hour on the half-hour (fast, ~10s)
-        scheduler.add_job(_run_scheduled_today_sync, CronTrigger(minute=30, second=0, timezone="America/Chicago"), id="today_sync_hourly")
+        # Schedule today-orders sync every 15 minutes (fast, ~10s)
+        scheduler.add_job(_run_scheduled_today_sync, CronTrigger(minute='*/15', second=0, timezone="America/Chicago"), id="today_sync_15min")
 
         # Schedule ads sync every 2 hours (0, 2, 4, 6, 8, ... hours)
         scheduler.add_job(_run_scheduled_ads_sync, CronTrigger(hour='*/2', minute=0, second=0, timezone="America/Chicago"), id="ads_sync_2hourly")
@@ -396,11 +411,14 @@ async def _sync_loop():
         # Pulls one missing 30-day historical chunk per run; self-deactivates at 97% coverage
         scheduler.add_job(_run_scheduled_gap_fill, CronTrigger(hour='*/2', minute=45, second=0, timezone="America/Chicago"), id="gap_fill_2hourly")
 
+        # Schedule daily FBA inventory snapshot at 11pm Central (after all syncs, before backup)
+        scheduler.add_job(_run_scheduled_inventory_snapshot, CronTrigger(hour=23, minute=0, timezone="America/Chicago"), id="fba_inventory_snapshot_11pm", misfire_grace_time=3600)
+
         # Schedule analytics rollup at 2:30am Central (after backup completes)
         scheduler.add_job(_run_scheduled_analytics_rollup, CronTrigger(hour=2, minute=30, timezone="America/Chicago"), id="analytics_rollup_230am", misfire_grace_time=3600)
 
         await scheduler.start()
-        logger.info("APScheduler started with 4 daily SP-API syncs, hourly ads/pricing, docs updates, and nightly backup (America/Chicago)")
+        logger.info("APScheduler started with 4 daily SP-API syncs, 15-min today sync, hourly ads/pricing, docs updates, and nightly backup (America/Chicago)")
 
         # Startup catchup: if current time is past a scheduled sync time and no sync_log entry exists for today, run immediately
         await _startup_sync_catchup()

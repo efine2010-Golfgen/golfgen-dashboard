@@ -761,9 +761,9 @@ _reg(MetricDef(
     today_available  = True,
     null_rule        = "show_dash",
     unit             = "days",
-    implementation_status = "planned_phase4",
+    implementation_status = "live",
     alert_threshold  = {"below": 14},
-    notes            = "Data EXISTS now in fba_inventory + daily_sales. Just needs surfacing on Inventory tab.",
+    notes            = "Surfaced via /api/inventory/kpis endpoint. Uses fba_inventory + daily_sales 7d velocity.",
 ))
 
 _reg(MetricDef(
@@ -777,7 +777,7 @@ _reg(MetricDef(
     today_available  = True,
     null_rule        = "show_dash",
     unit             = "weeks",
-    implementation_status = "planned_phase4",
+    implementation_status = "live",
     alert_threshold  = {"below": 2},
 ))
 
@@ -795,8 +795,8 @@ _reg(MetricDef(
     today_available  = True,
     null_rule        = "show_dash",
     unit             = "count",
-    implementation_status = "planned_phase4",
-    notes            = "lead_time_days and safety_stock_units must be maintained in item_master or item_plan.",
+    implementation_status = "live",
+    notes            = "Surfaced via /api/inventory/kpis. Default lead_time=45d, safety_stock=14d. Override via item_master.",
 ))
 
 _reg(MetricDef(
@@ -810,7 +810,7 @@ _reg(MetricDef(
     today_available  = True,
     null_rule        = "show_dash",
     unit             = "pct",
-    implementation_status = "planned_phase4",
+    implementation_status = "live",
     alert_threshold  = {"equals": 1},
 ))
 
@@ -828,8 +828,8 @@ _reg(MetricDef(
     today_available  = True,
     null_rule        = "show_dash",
     unit             = "pct",
-    implementation_status = "planned_phase4",
-    notes            = "Requires daily FBA inventory snapshots. Add nightly inventory snapshot job.",
+    implementation_status = "live",
+    notes            = "Surfaced via /api/inventory/kpis. Uses current fulfillable as denominator (snapshot job adds history).",
 ))
 
 _reg(MetricDef(

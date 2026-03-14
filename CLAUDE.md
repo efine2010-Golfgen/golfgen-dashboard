@@ -204,7 +204,7 @@ Full definitions in `core/data_contracts.py`. Quick reference:
 Global `_sync_lock` (threading.Lock) in sp_api.py prevents overlapping syncs.
 `_sync_running` tracks which sync holds the lock ("today_orders" or "full_sync").
 
-### Today Sync (hourly at :30)
+### Today Sync (every 15 minutes)
 - Fetches orders from past 2 days via Orders API
 - 50-order cap to prevent long-running syncs
 - 3 retries with max 15s delay on throttle
@@ -228,11 +228,14 @@ Accessible via GET /api/debug/logs for remote debugging without Railway CLI.
 
 ## Scheduled Jobs (all in core/scheduler.py)
 - SP-API full sync: 9am, 12pm, 3pm, 6pm Central
-- Today quick sync: every hour at :30
+- Today quick sync: every 15 minutes
 - Ads sync: every 2 hours
 - Pricing sync: every hour at :30
 - Docs update: 8am + 8pm Central
-- DuckDB backup to Google Drive: 2am Central
+- FBA inventory snapshot: 11pm Central (daily, captures inventory history)
+- Google Drive + GitHub backup: 2am Central
+- Nightly deep sync: 3am Central (fills all gaps + re-pulls last 30 days)
+- Gap-fill: every 2 hours at :45 (one 30-day chunk per run)
 - Analytics rollup: 2:30am Central (after backup)
 ## Environment Variables (set in Railway)
 SP_API_CLIENT_ID, SP_API_CLIENT_SECRET, SP_API_REFRESH_TOKEN,

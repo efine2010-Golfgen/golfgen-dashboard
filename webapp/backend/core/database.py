@@ -1025,6 +1025,35 @@ def _init_analytics_tables():
     con.close()
 
 
+def _init_inventory_snapshot_table():
+    """Create the fba_inventory_snapshots table for daily inventory history.
+
+    Required for sell-through rate trends and inventory health over time.
+    One row per ASIN per snapshot_date.
+    """
+    con = get_db_rw()
+    con.execute("""
+        CREATE TABLE IF NOT EXISTS fba_inventory_snapshots (
+            snapshot_date    DATE NOT NULL,
+            asin             VARCHAR NOT NULL,
+            sku              VARCHAR,
+            product_name     VARCHAR,
+            fulfillable_quantity    INTEGER DEFAULT 0,
+            inbound_working_quantity INTEGER DEFAULT 0,
+            inbound_shipped_quantity INTEGER DEFAULT 0,
+            inbound_receiving_quantity INTEGER DEFAULT 0,
+            reserved_quantity       INTEGER DEFAULT 0,
+            unfulfillable_quantity  INTEGER DEFAULT 0,
+            division         VARCHAR DEFAULT 'unknown',
+            customer         VARCHAR DEFAULT 'amazon',
+            platform         VARCHAR DEFAULT 'sp_api',
+            created_at       TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            PRIMARY KEY (snapshot_date, asin)
+        )
+    """)
+    con.close()
+
+
 def init_all_tables():
     """Initialize all DuckDB tables on startup."""
     try:
@@ -1081,6 +1110,12 @@ def init_all_tables():
         logger.info("MFA tables initialized")
     except Exception as e:
         logger.error(f"MFA table init error: {e}")
+
+    try:
+        _init_inventory_snapshot_table()
+        logger.info("Inventory snapshot table initialized")
+    except Exception as e:
+        logger.error(f"Inventory snapshot table init error: {e}")
 
     # ── Auto-tag item_master divisions based on product names ──
     try:
