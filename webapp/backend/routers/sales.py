@@ -1291,7 +1291,7 @@ def sales_debug_today():
         return {"error": str(e)}
 
 
-@router.get("/api/sales/debug-today-full")
+@router.get("/api/debug/today-full")
 def sales_debug_today_full():
     """Full Today pipeline trace — shows daily_sales AND orders results, no auth."""
     try:
