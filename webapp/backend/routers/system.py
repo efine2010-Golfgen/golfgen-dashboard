@@ -10,7 +10,7 @@ from pathlib import Path
 from fastapi import APIRouter, Query, Request
 from fastapi.responses import JSONResponse
 
-from core.config import DB_PATH, DB_DIR, TIMEZONE, DOCS_DIR
+from core.config import DB_PATH, DB_DIR, TIMEZONE, DOCS_DIR, USE_POSTGRES, DATABASE_URL
 
 logger = logging.getLogger("golfgen")
 router = APIRouter()
@@ -25,14 +25,20 @@ def _load_sp_api_credentials():
 @router.get("/api/health")
 def health():
     now = datetime.now(ZoneInfo("America/Chicago"))
+    db_engine = "postgresql" if USE_POSTGRES else "duckdb"
+    db_info = {"engine": db_engine, "tables": {}}
+    if USE_POSTGRES:
+        # Show masked connection string (hide password)
+        import re
+        masked = re.sub(r'://[^@]+@', '://***@', DATABASE_URL) if DATABASE_URL else ""
+        db_info["connection"] = masked
+    else:
+        db_info["path"] = str(DB_PATH)
+        db_info["size_mb"] = round(DB_PATH.stat().st_size / 1024 / 1024, 2) if DB_PATH.exists() else 0
     result = {
         "status": "healthy",
         "timestamp": now.isoformat(),
-        "database": {
-            "path": str(DB_PATH),
-            "size_mb": round(DB_PATH.stat().st_size / 1024 / 1024, 2) if DB_PATH.exists() else 0,
-            "tables": {},
-        },
+        "database": db_info,
         "last_sync": {},
         "has_sp_api_creds": _load_sp_api_credentials() is not None,
     }
@@ -739,7 +745,6 @@ async def trigger_backup(request: Request):
 @router.get("/api/backup/status")
 async def backup_status(request: Request):
     """Get Google Drive backup status — last backup, total count, recent list."""
-    import os as _os
     from core.auth import get_session
     from services.backup import get_backup_status as _get_backup_status
 
@@ -750,15 +755,6 @@ async def backup_status(request: Request):
         raise HTTPException(status_code=401, detail="Not authenticated")
 
     result = _get_backup_status()
-    # Debug: if backup reports not configured, check env vars directly
-    if not result.get("configured"):
-        sa = _os.environ.get("GOOGLE_SERVICE_ACCOUNT_JSON", "")
-        ot = _os.environ.get("GOOGLE_OAUTH_REFRESH_TOKEN", "")
-        fi = _os.environ.get("BACKUP_DRIVE_FOLDER_ID", "")
-        result["_debug_env"] = {
-            "sa_len": len(sa), "oauth_len": len(ot), "folder_len": len(fi),
-            "sa_bool": bool(sa), "oauth_bool": bool(ot), "folder_bool": bool(fi),
-        }
     return result
 
 

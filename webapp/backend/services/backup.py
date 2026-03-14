@@ -255,7 +255,6 @@ def get_backup_status() -> dict:
     }
     """
     settings = _get_settings()
-    logger.info(f"Backup status check: has_credentials={settings['has_credentials']}, has_folder_id={settings['has_folder_id']}")
     if not settings["has_credentials"] or not settings["has_folder_id"]:
         return {
             "configured": False,

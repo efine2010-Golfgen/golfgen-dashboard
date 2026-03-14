@@ -1,5 +1,5 @@
 """
-GolfGen Dashboard API — FastAPI backend serving Amazon SP-API data from DuckDB.
+GolfGen Dashboard API — FastAPI backend with PostgreSQL (or DuckDB fallback).
 Includes background data sync from Amazon SP-API (runs every 2 hours on Railway).
 """
 import os
