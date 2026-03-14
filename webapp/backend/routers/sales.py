@@ -113,7 +113,8 @@ def _build_product_list(con, cutoff: str) -> list:
 
     products = []
     for r in rows:
-        asin, revenue, units, sessions, orders = r
+        asin, revenue, units, sessions, glance_views = r
+        orders = units  # proxy until per-ASIN order count is available
         api_name = inv_names.get(asin, {}).get("product_name", "")
         if units == 0:
             continue
