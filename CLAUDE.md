@@ -5,7 +5,7 @@ Read this entire file before doing anything else in every session.
 ## Project Overview
 GolfGen Commerce Dashboard — internal tool for GolfGen LLC /
 Elite Global Brands, Bentonville AR.
-Live URL: https://golfgen-dashboard-production-ce30.up.railway.app
+Live URL: https://golfgen-dashboard-production.up.railway.app
 GitHub: https://github.com/efine2010-Golfgen/golfgen-dashboard
 Backup Repo: https://github.com/efine2010-Golfgen/golfgen-backups
 
@@ -16,8 +16,7 @@ Auto-deploys to Railway when code is pushed to main branch on GitHub.
 3. cp -r webapp/frontend/dist webapp/backend/dist
 4. git add relevant files && git commit -m "your message"
 5. git push origin main
-6. Railway auto-deploys within 2 minutes
-7. Verify: curl -s https://golfgen-dashboard-production-ce30.up.railway.app/api/health | python3 -m json.tool
+6. Railway auto-deploys within 2 minutes7. Verify: curl -s https://golfgen-dashboard-production.up.railway.app/api/health | python3 -m json.tool
 
 NEVER manually restart Railway. NEVER use Railway CLI.
 
@@ -44,8 +43,7 @@ SKU / ASIN
 | golf        | amazon               | sp_api             | Auto (scheduled)   | LIVE ✓       |
 | golf        | walmart_marketplace  | walmart_api        | Auto               | Phase 5      |
 | golf        | walmart_stores       | scintilla          | Report upload      | Phase 4      |
-| golf        | shopify              | shopify_api        | Auto               | Phase 5      |
-| golf        | first_tee            | excel_upload       | Manual upload      | Phase 4      |
+| golf        | shopify              | shopify_api        | Auto               | Phase 5      || golf        | first_tee            | excel_upload       | Manual upload      | Phase 4      |
 | housewares  | amazon               | sp_api             | Auto (scheduled)   | LIVE ✓       |
 | housewares  | walmart_marketplace  | walmart_api        | Auto               | Phase 5      |
 | housewares  | walmart_stores       | scintilla          | Report upload      | Phase 4      |
@@ -74,7 +72,6 @@ If ASIN not found → division = 'unknown', flag for review.
 All routers use `from core.hierarchy import hierarchy_filter` for consistent
 division/customer/platform filtering. Never build filter SQL manually.
 The helper returns (sql_fragment, params) where sql_fragment starts with " AND ...".
-
 ## File Structure
 ```
 webapp/
@@ -84,7 +81,7 @@ webapp/
     dist/               ← compiled React frontend (copy here after build)
     core/
       __init__.py
-      database.py        ← DuckDB connection, DB_PATH, all CREATE TABLE
+      database.py        ← DbConnection wrapper (DuckDB ↔ PostgreSQL), get_db()/get_db_rw()
       config.py          ← all env vars and constants
       scheduler.py       ← APScheduler jobs, startup sync, catchup
       auth.py            ← login, logout, sessions, permissions
@@ -104,11 +101,10 @@ webapp/
       permissions.py     ← /api/permissions/*
       mfa.py             ← /api/mfa/*
       supply_chain.py    ← /api/supply-chain/*
-      system.py          ← /api/sync/*, /api/backup/*, /api/docs/*
-    services/
+      system.py          ← /api/sync/*, /api/backup/*, /api/docs/*, /api/debug/*    services/
       __init__.py
       sync_engine.py     ← sync orchestration, _write_sync_log
-      sp_api.py          ← all SP-API logic (LIVE) — mutex, retry, backoff
+      sp_api.py          ← all SP-API logic (LIVE) — mutex, retry, backoff, timeout
       ads_api.py         ← Amazon Ads API (LIVE) — mutex, retry
       analytics_rollup.py ← nightly rollup to analytics tables
       backup.py          ← Google Drive + GitHub backup functions
@@ -128,12 +124,13 @@ webapp/
 ```
 
 ## Database
-- Engine: DuckDB (migrating to PostgreSQL — next priority)
-- Live path on Railway: /app/data/golfgen_amazon.duckdb
-- DB_PATH env var controls which path is used
-- Single connection only — defined in core/database.py
-- Never open a second duckdb.connect() anywhere
-
+- Engine: DuckDB (PostgreSQL migration CODE COMPLETE — awaiting provisioning)
+- Dual-mode wrapper: core/database.py DbConnection class auto-detects DuckDB vs PostgreSQL
+- When DATABASE_URL env var is set → uses PostgreSQL; otherwise → uses DuckDB
+- Live path on Railway (current): /app/data/golfgen_amazon.duckdb
+- DB_PATH env var controls DuckDB path
+- Access via get_db() (read-only) and get_db_rw() (read-write) from core.database
+- SQL translator: _translate_sql_for_pg() converts ? → %s, INSERT OR IGNORE → ON CONFLICT DO NOTHING, etc.
 ### All Tables (27 total)
 Transactional (all have division + customer + platform):
   orders, daily_sales, financial_events, fba_inventory, advertising,
@@ -162,6 +159,41 @@ System:
 - sync_log uses `execution_time_seconds` NOT `duration_seconds`
 - orders table has `asin` NOT `sku`
 
+### Current Data Counts (as of March 13, 2026)
+- orders: 200 (recent window)
+- daily_sales: 1,072 (through March 13)
+- financial_events: 1,357 (1,280 nonzero)
+- fba_inventory: 70
+- Refunds: 182 rows / $26,377
+- Shipments: 1,175 rows / $173,003 in charges
+## Sync Architecture
+
+### Sync Mutex
+Global `_sync_lock` (threading.Lock) in sp_api.py prevents overlapping syncs.
+`_sync_running` tracks which sync holds the lock ("today_orders" or "full_sync").
+
+### Today Sync (hourly at :30)
+- Fetches orders from past 2 days via Orders API
+- 50-order cap to prevent long-running syncs
+- 3 retries with max 15s delay on throttle
+- 120-second hard timeout via concurrent.futures
+- If timeout → releases lock so full sync can proceed
+
+### Full Sync (9am, 12pm, 3pm, 6pm Central)
+- Orders + Financial Events + Inventory + Sales & Traffic Report
+- Financial events parsed via `_money()` helper (extracts CurrencyAmount from dicts)
+- This is the sync that populates financial_events, daily_sales, refunds
+
+### In-Memory Log Buffer
+Ring buffer (200 entries) with custom logging.Handler in sp_api.py.
+Accessible via GET /api/debug/logs for remote debugging without Railway CLI.
+
+## Debug Endpoints (no auth required)
+- GET /api/debug/db-diagnostic — recent daily_sales, financial_events summary, sync_log
+- GET /api/debug/test-financial-parse — fetches one financial event from API, shows parsed output
+- GET /api/debug/logs — recent in-memory log messages from sync engine
+- GET /api/health — row counts, DB size, uptime
+
 ## Scheduled Jobs (all in core/scheduler.py)
 - SP-API full sync: 9am, 12pm, 3pm, 6pm Central
 - Today quick sync: every hour at :30
@@ -170,7 +202,6 @@ System:
 - Docs update: 8am + 8pm Central
 - DuckDB backup to Google Drive: 2am Central
 - Analytics rollup: 2:30am Central (after backup)
-
 ## Environment Variables (set in Railway)
 SP_API_CLIENT_ID, SP_API_CLIENT_SECRET, SP_API_REFRESH_TOKEN,
 SP_API_MARKETPLACE_ID (ATVPDKIKX0DER), SP_API_AWS_ACCESS_KEY,
@@ -179,7 +210,8 @@ ADS_API_CLIENT_ID, ADS_API_CLIENT_SECRET, ADS_API_REFRESH_TOKEN,
 GOOGLE_SERVICE_ACCOUNT_JSON, BACKUP_DRIVE_FOLDER_ID,
 GOOGLE_OAUTH_CLIENT_ID, GOOGLE_OAUTH_CLIENT_SECRET,
 GITHUB_TOKEN, BACKUP_GITHUB_REPO (efine2010-Golfgen/golfgen-backups),
-DB_PATH (/app/data/golfgen_amazon.duckdb)
+DB_PATH (/app/data/golfgen_amazon.duckdb),
+DATABASE_URL (not yet set — set this to PostgreSQL connection string to activate PG mode)
 
 ## Users
 - Eric (eric@egbrands.com) — Admin, full access
@@ -197,11 +229,10 @@ DB_PATH (/app/data/golfgen_amazon.duckdb)
 - Audit log table + viewer
 
 ## Critical Rules — Follow in Every Session
-1. DuckDB connection defined ONCE in core/database.py — never open duckdb.connect() elsewhere
+1. Database access via get_db() / get_db_rw() from core.database ONLY — never call duckdb.connect() directly
 2. DB_PATH defined ONCE in core/config.py only
 3. All datetime.now() must use ZoneInfo("America/Chicago") — never utcnow()
-4. Every CREATE TABLE must have IF NOT EXISTS
-5. Never use DROP TABLE or DELETE FROM on existing data tables
+4. Every CREATE TABLE must have IF NOT EXISTS5. Never use DROP TABLE or DELETE FROM on existing data tables
 6. All CREATE SEQUENCE before CREATE TABLE in database.py
 7. After any frontend change: npm run build → copy dist → commit → push
 8. sync_log columns: records_processed, execution_time_seconds
@@ -212,6 +243,8 @@ DB_PATH (/app/data/golfgen_amazon.duckdb)
 13. All routers use core.hierarchy.hierarchy_filter() — never build filter SQL manually
 14. Auto-save debounced 500ms — never save on every keystroke
 15. All formula math client-side in React — no server round-trips
+16. SQL must be dialect-aware — use DbConnection wrapper which auto-translates for PostgreSQL
+17. Never modify _sync_lock or _sync_running outside the established mutex pattern in sp_api.py
 
 ## Roadmap Status (as of March 13, 2026)
 
@@ -219,13 +252,13 @@ DB_PATH (/app/data/golfgen_amazon.duckdb)
 All 10 items done: returns bug, YOY bug, SKU bug, ads sync, sync mutex,
 transaction rollback, retry/backoff, Google SSO, session timeout, audit log.
 
-### Phase 2 — Data Layer + Division Hierarchy: ~90% COMPLETE
+### Phase 2 — Data Layer + Division Hierarchy: CODE COMPLETE ✓
 Done: division/customer/platform columns on all tables, item_master seeded,
 SP-API auto-tagging, hierarchy filter on all routers (shared helper),
 HierarchyFilter.jsx in header, staging tables created, analytics tables created,
-nightly analytics rollup at 2:30am.
-Remaining: PostgreSQL migration (scripts exist, not yet executed).
-
+nightly analytics rollup at 2:30am, PostgreSQL dual-mode wrapper (DbConnection),
+SQL translator for DuckDB↔PostgreSQL, all 56+ duckdb.connect() calls eliminated.
+**Next step:** Eric provisions PostgreSQL on Railway + sets DATABASE_URL env var.
 ### Phase 3 — Redundancy + Backup Hardening: PARTIAL
 Done: Nightly Google Drive backup (2am), nightly GitHub backup.
 Remaining: Hot standby, weekly backup verification, 6-hour snapshots.
