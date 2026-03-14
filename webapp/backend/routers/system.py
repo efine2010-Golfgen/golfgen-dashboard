@@ -93,6 +93,16 @@ async def trigger_sync_get():
     return {"status": "sync_complete", "today_synced": True}
 
 
+@router.get("/api/sync/deep")
+async def trigger_deep_sync():
+    """Manually trigger the nightly deep sync (fills all data gaps + re-pulls last 30 days).
+    WARNING: This can take 10-30 minutes depending on gap count. Runs in background."""
+    from services.sync_engine import run_nightly_deep_sync
+    import asyncio
+    asyncio.get_event_loop().run_in_executor(None, run_nightly_deep_sync)
+    return {"status": "deep_sync_started", "note": "Running in background. Check /api/debug/logs for progress."}
+
+
 @router.get("/api/debug/today-orders")
 def debug_today_orders():
     """Show raw order data for today to debug pricing issues."""

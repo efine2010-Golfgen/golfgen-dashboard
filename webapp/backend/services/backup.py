@@ -486,3 +486,124 @@ def get_github_backup_status() -> dict:
             "repo": repo_name,
             "configured": bool(os.environ.get("GITHUB_TOKEN")) and bool(repo_name),
         }
+
+
+# ── Restore from Google Drive backup on startup ─────────────────
+def restore_from_latest_backup() -> dict:
+    """Download the latest Google Drive backup and restore DuckDB from it.
+
+    Called on container startup BEFORE any sync jobs. If a backup exists and
+    is newer than the seed database, the raw .duckdb file inside the archive
+    replaces the seed. This ensures every deploy starts with the most recent
+    data rather than the stale git-committed snapshot.
+
+    Returns a dict with restore status and details.
+    """
+    settings = _get_settings()
+    if not settings["has_credentials"] or not settings["has_folder_id"]:
+        logger.info("Restore: Google Drive not configured — using seed DB")
+        return {"status": "SKIPPED", "reason": "Google Drive not configured"}
+
+    try:
+        drive = _get_drive_service()
+        folder_id = settings["folder_id"]
+
+        # Find the most recent backup
+        query = (
+            f"'{folder_id}' in parents "
+            f"and name contains 'golfgen_backup_' "
+            f"and trashed = false"
+        )
+        results = drive.files().list(
+            q=query,
+            fields="files(id,name,size,createdTime)",
+            orderBy="createdTime desc",
+            pageSize=1,
+        ).execute()
+        files = results.get("files", [])
+
+        if not files:
+            logger.info("Restore: No backups found on Google Drive — using seed DB")
+            return {"status": "SKIPPED", "reason": "No backups found"}
+
+        latest = files[0]
+        backup_name = latest["name"]
+        backup_id = latest["id"]
+        backup_size = int(latest.get("size", 0))
+        backup_size_mb = round(backup_size / (1024 * 1024), 2)
+        logger.info(f"Restore: Found backup {backup_name} ({backup_size_mb} MB) — downloading...")
+
+        # Download the backup archive
+        from googleapiclient.http import MediaIoBaseDownload
+        import io
+
+        request = drive.files().get_media(fileId=backup_id)
+        buffer = io.BytesIO()
+        downloader = MediaIoBaseDownload(buffer, request)
+
+        done = False
+        while not done:
+            _, done = downloader.next_chunk()
+
+        buffer.seek(0)
+        logger.info(f"Restore: Downloaded {backup_size_mb} MB")
+
+        # Extract the raw .duckdb file from the archive
+        import shutil
+        with tempfile.TemporaryDirectory() as tmpdir:
+            archive_path = Path(tmpdir) / "backup.tar.gz"
+            with open(archive_path, "wb") as f:
+                f.write(buffer.read())
+
+            with tarfile.open(str(archive_path), "r:gz") as tar:
+                tar.extractall(path=tmpdir)
+
+            # Look for the .duckdb file in the extracted archive
+            duckdb_file = None
+            for root, dirs, fnames in os.walk(tmpdir):
+                for fname in fnames:
+                    if fname.endswith(".duckdb"):
+                        duckdb_file = Path(root) / fname
+                        break
+                if duckdb_file:
+                    break
+
+            if not duckdb_file:
+                logger.error("Restore: No .duckdb file found in backup archive")
+                return {"status": "FAILED", "reason": "No .duckdb in archive"}
+
+            restored_size = duckdb_file.stat().st_size
+            restored_size_mb = round(restored_size / (1024 * 1024), 2)
+
+            # Compare: only replace if backup DB is larger (has more data)
+            current_size = DB_PATH.stat().st_size if DB_PATH.exists() else 0
+            current_size_mb = round(current_size / (1024 * 1024), 2)
+
+            if restored_size <= current_size:
+                logger.info(f"Restore: Backup DB ({restored_size_mb} MB) <= current ({current_size_mb} MB) — keeping current")
+                return {"status": "SKIPPED", "reason": f"Backup ({restored_size_mb}MB) not larger than current ({current_size_mb}MB)"}
+
+            # Replace the database file
+            logger.info(f"Restore: Replacing DB ({current_size_mb} MB → {restored_size_mb} MB)")
+            shutil.copy2(str(duckdb_file), str(DB_PATH))
+
+            # Also remove any .wal file that might be stale
+            wal_path = DB_PATH.with_suffix(".duckdb.wal")
+            if wal_path.exists():
+                wal_path.unlink()
+                logger.info("Restore: Removed stale .wal file")
+
+            logger.info(f"Restore: SUCCESS — restored from {backup_name}")
+            return {
+                "status": "SUCCESS",
+                "backup_name": backup_name,
+                "backup_size_mb": backup_size_mb,
+                "restored_db_size_mb": restored_size_mb,
+                "previous_db_size_mb": current_size_mb,
+            }
+
+    except Exception as e:
+        logger.error(f"Restore: Failed — {e}")
+        import traceback
+        logger.error(traceback.format_exc())
+        return {"status": "FAILED", "reason": str(e)}

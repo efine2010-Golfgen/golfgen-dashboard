@@ -17,8 +17,9 @@ from apscheduler.triggers.cron import CronTrigger
 from core.config import DB_PATH, DB_DIR, TIMEZONE, SYNC_INTERVAL_HOURS
 from services.sp_api import _sync_today_orders, _run_sp_api_sync, _backfill_orders
 from services.ads_api import _sync_ads_data, _sync_pricing_and_coupons
-from services.sync_engine import _auto_backfill_if_needed, _log_sync, _write_sync_log
+from services.sync_engine import _auto_backfill_if_needed, _log_sync, _write_sync_log, run_nightly_deep_sync
 from services.analytics_rollup import run_full_rollup
+from services.backup import restore_from_latest_backup
 
 logger = logging.getLogger("golfgen")
 
@@ -165,6 +166,20 @@ def _run_scheduled_analytics_rollup():
         _scheduler_locks["analytics"].release()
 
 
+def _run_scheduled_nightly_deep_sync():
+    """Wrapper for nightly deep sync with logging and scheduler-level mutex."""
+    if not _scheduler_locks["sp_api"].acquire(blocking=False):
+        logger.warning("Skipping nightly deep sync — SP-API sync already running")
+        return
+    try:
+        result = run_nightly_deep_sync()
+        logger.info(f"Nightly deep sync result: {result}")
+    except Exception as e:
+        logger.error(f"Nightly deep sync failed: {e}")
+    finally:
+        _scheduler_locks["sp_api"].release()
+
+
 def _run_duckdb_backup():
     """Nightly backup: Google Drive (full DB) then GitHub (manifest + docs). Scheduler-level mutex."""
     if not _scheduler_locks["backup"].acquire(blocking=False):
@@ -233,6 +248,15 @@ async def _sync_loop():
     5. Handle startup catchup: if a scheduled time has passed for today with no sync_log entry, run immediately
     """
     global scheduler
+
+    # FIRST: Restore latest Google Drive backup if available.
+    # This prevents data loss on Railway redeploys (ephemeral filesystem).
+    try:
+        loop = asyncio.get_event_loop()
+        result = await loop.run_in_executor(None, restore_from_latest_backup)
+        logger.info(f"Startup: DB restore result: {result.get('status')} — {result}")
+    except Exception as e:
+        logger.error(f"Startup DB restore error (continuing with seed): {e}")
 
     # Immediately pull today's orders — no delay
     try:
@@ -315,6 +339,9 @@ async def _sync_loop():
 
         # Schedule nightly DuckDB backup at 2am Central (Prompt 2 implementation)
         scheduler.add_job(_run_duckdb_backup, CronTrigger(hour=2, minute=0, timezone="America/Chicago"), id="duckdb_backup_2am")
+
+        # Schedule nightly deep sync at 3am Central — fills all data gaps + re-pulls last 30 days
+        scheduler.add_job(_run_scheduled_nightly_deep_sync, CronTrigger(hour=3, minute=0, timezone="America/Chicago"), id="nightly_deep_sync_3am", misfire_grace_time=7200)
 
         # Schedule analytics rollup at 2:30am Central (after backup completes)
         scheduler.add_job(_run_scheduled_analytics_rollup, CronTrigger(hour=2, minute=30, timezone="America/Chicago"), id="analytics_rollup_230am", misfire_grace_time=3600)
