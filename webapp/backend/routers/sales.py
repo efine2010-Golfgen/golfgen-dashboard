@@ -31,12 +31,16 @@ def _orders_supplement(con, sd: date, ed: date, hw: str, hp: list):
     """Pull sales/units from orders table using exact Central-time day boundaries.
 
     Handles the S&T report lag for recent periods (today, yesterday, last few days).
-    Central midnight → UTC conversion ensures no orders are cut off at the UTC date line.
+    Includes both confirmed (Shipped) revenue AND estimated revenue for Pending orders
+    (Amazon Seller Central includes Pending in their daily totals; we estimate using
+    ASIN average price from the last 14 days of confirmed orders).
     Returns (sales_float, units_int, order_count_int). Returns (0, 0, 0) on any failure.
     """
     try:
         s_iso = datetime(sd.year, sd.month, sd.day, 0, 0, 0, tzinfo=CENTRAL).isoformat()
-        e_iso = datetime(ed.year, ed.month, ed.day, 23, 59, 59, tzinfo=CENTRAL).isoformat()
+        e_iso = datetime(sd.year, sd.month, sd.day, 23, 59, 59, tzinfo=CENTRAL).isoformat()
+
+        # Step 1: Confirmed (Shipped/Unshipped) orders — actual revenue
         r = con.execute(f"""
             SELECT COALESCE(SUM(order_total), 0),
                    COALESCE(SUM(number_of_items), 0),
@@ -46,12 +50,45 @@ def _orders_supplement(con, sd: date, ed: date, hw: str, hp: list):
               AND (order_status IS NULL OR order_status NOT IN ('Cancelled','Pending'))
               {hw}
         """, [s_iso, e_iso] + hp).fetchone()
-        if r:
-            sales = float(r[0] or 0)
-            units = int(r[1] or 0)
-            cnt   = int(r[2] or 0)
-            logger.debug(f"_orders_supplement {sd}→{ed}: ${sales:.2f}, {units} units, {cnt} orders")
-            return sales, units, cnt
+        shipped_sales = float(r[0] or 0) if r else 0.0
+        shipped_units = int(r[1] or 0) if r else 0
+        total_cnt     = int(r[2] or 0) if r else 0
+
+        # Step 2: Pending orders — SP-API returns OrderTotal={} for these.
+        # Estimate revenue using the ASIN's average price from last 14 days.
+        try:
+            pending_rows = con.execute(f"""
+                SELECT asin, COALESCE(number_of_items, 1) AS qty
+                FROM orders
+                WHERE purchase_date >= ? AND purchase_date <= ?
+                  AND order_status = 'Pending'
+                  AND asin IS NOT NULL AND asin != ''
+                  {hw}
+            """, [s_iso, e_iso] + hp).fetchall()
+
+            pending_sales = 0.0
+            pending_units = 0
+            cutoff_14d = (sd - timedelta(days=14)).isoformat()
+            for (asin, qty) in pending_rows:
+                total_cnt += 1
+                pending_units += qty
+                price_row = con.execute("""
+                    SELECT AVG(order_total / NULLIF(number_of_items, 0))
+                    FROM orders
+                    WHERE asin = ? AND order_total > 0
+                      AND order_status NOT IN ('Cancelled', 'Pending')
+                      AND purchase_date >= ?
+                """, [asin, cutoff_14d]).fetchone()
+                avg_price = float(price_row[0]) if price_row and price_row[0] else 0.0
+                pending_sales += avg_price * qty
+        except Exception:
+            pending_sales = 0.0
+            pending_units = 0
+
+        sales = shipped_sales + pending_sales
+        units = shipped_units + pending_units
+        logger.debug(f"_orders_supplement {sd}→{ed}: ${sales:.2f} (shipped ${shipped_sales:.2f} + pending_est ${pending_sales:.2f}), {units} units")
+        return sales, units, total_cnt
     except Exception as exc:
         logger.warning(f"_orders_supplement({sd}→{ed}) failed: {exc}")
     return 0.0, 0, 0
