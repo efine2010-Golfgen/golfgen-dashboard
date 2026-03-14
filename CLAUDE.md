@@ -2,6 +2,30 @@
 
 Read this entire file before doing anything else in every session.
 
+## Metric Registry & Data Contracts — READ BEFORE WRITING ANY QUERY OR KPI
+
+Two files are the source of truth for all data definitions. Check them before
+writing any new query, router, or frontend calculation:
+
+- **`webapp/backend/core/metrics.py`** — Every KPI: definition, formula, data source,
+  conflict rule (which source wins when two disagree), today_available flag,
+  null handling rule, fee fallback rates, CANONICAL_TIMEZONE.
+- **`webapp/backend/core/data_contracts.py`** — Every table column: Amazon API field name
+  it maps to, valid values, gotchas (e.g. "event_type NOT transaction_type",
+  "asin NOT sku", "Pending orders have no OrderTotal"), join keys, resolved bugs.
+
+### Non-negotiable rules enforced by the registry:
+- Every metric formula lives in `metrics.py` and NOWHERE ELSE. Routers read
+  analytics tables only — they do NOT calculate. Frontend displays only.
+- When two sources report the same metric, `SOURCE_PRIORITY` in `metrics.py`
+  controls which wins. The S&T overwrite bug happened because this didn't exist.
+- All date range filters use `CANONICAL_TIMEZONE = "America/Chicago"` from
+  `metrics.py`. Never use `date.today()` — Railway runs UTC.
+- Sessions/page_views are NEVER estimated for today. Show dash (—).
+  See `metrics.py` → `sessions.today_available = False`.
+- Fee fallback rate when Finances API shows $0: use `get_fee_fallback()` from
+  `metrics.py`. Default: 27% of revenue (referral 15% + FBA 12%).
+
 ## Project Overview
 GolfGen Commerce Dashboard — internal tool for GolfGen LLC /
 Elite Global Brands, Bentonville AR.
@@ -156,11 +180,17 @@ System:
   sessions, user_permissions, audit_log, sync_log, docs_update_log
 
 ### Critical Column Facts — NEVER get these wrong
+Full definitions in `core/data_contracts.py`. Quick reference:
 - financial_events uses `event_type` NOT `transaction_type`
 - Refund filter: `event_type ILIKE '%refund%'`
 - sync_log uses `records_processed` NOT `records_inserted`
 - sync_log uses `execution_time_seconds` NOT `duration_seconds`
 - orders table has `asin` NOT `sku`
+- orders.order_total is NULL/empty for Pending orders — estimate via ASIN avg price
+- daily_sales asin='ALL' = date aggregate; asin=<ASIN> = per-product (24hr lag)
+- fba_fees column is NEGATIVE — always use ABS(fba_fees) in SUM
+- commission column is NEGATIVE — always use ABS(commission) in SUM
+- purchase_date stored as UTC ISO string — always compare using Central TZ boundaries
 
 ### Current Data Counts (as of March 14, 2026 — now in PostgreSQL)
 - orders: 136 (recent window)
