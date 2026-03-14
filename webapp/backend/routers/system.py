@@ -868,3 +868,105 @@ def db_diagnostic():
     except Exception as e:
         import traceback
         return {"error": str(e), "traceback": traceback.format_exc()}
+
+
+@router.get("/api/debug/test-financial-parse")
+def test_financial_parse():
+    """Fetch one financial event, parse it the same way the sync does, and return the result."""
+    try:
+        from services.sp_api import _load_sp_api_credentials, is_sync_running
+        from sp_api.api import Finances as FinancesAPI
+        from sp_api.base import Marketplaces as _Mp
+
+        # Check if a sync is currently running
+        running = is_sync_running()
+
+        creds = _load_sp_api_credentials()
+        if not creds:
+            return {"error": "No SP-API credentials found"}
+
+        fin_start = (datetime.utcnow() - timedelta(days=30)).strftime("%Y-%m-%dT%H:%M:%SZ")
+        finances = FinancesAPI(credentials=creds, marketplace=_Mp.US)
+        resp = finances.list_financial_events(PostedAfter=fin_start, MaxResultsPerPage=10)
+
+        payload = resp.payload if hasattr(resp, 'payload') else (resp if isinstance(resp, dict) else {})
+        events = payload.get("FinancialEvents", {})
+        shipments = events.get("ShipmentEventList", []) or []
+
+        if not shipments:
+            return {"error": "No shipment events found", "sync_running": running}
+
+        first_event = shipments[0]
+        items = first_event.get("ShipmentItemList", []) if isinstance(first_event, dict) else getattr(first_event, "ShipmentItemList", []) or []
+
+        results = []
+        for item in items[:3]:
+            charges = item.get("ItemChargeList", []) if isinstance(item, dict) else getattr(item, "ItemChargeList", []) or []
+            fees = item.get("ItemFeeList", []) if isinstance(item, dict) else getattr(item, "ItemFeeList", []) or []
+
+            charge_details = []
+            for c in charges:
+                ca = c.get("ChargeAmount") if isinstance(c, dict) else getattr(c, "ChargeAmount", None)
+                ct = c.get("ChargeType", "") if isinstance(c, dict) else getattr(c, "ChargeType", "")
+
+                # Parse exactly as _money() does
+                parsed_val = 0.0
+                parse_method = "unknown"
+                if ca is None:
+                    parsed_val = 0.0
+                    parse_method = "None"
+                elif isinstance(ca, dict):
+                    for key in ("CurrencyAmount", "Amount", "currency_amount", "amount", "value"):
+                        v = ca.get(key)
+                        if v is not None:
+                            try:
+                                parsed_val = float(v)
+                                parse_method = f"dict[{key}]"
+                                break
+                            except (ValueError, TypeError):
+                                continue
+                    if parse_method == "unknown":
+                        parse_method = f"dict_no_match_keys={list(ca.keys())}"
+
+                charge_details.append({
+                    "charge_type": ct,
+                    "raw_charge_amount": str(ca)[:200],
+                    "ca_type": type(ca).__name__,
+                    "ca_is_dict": isinstance(ca, dict),
+                    "parsed_value": parsed_val,
+                    "parse_method": parse_method,
+                })
+
+            fee_details = []
+            for f in fees[:3]:
+                fa = f.get("FeeAmount") if isinstance(f, dict) else getattr(f, "FeeAmount", None)
+                ft = f.get("FeeType", "") if isinstance(f, dict) else getattr(f, "FeeType", "")
+                parsed_fee = 0.0
+                if fa and isinstance(fa, dict):
+                    for key in ("CurrencyAmount", "Amount"):
+                        v = fa.get(key)
+                        if v is not None:
+                            try:
+                                parsed_fee = abs(float(v))
+                                break
+                            except:
+                                pass
+                fee_details.append({"fee_type": ft, "raw": str(fa)[:200], "parsed": parsed_fee})
+
+            results.append({
+                "sku": item.get("SellerSKU", "") if isinstance(item, dict) else getattr(item, "SellerSKU", ""),
+                "asin": item.get("ASIN", "") if isinstance(item, dict) else getattr(item, "ASIN", ""),
+                "charges": charge_details,
+                "fees": fee_details,
+            })
+
+        return {
+            "sync_running": running,
+            "shipment_count": len(shipments),
+            "first_event_order": first_event.get("AmazonOrderId", "?") if isinstance(first_event, dict) else getattr(first_event, "AmazonOrderId", "?"),
+            "first_event_items_count": len(items),
+            "parsed_items": results,
+        }
+    except Exception as e:
+        import traceback
+        return {"error": str(e), "traceback": traceback.format_exc()}
