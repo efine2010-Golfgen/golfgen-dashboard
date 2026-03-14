@@ -1,194 +1,244 @@
-# GolfGen Amazon Dashboard — Setup Guide
+# GolfGen Commerce Dashboard — Setup & Operations Guide
 
-## What You're Getting
+## What This Is
 
-A complete Amazon analytics dashboard that pulls live data from your Seller Central account via API and displays it in a professional, interactive HTML dashboard. The system refreshes hourly and tracks sales, advertising, inventory, and profitability across all your PGA Tour Golf products.
+A full-stack commerce analytics dashboard for GolfGen LLC / Elite Global Brands. It pulls live data from Amazon SP-API and Amazon Ads API on a scheduled basis and displays sales, advertising, inventory, profitability, and planning data in an interactive React frontend.
 
----
-
-## Prerequisites
-
-1. **Python 3.8+** — You likely already have this with VS Code installed
-2. **VS Code** — Your code editor (already installed)
-3. **Amazon Seller Central Account** — Active seller account with API access
-4. **AWS Account** — Free tier is sufficient (needed for SP-API authentication)
+**Live URL:** https://golfgen-dashboard-production.up.railway.app
+**GitHub:** https://github.com/efine2010-Golfgen/golfgen-dashboard
 
 ---
 
-## Step 1: Install Python Dependencies
+## Architecture at a Glance
 
-Open a terminal in VS Code (Terminal > New Terminal) and run:
-
-```bash
-pip install python-amazon-sp-api duckdb requests
-```
-
----
-
-## Step 2: Get Your Amazon SP-API Credentials
-
-This is the most involved step, but you only do it once.
-
-### 2a. Register as a Developer in Seller Central
-
-1. Go to **Seller Central** > **Apps & Services** > **Develop Apps**
-2. Click **Register** to register yourself as a developer
-3. Fill in the form (use your company name, GolfGen LLC)
-4. Amazon will approve this within 24-48 hours
-
-### 2b. Create an AWS IAM User
-
-1. Go to **AWS Console** > **IAM** > **Users** > **Add Users**
-2. Create a user named `golfgen-sp-api`
-3. Attach the policy: **Allow all SP-API actions** (or create a custom policy)
-4. Save the **Access Key ID** and **Secret Access Key**
-
-### 2c. Create an IAM Role
-
-1. In AWS IAM > **Roles** > **Create Role**
-2. Select **Another AWS account** and enter your own account ID
-3. Name it: `golfgen-sp-api-role`
-4. Save the **Role ARN** (looks like: `arn:aws:iam::123456789:role/golfgen-sp-api-role`)
-
-### 2d. Create the App in Seller Central
-
-1. Back in **Seller Central** > **Develop Apps** > **Add new app client**
-2. Select **SP API** as the API type
-3. For IAM ARN, enter the Role ARN from step 2c
-4. Select these roles:
-   - **Selling Partner Insights** (for sales data)
-   - **Finance and Accounting** (for financial events)
-   - **Inventory and Order Management** (for orders & inventory)
-   - **Direct-to-Consumer Shipping** (for FBA data)
-5. After creation, you'll get:
-   - **LWA Client ID** (starts with `amzn1.application-oa2-client.`)
-   - **LWA Client Secret**
-6. Click **Authorize** to self-authorize and get the **Refresh Token**
-
-### 2e. Amazon Ads API (Optional, for PPC data)
-
-1. Go to **advertising.amazon.com/developer**
-2. Register for API access
-3. Create an app and get Client ID, Client Secret
-4. Authorize and get a Refresh Token
-5. Find your Profile ID by calling the Profiles endpoint
+- **Frontend:** React + Vite (builds to static files served by backend)
+- **Backend:** Python FastAPI
+- **Database:** PostgreSQL (managed by Railway)
+- **Hosting:** Railway (auto-deploys from GitHub `main` branch)
+- **Data Sources:** Amazon SP-API (orders, inventory, financials), Amazon Ads API (campaigns, keywords)
+- **Backup:** Nightly to Google Drive + GitHub
 
 ---
 
-## Step 3: Configure Credentials
+## Deployment
 
-1. Copy the template file:
+The dashboard auto-deploys to Railway whenever code is pushed to the `main` branch on GitHub. There is no manual deployment step.
+
+### Deploy Workflow
+1. Make code changes locally
+2. Build the frontend:
    ```bash
-   cp config/credentials_template.json config/credentials.json
+   cd webapp/frontend && npm run build
+   ```
+3. Copy built files to backend:
+   ```bash
+   cp -r webapp/frontend/dist webapp/backend/dist
+   ```
+4. Commit and push:
+   ```bash
+   git add <relevant files>
+   git commit -m "your message"
+   git push origin main
+   ```
+5. Railway auto-deploys within ~2 minutes
+6. Verify:
+   ```bash
+   curl -s https://golfgen-dashboard-production.up.railway.app/api/health | python3 -m json.tool
    ```
 
-2. Open `config/credentials.json` in VS Code and fill in all the values from Step 2
-
-**IMPORTANT:** Never commit `credentials.json` to git or share it. The `.gitignore` file already excludes it.
+**Important:** Never manually restart Railway. Never use Railway CLI.
 
 ---
 
-## Step 4: Run Your First Data Pull
+## Local Development
 
+### Prerequisites
+- Python 3.8+
+- Node.js 18+ (for frontend builds)
+- Git
+
+### Backend Setup
 ```bash
-# From the golfgen_amazon_dashboard folder:
-
-# Test with demo data first (no credentials needed):
-python scripts/generate_dashboard.py --demo
-
-# When credentials are configured, do a full pull:
-python scripts/amazon_sp_api.py 30    # Pull last 30 days
-
-# Generate the dashboard from live data:
-python scripts/generate_dashboard.py
+cd webapp/backend
+pip install -r requirements.txt
 ```
 
-Open `amazon_dashboard.html` in your browser to see the dashboard.
+Without `DATABASE_URL` set, the backend falls back to DuckDB (file-based). To develop against PostgreSQL locally, set `DATABASE_URL` to a local Postgres connection string.
+
+### Frontend Setup
+```bash
+cd webapp/frontend
+npm install
+npm run dev    # Dev server with hot reload (proxies API to backend)
+```
+
+### Running the Backend Locally
+```bash
+cd webapp/backend
+python -m uvicorn main:app --reload --port 8000
+```
 
 ---
 
-## Step 5: Set Up Hourly Auto-Refresh
+## Database
 
-### Windows (Task Scheduler)
+### PostgreSQL (Primary — LIVE)
+- Managed PostgreSQL on Railway
+- Connected via `DATABASE_URL` environment variable
+- All 29 tables live and receiving synced data
+- Data persists independently of container redeploys
 
-1. Open **Task Scheduler** (search in Start menu)
-2. Click **Create Basic Task**
-3. Name: `GolfGen Amazon Pull`
-4. Trigger: **Daily**, start at 6:00 AM
-5. Action: **Start a program**
-   - Program: `python`
-   - Arguments: `scripts/scheduler.py`
-   - Start in: `C:\path\to\golfgen_amazon_dashboard`
-6. Check **Repeat task every 1 hour** for a duration of 18 hours
+### DuckDB (Fallback)
+- File at `/app/data/golfgen_amazon.duckdb` on Railway volume
+- Used automatically if `DATABASE_URL` is not set
+- Emergency fallback: remove `DATABASE_URL` env var on Railway to switch back
 
-### Mac (cron)
+### Tables (29 total)
 
-```bash
-# Open crontab
-crontab -e
+**Transactional** (all have division + customer + platform columns):
+orders, daily_sales, financial_events, fba_inventory, advertising, ads_campaigns, ads_keywords, ads_search_terms, ads_negative_keywords
 
-# Add this line (runs every hour from 6am to midnight):
-0 6-23 * * * cd /path/to/golfgen_amazon_dashboard && python3 scripts/scheduler.py
-```
+**Staging:** staging_orders, staging_financial_events
+
+**Analytics** (pre-aggregated): analytics_daily, analytics_sku, analytics_ads
+
+**Reference:** item_master (source of truth for division mapping)
+
+**Planning/Operations:** monthly_sales_history, item_plan_overrides, item_plan_curve_selection, item_plan_factory_orders, item_plan_factory_order_items, item_plan_settings
+
+**System:** sessions, user_permissions, audit_log, sync_log, docs_update_log
+
+---
+
+## Data Sync Schedule
+
+All scheduled jobs run automatically via APScheduler (configured in `core/scheduler.py`). Times are Central (America/Chicago).
+
+| Job | Schedule | What It Does |
+|-----|----------|--------------|
+| Full SP-API sync | 9am, 12pm, 3pm, 6pm | Orders + Financial Events + Inventory + Sales Report |
+| Today quick sync | Every hour at :30 | Last 2 days of orders (50-order cap, 120s timeout) |
+| Ads sync | Every 2 hours | Campaign, keyword, search term reports |
+| Pricing sync | Every hour at :30 | Current prices from SP-API |
+| Analytics rollup | 2:30am | Pre-aggregate into analytics tables |
+| Google Drive backup | 2am | DuckDB file backup, 30-day retention |
+| GitHub backup | After Drive backup | Push to backup repository |
+| Docs update | 8am + 8pm | Documentation auto-update |
+
+---
+
+## Environment Variables (set on Railway)
+
+**Amazon SP-API:**
+SP_API_CLIENT_ID, SP_API_CLIENT_SECRET, SP_API_REFRESH_TOKEN, SP_API_MARKETPLACE_ID (ATVPDKIKX0DER), SP_API_AWS_ACCESS_KEY, SP_API_AWS_SECRET_KEY, SP_API_ROLE_ARN
+
+**Amazon Ads API:**
+ADS_API_CLIENT_ID, ADS_API_CLIENT_SECRET, ADS_API_REFRESH_TOKEN
+
+**Google (SSO + Backup):**
+GOOGLE_OAUTH_CLIENT_ID, GOOGLE_OAUTH_CLIENT_SECRET, GOOGLE_SERVICE_ACCOUNT_JSON, BACKUP_DRIVE_FOLDER_ID
+
+**GitHub Backup:**
+GITHUB_TOKEN, BACKUP_GITHUB_REPO (efine2010-Golfgen/golfgen-backups)
+
+**Database:**
+DATABASE_URL (${{Postgres.DATABASE_URL}} — references Railway Postgres service), DB_PATH (/app/data/golfgen_amazon.duckdb — DuckDB fallback path)
+
+---
+
+## Users & Access
+
+| User | Email | Role |
+|------|-------|------|
+| Eric | eric@egbrands.com | Admin (full access) |
+| Ty | tysams@egbrands.com | Staff |
+| Kim | kim@egbrands.com | Staff |
+| Ryan | ryan@egbrands.com | Staff |
+| McKay | riseecom21@gmail.com | Staff |
+
+Authentication is via Google SSO with whitelisted emails. MFA/TOTP is available. Sessions expire after 18 hours with a 2-hour idle timeout.
+
+---
+
+## Debug & Monitoring
+
+These endpoints require no authentication:
+
+| Endpoint | What It Shows |
+|----------|---------------|
+| `GET /api/health` | Row counts, DB size, uptime |
+| `GET /api/debug/db-diagnostic` | Recent daily_sales, financial_events summary, sync_log |
+| `GET /api/debug/test-financial-parse` | Fetches one financial event from API, shows parsed output |
+| `GET /api/debug/logs` | Recent in-memory log messages (200-entry ring buffer) |
+
+---
+
+## Backup & Recovery
+
+### Backups
+- **Google Drive:** Nightly 2am Central, 30-day retention. Manual trigger: `POST /api/backup/trigger`
+- **GitHub:** Nightly after Drive backup. Manual trigger: `POST /api/backup/github-trigger`
+- **List backups:** `GET /api/backup/list-drive`
+
+### Recovery
+With PostgreSQL, data persists independently of container deploys — routine redeploys don't affect data.
+
+**If PostgreSQL data is lost:**
+1. Remove `DATABASE_URL` env var on Railway → app falls back to DuckDB
+2. Re-add `DATABASE_URL` → triggers auto-migration from DuckDB to PostgreSQL
+
+**Legacy DuckDB restore (if needed):**
+- Dashboard → System tab → Backup → Restore from Drive
+- Or: `POST /api/backup/restore` with body `{}`
+
+---
+
+## Dashboard Features
+
+- **22 pages** covering sales, orders, advertising, inventory, profitability, item planning, factory POs, logistics, supply chain, item master, and system admin
+- **Hierarchy filter** in header: filter by Division (Golf/Housewares), Customer, Platform
+- **KPI cards** with period-over-period trends
+- **Charts:** daily revenue, monthly YOY, ad performance, profit waterfall
+- **Tables:** sortable product performance, FBA inventory with days-of-supply
+- **Planning tools:** item plan with sales curves, factory on-order tracking
+- **Admin:** user permissions, audit log, sync status, backup controls
 
 ---
 
 ## Folder Structure
 
 ```
-golfgen_amazon_dashboard/
-├── amazon_dashboard.html      ← Open this in your browser
-├── SETUP_GUIDE.md             ← You are here
-├── config/
-│   ├── credentials_template.json  ← Template (safe to share)
-│   └── credentials.json          ← YOUR credentials (DO NOT SHARE)
-├── data/
-│   └── golfgen_amazon.duckdb     ← Local database (created on first run)
-├── scripts/
-│   ├── amazon_sp_api.py          ← SP-API data pull (sales, orders, inventory, finance)
-│   ├── generate_dashboard.py     ← Dashboard HTML generator
-│   └── scheduler.py              ← Automated hourly runner
-└── templates/                    ← (reserved for future Tableau templates)
+webapp/
+  backend/
+    main.py              ← FastAPI app init, router registration, Google SSO
+    requirements.txt     ← Python dependencies
+    dist/                ← Compiled React frontend (copy here after build)
+    core/                ← Shared business logic (config, database, auth, scheduler)
+    routers/             ← API endpoint handlers (12 router files)
+    services/            ← External API integrations and background jobs
+    scripts/             ← Migration and export utilities
+  frontend/
+    src/
+      App.jsx            ← Main app, routing, passes filters to all pages
+      components/        ← Shared components (HierarchyFilter, etc.)
+      lib/               ← API client (api.js), constants
+      pages/             ← One file per dashboard tab (22 pages)
+    package.json
+    vite.config.js
 ```
 
 ---
 
-## Dashboard Features
+## Roadmap
 
-- **6 KPI Cards:** Revenue, Units, Net Profit, Margin, TACOS, AOV with period-over-period trends
-- **Daily Revenue Chart:** 90-day trend line for revenue and net profit
-- **Monthly Revenue vs Profit:** Bar chart comparing revenue to net profit by month
-- **Ad Performance:** Monthly ad spend vs ad-attributed sales
-- **Profit Waterfall:** Visual breakdown of where revenue goes (COGS, fees, ads, profit)
-- **Product Performance Table:** Sortable table with per-product revenue, units, profit, margin
-- **FBA Inventory Status:** Current stock levels with days-of-supply and restock alerts
-- **Filters:** Time range (30/60/90/180/365 days) and product filter
-- **Print-ready:** Clean print layout for executive reports
+### Completed
+- **Phase 1:** Stability + Security (bug fixes, sync mutex, Google SSO, audit log)
+- **Phase 2:** Modular architecture, division hierarchy, PostgreSQL migration
 
----
+### In Progress
+- **Phase 3:** Backup hardening (hot standby, weekly verification, 6-hour snapshots)
+- **Phase 4:** File upload for store channels (Scintilla, Belk, Hobby Lobby, etc.)
 
-## Troubleshooting
-
-**"Access Denied" from SP-API:**
-- Check your IAM Role ARN matches what's in Seller Central
-- Verify your Refresh Token hasn't expired (re-authorize if needed)
-- Ensure all required API roles are selected in the app
-
-**"No data" in dashboard:**
-- Run `python scripts/amazon_sp_api.py 30` to pull 30 days of data
-- Check the terminal output for error messages
-- Verify credentials.json is properly formatted
-
-**Dashboard won't open:**
-- Right-click the HTML file > Open With > Chrome/Edge/Firefox
-- If charts don't load, ensure you have internet (Chart.js loads from CDN)
-
----
-
-## Next Steps (Future Phases)
-
-1. **Connect Tableau:** Point Tableau Desktop at `data/golfgen_amazon.duckdb` for advanced analytics
-2. **Add Walmart data:** Phase 2 will add Walmart Marketplace API + Scintilla imports
-3. **Add Shopify:** Phase 2 will add Shopify API for DTC channel
-4. **Financial integration:** Phase 3 will sync with your GolfGen Cash Flow Excel
-5. **Invoice processing:** Phase 3 will add PDF invoice scanning from a drop folder
+### Planned
+- **Phase 5:** Multi-platform APIs (Walmart Marketplace, Shopify)
+- **Phase 6:** Intelligence + Forecasting (anomaly alerts, forecast tab, exec dashboard)

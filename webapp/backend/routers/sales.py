@@ -93,8 +93,8 @@ def _build_product_list(con, cutoff: str) -> list:
         SELECT asin,
                COALESCE(SUM(ordered_product_sales), 0) AS revenue,
                COALESCE(SUM(units_ordered), 0) AS units,
-               COALESCE(SUM(page_views), 0) AS sessions,
-               COALESCE(SUM(units_ordered), 0) AS orders
+               COALESCE(SUM(sessions), 0) AS sessions,
+               COALESCE(SUM(page_views), 0) AS glance_views
         FROM daily_sales
         WHERE asin != 'ALL' AND date >= ?
         GROUP BY asin
@@ -314,13 +314,26 @@ def sales_summary(
             row = con.execute(f"""
                 SELECT COALESCE(SUM(ordered_product_sales), 0),
                        COALESCE(SUM(units_ordered), 0),
+                       COALESCE(SUM(sessions), 0),
                        COALESCE(SUM(page_views), 0)
                 FROM daily_sales
                 WHERE asin = 'ALL' AND date >= ? AND date <= ? {hw}
             """, [str(s), str(e)] + extra_params).fetchone()
-            return float(row[0]), int(row[1]), int(row[2])
+            return float(row[0]), int(row[1]), int(row[2]), int(row[3])
 
-        ty_sales, ty_units, ty_sessions = _sum_sales(sd, ed, hp)
+        def _count_orders(s, e, extra_params):
+            """Count distinct orders from orders table for true AOV."""
+            try:
+                r = con.execute(f"""
+                    SELECT COUNT(DISTINCT order_id)
+                    FROM orders
+                    WHERE purchase_date >= ? AND purchase_date <= ? {hw}
+                """, [str(s), str(e)] + extra_params).fetchone()
+                return int(r[0]) if r else 0
+            except Exception:
+                return 0
+
+        ty_sales, ty_units, ty_sessions, ty_gv = _sum_sales(sd, ed, hp)
 
         # Auto-fallback: if period is 'today' and no TY data, use yesterday
         fell_back = False
@@ -329,22 +342,24 @@ def sales_summary(
             ed = ed - timedelta(days=1)
             ly_sd = sd - timedelta(days=364)
             ly_ed = ed - timedelta(days=364)
-            ty_sales, ty_units, ty_sessions = _sum_sales(sd, ed, hp)
+            ty_sales, ty_units, ty_sessions, ty_gv = _sum_sales(sd, ed, hp)
             fell_back = True
 
-        ly_sales, ly_units, ly_sessions = _sum_sales(ly_sd, ly_ed, hp)
+        ly_sales, ly_units, ly_sessions, ly_gv = _sum_sales(ly_sd, ly_ed, hp)
 
         ty_aur = round(ty_sales / ty_units, 2) if ty_units else 0
         ly_aur = round(ly_sales / ly_units, 2) if ly_units else 0
-        ty_orders = ty_units  # proxy
-        ly_orders = ly_units
+        ty_orders = _count_orders(sd, ed, hp)
+        ly_orders = _count_orders(ly_sd, ly_ed, hp)
+        # Fallback: if orders table has no data, use units as proxy
+        if ty_orders == 0:
+            ty_orders = ty_units
+        if ly_orders == 0:
+            ly_orders = ly_units
         ty_aov = round(ty_sales / ty_orders, 2) if ty_orders else 0
         ly_aov = round(ly_sales / ly_orders, 2) if ly_orders else 0
         ty_conv = round(ty_units / ty_sessions, 4) if ty_sessions else 0
         ly_conv = round(ly_units / ly_sessions, 4) if ly_sessions else 0
-        # glance_views = page_views for Amazon
-        ty_gv = ty_sessions
-        ly_gv = ly_sessions
         ty_ctr = 0  # CTR not available from current data
         ly_ctr = 0
 
@@ -458,7 +473,7 @@ def sales_trend(
         rows = con.execute(f"""
             SELECT date,
                    COALESCE(SUM(ordered_product_sales), 0),
-                   COALESCE(SUM(page_views), 0),
+                   COALESCE(SUM(sessions), 0),
                    COALESCE(SUM(units_ordered), 0)
             FROM daily_sales
             WHERE asin = 'ALL' AND date >= ? AND date <= ? {hw}
@@ -471,7 +486,7 @@ def sales_trend(
         ly_rows = con.execute(f"""
             SELECT date,
                    COALESCE(SUM(ordered_product_sales), 0),
-                   COALESCE(SUM(page_views), 0),
+                   COALESCE(SUM(sessions), 0),
                    COALESCE(SUM(units_ordered), 0)
             FROM daily_sales
             WHERE asin = 'ALL' AND date >= ? AND date <= ? {hw}
@@ -564,12 +579,22 @@ def sales_period_comparison(
             row = con.execute(f"""
                 SELECT COALESCE(SUM(ordered_product_sales), 0),
                        COALESCE(SUM(units_ordered), 0),
+                       COALESCE(SUM(sessions), 0),
                        COALESCE(SUM(page_views), 0)
                 FROM daily_sales
                 WHERE asin = 'ALL' AND date >= ? AND date <= ? {hw}
             """, [str(sd), str(ed)] + hp).fetchone()
-            sales, units, sessions = float(row[0]), int(row[1]), int(row[2])
-            orders = units
+            sales, units, sessions, glance_views = float(row[0]), int(row[1]), int(row[2]), int(row[3])
+            # True order count from orders table
+            try:
+                o_row = con.execute(f"""
+                    SELECT COUNT(DISTINCT order_id)
+                    FROM orders
+                    WHERE purchase_date >= ? AND purchase_date <= ? {hw}
+                """, [str(sd), str(ed)] + hp).fetchone()
+                orders = int(o_row[0]) if o_row and o_row[0] else units
+            except Exception:
+                orders = units
             aur = round(sales / units, 2) if units else 0
             aov = round(sales / orders, 2) if orders else 0
             conv = round(units / sessions, 4) if sessions else 0
@@ -577,7 +602,7 @@ def sales_period_comparison(
             result[label] = {
                 "sales": round(sales, 2), "units": units, "aur": aur,
                 "orders": orders, "aov": aov,
-                "sessions": sessions, "glance_views": sessions,
+                "sessions": sessions, "glance_views": glance_views,
                 "ctr": ctr, "conversion": conv,
             }
 
@@ -1079,13 +1104,23 @@ def summary(
         revenue, units = float(row[0]), int(row[1])
 
     sessions_row = con.execute(f"""
-        SELECT COALESCE(SUM(page_views), 0) AS sessions
+        SELECT COALESCE(SUM(sessions), 0), COALESCE(SUM(page_views), 0)
         FROM daily_sales
         WHERE date >= ? AND asin = 'ALL'{hf}
     """, [cutoff] + hp).fetchone()
     sessions = int(sessions_row[0])
+    glance_views = int(sessions_row[1])
 
-    orders = units
+    # True order count from orders table
+    try:
+        o_row = con.execute(f"""
+            SELECT COUNT(DISTINCT order_id)
+            FROM orders
+            WHERE purchase_date >= ?{hf}
+        """, [cutoff] + hp).fetchone()
+        orders = int(o_row[0]) if o_row and o_row[0] else units
+    except Exception:
+        orders = units
     aur = round(revenue / units, 2) if units else 0
     conv_rate = round(units / sessions * 100, 1) if sessions else 0
 
@@ -1146,7 +1181,7 @@ def get_daily_sales(
         SELECT date,
                COALESCE(ordered_product_sales, 0) AS revenue,
                COALESCE(units_ordered, 0) AS units,
-               COALESCE(page_views, 0) AS sessions
+               COALESCE(sessions, 0) AS sessions
         FROM daily_sales
         WHERE date >= ? AND asin = 'ALL'{hf}
         ORDER BY date
@@ -1206,7 +1241,7 @@ def product_detail(asin: str, days: int = Query(365)):
         SELECT date,
                COALESCE(ordered_product_sales, 0) AS revenue,
                COALESCE(units_ordered, 0) AS units,
-               COALESCE(page_views, 0) AS sessions
+               COALESCE(sessions, 0) AS sessions
         FROM daily_sales
         WHERE date >= ? AND asin = ?
         ORDER BY date
@@ -1351,13 +1386,21 @@ def period_comparison(
             SELECT
                 COALESCE(SUM(ordered_product_sales), 0),
                 COALESCE(SUM(units_ordered), 0),
-                COALESCE(SUM(page_views), 0)
+                COALESCE(SUM(sessions), 0)
             FROM daily_sales
             WHERE date >= ? AND date < ? AND asin = 'ALL'{hf}
         """, [p["start"], p["end"]] + hp).fetchone()
 
         rev, units, sessions = row
-        orders = units
+        # True order count from orders table
+        try:
+            o_row = con.execute(f"""
+                SELECT COUNT(DISTINCT order_id) FROM orders
+                WHERE purchase_date >= ? AND purchase_date < ?{hf}
+            """, [p["start"], p["end"]] + hp).fetchone()
+            orders = int(o_row[0]) if o_row and o_row[0] else units
+        except Exception:
+            orders = units
         aur = round(rev / units, 2) if units else 0
         conv = round(units / sessions * 100, 1) if sessions else 0
 
@@ -1390,13 +1433,20 @@ def period_comparison(
             SELECT
                 COALESCE(SUM(ordered_product_sales), 0),
                 COALESCE(SUM(units_ordered), 0),
-                COALESCE(SUM(page_views), 0)
+                COALESCE(SUM(sessions), 0)
             FROM daily_sales
             WHERE date >= ? AND date < ? AND asin = 'ALL'{hf}
         """, [ly_start.strftime("%Y-%m-%d"), ly_end.strftime("%Y-%m-%d")] + hp).fetchone()
 
         ly_rev, ly_units, ly_sessions = ly_row
-        ly_orders = ly_units
+        try:
+            ly_o_row = con.execute(f"""
+                SELECT COUNT(DISTINCT order_id) FROM orders
+                WHERE purchase_date >= ? AND purchase_date < ?{hf}
+            """, [ly_start.strftime("%Y-%m-%d"), ly_end.strftime("%Y-%m-%d")] + hp).fetchone()
+            ly_orders = int(ly_o_row[0]) if ly_o_row and ly_o_row[0] else ly_units
+        except Exception:
+            ly_orders = ly_units
 
         ly_ad = 0
         try:
