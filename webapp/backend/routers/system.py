@@ -845,6 +845,21 @@ def db_diagnostic():
         except Exception:
             sync_entries = [{"error": "sync_log table not found"}]
 
+        # Monthly YOY test
+        monthly_yoy_data = []
+        try:
+            yoy_rows = con.execute("""
+                SELECT YEAR(date) AS yr, MONTH(date) AS mo,
+                       COALESCE(SUM(ordered_product_sales), 0) AS revenue
+                FROM daily_sales
+                WHERE asin = 'ALL' AND date IS NOT NULL AND date >= '2024-01-01'
+                GROUP BY YEAR(date), MONTH(date)
+                ORDER BY yr, mo
+            """).fetchall()
+            monthly_yoy_data = [{"year": int(r[0]), "month": int(r[1]), "revenue": round(float(r[2]), 2)} for r in yoy_rows]
+        except Exception as yoy_e:
+            monthly_yoy_data = [{"error": str(yoy_e)}]
+
         con.close()
 
         return {
@@ -864,6 +879,7 @@ def db_diagnostic():
                 ]
             },
             "sync_log": sync_entries,
+            "monthly_yoy": monthly_yoy_data,
         }
     except Exception as e:
         import traceback
