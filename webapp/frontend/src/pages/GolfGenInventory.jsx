@@ -94,18 +94,19 @@ function SortTH({ label, field, sortKey, sortDir, onClick, style }) {
 
 /* ── Main page component ── */
 export default function GolfGenInventory({ filters = {} }) {
-  const [division,    setDivision]    = useState("Golf");
-  const [channel,     setChannel]     = useState("All");
-  const [data,        setData]        = useState(null);
-  const [overviewData,setOverviewData]= useState(null);
-  const [loading,     setLoading]     = useState(true);
-  const [expandedSku, setExpandedSku] = useState(null);
-  const [search,      setSearch]      = useState("");
-  const [sortKey,     setSortKey]     = useState("totalOnHand");
-  const [sortDir,     setSortDir]     = useState("desc");
-  const [uploading,   setUploading]   = useState(null);
-  const [uploadMsg,   setUploadMsg]   = useState(null);
-  const [uploadMeta,  setUploadMeta]  = useState({});
+  const [division,     setDivision]    = useState("Golf");
+  const [channel,      setChannel]     = useState("All");
+  const [data,         setData]        = useState(null);
+  const [overviewData, setOverviewData]= useState(null);
+  const [loading,      setLoading]     = useState(true);
+  const [expandedSku,  setExpandedSku] = useState(null);
+  const [search,       setSearch]      = useState("");
+  const [suffixFilter, setSuffixFilter]= useState("All");
+  const [sortKey,      setSortKey]     = useState("totalOnHand");
+  const [sortDir,      setSortDir]     = useState("desc");
+  const [uploading,    setUploading]   = useState(null);
+  const [uploadMsg,    setUploadMsg]   = useState(null);
+  const [uploadMeta,   setUploadMeta]  = useState({});
 
   useEffect(() => {
     api.warehouseSummary().then(d => setOverviewData(d)).catch(() => null);
@@ -156,8 +157,23 @@ export default function GolfGenInventory({ filters = {} }) {
     else { setSortKey(key); setSortDir("desc"); }
   };
 
-  const masters  = data?.masters || [];
+  const masters = data?.masters || [];
+
+  /* All unique suffixes present in current division's data */
+  const allSuffixes = [...new Set(
+    masters.flatMap(m => (m.subs || []).map(s => s.suffix).filter(Boolean))
+  )].sort();
+
   const filtered = masters.filter(m => {
+    /* Suffix/type filter */
+    if (suffixFilter === "Master") {
+      /* Master filter: only show items that have their own inventory on the master level */
+      const subSumOH = (m.subs || []).reduce((s, sub) => s + (sub.pcsOnHand || 0), 0);
+      if ((m.totalOnHand || 0) - subSumOH <= 0) return false;
+    } else if (suffixFilter !== "All") {
+      if (!(m.subs || []).some(s => s.suffix === suffixFilter)) return false;
+    }
+    /* Search filter */
     if (!search) return true;
     const q = search.toLowerCase();
     return (m.baseSku || "").toLowerCase().includes(q) ||
@@ -190,18 +206,56 @@ export default function GolfGenInventory({ filters = {} }) {
 
   return (
     <>
-      {/* ── Controls Bar: division + channel toggles | upload buttons | search ── */}
-      <div style={{ display: "flex", gap: 10, alignItems: "center", marginBottom: 16, flexWrap: "wrap" }}>
+      {/* ══ ROW 1: Division + upload icons + Channel filter ══ */}
+      <div style={{ display: "flex", gap: 10, alignItems: "center", marginBottom: 8, flexWrap: "wrap" }}>
 
-        {/* Division tabs */}
-        <div className="range-tabs">
-          {DIVISIONS.map(d => (
-            <button key={d} className={`range-tab ${division === d ? "active" : ""}`}
-              onClick={() => { setDivision(d); setChannel("All"); setSearch(""); }}>
-              {d === "Golf" ? "⛳ Golf" : "🏠 HW"}
-            </button>
-          ))}
+        {/* Division tabs — each with an attached upload icon button */}
+        <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+          {DIVISIONS.map(d => {
+            const divKey   = d === "Golf" ? "golf" : "housewares";
+            const isActive = division === d;
+            return (
+              <div key={d} style={{ display: "flex", alignItems: "stretch", borderRadius: 7, overflow: "hidden",
+                border: `1px solid ${isActive ? "var(--acc1)" : "var(--brd)"}`,
+                background: isActive ? "rgba(46,207,170,.12)" : "var(--ibg)",
+              }}>
+                {/* Division select button */}
+                <button
+                  onClick={() => { setDivision(d); setChannel("All"); setSearch(""); setSuffixFilter("All"); }}
+                  style={{
+                    padding: "5px 12px 5px 10px", border: "none", cursor: "pointer",
+                    background: "transparent", fontSize: 12, fontWeight: 700,
+                    color: isActive ? "var(--acc1)" : "var(--txt3)", whiteSpace: "nowrap",
+                  }}>
+                  {d === "Golf" ? "⛳ Golf" : "🏠 HW"}
+                </button>
+                {/* Upload trigger — thin separator + up-arrow icon */}
+                <label
+                  title={`Upload ${d} inventory Excel`}
+                  style={{
+                    display: "inline-flex", alignItems: "center", justifyContent: "center",
+                    padding: "0 8px", cursor: "pointer",
+                    borderLeft: `1px solid ${isActive ? "rgba(46,207,170,.3)" : "var(--brd)"}`,
+                    color: uploading === divKey ? "var(--txt3)" : (isActive ? "var(--acc1)" : "var(--txt3)"),
+                    fontSize: 12, transition: "color .15s",
+                    opacity: uploading !== null ? 0.5 : 1,
+                  }}>
+                  {uploading === divKey ? "…" : "⬆"}
+                  <input type="file" accept=".xlsx,.xls"
+                    onChange={e => handleUpload(e, divKey)}
+                    style={{ display: "none" }} disabled={uploading !== null} />
+                </label>
+              </div>
+            );
+          })}
+          {/* Last upload date hint */}
+          <span style={{ fontSize: 10, color: "var(--txt3)", whiteSpace: "nowrap" }}>
+            Last upload: {formatDate(uploadMeta[division === "Golf" ? "golf" : "housewares"]?.lastUpload)}
+          </span>
         </div>
+
+        {/* Divider */}
+        <div style={{ width: 1, height: 22, background: "var(--brd2)", flexShrink: 0 }} />
 
         {/* Channel filter — Golf only */}
         {showChannel && (
@@ -217,39 +271,40 @@ export default function GolfGenInventory({ filters = {} }) {
             ))}
           </div>
         )}
+      </div>
+
+      {/* ══ ROW 2: Type / suffix filter pills + search + count ══ */}
+      <div style={{ display: "flex", gap: 6, alignItems: "center", marginBottom: 16, flexWrap: "wrap" }}>
+
+        {/* Filter pills: All | Master | each suffix */}
+        {["All", "Master", ...allSuffixes].map(sf => {
+          const isActive = suffixFilter === sf;
+          const isDanger = ["RETD", "DONATE", "Damage"].includes(sf);
+          const activeColor   = isDanger ? "#D03030" : "var(--acc1)";
+          const activeBg      = isDanger ? "rgba(208,48,48,.15)" : "rgba(46,207,170,.15)";
+          const activeTxtClr  = isDanger ? "#D03030" : "#0E1F2D";
+          return (
+            <button key={sf} onClick={() => setSuffixFilter(sf)} style={{
+              padding: "3px 11px", borderRadius: 99, fontSize: 11, fontWeight: 600,
+              cursor: "pointer", border: `1px solid ${isActive ? activeColor : "var(--brd)"}`,
+              background: isActive ? activeBg : "transparent",
+              color: isActive ? (isDanger ? "#D03030" : activeColor) : "var(--txt3)",
+              transition: "all .15s",
+            }}>
+              {sf}
+            </button>
+          );
+        })}
 
         <div style={{ flex: 1 }} />
 
-        {/* Upload buttons */}
-        {[
-          { key: "golf",       label: "Upload Golf", color: "var(--teal)"        },
-          { key: "housewares", label: "Upload HW",   color: "var(--blue-active)" },
-        ].map(({ key, label, color }) => (
-          <div key={key} style={{ textAlign: "center" }}>
-            <label style={{
-              display: "inline-flex", alignItems: "center", gap: 5,
-              padding: "5px 12px", background: color, color: "#fff",
-              borderRadius: 7, cursor: "pointer", fontSize: 11, fontWeight: 600,
-              opacity: uploading === key ? 0.6 : 1, whiteSpace: "nowrap",
-            }}>
-              {uploading === key ? "Uploading…" : label}
-              <input type="file" accept=".xlsx,.xls"
-                onChange={e => handleUpload(e, key)}
-                style={{ display: "none" }} disabled={uploading !== null} />
-            </label>
-            <div style={{ fontSize: 9, color: "var(--txt3)", marginTop: 2 }}>
-              Last: {formatDate(uploadMeta[key]?.lastUpload)}
-            </div>
-          </div>
-        ))}
-
         {/* Search */}
         <input
-          type="text" placeholder="Search SKU or description…"
+          type="text" placeholder="🔍 Search SKU or description…"
           value={search} onChange={e => setSearch(e.target.value)}
           style={{
             padding: "5px 12px", border: "1px solid var(--brd)", borderRadius: 7,
-            fontSize: 12, width: 210, outline: "none",
+            fontSize: 12, width: 220, outline: "none",
             background: "var(--ibg)", color: "var(--txt)",
           }}
         />
