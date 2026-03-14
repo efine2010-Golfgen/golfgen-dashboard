@@ -962,7 +962,7 @@ tr:hover td { background: var(--teal-bg); }
    ITEM PLANNING PAGE STYLES
    ═══════════════════════════════════════════════════════════ */
 
-.ip-page { max-width: 1440px; margin: 0 auto; padding: 0 24px 40px; }
+.ip-page { padding: 0 0 40px; }
 
 .ip-page-header {
   display: flex; justify-content: space-between; align-items: flex-start;
