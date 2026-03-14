@@ -964,8 +964,8 @@ def sales_heatmap(
             WHERE asin = 'ALL' AND date >= ? AND date <= ? {hw}
             GROUP BY date ORDER BY date
         """, [str(start_date), str(today)] + hp).fetchall()
-        # Fallback: if no ALL-aggregate rows, sum individual ASINs
-        if not rows:
+        # Fallback: if no ALL-aggregate rows, or all rows have 0 units, sum individual ASINs
+        if not rows or sum(int(r[1]) for r in rows) == 0:
             rows = con.execute(f"""
                 SELECT date, COALESCE(SUM(units_ordered), 0)
                 FROM daily_sales

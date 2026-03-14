@@ -254,18 +254,20 @@ function AppShell({ user, isAdmin, allowed, mfaProtected, userMfaEnabled, filter
             </div>
 
           </div>
-          <div className="stripe" />
         </div>
 
-        {/* ── Filter Bar (View filter + theme selector) ── */}
+        {/* ── Filter Bar (View filter + theme selector) — Tier 2 ── */}
         <div className="filter-bar">
           <span className="filter-lbl">View:</span>
           <HierarchyFilter division={division} customer={customer} onChange={handleFilterChange} compact />
           <ThemeSelector />
         </div>
 
-        {/* ── Sub-nav ── */}
+        {/* ── Sub-nav — Tier 3 ── */}
         <NavSystem permissions={allowed} mfaProtected={mfaProtected} userMfaEnabled={userMfaEnabled} />
+
+        {/* ── Accent stripe — below all header tiers ── */}
+        <div className="stripe" />
 
       </div>
 

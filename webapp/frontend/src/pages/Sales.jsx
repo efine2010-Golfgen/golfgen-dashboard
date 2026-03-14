@@ -155,7 +155,7 @@ function heatmapSVG(data, W=1100) {
   Array.from({length:WEEKS},(_,w) => { if(w%4===0||w===WEEKS-1) s+=`<text x="${padL+(w+.5)*cellW}" y="${padT-5}" text-anchor="middle" font-size="8" fill="${B.sub}">W${WEEKS-w}</text>`; });
   DAYS.forEach((d,i) => s+=`<text x="${padL-3}" y="${padT+(i+.5)*cellH+4}" text-anchor="end" font-size="9" fill="${B.sub}">${d}</text>`);
   data.forEach(({week,day,units}) => {
-    const alpha = Math.max(0.07, Math.min(0.9, (units||0)/mx)).toFixed(2);
+    const alpha = mx > 0 ? Math.max(0.07, Math.min(0.9, (units||0)/mx)).toFixed(2) : '0.07';
     const c = day >= 5 ? B.o2 : B.b2;
     s += `<rect x="${(padL+week*cellW+2).toFixed(1)}" y="${(padT+day*cellH+2).toFixed(1)}" width="${(cellW-4).toFixed(1)}" height="${(cellH-4).toFixed(1)}" rx="3" fill="${c}" fill-opacity="${alpha}"/>`;
     if ((units||0)/mx > 0.68) s += `<text x="${(padL+(week+.5)*cellW).toFixed(1)}" y="${(padT+(day+.5)*cellH+3.5).toFixed(1)}" text-anchor="middle" font-size="7" fill="white" opacity=".85">${units}</text>`;
@@ -165,11 +165,26 @@ function heatmapSVG(data, W=1100) {
 
 function funnelSVG(data) {
   if (!data || data.length === 0) return '<div style="color:#374f66;padding:20px;text-align:center;font-size:12px">No funnel data</div>';
-  const W=1100, H=380, padL=90, padR=260, padT=30, padB=60;
-  const iw=W-padL-padR, ih=H-padT-padB;
-  const n=data.length, rowH=ih/n;
-  const maxVal=Math.max(data[0].ty, data[0].ly, 1);
-  const stageW = val => Math.max(iw*.13, (val/maxVal)*(iw*.88));
+  const n = data.length;
+
+  // Layout constants — funnel LEFT, comparison table RIGHT
+  const W = 1100;
+  const rowH = 56;
+  const padT = 38;        // space above first row (header row)
+  const padB = 44;        // legend below
+  const derivedRowH = 28;
+  const nDerived = 2;     // ATC%, Conv%
+  const H = padT + n * rowH + 14 + nDerived * derivedRowH + padB;
+
+  // Funnel geometry (left side)
+  const funnelCX = 230;
+  const maxFW = 390;
+
+  // Table column x-positions (right side)
+  const labelX = 490;
+  const tyX    = 740;   // right-anchored
+  const lyX    = 900;   // right-anchored
+  const chgX   = 1082;  // right-anchored
 
   // Pre-compute derived metrics
   const sessIdx = data.findIndex(d => d.label === 'Sessions');
@@ -186,73 +201,86 @@ function funnelSVG(data) {
   const conv_ty   = sess_ty > 0 ? (ord_ty / sess_ty * 100).toFixed(2) : null;
   const conv_ly   = sess_ly > 0 ? (ord_ly / sess_ly * 100).toFixed(2) : null;
 
+  const maxVal = Math.max(data[0].ty, data[0].ly, 1);
+  const stageW = val => Math.max(maxFW * 0.14, (val / maxVal) * (maxFW * 0.94));
+
   let s = `<svg width="100%" viewBox="0 0 ${W} ${H}" style="overflow:visible;display:block">`;
-  s += `<defs>${data.map((_,i)=>`<linearGradient id="fg${i}" x1="0" y1="0" x2="1" y2="0"><stop offset="0%" stop-color="${B.b1}" stop-opacity=".92"/><stop offset="100%" stop-color="${B.b3}" stop-opacity=".92"/></linearGradient>`).join('')}</defs>`;
+  s += `<defs>${data.map((_,i) => `<linearGradient id="fg${i}" x1="0" y1="0" x2="1" y2="0"><stop offset="0%" stop-color="${B.b1}" stop-opacity=".92"/><stop offset="100%" stop-color="${B.b3}" stop-opacity=".92"/></linearGradient>`).join('')}</defs>`;
 
-  const cx = (W - padR + padL) / 2;
+  // ── Table header row ──────────────────────────────────────
+  s += `<text x="${labelX}" y="${padT - 10}" text-anchor="start" font-size="9" font-weight="700" fill="${B.sub}" letter-spacing="1">METRIC</text>`;
+  s += `<text x="${tyX}"    y="${padT - 10}" text-anchor="end"   font-size="9" font-weight="700" fill="${B.sub}" letter-spacing="1">TY</text>`;
+  s += `<text x="${lyX}"    y="${padT - 10}" text-anchor="end"   font-size="9" font-weight="700" fill="${B.sub}" letter-spacing="1">LY</text>`;
+  s += `<text x="${chgX}"   y="${padT - 10}" text-anchor="end"   font-size="9" font-weight="700" fill="${B.sub}" letter-spacing="1">% CHG</text>`;
+  s += `<line x1="${labelX}" y1="${padT - 4}" x2="${W - 8}" y2="${padT - 4}" stroke="${B.brd}" stroke-width="0.5" opacity=".9"/>`;
 
-  data.forEach((f,i) => {
+  // ── Funnel + table rows ───────────────────────────────────
+  data.forEach((f, i) => {
     const tyW = stageW(f.ty), lyW = stageW(f.ly);
-    const nextTyW = i<n-1 ? stageW(data[i+1].ty) : tyW*.55;
-    const nextLyW = i<n-1 ? stageW(data[i+1].ly) : lyW*.55;
-    const cy = padT+i*rowH, segH = rowH-4;
+    const nextTyW = i < n - 1 ? stageW(data[i+1].ty) : tyW * 0.55;
+    const nextLyW = i < n - 1 ? stageW(data[i+1].ly) : lyW * 0.55;
+    const rowY  = padT + i * rowH;
+    const segH  = rowH - 4;
+    const rowMid = rowY + rowH / 2;
 
-    // TY fill drawn FIRST so LY outline appears on top and is always visible
-    s += `<path d="M${cx-tyW/2},${cy+2} L${cx+tyW/2},${cy+2} L${cx+nextTyW/2},${cy+segH-1} L${cx-nextTyW/2},${cy+segH-1} Z" fill="url(#fg${i})" opacity=".92"/>`;
-    // LY dashed outline drawn ON TOP — always visible regardless of size vs TY
-    s += `<path d="M${cx-lyW/2},${cy} L${cx+lyW/2},${cy} L${cx+nextLyW/2},${cy+segH} L${cx-nextLyW/2},${cy+segH} Z" fill="none" stroke="${B.sub}" stroke-width="1.5" stroke-dasharray="5 3" opacity=".75"/>`;
+    // Funnel trapezoid
+    s += `<path d="M${funnelCX - tyW/2},${rowY + 2} L${funnelCX + tyW/2},${rowY + 2} L${funnelCX + nextTyW/2},${rowY + segH - 1} L${funnelCX - nextTyW/2},${rowY + segH - 1} Z" fill="url(#fg${i})" opacity=".92"/>`;
+    s += `<path d="M${funnelCX - lyW/2},${rowY} L${funnelCX + lyW/2},${rowY} L${funnelCX + nextLyW/2},${rowY + segH} L${funnelCX - nextLyW/2},${rowY + segH} Z" fill="none" stroke="${B.sub}" stroke-width="1.5" stroke-dasharray="5 3" opacity=".75"/>`;
+    // TY value on funnel bar
+    s += `<text x="${funnelCX}" y="${rowMid + 4}" text-anchor="middle" font-size="12" font-weight="700" fill="#fff">${fN(f.ty)}</text>`;
 
-    // Stage label (left)
-    s += `<text x="${padL-12}" y="${cy+rowH/2+4}" text-anchor="end" font-size="11" font-weight="600" fill="#e2e8f0">${f.label}</text>`;
-    // TY value (center)
-    s += `<text x="${cx}" y="${cy+rowH/2+4}" text-anchor="middle" font-size="13" font-weight="700" fill="#fff">${fN(f.ty)}</text>`;
-
-    // Right comparison panel: TY / vs LY / YOY delta
-    const rx = W - padR + 16;
-    const rowMid = cy + rowH/2;
+    // Table row
     const lyDelta = f.ly > 0 ? dp(f.ty, f.ly) : null;
     const deltaColor = lyDelta != null ? (lyDelta >= 0 ? '#4ade80' : '#fb923c') : B.sub;
-    s += `<text x="${rx}" y="${rowMid-8}" text-anchor="start" font-size="12" font-weight="700" fill="#e2e8f0">${fN(f.ty)}</text>`;
-    s += `<text x="${rx+90}" y="${rowMid-8}" text-anchor="start" font-size="10" fill="${B.sub}">vs LY ${fN(f.ly)}</text>`;
+
+    s += `<text x="${labelX}" y="${rowMid + 4}" text-anchor="start" font-size="11" font-weight="600" fill="#e2e8f0">${f.label}</text>`;
+    s += `<text x="${tyX}"    y="${rowMid + 4}" text-anchor="end"   font-size="12" font-weight="700" fill="#e2e8f0">${fN(f.ty)}</text>`;
+    s += `<text x="${lyX}"    y="${rowMid + 4}" text-anchor="end"   font-size="11"                   fill="${B.sub}">${fN(f.ly)}</text>`;
     if (lyDelta != null) {
-      s += `<text x="${rx}" y="${rowMid+8}" text-anchor="start" font-size="10" font-weight="700" fill="${deltaColor}">${lyDelta>=0?'\u25B2':'\u25BC'} ${Math.abs(lyDelta).toFixed(1)}% YOY</text>`;
+      s += `<text x="${chgX}" y="${rowMid + 4}" text-anchor="end" font-size="11" font-weight="700" fill="${deltaColor}">${lyDelta >= 0 ? '\u25B2' : '\u25BC'} ${Math.abs(lyDelta).toFixed(1)}%</text>`;
+    } else {
+      s += `<text x="${chgX}" y="${rowMid + 4}" text-anchor="end" font-size="11" fill="${B.sub}">\u2014</text>`;
+    }
+
+    // Row divider (not after last)
+    if (i < n - 1) {
+      s += `<line x1="${labelX}" y1="${rowY + rowH}" x2="${W - 8}" y2="${rowY + rowH}" stroke="${B.brd}" stroke-width="0.4" opacity=".5"/>`;
     }
   });
 
-  // ── Derived metrics in right panel below last stage ──
-  const rx = W - padR + 16;
-  const divY = padT + n*rowH + 8;
-  s += `<line x1="${W-padR+8}" y1="${divY}" x2="${W-6}" y2="${divY}" stroke="${B.brd}" stroke-width="0.5" opacity=".6"/>`;
+  // ── Derived rows: ATC% and Conv% ──────────────────────────
+  const divY = padT + n * rowH + 8;
+  s += `<line x1="${labelX}" y1="${divY}" x2="${W - 8}" y2="${divY}" stroke="${B.brd}" stroke-width="0.6" opacity=".8"/>`;
 
+  const derivedRows = [];
   if (atcPct_ty != null) {
     const atcChg = atcPct_ly != null ? dp(parseFloat(atcPct_ty), parseFloat(atcPct_ly)) : null;
-    const atcColor = atcChg != null ? (atcChg >= 0 ? '#4ade80' : '#fb923c') : B.sub;
-    const ry = divY + 16;
-    s += `<text x="${rx}" y="${ry}" text-anchor="start" font-size="9" fill="${B.sub}">ATC % of Sessions</text>`;
-    s += `<text x="${rx+120}" y="${ry}" text-anchor="start" font-size="11" font-weight="800" fill="#e2e8f0">${atcPct_ty}%</text>`;
-    if (atcPct_ly != null) s += `<text x="${rx+158}" y="${ry}" text-anchor="start" font-size="9" fill="${B.sub}">LY ${atcPct_ly}%</text>`;
-    if (atcChg != null) s += `<text x="${rx+204}" y="${ry}" text-anchor="start" font-size="9" font-weight="700" fill="${atcColor}">${atcChg>=0?'\u25B2':'\u25BC'}${Math.abs(atcChg).toFixed(1)}%</text>`;
+    derivedRows.push({ label: 'ATC %', ty: atcPct_ty + '%', ly: atcPct_ly != null ? atcPct_ly + '%' : '\u2014', chg: atcChg });
   }
-
   if (conv_ty != null) {
     const convChg = conv_ly != null ? dp(parseFloat(conv_ty), parseFloat(conv_ly)) : null;
-    const convColor = convChg != null ? (convChg >= 0 ? '#4ade80' : '#fb923c') : B.sub;
-    const ry = divY + 34;
-    s += `<text x="${rx}" y="${ry}" text-anchor="start" font-size="9" fill="${B.sub}">Conversion %</text>`;
-    s += `<text x="${rx+120}" y="${ry}" text-anchor="start" font-size="11" font-weight="800" fill="#e2e8f0">${conv_ty}%</text>`;
-    if (conv_ly != null) s += `<text x="${rx+158}" y="${ry}" text-anchor="start" font-size="9" fill="${B.sub}">LY ${conv_ly}%</text>`;
-    if (convChg != null) s += `<text x="${rx+204}" y="${ry}" text-anchor="start" font-size="9" font-weight="700" fill="${convColor}">${convChg>=0?'\u25B2':'\u25BC'}${Math.abs(convChg).toFixed(1)}%</text>`;
+    derivedRows.push({ label: 'Conversion %', ty: conv_ty + '%', ly: conv_ly != null ? conv_ly + '%' : '\u2014', chg: convChg });
   }
 
-  // Legend
-  s += `<g transform="translate(${padL},${H-14})">`;
-  s += `<rect width="10" height="10" y="-1" rx="2" fill="${B.b2}" opacity=".9"/><text x="14" y="8" font-size="9" fill="${B.sub}">This Year</text>`;
-  s += `<rect x="90" width="10" height="8" y="0" rx="2" fill="none" stroke="${B.sub}" stroke-width="1" stroke-dasharray="4 2"/><text x="104" y="8" font-size="9" fill="${B.sub}">Last Year outline</text>`;
-  s += `</g>`;
+  derivedRows.forEach((dm, i) => {
+    const ry = divY + 20 + i * derivedRowH;
+    const chgColor = dm.chg != null ? (dm.chg >= 0 ? '#4ade80' : '#fb923c') : B.sub;
+    s += `<text x="${labelX}" y="${ry}" text-anchor="start" font-size="10"               fill="${B.sub}">${dm.label}</text>`;
+    s += `<text x="${tyX}"    y="${ry}" text-anchor="end"   font-size="11" font-weight="700" fill="#e2e8f0">${dm.ty}</text>`;
+    s += `<text x="${lyX}"    y="${ry}" text-anchor="end"   font-size="10"               fill="${B.sub}">${dm.ly}</text>`;
+    if (dm.chg != null) {
+      s += `<text x="${chgX}" y="${ry}" text-anchor="end" font-size="10" font-weight="700" fill="${chgColor}">${dm.chg >= 0 ? '\u25B2' : '\u25BC'} ${Math.abs(dm.chg).toFixed(1)}%</text>`;
+    } else {
+      s += `<text x="${chgX}" y="${ry}" text-anchor="end" font-size="10" fill="${B.sub}">\u2014</text>`;
+    }
+  });
 
-  // Right panel header
-  s += `<line x1="${W-padR+8}" y1="${padT-4}" x2="${W-6}" y2="${padT-4}" stroke="${B.brd}" stroke-width="0.5"/>`;
-  s += `<text x="${W-padR+16}" y="${padT-10}" font-size="9" font-weight="700" fill="${B.sub}" text-transform="uppercase" letter-spacing="1">COMPARISON</text>`;
+  // ── Legend (bottom-left, under funnel) ────────────────────
+  const legY = H - padB + 18;
+  s += `<g transform="translate(16,${legY})">`;
+  s += `<rect width="10" height="10" y="-1" rx="2" fill="${B.b2}" opacity=".9"/><text x="14" y="8" font-size="9" fill="${B.sub}">This Year</text>`;
+  s += `<rect x="90" width="10" height="8" y="0" rx="2" fill="none" stroke="${B.sub}" stroke-width="1" stroke-dasharray="4 2"/><text x="104" y="8" font-size="9" fill="${B.sub}">Last Year</text>`;
+  s += `</g>`;
 
   return s + '</svg>';
 }
@@ -516,12 +544,9 @@ export default function Sales({ filters = {} }) {
       </div>
 
       {/* VIEW TABS */}
-      <div style={{display:'flex',gap:2,padding:4,borderRadius:12,background:'var(--surf)',border:'1px solid var(--brd2)',width:'fit-content',marginBottom:18}}>
+      <div className="ptab-bar" style={{marginBottom:18}}>
         {VIEW_TABS.map(t => (
-          <button key={t} onClick={() => handleViewTab(t)}
-            style={{padding:'6px 18px',borderRadius:8,fontSize:13,fontWeight:600,border:'none',cursor:'pointer',
-              background:viewTab===t?B.b1:'transparent',color:viewTab===t?'#fff':'var(--txt3)',
-              boxShadow:viewTab===t?'0 0 18px rgba(27,79,138,.5)':'none',transition:'all .15s'}}>
+          <button key={t} className={`ptab${viewTab===t?' active':''}`} onClick={() => handleViewTab(t)}>
             {t}
           </button>
         ))}
@@ -546,21 +571,6 @@ export default function Sales({ filters = {} }) {
               </button>
             ))}
           </div>
-        </div>
-      )}
-
-      {/* PERIOD PILLS */}
-      {viewTab !== 'Custom' && (
-        <div style={{display:'flex',gap:6,flexWrap:'wrap',marginBottom:18}}>
-          {periods.map(p => (
-            <button key={p} onClick={() => setActivePeriod(p)}
-              style={{padding:'4px 13px',borderRadius:99,fontSize:12,fontWeight:600,
-                border:`1px solid ${activePeriod===p?'transparent':'var(--brd)'}`,cursor:'pointer',
-                background:activePeriod===p?'var(--apill)':'transparent',
-                color:activePeriod===p?'#fff':'var(--txt3)',transition:'all .15s'}}>
-              {p}
-            </button>
-          ))}
         </div>
       )}
 
@@ -610,6 +620,17 @@ export default function Sales({ filters = {} }) {
               </div>
             );
           })}
+        </div>
+      )}
+
+      {/* PERIOD PILLS — directly above Sales Overview KPIs */}
+      {viewTab !== 'Custom' && (
+        <div className="ppill-bar" style={{marginBottom:14}}>
+          {periods.map(p => (
+            <button key={p} className={`ppill${activePeriod===p?' active':''}`} onClick={() => setActivePeriod(p)}>
+              {p}
+            </button>
+          ))}
         </div>
       )}
 

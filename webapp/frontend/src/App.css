@@ -108,19 +108,19 @@ body.fresh {
 .hnav-hidden { visibility:hidden; }
 .stripe { height:3px; background:linear-gradient(90deg,var(--s1),var(--s2),var(--s3)); transition:background .35s; }
 
-/* ── FILTER BAR ─────────────────────────────────────────── */
-.filter-bar { background:var(--surf); border-bottom:1px solid var(--brd); padding:6px 20px; display:flex; align-items:center; gap:10px; transition:background .3s; }
-.filter-lbl { font-family:'Space Grotesk',monospace; font-size:10px; font-weight:600; text-transform:uppercase; letter-spacing:.08em; color:var(--txt3); white-space:nowrap; }
+/* ── FILTER BAR — Tier 2 of unified header ────────────── */
+.filter-bar { background:#0a1924; border-top:1px solid rgba(255,255,255,.07); border-bottom:1px solid rgba(255,255,255,.07); padding:6px 20px; display:flex; align-items:center; gap:10px; }
+.filter-lbl { font-family:'Space Grotesk',monospace; font-size:10px; font-weight:600; text-transform:uppercase; letter-spacing:.08em; color:rgba(255,255,255,.45); white-space:nowrap; }
 
 /* ── THEME STRIP — now lives inside filter-bar, no longer a separate row ── */
 .theme-strip { display:none; }
 
-/* ── SUB-NAV ────────────────────────────────────────────── */
-.subnav { background:var(--surf); border-bottom:1px solid var(--brd); padding:0 20px; display:flex; align-items:center; height:40px; overflow-x:auto; transition:background .3s; }
-.snbtn { display:flex; align-items:center; padding:0 13px; height:100%; font-size:12px; font-weight:600; font-family:'Sora',sans-serif; color:var(--txt2); border:none; background:transparent; cursor:pointer; border-bottom:2px solid transparent; transition:all .15s; white-space:nowrap; }
-.snbtn.active { color:var(--acc1); border-bottom-color:var(--acc1); }
-.snbtn:hover:not(.active) { color:var(--txt); }
-.sn-div { width:1px; height:16px; background:var(--brd); flex-shrink:0; }
+/* ── SUB-NAV — Tier 3 of unified header ────────────────── */
+.subnav { background:#081520; border-bottom:1px solid rgba(255,255,255,.07); padding:0 20px; display:flex; align-items:center; height:40px; overflow-x:auto; }
+.snbtn { display:flex; align-items:center; padding:0 13px; height:100%; font-size:12px; font-weight:600; font-family:'Sora',sans-serif; color:rgba(255,255,255,.55); border:none; background:transparent; cursor:pointer; border-bottom:2px solid transparent; transition:all .15s; white-space:nowrap; }
+.snbtn.active { color:#2ECFAA; border-bottom-color:#2ECFAA; }
+.snbtn:hover:not(.active) { color:rgba(255,255,255,.85); }
+.sn-div { width:1px; height:16px; background:rgba(255,255,255,.12); flex-shrink:0; }
 .subnav-sub { height:34px; }
 
 /* ── PAGE & THEME BANNER ────────────────────────────────── */
@@ -136,6 +136,18 @@ body.fresh {
 .tbtn { padding:3px 9px; border-radius:6px; font-size:10px; font-weight:700; font-family:'Sora',sans-serif; border:1px solid var(--brd2); background:transparent; color:var(--txt2); cursor:pointer; transition:all .15s; white-space:nowrap; }
 .tbtn:hover { border-color:var(--acc1); color:var(--acc1); }
 .tbtn.active { background:var(--acc1); border-color:var(--acc1); color:#0E1F2D; font-weight:800; }
+
+/* ── UNIFIED PAGE TAB BAR (Exec/Daily/Weekly etc.) ──────── */
+.ptab-bar { display:flex; align-items:center; gap:4px; flex-wrap:wrap; }
+.ptab { padding:5px 14px; border-radius:6px; font-size:11px; font-weight:600; font-family:'Sora',sans-serif; border:1px solid var(--brd2); background:transparent; color:var(--txt2); cursor:pointer; transition:all .15s; white-space:nowrap; }
+.ptab:hover { border-color:var(--acc1); color:var(--acc1); }
+.ptab.active { background:var(--acc1); border-color:var(--acc1); color:#0E1F2D; font-weight:700; }
+
+/* ── UNIFIED PERIOD PILL (Today/Yesterday/WTD etc.) ──────── */
+.ppill-bar { display:flex; align-items:center; gap:4px; flex-wrap:wrap; }
+.ppill { padding:5px 13px; border-radius:6px; font-size:11px; font-weight:600; font-family:'Sora',sans-serif; border:1px solid var(--brd2); background:transparent; color:var(--txt2); cursor:pointer; transition:all .15s; white-space:nowrap; }
+.ppill:hover { border-color:var(--acc1); color:var(--acc1); }
+.ppill.active { background:var(--acc1); border-color:var(--acc1); color:#0E1F2D; font-weight:700; }
 .tg-divider { width:1px; height:20px; background:var(--brd); flex-shrink:0; }
 
 /* ── GolfGen Dashboard — Brand Colors (kept for page components) ── */
