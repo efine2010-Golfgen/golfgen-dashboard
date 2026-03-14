@@ -17,6 +17,45 @@ from core.hierarchy import hierarchy_filter as _hierarchy_filter
 logger = logging.getLogger("golfgen")
 router = APIRouter()
 
+# ── Module-level timezone constant — used everywhere, never re-defined inline ──
+CENTRAL = ZoneInfo("America/Chicago")
+
+
+def _today_central() -> date:
+    """Current calendar date in US/Central time.
+    Always use this instead of date.today() — Railway container runs UTC."""
+    return datetime.now(CENTRAL).date()
+
+
+def _orders_supplement(con, sd: date, ed: date, hw: str, hp: list):
+    """Pull sales/units from orders table using exact Central-time day boundaries.
+
+    Handles the S&T report lag for recent periods (today, yesterday, last few days).
+    Central midnight → UTC conversion ensures no orders are cut off at the UTC date line.
+    Returns (sales_float, units_int, order_count_int). Returns (0, 0, 0) on any failure.
+    """
+    try:
+        s_iso = datetime(sd.year, sd.month, sd.day, 0, 0, 0, tzinfo=CENTRAL).isoformat()
+        e_iso = datetime(ed.year, ed.month, ed.day, 23, 59, 59, tzinfo=CENTRAL).isoformat()
+        r = con.execute(f"""
+            SELECT COALESCE(SUM(order_total), 0),
+                   COALESCE(SUM(number_of_items), 0),
+                   COUNT(DISTINCT order_id)
+            FROM orders
+            WHERE purchase_date >= ? AND purchase_date <= ?
+              AND (order_status IS NULL OR order_status NOT IN ('Cancelled','Pending'))
+              {hw}
+        """, [s_iso, e_iso] + hp).fetchone()
+        if r:
+            sales = float(r[0] or 0)
+            units = int(r[1] or 0)
+            cnt   = int(r[2] or 0)
+            logger.debug(f"_orders_supplement {sd}→{ed}: ${sales:.2f}, {units} units, {cnt} orders")
+            return sales, units, cnt
+    except Exception as exc:
+        logger.warning(f"_orders_supplement({sd}→{ed}) failed: {exc}")
+    return 0.0, 0, 0
+
 
 # ── Helper Functions ────────────────────────────────────
 
@@ -219,8 +258,9 @@ def _aggregate_weekly(daily_data: list) -> list:
 
 
 def _period_to_dates(period: str, start: str = None, end: str = None):
-    """Convert period label to (start_date, end_date) tuple."""
-    today = datetime.now(ZoneInfo("America/Chicago")).date()  # Use Central time — Railway runs UTC
+    """Convert period label to (start_date, end_date) tuple.
+    Uses _today_central() — always Central time, never UTC date.today()."""
+    today = _today_central()
     if period == 'today':
         return today, today
     elif period == 'yesterday':
@@ -367,51 +407,21 @@ def sales_summary(
 
         ty_sales, ty_units, ty_sessions, ty_gv = _sum_sales(sd, ed, hp)
 
-        # For today/yesterday: supplement from orders table (no S&T report lag)
-        # Use Central-time datetime bounds to avoid UTC date boundary mis-match on Railway
-        fell_back = False  # restored — referenced in return payload
-        _CENTRAL = ZoneInfo("America/Chicago")
+        # Supplement TY from orders table for recent periods where S&T report lags.
+        # fell_back stays False — kept in return payload for frontend compatibility.
+        fell_back = False
         if period in ('today', 'yesterday'):
-            try:
-                ty_start = datetime(sd.year, sd.month, sd.day, 0, 0, 0, tzinfo=_CENTRAL).isoformat()
-                ty_end   = datetime(ed.year, ed.month, ed.day, 23, 59, 59, tzinfo=_CENTRAL).isoformat()
-                r = con.execute(f"""
-                    SELECT COALESCE(SUM(order_total), 0),
-                           COALESCE(SUM(number_of_items), 0),
-                           COUNT(DISTINCT order_id)
-                    FROM orders
-                    WHERE purchase_date >= ? AND purchase_date <= ?
-                      AND (order_status IS NULL OR order_status NOT IN ('Cancelled','Pending')) {hw}
-                """, [ty_start, ty_end] + hp).fetchone()
-                o_sales, o_units, o_cnt = float(r[0]), int(r[1]), int(r[2])
-                if o_sales > 0 or o_cnt > 0:
-                    ty_sales = o_sales
-                    ty_units = o_units
-            except Exception:
-                pass
+            o_sales, o_units, o_cnt = _orders_supplement(con, sd, ed, hw, hp)
+            if o_sales > 0 or o_cnt > 0:
+                ty_sales, ty_units = o_sales, o_units
 
         ly_sales, ly_units, ly_sessions, ly_gv = _sum_sales(ly_sd, ly_ed, hp)
 
-        # For today/yesterday: supplement LY from orders table too (S&T report lags for recent LY dates)
+        # Supplement LY from orders table — same logic, same helper.
         if period in ('today', 'yesterday'):
-            try:
-                _CENTRAL = ZoneInfo("America/Chicago")
-                ly_start = datetime(ly_sd.year, ly_sd.month, ly_sd.day, 0, 0, 0, tzinfo=_CENTRAL).isoformat()
-                ly_end   = datetime(ly_ed.year, ly_ed.month, ly_ed.day, 23, 59, 59, tzinfo=_CENTRAL).isoformat()
-                r = con.execute(f"""
-                    SELECT COALESCE(SUM(order_total), 0),
-                           COALESCE(SUM(number_of_items), 0),
-                           COUNT(DISTINCT order_id)
-                    FROM orders
-                    WHERE purchase_date >= ? AND purchase_date <= ?
-                      AND (order_status IS NULL OR order_status NOT IN ('Cancelled','Pending')) {hw}
-                """, [ly_start, ly_end] + hp).fetchone()
-                lo_sales, lo_units, lo_cnt = float(r[0]), int(r[1]), int(r[2])
-                if lo_sales > 0 or lo_cnt > 0:
-                    ly_sales = lo_sales
-                    ly_units = lo_units
-            except Exception:
-                pass
+            lo_sales, lo_units, lo_cnt = _orders_supplement(con, ly_sd, ly_ed, hw, hp)
+            if lo_sales > 0 or lo_cnt > 0:
+                ly_sales, ly_units = lo_sales, lo_units
 
         ty_aur = round(ty_sales / ty_units, 2) if ty_units else 0
         ly_aur = round(ly_sales / ly_units, 2) if ly_units else 0
@@ -643,7 +653,6 @@ def sales_period_comparison(
     try:
         con = get_db()
         hw, hp = _hier_where(division, customer)
-        today = date.today()
 
         view_periods = {
             "exec": {
@@ -684,49 +693,23 @@ def sales_period_comparison(
             """, [str(s), str(e)] + extra_params).fetchone()
             return float(r[0]), int(r[1]), int(r[2]), int(r[3])
 
-        def _orders_table_sum(s, e, extra_params):
-            """Pull revenue/units directly from orders table — always more current than daily_sales."""
-            try:
-                r = con.execute(f"""
-                    SELECT COALESCE(SUM(order_total), 0),
-                           COUNT(DISTINCT order_id),
-                           COALESCE(SUM(number_of_items), 0)
-                    FROM orders
-                    WHERE purchase_date >= ? AND purchase_date <= ?
-                      AND (order_status IS NULL OR order_status NOT IN ('Cancelled','Pending')) {hw}
-                """, [str(s), str(e)] + extra_params).fetchone()
-                if r:
-                    o_sales = float(r[0])
-                    o_cnt   = int(r[1])
-                    o_units = int(r[2]) if r[2] else o_cnt
-                    return o_sales, o_units, o_cnt
-                return 0.0, 0, 0
-            except Exception:
-                return 0.0, 0, 0
-
         for label, period_key in periods_map.items():
             sd, ed = _period_to_dates(period_key)
             sales, units, sessions, glance_views = _daily_sales_sum(sd, ed, hp)
 
             if period_key == 'today':
-                # S&T report never has today's data — always pull from orders table.
-                o_sales, o_units, o_cnt = _orders_table_sum(sd, ed, hp)
+                # S&T never has today's data — always pull from orders table.
+                o_sales, o_units, o_cnt = _orders_supplement(con, sd, ed, hw, hp)
                 if o_sales > 0 or o_cnt > 0:
-                    sales = o_sales    # order_total is best proxy for today
-                    units = o_units
-                # sd/ed stay as actual today — no fallback to earlier dates
+                    sales, units = o_sales, o_units
 
             elif period_key == 'yesterday':
-                # daily_sales may lag by 1 order — supplement with orders table.
-                o_sales, o_units, o_cnt = _orders_table_sum(sd, ed, hp)
+                # S&T may lag — supplement with orders table.
+                o_sales, o_units, o_cnt = _orders_supplement(con, sd, ed, hw, hp)
                 if sales == 0 and o_sales > 0:
-                    # daily_sales has nothing yet — use orders table
-                    sales = o_sales
-                    units = o_units
+                    sales, units = o_sales, o_units
                 elif o_units > units:
-                    # orders table has more units (the missing order) — use higher count
                     units = o_units
-                # sd/ed stay as actual yesterday — no fallback to earlier dates
 
             elif sales == 0 and units == 0:
                 # For longer periods (WTD, MTD, etc.) only: step back up to 3 days if no data
@@ -816,8 +799,9 @@ def sales_monthly_yoy(
                 months_map[mo] = {}
             months_map[mo][yr] = rev
 
-        current_month = date.today().month
-        current_year = date.today().year
+        _today = _today_central()
+        current_month = _today.month
+        current_year  = _today.year
         result = []
         for mo in range(1, 13):
             entry = {
@@ -971,7 +955,7 @@ def sales_heatmap(
     try:
         con = get_db()
         hw, hp = _hier_where(division, customer)
-        today = date.today()
+        today = _today_central()
         start_date = today - timedelta(weeks=26)
 
         rows = con.execute(f"""
@@ -1253,6 +1237,56 @@ def sales_ad_breakdown(
         return result
     except Exception as e:
         logger.error(f"sales/ad-breakdown error: {e}")
+        return {"error": str(e)}
+
+
+# ── DEBUG: Today sales diagnostic (no auth) ────────────────
+@router.get("/api/sales/debug-today")
+def sales_debug_today():
+    """Show exactly what the Today query returns and why. No auth required."""
+    try:
+        con = get_db()
+        today_c = _today_central()
+        s_iso = datetime(today_c.year, today_c.month, today_c.day, 0, 0, 0, tzinfo=CENTRAL).isoformat()
+        e_iso = datetime(today_c.year, today_c.month, today_c.day, 23, 59, 59, tzinfo=CENTRAL).isoformat()
+
+        # What does the orders table return for today?
+        r = con.execute("""
+            SELECT COUNT(DISTINCT order_id) AS cnt,
+                   COALESCE(SUM(order_total), 0) AS total,
+                   COALESCE(SUM(number_of_items), 0) AS units,
+                   MIN(purchase_date) AS earliest,
+                   MAX(purchase_date) AS latest
+            FROM orders
+            WHERE purchase_date >= ? AND purchase_date <= ?
+              AND (order_status IS NULL OR order_status NOT IN ('Cancelled','Pending'))
+        """, [s_iso, e_iso]).fetchone()
+
+        # What are the most recent 5 orders in the table at all?
+        recent = con.execute("""
+            SELECT order_id, purchase_date, order_total, order_status
+            FROM orders
+            ORDER BY purchase_date DESC
+            LIMIT 5
+        """).fetchall()
+        con.close()
+
+        return {
+            "central_today": str(today_c),
+            "query_start_iso": s_iso,
+            "query_end_iso": e_iso,
+            "today_orders_count": int(r[0]) if r else 0,
+            "today_sales_total": float(r[1]) if r else 0,
+            "today_units": int(r[2]) if r else 0,
+            "today_earliest_order": str(r[3]) if r and r[3] else None,
+            "today_latest_order": str(r[4]) if r and r[4] else None,
+            "most_recent_5_orders": [
+                {"order_id": row[0], "purchase_date": str(row[1]),
+                 "order_total": row[2], "status": row[3]}
+                for row in recent
+            ],
+        }
+    except Exception as e:
         return {"error": str(e)}
 
 
