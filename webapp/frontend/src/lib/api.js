@@ -228,8 +228,11 @@ export const api = {
 
   // System
   health: () => fetchJSON(`/api/health`),
-  syncLog: (limit = 50) => fetchJSON(`/api/system/sync-log?limit=${limit}`),
+  syncLog: (limit = 100) => fetchJSON(`/api/system/sync-log?limit=${limit}`),
+  dataCoverage: () => fetchJSON(`/api/system/data-coverage`),
   systemStatus: () => fetchJSON(`/api/system/status`),
+  triggerGapFill: () =>
+    fetch(`${API_BASE}/api/sync/gap-fill`, { method: "POST", credentials: "include" }).then(r => r.json()),
 
   // Backup
   backupStatus: () => fetchJSON(`/api/backup/status`),

@@ -511,19 +511,18 @@ async def get_system_status(request: Request):
 async def get_sync_log(request: Request, limit: int = Query(50, ge=1, le=500)):
     """Get sync log entries."""
     from core.auth import get_session
+    from fastapi import HTTPException
 
     token = request.cookies.get("golfgen_session")
     sess = get_session(token)
     if not sess:
-        from fastapi import HTTPException
         raise HTTPException(status_code=401, detail="Not authenticated")
 
-    con = get_db_rw()
+    con = get_db()
     try:
         rows = con.execute("""
             SELECT id, job_name, started_at, completed_at, status,
-                   records_processed, records_processed, 
-                   error_message, execution_time_seconds
+                   records_processed, error_message, execution_time_seconds
             FROM sync_log
             ORDER BY started_at DESC
             LIMIT ?
@@ -538,16 +537,186 @@ async def get_sync_log(request: Request, limit: int = Query(50, ge=1, le=500)):
                     "completed_at": str(row[3]),
                     "status": row[4],
                     "records_processed": row[5] or 0,
-                    "records_processed": row[6] or 0,
-                    "": row[7] or 0,
-                    "error_message": row[8],
-                    "execution_time_seconds": round(row[9], 2) if row[9] else None,
+                    "error_message": row[6],
+                    "execution_time_seconds": round(row[7], 1) if row[7] else None,
                 }
                 for row in rows
             ]
         }
     finally:
         con.close()
+
+
+@router.get("/api/system/data-coverage")
+async def get_data_coverage(request: Request):
+    """Return monthly data coverage grid, sync job health, and API report budget."""
+    import calendar as cal
+    from datetime import date as dt_date
+    from core.auth import get_session
+    from fastapi import HTTPException
+
+    token = request.cookies.get("golfgen_session")
+    sess = get_session(token)
+    if not sess:
+        raise HTTPException(status_code=401, detail="Not authenticated")
+
+    today = datetime.now(ZoneInfo("America/Chicago")).date()
+    yesterday = today - timedelta(days=1)
+    backfill_start = dt_date(2024, 4, 1)
+
+    con = get_db()
+    try:
+        # ── All daily_sales dates (ALL-level aggregates) ──────────────────────
+        rows = con.execute(
+            "SELECT DISTINCT date FROM daily_sales WHERE asin = 'ALL' AND date >= '2024-04-01'"
+        ).fetchall()
+        existing_dates: set = set()
+        for r in rows:
+            d = r[0]
+            if isinstance(d, str):
+                d = datetime.strptime(d, "%Y-%m-%d").date()
+            elif hasattr(d, "date"):
+                d = d.date()
+            existing_dates.add(d)
+
+        # ── Monthly coverage grid ─────────────────────────────────────────────
+        months = []
+        cur = backfill_start.replace(day=1)
+        while cur <= today.replace(day=1):
+            _, days_in_month = cal.monthrange(cur.year, cur.month)
+            month_end = dt_date(cur.year, cur.month, days_in_month)
+            cutoff = min(month_end, yesterday)
+            expected = max(0, (cutoff - cur).days + 1) if cutoff >= cur else 0
+            found = sum(
+                1 for d in existing_dates
+                if d.year == cur.year and d.month == cur.month
+            )
+            pct = round(found / expected * 100, 1) if expected > 0 else 0.0
+            months.append({
+                "month": cur.strftime("%Y-%m"),
+                "label": cur.strftime("%b %Y"),
+                "expected": expected,
+                "found": found,
+                "pct": pct,
+                "status": "complete" if pct >= 95 else ("partial" if pct > 0 else "empty"),
+            })
+            # advance to next month
+            if cur.month == 12:
+                cur = dt_date(cur.year + 1, 1, 1)
+            else:
+                cur = dt_date(cur.year, cur.month + 1, 1)
+
+        # ── Overall coverage ──────────────────────────────────────────────────
+        total_expected = max(0, (yesterday - backfill_start).days + 1)
+        total_found = len(existing_dates)
+        coverage_pct = round(total_found / total_expected * 100, 1) if total_expected > 0 else 0.0
+
+        # ── Missing date ranges ───────────────────────────────────────────────
+        all_expected: set = set()
+        d = backfill_start
+        while d <= yesterday:
+            all_expected.add(d)
+            d += timedelta(days=1)
+
+        missing = sorted(all_expected - existing_dates)
+        missing_ranges = []
+        if missing:
+            rs = re = missing[0]
+            for md in missing[1:]:
+                if (md - re).days <= 1:
+                    re = md
+                else:
+                    missing_ranges.append({
+                        "start": rs.isoformat(),
+                        "end": re.isoformat(),
+                        "days": (re - rs).days + 1,
+                        "label": rs.strftime("%b %Y") if rs.strftime("%b %Y") == re.strftime("%b %Y")
+                                 else f"{rs.strftime('%b %Y')} – {re.strftime('%b %Y')}",
+                    })
+                    rs = re = md
+            missing_ranges.append({
+                "start": rs.isoformat(),
+                "end": re.isoformat(),
+                "days": (re - rs).days + 1,
+                "label": rs.strftime("%b %Y") if rs.strftime("%b %Y") == re.strftime("%b %Y")
+                         else f"{rs.strftime('%b %Y')} – {re.strftime('%b %Y')}",
+            })
+
+        # ── Per-job health (last run + 24h stats) ─────────────────────────────
+        cutoff_24h = datetime.now(ZoneInfo("America/Chicago")) - timedelta(hours=24)
+        job_names = [
+            "sp_api_sync", "today_sync", "gap_fill",
+            "ads_sync", "nightly_deep_sync", "auto_backfill",
+            "pricing_sync", "nightly_backup_gdrive",
+        ]
+        job_health = {}
+        for job in job_names:
+            last = con.execute("""
+                SELECT started_at, status, records_processed,
+                       execution_time_seconds, error_message
+                FROM sync_log WHERE job_name = ?
+                ORDER BY started_at DESC LIMIT 1
+            """, [job]).fetchone()
+
+            stats = con.execute("""
+                SELECT COUNT(*),
+                       SUM(CASE WHEN status = 'SUCCESS' THEN 1 ELSE 0 END),
+                       COALESCE(SUM(records_processed), 0)
+                FROM sync_log
+                WHERE job_name = ? AND started_at >= ?
+            """, [job, cutoff_24h]).fetchone()
+
+            job_health[job] = {
+                "last_run": str(last[0])[:19] if last and last[0] else None,
+                "last_status": last[1] if last else None,
+                "last_records": int(last[2] or 0) if last else 0,
+                "last_duration_s": round(last[3], 1) if last and last[3] else None,
+                "last_error": last[4] if last else None,
+                "runs_24h": int(stats[0] or 0) if stats else 0,
+                "success_24h": int(stats[1] or 0) if stats else 0,
+                "records_24h": int(stats[2] or 0) if stats else 0,
+            }
+
+        # ── Report budget (in-memory counter from sync_engine) ────────────────
+        try:
+            from services.sync_engine import _report_budget, _HISTORICAL_REPORT_BUDGET
+            b_date = _report_budget.get("date")
+            b_used = _report_budget.get("used", 0) if b_date == today else 0
+            budget = {"used": b_used, "cap": _HISTORICAL_REPORT_BUDGET,
+                      "remaining": _HISTORICAL_REPORT_BUDGET - b_used}
+        except Exception:
+            budget = {"used": 0, "cap": 14, "remaining": 14}
+
+        return {
+            "months": months,
+            "total_expected": total_expected,
+            "total_found": total_found,
+            "coverage_pct": coverage_pct,
+            "missing_ranges": missing_ranges,
+            "missing_days": len(missing),
+            "job_health": job_health,
+            "report_budget": budget,
+            "as_of": yesterday.isoformat(),
+        }
+    finally:
+        con.close()
+
+
+@router.post("/api/sync/gap-fill")
+async def trigger_gap_fill(request: Request):
+    """Manually trigger one incremental gap-fill chunk."""
+    from core.auth import get_session
+    from fastapi import HTTPException
+    from services.sync_engine import run_incremental_gap_fill
+
+    token = request.cookies.get("golfgen_session")
+    sess = get_session(token)
+    if not sess:
+        raise HTTPException(status_code=401, detail="Not authenticated")
+
+    loop = asyncio.get_event_loop()
+    result = await loop.run_in_executor(None, run_incremental_gap_fill)
+    return result
 
 
 @router.post("/api/backup/trigger")
