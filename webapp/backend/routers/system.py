@@ -1,13 +1,14 @@
-"""System, health, debug, and backup routes."""
+"""System, health, debug, and backup routes. v2"""
 import os
 import json
 import logging
 import asyncio
-import duckdb
+from core.database import get_db, get_db_rw
 from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
 from pathlib import Path
 from fastapi import APIRouter, Query, Request
+from fastapi.responses import JSONResponse
 
 from core.config import DB_PATH, DB_DIR, TIMEZONE, DOCS_DIR
 
@@ -16,16 +17,9 @@ router = APIRouter()
 
 
 def _load_sp_api_credentials():
-    """Load SP-API credentials from environment."""
-    refresh_token = os.environ.get("SP_API_REFRESH_TOKEN")
-    if not refresh_token:
-        return None
-    return {
-        "refresh_token": refresh_token,
-        "client_id": os.environ.get("LWA_APP_ID"),
-        "client_secret": os.environ.get("LWA_CLIENT_SECRET"),
-        "marketplace_id": os.environ.get("MARKETPLACE_ID", "ATVPDKIKX0DER"),
-    }
+    """Load SP-API credentials from environment (matches sp_api.py logic)."""
+    from services.sp_api import _load_sp_api_credentials as _load_creds
+    return _load_creds()
 
 
 @router.get("/api/health")
@@ -44,7 +38,7 @@ def health():
     }
 
     try:
-        con = duckdb.connect(str(DB_PATH), read_only=False)
+        con = get_db_rw()
         # Table row counts
         for tbl in ["orders", "daily_sales", "financial_events", "fba_inventory", "advertising", "ads_campaigns"]:
             try:
@@ -97,6 +91,16 @@ async def trigger_sync_get():
     # Kick off full sync in background (don't wait for 5-min report poll)
     asyncio.get_event_loop().run_in_executor(None, _run_sp_api_sync)
     return {"status": "sync_complete", "today_synced": True}
+
+
+@router.get("/api/sync/deep")
+async def trigger_deep_sync():
+    """Manually trigger the nightly deep sync (fills all data gaps + re-pulls last 30 days).
+    WARNING: This can take 10-30 minutes depending on gap count. Runs in background."""
+    from services.sync_engine import run_nightly_deep_sync
+    import asyncio
+    asyncio.get_event_loop().run_in_executor(None, run_nightly_deep_sync)
+    return {"status": "deep_sync_started", "note": "Running in background. Check /api/debug/logs for progress."}
 
 
 @router.get("/api/debug/today-orders")
@@ -238,7 +242,7 @@ def debug_financial_events():
                 summary[k] = str(v)[:100]
 
         # Also check what's in the DB
-        con = duckdb.connect(str(DB_PATH), read_only=False)
+        con = get_db_rw()
         db_counts = con.execute("""
             SELECT event_type, COUNT(*), SUM(ABS(product_charges)),
                    SUM(ABS(fba_fees)), SUM(ABS(commission))
@@ -329,7 +333,7 @@ def backfill_historical(
                 if isinstance(report_data, str):
                     report_data = json.loads(report_data)
 
-                con = duckdb.connect(str(DB_PATH), read_only=False)
+                con = get_db_rw()
                 records = 0
 
                 for day_entry in report_data.get("salesAndTrafficByDate", []):
@@ -435,7 +439,7 @@ async def get_system_status(request: Request):
         from fastapi import HTTPException
         raise HTTPException(status_code=401, detail="Not authenticated")
 
-    con = duckdb.connect(str(DB_PATH), read_only=False)
+    con = get_db_rw()
     try:
         # Get last sync log entry
         last_sync = con.execute("""
@@ -514,7 +518,7 @@ async def get_sync_log(request: Request, limit: int = Query(50, ge=1, le=500)):
         from fastapi import HTTPException
         raise HTTPException(status_code=401, detail="Not authenticated")
 
-    con = duckdb.connect(str(DB_PATH), read_only=False)
+    con = get_db_rw()
     try:
         rows = con.execute("""
             SELECT id, job_name, started_at, completed_at, status,
@@ -649,7 +653,7 @@ async def get_docs_status(request: Request):
         from fastapi import HTTPException
         raise HTTPException(status_code=401, detail="Not authenticated")
 
-    con = duckdb.connect(str(DB_PATH), read_only=False)
+    con = get_db_rw()
     try:
         rows = con.execute("""
             SELECT id, started_at, completed_at, status, execution_time_seconds, error_message, documents_updated
@@ -674,6 +678,36 @@ async def get_docs_status(request: Request):
         }
     finally:
         con.close()
+
+
+@router.post("/api/analytics/rollup")
+async def trigger_analytics_rollup(request: Request):
+    """Manually trigger analytics rollup to populate analytics tables."""
+    from core.auth import get_session
+    from services.analytics_rollup import run_full_rollup
+
+    token = request.cookies.get("golfgen_session")
+    sess = get_session(token)
+    if not sess:
+        from fastapi import HTTPException
+        raise HTTPException(status_code=401, detail="Not authenticated")
+
+    try:
+        loop = asyncio.get_event_loop()
+        result = await loop.run_in_executor(None, run_full_rollup)
+        now = datetime.now(ZoneInfo("America/Chicago"))
+        return {
+            "status": "rollup_complete",
+            "daily_rows": result.get("daily_rows", 0),
+            "sku_rows": result.get("sku_rows", 0),
+            "completed_at": now.isoformat(),
+        }
+    except Exception as e:
+        import traceback
+        return JSONResponse(
+            status_code=500,
+            content={"detail": str(e), "traceback": traceback.format_exc()},
+        )
 
 
 @router.get("/api/docs/architecture")
@@ -732,3 +766,246 @@ async def get_disaster_recovery_doc(request: Request):
             "content": "Disaster recovery plan not yet generated. Run /api/docs/update to generate.",
             "last_updated": None
         }
+
+
+@router.post("/api/admin/init-tables")
+def init_tables(request: Request):
+    """Re-run all CREATE TABLE IF NOT EXISTS statements to ensure schema is current."""
+    sess = request.cookies.get("session_id")
+    if not sess:
+        from fastapi import HTTPException
+        raise HTTPException(status_code=401, detail="Not authenticated")
+    try:
+        from core.database import init_all_tables
+        init_all_tables()
+        return {"status": "ok", "message": "All tables initialized successfully"}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/api/admin/pg-ready")
+def pg_ready():
+    """Check PostgreSQL migration readiness."""
+    from pathlib import Path
+    try:
+        con = get_db()
+        tables = [r[0] for r in con.execute("SHOW TABLES").fetchall()]
+        con.close()
+        export_path = Path("/app/data/pg_export")
+        manifest_path = export_path / "MANIFEST.txt"
+        return {
+            "duckdb_tables": len(tables),
+            "table_list": tables,
+            "export_ready": export_path.exists(),
+            "export_path": str(export_path),
+            "manifest_exists": manifest_path.exists(),
+        }
+    except Exception as e:
+        return {
+            "duckdb_tables": 0,
+            "export_ready": False,
+            "export_path": "/app/data/pg_export",
+            "manifest_exists": False,
+            "error": str(e),
+        }
+
+
+@router.get("/api/debug/db-diagnostic")
+def db_diagnostic():
+    """Return recent daily_sales and financial_events data for debugging (no SP-API call needed)."""
+    try:
+        con = get_db()
+        # Recent daily_sales (ALL aggregates)
+        daily_rows = con.execute("""
+            SELECT date, units_ordered, ordered_product_sales
+            FROM daily_sales
+            WHERE asin = 'ALL'
+            ORDER BY date DESC
+            LIMIT 14
+        """).fetchall()
+
+        # Financial events summary
+        fe_total = con.execute("SELECT COUNT(*) FROM financial_events").fetchone()[0]
+        fe_nonzero = con.execute("""
+            SELECT COUNT(*) FROM financial_events
+            WHERE product_charges != 0 OR fba_fees != 0 OR commission != 0
+        """).fetchone()[0]
+        fe_sample = con.execute("""
+            SELECT date, asin, event_type, product_charges, fba_fees, commission, net_proceeds, order_id
+            FROM financial_events
+            ORDER BY date DESC
+            LIMIT 5
+        """).fetchall()
+
+        # Sync log (last 10 entries)
+        sync_entries = []
+        try:
+            sync_rows = con.execute("""
+                SELECT job_name, started_at, status, rows_inserted, error_message
+                FROM sync_log
+                ORDER BY started_at DESC
+                LIMIT 10
+            """).fetchall()
+            for sr in sync_rows:
+                sync_entries.append({
+                    "job": sr[0], "started": str(sr[1])[:19],
+                    "status": sr[2], "rows": sr[3],
+                    "error": (sr[4] or "")[:200]
+                })
+        except Exception:
+            sync_entries = [{"error": "sync_log table not found"}]
+
+        # Monthly YOY test
+        monthly_yoy_data = []
+        try:
+            yoy_rows = con.execute("""
+                SELECT YEAR(date) AS yr, MONTH(date) AS mo,
+                       COALESCE(SUM(ordered_product_sales), 0) AS revenue
+                FROM daily_sales
+                WHERE asin = 'ALL' AND date IS NOT NULL AND date >= '2024-01-01'
+                GROUP BY YEAR(date), MONTH(date)
+                ORDER BY yr, mo
+            """).fetchall()
+            monthly_yoy_data = [{"year": int(r[0]), "month": int(r[1]), "revenue": round(float(r[2]), 2)} for r in yoy_rows]
+        except Exception as yoy_e:
+            monthly_yoy_data = [{"error": str(yoy_e)}]
+
+        con.close()
+
+        return {
+            "daily_sales_recent": [
+                {"date": str(r[0]), "units": r[1], "revenue": float(r[2]) if r[2] else 0}
+                for r in daily_rows
+            ],
+            "financial_events": {
+                "total_rows": fe_total,
+                "nonzero_rows": fe_nonzero,
+                "samples": [
+                    {"date": str(r[0]), "asin": r[1], "type": r[2],
+                     "charges": float(r[3]) if r[3] else 0, "fees": float(r[4]) if r[4] else 0,
+                     "commission": float(r[5]) if r[5] else 0, "net": float(r[6]) if r[6] else 0,
+                     "order": r[7]}
+                    for r in fe_sample
+                ]
+            },
+            "sync_log": sync_entries,
+            "monthly_yoy": monthly_yoy_data,
+        }
+    except Exception as e:
+        import traceback
+        return {"error": str(e), "traceback": traceback.format_exc()}
+
+
+@router.get("/api/debug/test-financial-parse")
+def test_financial_parse():
+    """Fetch one financial event, parse it the same way the sync does, and return the result."""
+    try:
+        from services.sp_api import _load_sp_api_credentials, is_sync_running
+        from sp_api.api import Finances as FinancesAPI
+        from sp_api.base import Marketplaces as _Mp
+
+        # Check if a sync is currently running
+        running = is_sync_running()
+
+        creds = _load_sp_api_credentials()
+        if not creds:
+            return {"error": "No SP-API credentials found"}
+
+        fin_start = (datetime.utcnow() - timedelta(days=30)).strftime("%Y-%m-%dT%H:%M:%SZ")
+        finances = FinancesAPI(credentials=creds, marketplace=_Mp.US)
+        resp = finances.list_financial_events(PostedAfter=fin_start, MaxResultsPerPage=10)
+
+        payload = resp.payload if hasattr(resp, 'payload') else (resp if isinstance(resp, dict) else {})
+        events = payload.get("FinancialEvents", {})
+        shipments = events.get("ShipmentEventList", []) or []
+
+        if not shipments:
+            return {"error": "No shipment events found", "sync_running": running}
+
+        first_event = shipments[0]
+        items = first_event.get("ShipmentItemList", []) if isinstance(first_event, dict) else getattr(first_event, "ShipmentItemList", []) or []
+
+        results = []
+        for item in items[:3]:
+            charges = item.get("ItemChargeList", []) if isinstance(item, dict) else getattr(item, "ItemChargeList", []) or []
+            fees = item.get("ItemFeeList", []) if isinstance(item, dict) else getattr(item, "ItemFeeList", []) or []
+
+            charge_details = []
+            for c in charges:
+                ca = c.get("ChargeAmount") if isinstance(c, dict) else getattr(c, "ChargeAmount", None)
+                ct = c.get("ChargeType", "") if isinstance(c, dict) else getattr(c, "ChargeType", "")
+
+                # Parse exactly as _money() does
+                parsed_val = 0.0
+                parse_method = "unknown"
+                if ca is None:
+                    parsed_val = 0.0
+                    parse_method = "None"
+                elif isinstance(ca, dict):
+                    for key in ("CurrencyAmount", "Amount", "currency_amount", "amount", "value"):
+                        v = ca.get(key)
+                        if v is not None:
+                            try:
+                                parsed_val = float(v)
+                                parse_method = f"dict[{key}]"
+                                break
+                            except (ValueError, TypeError):
+                                continue
+                    if parse_method == "unknown":
+                        parse_method = f"dict_no_match_keys={list(ca.keys())}"
+
+                charge_details.append({
+                    "charge_type": ct,
+                    "raw_charge_amount": str(ca)[:200],
+                    "ca_type": type(ca).__name__,
+                    "ca_is_dict": isinstance(ca, dict),
+                    "parsed_value": parsed_val,
+                    "parse_method": parse_method,
+                })
+
+            fee_details = []
+            for f in fees[:3]:
+                fa = f.get("FeeAmount") if isinstance(f, dict) else getattr(f, "FeeAmount", None)
+                ft = f.get("FeeType", "") if isinstance(f, dict) else getattr(f, "FeeType", "")
+                parsed_fee = 0.0
+                if fa and isinstance(fa, dict):
+                    for key in ("CurrencyAmount", "Amount"):
+                        v = fa.get(key)
+                        if v is not None:
+                            try:
+                                parsed_fee = abs(float(v))
+                                break
+                            except:
+                                pass
+                fee_details.append({"fee_type": ft, "raw": str(fa)[:200], "parsed": parsed_fee})
+
+            results.append({
+                "sku": item.get("SellerSKU", "") if isinstance(item, dict) else getattr(item, "SellerSKU", ""),
+                "asin": item.get("ASIN", "") if isinstance(item, dict) else getattr(item, "ASIN", ""),
+                "charges": charge_details,
+                "fees": fee_details,
+            })
+
+        return {
+            "sync_running": running,
+            "shipment_count": len(shipments),
+            "first_event_order": first_event.get("AmazonOrderId", "?") if isinstance(first_event, dict) else getattr(first_event, "AmazonOrderId", "?"),
+            "first_event_items_count": len(items),
+            "parsed_items": results,
+        }
+    except Exception as e:
+        import traceback
+        return {"error": str(e), "traceback": traceback.format_exc()}
+
+
+@router.get("/api/debug/logs")
+def debug_logs(n: int = Query(100, ge=1, le=200)):
+    """Return recent in-memory log messages from the sync engine."""
+    try:
+        from services.sp_api import _log_buffer
+        entries = list(_log_buffer)
+        return {"count": len(entries), "logs": entries[-n:]}
+    except ImportError:
+        return {"error": "_log_buffer not available"}
+    except Exception as e:
+        return {"error": str(e)}

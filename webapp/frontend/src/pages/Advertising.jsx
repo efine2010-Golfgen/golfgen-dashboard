@@ -22,7 +22,7 @@ const TABS = [
   { key: "negKeywords", label: "Negative KWs" },
 ];
 
-export default function Advertising() {
+export default function Advertising({ filters = {} }) {
   const [days, setDays] = useState(30);
   const [tab, setTab] = useState("overview");
   const [summary, setSummary] = useState(null);
@@ -37,18 +37,19 @@ export default function Advertising() {
 
   useEffect(() => {
     setLoading(true);
-    const promises = [api.adsSummary(days)];
+    const h = filters;
+    const promises = [api.adsSummary(days, h)];
 
     if (tab === "overview") {
-      promises.push(api.adsDaily(days));
+      promises.push(api.adsDaily(days, h));
     } else if (tab === "campaigns") {
-      promises.push(api.adsCampaigns(days));
+      promises.push(api.adsCampaigns(days, h));
     } else if (tab === "keywords") {
-      promises.push(api.adsKeywords(days, 100));
+      promises.push(api.adsKeywords(days, 100, h));
     } else if (tab === "searchTerms") {
-      promises.push(api.adsSearchTerms(days, 100));
+      promises.push(api.adsSearchTerms(days, 100, h));
     } else if (tab === "negKeywords") {
-      promises.push(api.adsNegativeKeywords());
+      promises.push(api.adsNegativeKeywords(h));
     }
 
     Promise.all(promises).then(([s, detail]) => {
@@ -63,7 +64,7 @@ export default function Advertising() {
       console.error("Ads API error:", err);
       setLoading(false);
     });
-  }, [days, tab]);
+  }, [days, tab, filters.division, filters.customer]);
 
   const handleSort = (key) => {
     if (sortKey === key) setSortDir(sortDir === "desc" ? "asc" : "desc");

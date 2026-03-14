@@ -3,7 +3,6 @@ import os
 import json
 import csv
 import logging
-import duckdb
 from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
 from pathlib import Path
@@ -12,6 +11,8 @@ from fastapi import APIRouter, Query, Request, UploadFile, File, HTTPException
 from fastapi.responses import JSONResponse
 
 from core.config import DB_PATH, DB_DIR, COGS_PATH, CONFIG_PATH, TIMEZONE
+from core.database import get_db
+from core.hierarchy import hierarchy_filter
 
 logger = logging.getLogger("golfgen")
 router = APIRouter()
@@ -23,10 +24,6 @@ _FBA_SHIPMENTS_CACHE_PATH = DB_DIR / "fba_shipments_cache.json"
 
 
 # ── Helper Functions ────────────────────────────────────────────
-
-def get_db():
-    """Return a read-only DuckDB connection."""
-    return duckdb.connect(str(DB_PATH), read_only=False)
 
 
 def load_json(filename: str) -> list:
@@ -155,28 +152,32 @@ def save_item_master(items: list):
 
 
 @router.get("/api/inventory")
-def inventory():
+def inventory(division: Optional[str] = None, customer: Optional[str] = None, platform: Optional[str] = None):
     """Current FBA inventory with days-of-supply calculations."""
     con = get_db()
     cogs_data = load_cogs()
 
-    inv_rows = con.execute("""
+    hf, hp = hierarchy_filter(division, customer, platform)
+    # For fba_inventory the hf starts with " AND ...", convert to WHERE if needed
+    inv_where = (" WHERE " + hf.lstrip(" AND ")) if hf else ""
+    inv_rows = con.execute(f"""
         SELECT asin, sku, product_name,
                COALESCE(fulfillable_quantity, 0) AS fba_stock,
                COALESCE(inbound_working_quantity, 0) + COALESCE(inbound_shipped_quantity, 0) + COALESCE(inbound_receiving_quantity, 0) AS inbound,
                COALESCE(reserved_quantity, 0) AS reserved
-        FROM fba_inventory
-    """).fetchall()
+        FROM fba_inventory{inv_where}
+    """, hp).fetchall()
 
     # Get avg daily units for last 30 days
+    vel_filter = "WHERE date >= CURRENT_DATE - INTERVAL '30 days' AND asin != 'ALL'" + hf
+    vel_params = [] + hp
     velocity = {}
-    vel_rows = con.execute("""
+    vel_rows = con.execute(f"""
         SELECT asin, SUM(units_ordered) AS units
         FROM daily_sales
-        WHERE date >= CURRENT_DATE - INTERVAL '30 days'
-          AND asin != 'ALL'
+        {vel_filter}
         GROUP BY asin
-    """).fetchall()
+    """, vel_params).fetchall()
     for vr in vel_rows:
         velocity[vr[0]] = round(vr[1] / 30, 1)
 

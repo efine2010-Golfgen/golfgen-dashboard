@@ -2,13 +2,13 @@
 MFA Database Tables for DuckDB
 Called from init_all_tables() in database.py
 """
-import duckdb
+from .database import get_db_rw
 from .config import DB_PATH
 
 
 def _init_mfa_tables():
     """Initialize MFA-related tables in DuckDB."""
-    con = duckdb.connect(str(DB_PATH))
+    con = get_db_rw()
     try:
         # MFA user settings — keyed by user_name since users are in config.py, not DB
         con.execute("""

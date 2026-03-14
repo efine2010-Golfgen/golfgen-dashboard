@@ -8,28 +8,29 @@ import os
 import json
 import csv
 import logging
+import threading
 from pathlib import Path
 from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
 
-import duckdb
+from core.database import get_db_rw
 
 from core.config import DB_PATH, DB_DIR, CONFIG_PATH, PRICING_CACHE_PATH, TIMEZONE
 
 logger = logging.getLogger("golfgen")
 
+# ── Sync mutex — prevent overlapping ads/pricing syncs ────────────────────
+_ads_sync_lock = threading.Lock()
+_ads_sync_running: str | None = None
 
-# ── Helper Functions (imported from main at module init) ──────────────────
-# These are set by main.py when importing this module
-_load_sp_api_credentials = None
-load_item_master = None
+def is_ads_sync_running() -> str | None:
+    """Return the name of the currently-running ads sync, or None."""
+    return _ads_sync_running
 
 
-def set_helpers(load_sp_api_creds_fn, load_item_master_fn):
-    """Register helper functions from main module."""
-    global _load_sp_api_credentials, load_item_master
-    _load_sp_api_credentials = load_sp_api_creds_fn
-    load_item_master = load_item_master_fn
+# ── Helper Functions (direct imports from modular structure) ──────────────
+from services.sp_api import _load_sp_api_credentials, retry_with_backoff
+from routers.item_master import load_item_master
 
 
 # ── Pricing Cache Functions ──────────────────────────────────────────────
@@ -251,14 +252,23 @@ def _sync_coupon_data():
 
 def _sync_pricing_and_coupons():
     """Run both pricing and coupon syncs. Called from the sync loop."""
+    global _ads_sync_running
+    if not _ads_sync_lock.acquire(blocking=False):
+        logger.warning(f"  Skipping pricing/coupon sync — '{_ads_sync_running}' already running")
+        return
+    _ads_sync_running = "pricing_coupons"
     try:
-        _sync_pricing_data()
-    except Exception as e:
-        logger.error(f"Pricing sync error: {e}")
-    try:
-        _sync_coupon_data()
-    except Exception as e:
-        logger.error(f"Coupon sync error: {e}")
+        try:
+            _sync_pricing_data()
+        except Exception as e:
+            logger.error(f"Pricing sync error: {e}")
+        try:
+            _sync_coupon_data()
+        except Exception as e:
+            logger.error(f"Coupon sync error: {e}")
+    finally:
+        _ads_sync_running = None
+        _ads_sync_lock.release()
 
 
 # ── Ads API Functions ────────────────────────────────────────────────────
@@ -299,11 +309,19 @@ def _load_ads_credentials() -> dict | None:
 
 
 def _ensure_ads_tables():
-    """Create ads DuckDB tables if they don't exist."""
-    con = duckdb.connect(str(DB_PATH), read_only=False)
+    """Ensure ads DuckDB tables exist and have hierarchy columns.
+
+    NOTE: The primary table definitions live in core/database.py (init_all_tables).
+    This function only ensures hierarchy columns exist for upgrades and creates
+    tables as fallback if database.py hasn't run yet. Uses DATE type to match
+    the canonical definitions in database.py.
+    """
+    con = get_db_rw()
+
+    # Fallback CREATE IF NOT EXISTS — uses DATE type to match database.py
     con.execute("""
         CREATE TABLE IF NOT EXISTS advertising (
-            date TEXT,
+            date DATE,
             campaign_id TEXT,
             campaign_name TEXT,
             impressions INTEGER DEFAULT 0,
@@ -312,12 +330,14 @@ def _ensure_ads_tables():
             sales DOUBLE DEFAULT 0,
             orders INTEGER DEFAULT 0,
             units INTEGER DEFAULT 0,
-            PRIMARY KEY (date, campaign_id)
+            division VARCHAR DEFAULT 'golf',
+            customer VARCHAR DEFAULT 'amazon',
+            platform VARCHAR DEFAULT 'sp_api'
         )
     """)
     con.execute("""
         CREATE TABLE IF NOT EXISTS ads_campaigns (
-            date TEXT,
+            date DATE,
             campaign_id TEXT,
             campaign_name TEXT,
             campaign_type TEXT DEFAULT 'SP',
@@ -329,12 +349,14 @@ def _ensure_ads_tables():
             sales DOUBLE DEFAULT 0,
             orders INTEGER DEFAULT 0,
             units INTEGER DEFAULT 0,
-            PRIMARY KEY (date, campaign_id)
+            division VARCHAR DEFAULT 'golf',
+            customer VARCHAR DEFAULT 'amazon',
+            platform VARCHAR DEFAULT 'sp_api'
         )
     """)
     con.execute("""
         CREATE TABLE IF NOT EXISTS ads_keywords (
-            date TEXT,
+            date DATE,
             campaign_id TEXT,
             campaign_name TEXT,
             ad_group_id TEXT,
@@ -348,12 +370,14 @@ def _ensure_ads_tables():
             sales DOUBLE DEFAULT 0,
             orders INTEGER DEFAULT 0,
             units INTEGER DEFAULT 0,
-            PRIMARY KEY (date, keyword_id)
+            division VARCHAR DEFAULT 'golf',
+            customer VARCHAR DEFAULT 'amazon',
+            platform VARCHAR DEFAULT 'sp_api'
         )
     """)
     con.execute("""
         CREATE TABLE IF NOT EXISTS ads_search_terms (
-            date TEXT,
+            date DATE,
             campaign_id TEXT,
             campaign_name TEXT,
             ad_group_name TEXT,
@@ -366,7 +390,9 @@ def _ensure_ads_tables():
             sales DOUBLE DEFAULT 0,
             orders INTEGER DEFAULT 0,
             units INTEGER DEFAULT 0,
-            PRIMARY KEY (date, search_term, campaign_id)
+            division VARCHAR DEFAULT 'golf',
+            customer VARCHAR DEFAULT 'amazon',
+            platform VARCHAR DEFAULT 'sp_api'
         )
     """)
     con.execute("""
@@ -375,15 +401,36 @@ def _ensure_ads_tables():
             match_type TEXT,
             campaign_name TEXT,
             ad_group_name TEXT,
-            keyword_status TEXT DEFAULT 'ENABLED',
-            PRIMARY KEY (keyword_text, campaign_name)
+            keyword_status TEXT DEFAULT 'ENABLED'
         )
     """)
+    # Ensure existing tables have the hierarchy columns (safe ALTER for upgrades)
+    for tbl in ["advertising", "ads_campaigns", "ads_keywords", "ads_search_terms"]:
+        for col, default in [("division", "'golf'"), ("customer", "'amazon'"), ("platform", "'sp_api'")]:
+            try:
+                con.execute(f"ALTER TABLE {tbl} ADD COLUMN {col} VARCHAR DEFAULT {default}")
+            except Exception:
+                pass  # column already exists
     con.close()
+    logger.info("Ads tables verified/created")
 
 
 def _sync_ads_data():
     """Pull Sponsored Products reporting data from Amazon Ads API v3."""
+    global _ads_sync_running
+    if not _ads_sync_lock.acquire(blocking=False):
+        logger.warning(f"  Skipping ads sync — '{_ads_sync_running}' already running")
+        return
+    _ads_sync_running = "ads_data"
+    try:
+        _sync_ads_data_inner()
+    finally:
+        _ads_sync_running = None
+        _ads_sync_lock.release()
+
+
+def _sync_ads_data_inner():
+    """Inner implementation of ads sync (called under mutex)."""
     import time as _time
     import gzip as gz
     import requests as req
@@ -482,7 +529,12 @@ def _pull_ads_report(creds, report_type_id, columns, start_date, end_date, handl
     try:
         logger.info(f"Ads sync: creating {report_type_id} report ({start_date} to {end_date})...")
         reports_api = sponsored_products.Reports(credentials=creds)
-        result = reports_api.post_report(body=body)
+
+        @retry_with_backoff(max_retries=3, base_delay=2.0, max_delay=30.0)
+        def _create_report():
+            return reports_api.post_report(body=body)
+
+        result = _create_report()
         report_id = result.payload.get("reportId")
 
         if not report_id:
@@ -525,107 +577,194 @@ def _pull_ads_report(creds, report_type_id, columns, start_date, end_date, handl
 
 
 def _handle_campaign_report(data):
-    """Insert campaign-level ads data into DuckDB."""
+    """Insert campaign-level ads data into DuckDB with transaction wrapping."""
     if not isinstance(data, list):
+        logger.warning(f"Campaign report: expected list, got {type(data)}")
         return
 
-    con = duckdb.connect(str(DB_PATH), read_only=False)
-    for row in data:
-        date = row.get("date", "")
-        campaign_id = str(row.get("campaignId", ""))
-        campaign_name = row.get("campaignName", "")
-        spend = float(row.get("cost", 0) or 0)
-        sales = float(row.get("sales", 0) or 0)
-        impressions = int(row.get("impressions", 0) or 0)
-        clicks = int(row.get("clicks", 0) or 0)
-        orders = int(row.get("purchases", 0) or 0)
-        units = int(row.get("unitsSold", 0) or 0)
-        status = row.get("campaignStatus", "")
-        budget = float(row.get("campaignBudgetAmount", 0) or 0)
+    con = get_db_rw()
+    con.execute("BEGIN TRANSACTION")
+    inserted = 0
+    errors = 0
+    try:
+        for row in data:
+            try:
+                date = row.get("date", "")
+                campaign_id = str(row.get("campaignId", ""))
+                campaign_name = row.get("campaignName", "")
+                spend = float(row.get("cost", 0) or 0)
+                sales = float(row.get("sales", 0) or 0)
+                impressions = int(row.get("impressions", 0) or 0)
+                clicks = int(row.get("clicks", 0) or 0)
+                orders = int(row.get("purchases", 0) or 0)
+                units = int(row.get("unitsSold", 0) or 0)
+                status = row.get("campaignStatus", "")
+                budget = float(row.get("campaignBudgetAmount", 0) or 0)
 
-        # Aggregate table (for summary endpoints)
-        con.execute("""
-            INSERT OR REPLACE INTO advertising
-            (date, campaign_id, campaign_name, impressions, clicks, spend, sales, orders, units)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-        """, [date, campaign_id, campaign_name, impressions, clicks, spend, sales, orders, units])
+                if not date or not campaign_id:
+                    continue
 
-        # Campaign detail table
-        con.execute("""
-            INSERT OR REPLACE INTO ads_campaigns
-            (date, campaign_id, campaign_name, campaign_type, campaign_status,
-             daily_budget, impressions, clicks, spend, sales, orders, units)
-            VALUES (?, ?, ?, 'SP', ?, ?, ?, ?, ?, ?, ?, ?)
-        """, [date, campaign_id, campaign_name, status, budget,
-              impressions, clicks, spend, sales, orders, units])
+                # Aggregate table — DELETE+INSERT (DuckDB doesn't support INSERT OR REPLACE)
+                con.execute("DELETE FROM advertising WHERE date = CAST(? AS DATE) AND campaign_id = ?",
+                            [date, campaign_id])
+                con.execute("""
+                    INSERT INTO advertising
+                    (date, campaign_id, campaign_name, impressions, clicks, spend, sales, orders, units,
+                     division, customer, platform)
+                    VALUES (CAST(? AS DATE), ?, ?, ?, ?, ?, ?, ?, ?, 'golf', 'amazon', 'sp_api')
+                """, [date, campaign_id, campaign_name, impressions, clicks, spend, sales, orders, units])
 
-    con.close()
+                # Campaign detail table
+                con.execute("DELETE FROM ads_campaigns WHERE date = CAST(? AS DATE) AND campaign_id = ?",
+                            [date, campaign_id])
+                con.execute("""
+                    INSERT INTO ads_campaigns
+                    (date, campaign_id, campaign_name, campaign_type, campaign_status,
+                     daily_budget, impressions, clicks, spend, sales, orders, units,
+                     division, customer, platform)
+                    VALUES (CAST(? AS DATE), ?, ?, 'SP', ?, ?, ?, ?, ?, ?, ?, ?, 'golf', 'amazon', 'sp_api')
+                """, [date, campaign_id, campaign_name, status, budget,
+                      impressions, clicks, spend, sales, orders, units])
+                inserted += 1
+            except Exception as e:
+                errors += 1
+                if errors <= 5:
+                    logger.error(f"Campaign insert error: {e} (row date={row.get('date')})")
+
+        con.execute("COMMIT")
+    except Exception as e:
+        logger.error(f"Campaign report transaction error: {e}")
+        try:
+            con.execute("ROLLBACK")
+            logger.info("Campaign report rolled back due to error")
+        except Exception:
+            pass
+    finally:
+        con.close()
+    logger.info(f"Campaign report handler: {inserted} inserted, {errors} errors out of {len(data)} rows")
 
 
 def _handle_targeting_report(data):
-    """Insert keyword/targeting data into DuckDB."""
+    """Insert keyword/targeting data into DuckDB with transaction wrapping."""
     if not isinstance(data, list):
+        logger.warning(f"Targeting report: expected list, got {type(data)}")
         return
 
-    con = duckdb.connect(str(DB_PATH), read_only=False)
-    for row in data:
-        date = row.get("date", "")
-        keyword_id = str(row.get("keywordId", row.get("targetId", "")))
-        con.execute("""
-            INSERT OR REPLACE INTO ads_keywords
-            (date, campaign_id, campaign_name, ad_group_id, ad_group_name,
-             keyword_id, keyword_text, match_type,
-             impressions, clicks, spend, sales, orders, units)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-        """, [
-            date,
-            str(row.get("campaignId", "")),
-            row.get("campaignName", ""),
-            str(row.get("adGroupId", "")),
-            row.get("adGroupName", ""),
-            keyword_id,
-            row.get("keywordText", row.get("targeting", "")),
-            row.get("matchType", ""),
-            int(row.get("impressions", 0) or 0),
-            int(row.get("clicks", 0) or 0),
-            float(row.get("cost", 0) or 0),
-            float(row.get("sales", 0) or 0),
-            int(row.get("purchases", 0) or 0),
-            int(row.get("unitsSold", 0) or 0),
-        ])
-    con.close()
+    con = get_db_rw()
+    con.execute("BEGIN TRANSACTION")
+    inserted = 0
+    errors = 0
+    try:
+        for row in data:
+            try:
+                date = row.get("date", "")
+                keyword_id = str(row.get("keywordId", row.get("targetId", "")))
+                if not date or not keyword_id:
+                    continue
+
+                con.execute("DELETE FROM ads_keywords WHERE date = CAST(? AS DATE) AND keyword_id = ?",
+                            [date, keyword_id])
+                con.execute("""
+                    INSERT INTO ads_keywords
+                    (date, campaign_id, campaign_name, ad_group_id, ad_group_name,
+                     keyword_id, keyword_text, match_type,
+                     impressions, clicks, spend, sales, orders, units,
+                     division, customer, platform)
+                    VALUES (CAST(? AS DATE), ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'golf', 'amazon', 'sp_api')
+                """, [
+                    date,
+                    str(row.get("campaignId", "")),
+                    row.get("campaignName", ""),
+                    str(row.get("adGroupId", "")),
+                    row.get("adGroupName", ""),
+                    keyword_id,
+                    row.get("keywordText", row.get("targeting", "")),
+                    row.get("matchType", ""),
+                    int(row.get("impressions", 0) or 0),
+                    int(row.get("clicks", 0) or 0),
+                    float(row.get("cost", 0) or 0),
+                    float(row.get("sales", 0) or 0),
+                    int(row.get("purchases", 0) or 0),
+                    int(row.get("unitsSold", 0) or 0),
+                ])
+                inserted += 1
+            except Exception as e:
+                errors += 1
+                if errors <= 5:
+                    logger.error(f"Targeting insert error: {e} (row date={row.get('date')})")
+
+        con.execute("COMMIT")
+    except Exception as e:
+        logger.error(f"Targeting report transaction error: {e}")
+        try:
+            con.execute("ROLLBACK")
+            logger.info("Targeting report rolled back due to error")
+        except Exception:
+            pass
+    finally:
+        con.close()
+    logger.info(f"Targeting report handler: {inserted} inserted, {errors} errors out of {len(data)} rows")
 
 
 def _handle_search_term_report(data):
-    """Insert search term data into DuckDB."""
+    """Insert search term data into DuckDB with transaction wrapping."""
     if not isinstance(data, list):
+        logger.warning(f"Search term report: expected list, got {type(data)}")
         return
 
-    con = duckdb.connect(str(DB_PATH), read_only=False)
-    for row in data:
-        date = row.get("date", "")
-        search_term = row.get("searchTerm", "")
-        campaign_id = str(row.get("campaignId", ""))
-        con.execute("""
-            INSERT OR REPLACE INTO ads_search_terms
-            (date, campaign_id, campaign_name, ad_group_name,
-             keyword_text, match_type, search_term,
-             impressions, clicks, spend, sales, orders, units)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-        """, [
-            date, campaign_id,
-            row.get("campaignName", ""),
-            row.get("adGroupName", ""),
-            row.get("keywordText", ""),
-            row.get("matchType", ""),
-            search_term,
-            int(row.get("impressions", 0) or 0),
-            int(row.get("clicks", 0) or 0),
-            float(row.get("cost", 0) or 0),
-            float(row.get("sales", 0) or 0),
-            int(row.get("purchases", 0) or 0),
-            int(row.get("unitsSold", 0) or 0),
-        ])
-    con.close()
+    con = get_db_rw()
+    con.execute("BEGIN TRANSACTION")
+    inserted = 0
+    errors = 0
+    try:
+        for row in data:
+            try:
+                date = row.get("date", "")
+                search_term = row.get("searchTerm", "")
+                campaign_id = str(row.get("campaignId", ""))
+                if not date or not search_term:
+                    continue
+
+                con.execute("""DELETE FROM ads_search_terms
+                    WHERE date = CAST(? AS DATE) AND search_term = ? AND campaign_id = ?""",
+                    [date, search_term, campaign_id])
+                con.execute("""
+                    INSERT INTO ads_search_terms
+                    (date, campaign_id, campaign_name, ad_group_name,
+                     keyword_text, match_type, search_term,
+                     impressions, clicks, spend, sales, orders, units,
+                     division, customer, platform)
+                    VALUES (CAST(? AS DATE), ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'golf', 'amazon', 'sp_api')
+                """, [
+                    date, campaign_id,
+                    row.get("campaignName", ""),
+                    row.get("adGroupName", ""),
+                    row.get("keywordText", ""),
+                    row.get("matchType", ""),
+                    search_term,
+                    int(row.get("impressions", 0) or 0),
+                    int(row.get("clicks", 0) or 0),
+                    float(row.get("cost", 0) or 0),
+                    float(row.get("sales", 0) or 0),
+                    int(row.get("purchases", 0) or 0),
+                    int(row.get("unitsSold", 0) or 0),
+                ])
+                inserted += 1
+            except Exception as e:
+                errors += 1
+                if errors <= 5:
+                    logger.error(f"Search term insert error: {e} (row date={row.get('date')})")
+
+        con.execute("COMMIT")
+    except Exception as e:
+        logger.error(f"Search term report transaction error: {e}")
+        try:
+            con.execute("ROLLBACK")
+            logger.info("Search term report rolled back due to error")
+        except Exception:
+            pass
+    finally:
+        con.close()
+    logger.info(f"Search term report handler: {inserted} inserted, {errors} errors out of {len(data)} rows")
 
 

@@ -56,6 +56,8 @@ def load_item_master() -> list:
                 "plannedAnnualUnits": int(float(row.get("planned_annual_units") or 0)),
                 "listPrice": float(row.get("list_price") or 0),
                 "salePrice": float(row.get("sale_price") or 0),
+                "salePriceStartDate": (row.get("sale_price_start_date") or "").strip(),
+                "salePriceEndDate": (row.get("sale_price_end_date") or "").strip(),
                 "referralPct": float(row.get("referral_pct") or 15),
                 "couponType": (row.get("coupon_type") or "").strip(),
                 "couponValue": float(row.get("coupon_value") or 0),
@@ -74,7 +76,8 @@ def save_item_master(items: list):
         "asin", "sku", "product_name", "color", "brand", "series",
         "product_type", "piece_count", "orientation", "category", "unit_cost",
         "fba_stock", "ly_aur", "ly_revenue", "ly_units", "ly_profit",
-        "planned_annual_units", "list_price", "sale_price", "referral_pct",
+        "planned_annual_units", "list_price", "sale_price",
+        "sale_price_start_date", "sale_price_end_date", "referral_pct",
         "coupon_type", "coupon_value", "carton_pack", "carton_length",
         "carton_width", "carton_height", "carton_weight",
     ]
@@ -102,6 +105,8 @@ def save_item_master(items: list):
                 "planned_annual_units": item.get("plannedAnnualUnits", 0),
                 "list_price": item.get("listPrice", 0),
                 "sale_price": item.get("salePrice", 0),
+                "sale_price_start_date": item.get("salePriceStartDate", ""),
+                "sale_price_end_date": item.get("salePriceEndDate", ""),
                 "referral_pct": item.get("referralPct", 15),
                 "coupon_type": item.get("couponType", ""),
                 "coupon_value": item.get("couponValue", 0),
@@ -295,7 +300,8 @@ def update_item_master(asin: str, body: dict = Body(...)):
         if item["asin"] == asin:
             # Only update fields that are provided
             updatable = [
-                "listPrice", "salePrice", "referralPct", "couponType",
+                "listPrice", "salePrice", "salePriceStartDate", "salePriceEndDate",
+                "referralPct", "couponType",
                 "couponValue", "cartonPack", "cartonLength", "cartonWidth",
                 "cartonHeight", "cartonWeight", "unitCost", "plannedAnnualUnits",
                 "color", "series", "productType", "pieceCount", "orientation",
@@ -561,6 +567,142 @@ def item_master_housewares():
     return {"items": result, "count": len(result)}
 
 
+# ── Division Management Endpoints ─────────────────────────────
+
+
+@router.get("/api/item-master/by-division")
+def item_master_by_division(division: Optional[str] = None):
+    """Return item_master rows grouped by division. If division is specified, filter to it."""
+    from core.database import get_db
+    con = get_db()
+    try:
+        # Ensure division/customer columns exist
+        cols = [r[0] for r in con.execute("DESCRIBE item_master").fetchall()]
+        if 'division' not in cols:
+            con.execute("ALTER TABLE item_master ADD COLUMN division VARCHAR")
+        if 'customer' not in cols:
+            con.execute("ALTER TABLE item_master ADD COLUMN customer VARCHAR")
+
+        if division:
+            rows = con.execute(
+                "SELECT asin, sku, product_name, division, customer FROM item_master WHERE division = ? ORDER BY sku",
+                [division],
+            ).fetchall()
+        else:
+            rows = con.execute(
+                "SELECT asin, sku, product_name, division, customer FROM item_master ORDER BY division, sku"
+            ).fetchall()
+        items = [
+            {"asin": r[0], "sku": r[1], "productName": r[2], "division": r[3], "customer": r[4]}
+            for r in rows
+        ]
+        return {"items": items, "count": len(items)}
+    except Exception as e:
+        logger.error(f"by-division error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+    finally:
+        con.close()
+
+
+@router.get("/api/item-master/untagged")
+def item_master_untagged():
+    """Return ASINs that have no division set (NULL or empty string)."""
+    from core.database import get_db
+    con = get_db()
+    try:
+        # Ensure division/customer columns exist
+        cols = [r[0] for r in con.execute("DESCRIBE item_master").fetchall()]
+        if 'division' not in cols:
+            con.execute("ALTER TABLE item_master ADD COLUMN division VARCHAR")
+        if 'customer' not in cols:
+            con.execute("ALTER TABLE item_master ADD COLUMN customer VARCHAR")
+
+        rows = con.execute(
+            "SELECT asin, sku, product_name, customer FROM item_master WHERE division IS NULL OR division = '' OR division = 'unknown' ORDER BY sku"
+        ).fetchall()
+        items = [
+            {"asin": r[0], "sku": r[1], "productName": r[2], "customer": r[3]}
+            for r in rows
+        ]
+        return {"items": items, "count": len(items)}
+    except Exception as e:
+        logger.error(f"untagged error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+    finally:
+        con.close()
+
+
+@router.put("/api/item-master/{asin}/division")
+def set_item_division(asin: str, body: dict = Body(...)):
+    """Set the division for a single ASIN in item_master.
+    Body: { "division": "golf" | "housewares" }
+    """
+    division = body.get("division", "").strip().lower()
+    if division not in ("golf", "housewares"):
+        raise HTTPException(status_code=400, detail="Division must be 'golf' or 'housewares'")
+
+    from core.database import get_db
+    con = get_db()
+    try:
+        result = con.execute("UPDATE item_master SET division = ? WHERE asin = ?", [division, asin])
+        affected = result.fetchone()
+        # DuckDB UPDATE doesn't return rowcount easily; verify the ASIN exists
+        check = con.execute("SELECT asin FROM item_master WHERE asin = ?", [asin]).fetchone()
+        if not check:
+            raise HTTPException(status_code=404, detail=f"ASIN {asin} not found in item_master")
+        con.close()
+
+        # Clear the in-memory division cache so the next lookup picks up the change
+        try:
+            from services.sp_api import _division_cache
+            _division_cache.pop(asin, None)
+        except Exception:
+            pass
+
+        return {"status": "ok", "asin": asin, "division": division}
+    except HTTPException:
+        con.close()
+        raise
+    except Exception as e:
+        con.close()
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/api/item-master/bulk-set-division")
+def bulk_set_division(body: dict = Body(...)):
+    """Bulk-set division for multiple ASINs.
+    Body: { "asins": ["B0...", "B0..."], "division": "golf" | "housewares" }
+    """
+    division = body.get("division", "").strip().lower()
+    asins = body.get("asins", [])
+    if division not in ("golf", "housewares"):
+        raise HTTPException(status_code=400, detail="Division must be 'golf' or 'housewares'")
+    if not asins:
+        return {"status": "ok", "updated": 0}
+
+    from core.database import get_db
+    con = get_db()
+    try:
+        updated = 0
+        for asin in asins:
+            con.execute("UPDATE item_master SET division = ? WHERE asin = ?", [division, asin.strip()])
+            updated += 1
+        con.close()
+
+        # Clear cache for updated ASINs
+        try:
+            from services.sp_api import _division_cache
+            for asin in asins:
+                _division_cache.pop(asin.strip(), None)
+        except Exception:
+            pass
+
+        return {"status": "ok", "updated": updated, "division": division}
+    except Exception as e:
+        con.close()
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 @router.get("/api/item-master/other")
 def item_master_other():
     """Items in warehouse inventory that are not in Amazon or Walmart item masters."""
@@ -612,3 +754,166 @@ def item_master_other():
             })
 
     return {"items": other_items, "count": len(other_items)}
+
+
+@router.post("/api/item-master/propagate-division")
+def propagate_division():
+    """Backfill division from item_master into all transactional tables.
+
+    For every ASIN in item_master that has a division set, update all rows
+    in orders, order_items, financial_events, fba_inventory, daily_sales,
+    advertising, and ads_campaigns where the ASIN matches.
+    """
+    from core.database import get_db
+    con = get_db()
+    try:
+        # Get all ASIN→division mappings from item_master
+        mappings = con.execute(
+            "SELECT asin, division FROM item_master WHERE division IS NOT NULL AND division != '' AND division != 'unknown'"
+        ).fetchall()
+
+        if not mappings:
+            return {"status": "ok", "message": "No tagged ASINs in item_master", "updated": {}}
+
+        results = {}
+
+        # Tables that have an asin-like column and need division backfill
+        table_asin_col = {
+            "orders": None,  # orders don't have asin directly — skip or use order_items
+            "financial_events": "asin",
+            "fba_inventory": "asin",
+            "daily_sales": "asin",
+        }
+
+        for table, asin_col in table_asin_col.items():
+            if asin_col is None:
+                continue
+            total_updated = 0
+            for asin, division in mappings:
+                try:
+                    con.execute(
+                        f"UPDATE {table} SET division = ? WHERE {asin_col} = ? AND (division IS NULL OR division = 'unknown' OR division = '')",
+                        [division, asin],
+                    )
+                    total_updated += 1
+                except Exception as e:
+                    logger.warning(f"propagate {table}/{asin}: {e}")
+            results[table] = total_updated
+
+        # For orders: backfill via order_items ASIN join (orders don't have asin column)
+        # But since orders currently hardcode 'golf', update orders that have items in item_master
+        # We'll use the first ASIN from order_items to determine the order's division
+        try:
+            # Get order_id → division from order_items joined with item_master
+            order_divisions = con.execute("""
+                SELECT DISTINCT oi.order_id, im.division
+                FROM order_items oi
+                JOIN item_master im ON oi.asin = im.asin
+                WHERE im.division IS NOT NULL AND im.division != '' AND im.division != 'unknown'
+            """).fetchall()
+            order_count = 0
+            for order_id, division in order_divisions:
+                try:
+                    con.execute(
+                        "UPDATE orders SET division = ? WHERE order_id = ?",
+                        [division, order_id],
+                    )
+                    order_count += 1
+                except Exception:
+                    pass
+            results["orders"] = order_count
+        except Exception as e:
+            logger.warning(f"propagate orders via order_items: {e}")
+            results["orders"] = 0
+
+        con.close()
+
+        # Clear the entire division cache so future lookups use fresh data
+        try:
+            from services.sp_api import _division_cache
+            _division_cache.clear()
+        except Exception:
+            pass
+
+        return {"status": "ok", "mappings": len(mappings), "updated": results}
+    except Exception as e:
+        con.close()
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/api/item-master/seed")
+def seed_item_master():
+    """Populate item_master with ASINs found in orders and daily_sales tables.
+
+    Only inserts ASINs that don't already exist in item_master.
+    New entries get division='unknown' so Eric can tag them.
+    """
+    from core.database import get_db
+    con = get_db()
+    try:
+        # Ensure item_master has the right columns
+        cols = [r[0] for r in con.execute("DESCRIBE item_master").fetchall()]
+        for col in ['division', 'customer', 'platform', 'category', 'brand']:
+            if col not in cols:
+                try:
+                    con.execute(f"ALTER TABLE item_master ADD COLUMN {col} VARCHAR")
+                except Exception:
+                    pass
+
+        # Get existing ASINs
+        existing = set(
+            r[0] for r in con.execute("SELECT asin FROM item_master WHERE asin IS NOT NULL").fetchall()
+        )
+
+        # Collect ASINs from daily_sales (has product names via Sales & Traffic report)
+        new_asins = {}
+        try:
+            rows = con.execute("""
+                SELECT DISTINCT asin FROM daily_sales
+                WHERE asin IS NOT NULL AND asin != '' AND asin != 'ALL'
+            """).fetchall()
+            for r in rows:
+                asin = r[0].strip()
+                if asin and asin not in existing and asin not in new_asins:
+                    new_asins[asin] = {"sku": "", "product_name": ""}
+        except Exception:
+            pass
+
+        # Also pull from fba_inventory (has product_name and sku)
+        try:
+            rows = con.execute("""
+                SELECT DISTINCT asin, sku, product_name FROM fba_inventory
+                WHERE asin IS NOT NULL AND asin != ''
+            """).fetchall()
+            for r in rows:
+                asin = r[0].strip()
+                if asin and asin not in existing:
+                    new_asins[asin] = {
+                        "sku": (r[1] or "").strip(),
+                        "product_name": (r[2] or "").strip(),
+                    }
+        except Exception:
+            pass
+
+        # Insert new ASINs
+        inserted = 0
+        for asin, info in new_asins.items():
+            try:
+                con.execute("""
+                    INSERT INTO item_master (asin, sku, product_name, division, customer, platform)
+                    VALUES (?, ?, ?, 'unknown', 'amazon', 'sp_api')
+                """, [asin, info["sku"], info["product_name"]])
+                inserted += 1
+            except Exception as e:
+                logger.warning(f"seed item_master {asin}: {e}")
+
+        con.close()
+        return {
+            "status": "ok",
+            "existing": len(existing),
+            "new_asins_found": len(new_asins),
+            "inserted": inserted,
+        }
+    except Exception as e:
+        con.close()
+        raise HTTPException(status_code=500, detail=str(e))

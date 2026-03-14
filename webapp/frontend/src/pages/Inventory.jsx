@@ -1,18 +1,19 @@
 import { useState, useEffect } from "react";
 import { api } from "../lib/api";
 
-export default function Inventory() {
+export default function Inventory({ filters = {} }) {
   const [items, setItems] = useState([]);
   const [loading, setLoading] = useState(true);
   const [sortKey, setSortKey] = useState("fbaStock");
   const [sortDir, setSortDir] = useState("desc");
 
   useEffect(() => {
-    api.inventory().then((inv) => {
+    setLoading(true);
+    api.inventory(filters).then((inv) => {
       setItems(inv.items);
       setLoading(false);
     });
-  }, []);
+  }, [filters.division, filters.customer]);
 
   const handleSort = (key) => {
     if (sortKey === key) {

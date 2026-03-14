@@ -5,7 +5,7 @@ import shutil
 import asyncio
 import logging
 import time
-import duckdb
+import threading
 from datetime import datetime
 from zoneinfo import ZoneInfo
 from pathlib import Path
@@ -17,18 +17,32 @@ from apscheduler.triggers.cron import CronTrigger
 from core.config import DB_PATH, DB_DIR, TIMEZONE, SYNC_INTERVAL_HOURS
 from services.sp_api import _sync_today_orders, _run_sp_api_sync, _backfill_orders
 from services.ads_api import _sync_ads_data, _sync_pricing_and_coupons
-from services.sync_engine import _auto_backfill_if_needed, _log_sync, _write_sync_log
+from services.sync_engine import _auto_backfill_if_needed, _log_sync, _write_sync_log, run_nightly_deep_sync
+from services.analytics_rollup import run_full_rollup
+from services.backup import restore_from_latest_backup
 
 logger = logging.getLogger("golfgen")
 
 # Module-level scheduler instance (will be started in lifespan)
 scheduler = None
 
+# Scheduler-level locks to prevent overlapping scheduled runs of the same job type
+_scheduler_locks = {
+    "sp_api": threading.Lock(),
+    "today": threading.Lock(),
+    "ads": threading.Lock(),
+    "pricing": threading.Lock(),
+    "analytics": threading.Lock(),
+    "backup": threading.Lock(),
+    "docs": threading.Lock(),
+}
+
 
 def _log_docs_update(status: str = "in_progress", documents_updated: str = None, error_message: str = None, execution_time: float = None) -> int:
     """Log a docs update to the docs_update_log table. Returns the log ID."""
     try:
-        con = duckdb.connect(str(DB_PATH))
+        from .database import get_db
+        con = get_db()
         result = con.execute("""
             INSERT INTO docs_update_log (status, documents_updated, error_message, execution_time_seconds, completed_at)
             VALUES (?, ?, ?, ?, CASE WHEN ? = 'completed' OR ? = 'failed' THEN CURRENT_TIMESTAMP ELSE NULL END)
@@ -42,69 +56,143 @@ def _log_docs_update(status: str = "in_progress", documents_updated: str = None,
 
 
 def _run_scheduled_sp_api_sync():
-    """Wrapper for scheduled SP-API sync with logging."""
-    started_at = datetime.now(ZoneInfo("America/Chicago"))
+    """Wrapper for scheduled SP-API sync with logging and scheduler-level mutex."""
+    if not _scheduler_locks["sp_api"].acquire(blocking=False):
+        logger.warning("Skipping scheduled SP-API sync — previous run still active")
+        return
     try:
-        _run_sp_api_sync()
-        _write_sync_log("sp_api_sync", started_at, "SUCCESS")
-        logger.info(f"Scheduled SP-API sync completed")
-    except Exception as e:
-        _write_sync_log("sp_api_sync", started_at, "FAILED", error=str(e))
-        logger.error(f"Scheduled SP-API sync failed: {e}")
+        started_at = datetime.now(ZoneInfo("America/Chicago"))
+        try:
+            _run_sp_api_sync()
+            _write_sync_log("sp_api_sync", started_at, "SUCCESS")
+            logger.info(f"Scheduled SP-API sync completed")
+        except Exception as e:
+            _write_sync_log("sp_api_sync", started_at, "FAILED", error=str(e))
+            logger.error(f"Scheduled SP-API sync failed: {e}")
+    finally:
+        _scheduler_locks["sp_api"].release()
 
 
 def _run_scheduled_today_sync():
-    """Wrapper for scheduled today orders sync with logging."""
-    started_at = datetime.now(ZoneInfo("America/Chicago"))
+    """Wrapper for scheduled today orders sync with logging and scheduler-level mutex."""
+    if not _scheduler_locks["today"].acquire(blocking=False):
+        logger.warning("Skipping scheduled today sync — previous run still active")
+        return
     try:
-        _sync_today_orders()
-        _write_sync_log("today_sync", started_at, "SUCCESS")
-        logger.info(f"Scheduled today sync completed")
-    except Exception as e:
-        _write_sync_log("today_sync", started_at, "FAILED", error=str(e))
-        logger.error(f"Scheduled today sync failed: {e}")
+        started_at = datetime.now(ZoneInfo("America/Chicago"))
+        try:
+            _sync_today_orders()
+            _write_sync_log("today_sync", started_at, "SUCCESS")
+            logger.info(f"Scheduled today sync completed")
+        except Exception as e:
+            _write_sync_log("today_sync", started_at, "FAILED", error=str(e))
+            logger.error(f"Scheduled today sync failed: {e}")
+    finally:
+        _scheduler_locks["today"].release()
 
 
 def _run_scheduled_ads_sync():
-    """Wrapper for scheduled ads sync with logging."""
-    started_at = datetime.now(ZoneInfo("America/Chicago"))
+    """Wrapper for scheduled ads sync with logging and scheduler-level mutex."""
+    if not _scheduler_locks["ads"].acquire(blocking=False):
+        logger.warning("Skipping scheduled ads sync — previous run still active")
+        return
     try:
-        _sync_ads_data()
-        _write_sync_log("ads_sync", started_at, "SUCCESS")
-        logger.info(f"Scheduled ads sync completed")
-    except Exception as e:
-        _write_sync_log("ads_sync", started_at, "FAILED", error=str(e))
-        logger.error(f"Scheduled ads sync failed: {e}")
+        started_at = datetime.now(ZoneInfo("America/Chicago"))
+        try:
+            _sync_ads_data()
+            _write_sync_log("ads_sync", started_at, "SUCCESS")
+            logger.info(f"Scheduled ads sync completed")
+        except Exception as e:
+            _write_sync_log("ads_sync", started_at, "FAILED", error=str(e))
+            logger.error(f"Scheduled ads sync failed: {e}")
+    finally:
+        _scheduler_locks["ads"].release()
 
 
 def _run_scheduled_pricing_sync():
-    """Wrapper for scheduled pricing sync with logging."""
-    started_at = datetime.now(ZoneInfo("America/Chicago"))
+    """Wrapper for scheduled pricing sync with logging and scheduler-level mutex."""
+    if not _scheduler_locks["pricing"].acquire(blocking=False):
+        logger.warning("Skipping scheduled pricing sync — previous run still active")
+        return
     try:
-        _sync_pricing_and_coupons()
-        _write_sync_log("pricing_sync", started_at, "SUCCESS")
-        logger.info(f"Scheduled pricing sync completed")
-    except Exception as e:
-        _write_sync_log("pricing_sync", started_at, "FAILED", error=str(e))
-        logger.error(f"Scheduled pricing sync failed: {e}")
+        started_at = datetime.now(ZoneInfo("America/Chicago"))
+        try:
+            _sync_pricing_and_coupons()
+            _write_sync_log("pricing_sync", started_at, "SUCCESS")
+            logger.info(f"Scheduled pricing sync completed")
+        except Exception as e:
+            _write_sync_log("pricing_sync", started_at, "FAILED", error=str(e))
+            logger.error(f"Scheduled pricing sync failed: {e}")
+    finally:
+        _scheduler_locks["pricing"].release()
 
 
 def _run_scheduled_docs_update():
-    """Wrapper for scheduled docs update with logging. (Placeholder)"""
-    started_at = datetime.now(ZoneInfo("America/Chicago"))
+    """Wrapper for scheduled docs update with logging and scheduler-level mutex. (Placeholder)"""
+    if not _scheduler_locks["docs"].acquire(blocking=False):
+        logger.warning("Skipping scheduled docs update — previous run still active")
+        return
     try:
-        logger.info("Docs update job started (placeholder)")
-        _write_sync_log("docs_update", started_at, "SUCCESS")
-        _log_docs_update("completed", documents_updated="architecture_guide.md, disaster_recovery_plan.md", execution_time=0)
-        logger.info("Scheduled docs update completed")
+        started_at = datetime.now(ZoneInfo("America/Chicago"))
+        try:
+            logger.info("Docs update job started (placeholder)")
+            _write_sync_log("docs_update", started_at, "SUCCESS")
+            _log_docs_update("completed", documents_updated="architecture_guide.md, disaster_recovery_plan.md", execution_time=0)
+            logger.info("Scheduled docs update completed")
+        except Exception as e:
+            _write_sync_log("docs_update", started_at, "FAILED", error=str(e))
+            _log_docs_update("failed", error_message=str(e), execution_time=0)
+            logger.error(f"Scheduled docs update failed: {e}")
+    finally:
+        _scheduler_locks["docs"].release()
+
+
+def _run_scheduled_analytics_rollup():
+    """Wrapper for scheduled analytics rollup with logging and scheduler-level mutex."""
+    if not _scheduler_locks["analytics"].acquire(blocking=False):
+        logger.warning("Skipping scheduled analytics rollup — previous run still active")
+        return
+    try:
+        started_at = datetime.now(ZoneInfo("America/Chicago"))
+        try:
+            result = run_full_rollup()
+            _write_sync_log("analytics_rollup", started_at, "SUCCESS",
+                            inserted=(result.get("daily_rows", 0) + result.get("sku_rows", 0)))
+            logger.info(f"Scheduled analytics rollup completed: {result}")
+        except Exception as e:
+            _write_sync_log("analytics_rollup", started_at, "FAILED", error=str(e))
+            logger.error(f"Scheduled analytics rollup failed: {e}")
+    finally:
+        _scheduler_locks["analytics"].release()
+
+
+def _run_scheduled_nightly_deep_sync():
+    """Wrapper for nightly deep sync with logging and scheduler-level mutex."""
+    if not _scheduler_locks["sp_api"].acquire(blocking=False):
+        logger.warning("Skipping nightly deep sync — SP-API sync already running")
+        return
+    try:
+        result = run_nightly_deep_sync()
+        logger.info(f"Nightly deep sync result: {result}")
     except Exception as e:
-        _write_sync_log("docs_update", started_at, "FAILED", error=str(e))
-        _log_docs_update("failed", error_message=str(e), execution_time=0)
-        logger.error(f"Scheduled docs update failed: {e}")
+        logger.error(f"Nightly deep sync failed: {e}")
+    finally:
+        _scheduler_locks["sp_api"].release()
 
 
 def _run_duckdb_backup():
-    """Nightly backup: Google Drive (full DB) then GitHub (manifest + docs)."""
+    """Nightly backup: Google Drive (full DB) then GitHub (manifest + docs). Scheduler-level mutex."""
+    if not _scheduler_locks["backup"].acquire(blocking=False):
+        logger.warning("Skipping scheduled backup — previous run still active")
+        return
+    try:
+        _run_duckdb_backup_inner()
+    finally:
+        _scheduler_locks["backup"].release()
+
+
+def _run_duckdb_backup_inner():
+    """Actual backup logic — called inside mutex."""
     chicago = ZoneInfo("America/Chicago")
 
     # ── Google Drive backup ──
@@ -152,6 +240,9 @@ def _run_duckdb_backup():
 async def _sync_loop():
     """Initialize and run APScheduler for background sync jobs.
 
+    When USE_POSTGRES is True and WORKER_MODE env var is not set,
+    skip all sync — the separate worker service handles it.
+
     Sequence:
     1. Immediately sync today's orders (fast, ~5s) — so "Today" works right away
     2. Auto-backfill historical data if missing (detects fresh deploy)
@@ -161,13 +252,24 @@ async def _sync_loop():
     """
     global scheduler
 
-    # Immediately pull today's orders — no delay
+    # Skip sync jobs when using Postgres — the worker service handles them
+    from core.config import USE_POSTGRES
+    if USE_POSTGRES and not os.environ.get("WORKER_MODE"):
+        logger.info("Postgres mode: sync jobs handled by worker service, skipping scheduler in API")
+        return
+
+    # FIRST: Restore latest Google Drive backup if available.
+    # This prevents data loss on Railway redeploys (ephemeral filesystem).
     try:
         loop = asyncio.get_event_loop()
-        await loop.run_in_executor(None, _sync_today_orders)
-        logger.info("Startup: today's orders synced")
+        result = await loop.run_in_executor(None, restore_from_latest_backup)
+        logger.info(f"Startup: DB restore result: {result.get('status')} — {result}")
     except Exception as e:
-        logger.error(f"Startup today-sync error: {e}")
+        logger.error(f"Startup DB restore error (continuing with seed): {e}")
+
+    # NOTE: _run_sp_api_sync already calls _sync_today_orders internally as step 1.
+    # No need to call it separately — that was causing a double-sync where the second
+    # run (inside _run_sp_api_sync) could overwrite data from the first.
 
     # Run full SP-API sync on startup (includes financial events with refunds).
     # This is critical because Railway's ephemeral filesystem means every deploy
@@ -209,6 +311,14 @@ async def _sync_loop():
     except Exception as e:
         logger.error(f"Pricing/coupon sync error: {e}")
 
+    # Run analytics rollup on startup so analytics tables are populated immediately
+    try:
+        loop = asyncio.get_event_loop()
+        await loop.run_in_executor(None, run_full_rollup)
+        logger.info("Startup: analytics rollup completed — analytics tables populated")
+    except Exception as e:
+        logger.error(f"Startup analytics rollup error: {e}")
+
     # Initialize APScheduler
     if not scheduler:
         scheduler = AsyncIOScheduler(timezone="America/Chicago")
@@ -222,8 +332,8 @@ async def _sync_loop():
         # Schedule today-orders sync every hour on the half-hour (fast, ~10s)
         scheduler.add_job(_run_scheduled_today_sync, CronTrigger(minute=30, second=0, timezone="America/Chicago"), id="today_sync_hourly")
 
-        # Schedule ads sync every 2 hours
-        scheduler.add_job(_run_scheduled_ads_sync, CronTrigger(minute=0, second=0, timezone="America/Chicago"), id="ads_sync_hourly")
+        # Schedule ads sync every 2 hours (0, 2, 4, 6, 8, ... hours)
+        scheduler.add_job(_run_scheduled_ads_sync, CronTrigger(hour='*/2', minute=0, second=0, timezone="America/Chicago"), id="ads_sync_2hourly")
 
         # Schedule pricing sync every 2 hours (offset by 1 hour from ads)
         scheduler.add_job(_run_scheduled_pricing_sync, CronTrigger(minute=30, second=0, timezone="America/Chicago"), id="pricing_sync_hourly")
@@ -234,6 +344,12 @@ async def _sync_loop():
 
         # Schedule nightly DuckDB backup at 2am Central (Prompt 2 implementation)
         scheduler.add_job(_run_duckdb_backup, CronTrigger(hour=2, minute=0, timezone="America/Chicago"), id="duckdb_backup_2am")
+
+        # Schedule nightly deep sync at 3am Central — fills all data gaps + re-pulls last 30 days
+        scheduler.add_job(_run_scheduled_nightly_deep_sync, CronTrigger(hour=3, minute=0, timezone="America/Chicago"), id="nightly_deep_sync_3am", misfire_grace_time=7200)
+
+        # Schedule analytics rollup at 2:30am Central (after backup completes)
+        scheduler.add_job(_run_scheduled_analytics_rollup, CronTrigger(hour=2, minute=30, timezone="America/Chicago"), id="analytics_rollup_230am", misfire_grace_time=3600)
 
         await scheduler.start()
         logger.info("APScheduler started with 4 daily SP-API syncs, hourly ads/pricing, docs updates, and nightly backup (America/Chicago)")
@@ -256,7 +372,8 @@ async def _startup_sync_catchup():
             ("pricing_sync", 60, _run_scheduled_pricing_sync),       # every hour (offset 30m)
         ]
 
-        con = duckdb.connect(str(DB_PATH), read_only=False)
+        from .database import get_db_rw
+        con = get_db_rw()
 
         for job_name, interval_minutes, job_fn in catchup_jobs:
             try:

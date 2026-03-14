@@ -2,7 +2,6 @@
 import csv
 import json
 import logging
-import duckdb
 from datetime import datetime
 from zoneinfo import ZoneInfo
 from pathlib import Path
@@ -10,20 +9,21 @@ from fastapi import APIRouter, Query, Request, HTTPException
 from fastapi.responses import JSONResponse
 
 from core.config import DB_PATH, DB_DIR, TIMEZONE
+from core.database import get_db, get_db_rw
 
 logger = logging.getLogger("golfgen")
 router = APIRouter()
 
-# ── Database & Auth Helpers (from main.py, local to this module) ────────────────────────
+# ── Database & Auth Helpers ────────────────────────
 
 def _duck_rw():
-    """Return a read-write DuckDB connection for item plan operations."""
-    return duckdb.connect(str(DB_PATH), read_only=False)
+    """Return a read-write connection for item plan operations."""
+    return get_db_rw()
 
 
 def _duck():
-    """Return a read-only DuckDB connection for item plan queries."""
-    return duckdb.connect(str(DB_PATH), read_only=False)
+    """Return a connection for item plan queries."""
+    return get_db()
 
 
 def _require_auth(request: Request):
@@ -74,6 +74,8 @@ def load_item_master() -> list:
                 "series": (row.get("series") or "").strip(),
                 "productType": (row.get("product_type") or "").strip(),
                 "pieceCount": int(float(row.get("piece_count") or 0)),
+                "division": (row.get("division") or "").strip(),
+                "customer": (row.get("customer") or "").strip(),
             })
     return items
 
@@ -118,13 +120,17 @@ def _compute_master_curve() -> dict:
     con = _duck()
     try:
         # Get total units per (year, month) across all SKUs for LY
-        result = con.execute("""
-            SELECT year, month, SUM(units) as total_units
-            FROM monthly_sales_history
-            WHERE year IN (2025, 2026)
-            GROUP BY year, month
-            ORDER BY year, month
-        """).fetchall()
+        try:
+            result = con.execute("""
+                SELECT year, month, SUM(units) as total_units
+                FROM monthly_sales_history
+                WHERE year IN (2025, 2026)
+                GROUP BY year, month
+                ORDER BY year, month
+            """).fetchall()
+        except Exception as e:
+            logger.warning(f"Master curve: monthly_sales_history query failed: {e}")
+            result = []
 
         # Calculate total annual
         annual_total = sum(row[2] for row in result)
@@ -182,8 +188,11 @@ async def get_item_plan(request: Request):
     try:
         # ── Settings ──
         settings = {}
-        for row in con.execute("SELECT key, value FROM item_plan_settings").fetchall():
-            settings[row[0]] = row[1]
+        try:
+            for row in con.execute("SELECT key, value FROM item_plan_settings").fetchall():
+                settings[row[0]] = row[1]
+        except Exception as e:
+            logger.warning(f"Item Plan settings query failed: {e}")
 
         # ── Seed JSON for metadata ──
         seed_data = {}
@@ -220,9 +229,15 @@ async def get_item_plan(request: Request):
             return ""  # no match — skip this SKU
 
         # Map every monthly_sales_history SKU to a canonical base SKU
-        all_hist_skus = con.execute(
-            "SELECT DISTINCT sku FROM monthly_sales_history ORDER BY sku"
-        ).fetchall()
+        # Gracefully handle missing table (returns empty plan if no history data)
+        try:
+            all_hist_skus = con.execute(
+                "SELECT DISTINCT sku FROM monthly_sales_history ORDER BY sku"
+            ).fetchall()
+        except Exception as e:
+            logger.warning(f"Item Plan: monthly_sales_history query failed (table may not exist): {e}")
+            all_hist_skus = []
+
         # Build {base_sku: [raw_sku1, raw_sku2, ...]}
         base_to_raw = {}
         for (raw,) in all_hist_skus:
@@ -422,9 +437,12 @@ async def get_item_plan_sales_curves(request: Request):
             stripped = _ext_re.sub('', s).strip()
             return stripped if stripped in canon_c else ""
 
-        all_raw = con.execute(
-            "SELECT DISTINCT sku FROM monthly_sales_history"
-        ).fetchall()
+        try:
+            all_raw = con.execute(
+                "SELECT DISTINCT sku FROM monthly_sales_history"
+            ).fetchall()
+        except Exception:
+            all_raw = []
         base_map = {}
         for (raw,) in all_raw:
             b = _base_c(raw)
@@ -463,7 +481,8 @@ async def get_factory_on_order(request: Request):
         orders = []
         order_rows = con.execute("""
             SELECT po_number, factory, payment_terms, total_units, factory_cost,
-                   fob_date, est_arrival, wk_received, wk_available, cbm, status
+                   fob_date, est_arrival, wk_received, wk_available, cbm, status,
+                   division, customer, platform
             FROM item_plan_factory_orders
             ORDER BY po_number
         """).fetchall()
@@ -481,12 +500,16 @@ async def get_factory_on_order(request: Request):
                 "wk_available": row[8],
                 "cbm": float(row[9]),
                 "status": row[10],
+                "division": row[11],
+                "customer": row[12],
+                "platform": row[13],
             })
 
         items = []
         item_rows = con.execute("""
             SELECT id, po_number, sku, description, units, est_arrival,
-                   wk_received, wk_available, status
+                   wk_received, wk_available, status,
+                   division, customer, platform
             FROM item_plan_factory_order_items
             ORDER BY id
         """).fetchall()
@@ -502,6 +525,9 @@ async def get_factory_on_order(request: Request):
                 "wk_received": row[6],
                 "wk_available": row[7],
                 "status": row[8],
+                "division": row[9],
+                "customer": row[10],
+                "platform": row[11],
             })
 
         return {"orders": orders, "items": items}
@@ -522,8 +548,9 @@ async def post_factory_on_order(request: Request):
             con.execute("""
                 INSERT OR REPLACE INTO item_plan_factory_orders
                 (po_number, factory, payment_terms, total_units, factory_cost,
-                 fob_date, est_arrival, wk_received, wk_available, cbm, status)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                 fob_date, est_arrival, wk_received, wk_available, cbm, status,
+                 division, customer, platform)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """, [
                 body.get("po_number", ""),
                 body.get("factory", ""),
@@ -536,14 +563,18 @@ async def post_factory_on_order(request: Request):
                 body.get("wk_available", ""),
                 float(body.get("cbm", 0)),
                 body.get("status", "PENDING"),
+                body.get("division", "golf"),
+                body.get("customer", ""),
+                body.get("platform", "manual_entry"),
             ])
         else:
             # It's an item
             con.execute("""
                 INSERT OR REPLACE INTO item_plan_factory_order_items
                 (po_number, sku, description, units, est_arrival,
-                 wk_received, wk_available, status)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                 wk_received, wk_available, status,
+                 division, customer, platform)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """, [
                 body.get("po_number", ""),
                 body.get("sku", ""),
@@ -553,6 +584,9 @@ async def post_factory_on_order(request: Request):
                 body.get("wk_received", ""),
                 body.get("wk_available", ""),
                 body.get("status", "PENDING"),
+                body.get("division", "golf"),
+                body.get("customer", ""),
+                body.get("platform", "manual_entry"),
             ])
 
         con.commit()

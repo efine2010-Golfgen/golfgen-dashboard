@@ -1,13 +1,14 @@
 """Amazon Advertising routes."""
 import logging
 import asyncio
-import duckdb
 from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
+from typing import Optional
 from fastapi import APIRouter, Query
 
 from core.config import DB_PATH, TIMEZONE
 from core.database import get_db
+from core.hierarchy import hierarchy_filter
 from services.ads_api import _sync_ads_data, _load_ads_credentials
 
 logger = logging.getLogger("golfgen")
@@ -30,7 +31,8 @@ def _safe_ads_query(con, query, params=None):
     """Run an ads query, returning empty list if tables don't exist yet."""
     try:
         return con.execute(query, params or []).fetchall()
-    except Exception:
+    except Exception as e:
+        logger.warning(f"Ads query error: {e}")
         return []
 
 
@@ -38,12 +40,14 @@ def _safe_ads_query(con, query, params=None):
 
 
 @router.get("/api/ads/summary")
-def ads_summary(days: int = Query(30)):
+def ads_summary(days: int = Query(30), division: Optional[str] = None, customer: Optional[str] = None, platform: Optional[str] = None):
     """Ads KPIs: total spend, sales, ACOS, ROAS, TACOS, CPC, CTR."""
     con = get_db()
     cutoff = (datetime.now(ZoneInfo("America/Chicago")) - timedelta(days=days)).strftime("%Y-%m-%d")
 
-    row = _safe_ads_query(con, """
+    div_cust_sql, div_cust_params = hierarchy_filter(division, customer, platform)
+
+    row = _safe_ads_query(con, f"""
         SELECT
             COALESCE(SUM(spend), 0) AS spend,
             COALESCE(SUM(sales), 0) AS ad_sales,
@@ -52,8 +56,8 @@ def ads_summary(days: int = Query(30)):
             COALESCE(SUM(orders), 0) AS ad_orders,
             COALESCE(SUM(units), 0) AS ad_units
         FROM advertising
-        WHERE date >= ?
-    """, [cutoff])
+        WHERE date >= ?{div_cust_sql}
+    """, [cutoff] + div_cust_params)
 
     if not row or not row[0]:
         con.close()
@@ -67,11 +71,11 @@ def ads_summary(days: int = Query(30)):
     spend, ad_sales, impressions, clicks, orders, units = row[0]
 
     # Get total organic revenue for TACOS
-    org_row = con.execute("""
+    org_row = con.execute(f"""
         SELECT COALESCE(SUM(ordered_product_sales), 0)
         FROM daily_sales
-        WHERE date >= ? AND asin = 'ALL'
-    """, [cutoff]).fetchone()
+        WHERE date >= ? AND asin = 'ALL'{div_cust_sql}
+    """, [cutoff] + div_cust_params).fetchone()
     total_revenue = org_row[0] if org_row else 0
 
     con.close()
@@ -101,12 +105,14 @@ def ads_summary(days: int = Query(30)):
 
 
 @router.get("/api/ads/daily")
-def ads_daily(days: int = Query(30)):
+def ads_daily(days: int = Query(30), division: Optional[str] = None, customer: Optional[str] = None, platform: Optional[str] = None):
     """Daily ads performance time series."""
     con = get_db()
     cutoff = (datetime.now(ZoneInfo("America/Chicago")) - timedelta(days=days)).strftime("%Y-%m-%d")
 
-    rows = _safe_ads_query(con, """
+    div_cust_sql, div_cust_params = hierarchy_filter(division, customer, platform)
+
+    rows = _safe_ads_query(con, f"""
         SELECT date,
                COALESCE(SUM(spend), 0),
                COALESCE(SUM(sales), 0),
@@ -115,10 +121,10 @@ def ads_daily(days: int = Query(30)):
                COALESCE(SUM(orders), 0),
                0, 0, 0, 0, 0
         FROM advertising
-        WHERE date >= ?
+        WHERE date >= ?{div_cust_sql}
         GROUP BY date
         ORDER BY date
-    """, [cutoff])
+    """, [cutoff] + div_cust_params)
 
     con.close()
 
@@ -145,12 +151,13 @@ def ads_daily(days: int = Query(30)):
 
 
 @router.get("/api/ads/campaigns")
-def ads_campaigns(days: int = Query(30)):
+def ads_campaigns(days: int = Query(30), division: Optional[str] = None, customer: Optional[str] = None, platform: Optional[str] = None):
     """Campaign-level performance."""
     con = get_db()
     cutoff = (datetime.now(ZoneInfo("America/Chicago")) - timedelta(days=days)).strftime("%Y-%m-%d")
+    hf, hp = hierarchy_filter(division, customer, platform)
 
-    rows = _safe_ads_query(con, """
+    rows = _safe_ads_query(con, f"""
         SELECT
             campaign_id,
             MAX(campaign_name) AS campaign_name,
@@ -164,10 +171,10 @@ def ads_campaigns(days: int = Query(30)):
             SUM(orders) AS orders,
             SUM(units) AS units
         FROM ads_campaigns
-        WHERE date >= ?
+        WHERE date >= ?{hf}
         GROUP BY campaign_id
         ORDER BY SUM(spend) DESC
-    """, [cutoff])
+    """, [cutoff] + hp)
 
     con.close()
 
@@ -199,12 +206,13 @@ def ads_campaigns(days: int = Query(30)):
 
 
 @router.get("/api/ads/keywords")
-def ads_keywords(days: int = Query(30), sort: str = Query("spend"), limit: int = Query(50)):
+def ads_keywords(days: int = Query(30), sort: str = Query("spend"), limit: int = Query(50), division: Optional[str] = None, customer: Optional[str] = None, platform: Optional[str] = None):
     """Top keywords by spend, sales, or ACOS."""
     con = get_db()
     cutoff = (datetime.now(ZoneInfo("America/Chicago")) - timedelta(days=days)).strftime("%Y-%m-%d")
+    hf, hp = hierarchy_filter(division, customer, platform)
 
-    rows = _safe_ads_query(con, """
+    rows = _safe_ads_query(con, f"""
         SELECT
             keyword_text,
             MAX(match_type) AS match_type,
@@ -217,11 +225,11 @@ def ads_keywords(days: int = Query(30), sort: str = Query("spend"), limit: int =
             SUM(orders) AS orders,
             SUM(units) AS units
         FROM ads_keywords
-        WHERE date >= ?
+        WHERE date >= ?{hf}
         GROUP BY keyword_text
         ORDER BY SUM(spend) DESC
         LIMIT ?
-    """, [cutoff, limit])
+    """, [cutoff] + hp + [limit])
 
     con.close()
 
@@ -252,12 +260,13 @@ def ads_keywords(days: int = Query(30), sort: str = Query("spend"), limit: int =
 
 
 @router.get("/api/ads/search-terms")
-def ads_search_terms(days: int = Query(30), limit: int = Query(50)):
+def ads_search_terms(days: int = Query(30), limit: int = Query(50), division: Optional[str] = None, customer: Optional[str] = None, platform: Optional[str] = None):
     """Top search terms by spend."""
     con = get_db()
     cutoff = (datetime.now(ZoneInfo("America/Chicago")) - timedelta(days=days)).strftime("%Y-%m-%d")
+    hf, hp = hierarchy_filter(division, customer, platform)
 
-    rows = _safe_ads_query(con, """
+    rows = _safe_ads_query(con, f"""
         SELECT
             search_term,
             MAX(keyword_text) AS keyword,
@@ -270,11 +279,11 @@ def ads_search_terms(days: int = Query(30), limit: int = Query(50)):
             SUM(orders) AS orders,
             SUM(units) AS units
         FROM ads_search_terms
-        WHERE date >= ?
+        WHERE date >= ?{hf}
         GROUP BY search_term
         ORDER BY SUM(spend) DESC
         LIMIT ?
-    """, [cutoff, limit])
+    """, [cutoff] + hp + [limit])
 
     con.close()
 
@@ -304,15 +313,17 @@ def ads_search_terms(days: int = Query(30), limit: int = Query(50)):
 
 
 @router.get("/api/ads/negative-keywords")
-def ads_negative_keywords():
+def ads_negative_keywords(division: Optional[str] = None, customer: Optional[str] = None, platform: Optional[str] = None):
     """List all negative keywords."""
     con = get_db()
+    hf, hp = hierarchy_filter(division, customer, platform)
+    where_clause = (" WHERE " + hf.lstrip(" AND ")) if hf else ""
 
-    rows = _safe_ads_query(con, """
+    rows = _safe_ads_query(con, f"""
         SELECT keyword_text, match_type, campaign_name, ad_group_name, keyword_status
-        FROM ads_negative_keywords
+        FROM ads_negative_keywords{where_clause}
         ORDER BY campaign_name, keyword_text
-    """)
+    """, hp)
 
     con.close()
 

@@ -1,5 +1,14 @@
 const API_BASE = import.meta.env.VITE_API_URL || "";
 
+// Build hierarchy query string fragment from {division, customer, platform}
+function _hq(h = {}) {
+  let q = "";
+  if (h.division) q += `&division=${encodeURIComponent(h.division)}`;
+  if (h.customer) q += `&customer=${encodeURIComponent(h.customer)}`;
+  if (h.platform) q += `&platform=${encodeURIComponent(h.platform)}`;
+  return q;
+}
+
 async function fetchJSON(path) {
   const res = await fetch(`${API_BASE}${path}`, { credentials: "include" });
   if (!res.ok) {
@@ -43,34 +52,34 @@ export const api = {
     }).then(r => { if (!r.ok) throw new Error("Permission update failed"); return r.json(); }),
 
   // Existing endpoints
-  summary: (days = 365) => fetchJSON(`/api/summary?days=${days}`),
-  daily: (days = 365, granularity = "daily") =>
-    fetchJSON(`/api/daily?days=${days}&granularity=${granularity}`),
-  products: (days = 365) => fetchJSON(`/api/products?days=${days}`),
-  inventory: () => fetchJSON(`/api/inventory`),
+  summary: (days = 365, h = {}) => fetchJSON(`/api/summary?days=${days}${_hq(h)}`),
+  daily: (days = 365, granularity = "daily", h = {}) =>
+    fetchJSON(`/api/daily?days=${days}&granularity=${granularity}${_hq(h)}`),
+  products: (days = 365, h = {}) => fetchJSON(`/api/products?days=${days}${_hq(h)}`),
+  inventory: (h = {}) => fetchJSON(`/api/inventory${_hq(h) ? '?' + _hq(h).slice(1) : ''}`),
   productDetail: (asin, days = 365) =>
     fetchJSON(`/api/product/${asin}?days=${days}`),
-  pnl: (days = 365) => fetchJSON(`/api/pnl?days=${days}`),
+  pnl: (days = 365, h = {}) => fetchJSON(`/api/pnl?days=${days}${_hq(h)}`),
 
   // Dashboard analytics
-  comparison: (view = "realtime") => fetchJSON(`/api/comparison?view=${view}`),
-  monthlyYoY: () => fetchJSON(`/api/monthly-yoy`),
-  productMix: (days = 365) => fetchJSON(`/api/product-mix?days=${days}`),
-  colorMix: (days = 365) => fetchJSON(`/api/color-mix?days=${days}`),
+  comparison: (view = "realtime", h = {}) => fetchJSON(`/api/comparison?view=${view}${_hq(h)}`),
+  monthlyYoY: (h = {}) => fetchJSON(`/api/monthly-yoy${_hq(h) ? '?' + _hq(h).slice(1) : ''}`),
+  productMix: (days = 365, h = {}) => fetchJSON(`/api/product-mix?days=${days}${_hq(h)}`),
+  colorMix: (days = 365, h = {}) => fetchJSON(`/api/color-mix?days=${days}${_hq(h)}`),
 
   // Profitability (Sellerboard-style)
-  profitability: (view = "realtime") => fetchJSON(`/api/profitability?view=${view}`),
-  profitabilityItems: (days = 365) => fetchJSON(`/api/profitability/items?days=${days}`),
+  profitability: (view = "realtime", h = {}) => fetchJSON(`/api/profitability?view=${view}${_hq(h)}`),
+  profitabilityItems: (days = 365, h = {}) => fetchJSON(`/api/profitability/items?days=${days}${_hq(h)}`),
 
   // Advertising endpoints
-  adsSummary: (days = 30) => fetchJSON(`/api/ads/summary?days=${days}`),
-  adsDaily: (days = 30) => fetchJSON(`/api/ads/daily?days=${days}`),
-  adsCampaigns: (days = 30) => fetchJSON(`/api/ads/campaigns?days=${days}`),
-  adsKeywords: (days = 30, limit = 50) =>
-    fetchJSON(`/api/ads/keywords?days=${days}&limit=${limit}`),
-  adsSearchTerms: (days = 30, limit = 50) =>
-    fetchJSON(`/api/ads/search-terms?days=${days}&limit=${limit}`),
-  adsNegativeKeywords: () => fetchJSON(`/api/ads/negative-keywords`),
+  adsSummary: (days = 30, h = {}) => fetchJSON(`/api/ads/summary?days=${days}${_hq(h)}`),
+  adsDaily: (days = 30, h = {}) => fetchJSON(`/api/ads/daily?days=${days}${_hq(h)}`),
+  adsCampaigns: (days = 30, h = {}) => fetchJSON(`/api/ads/campaigns?days=${days}${_hq(h)}`),
+  adsKeywords: (days = 30, limit = 50, h = {}) =>
+    fetchJSON(`/api/ads/keywords?days=${days}&limit=${limit}${_hq(h)}`),
+  adsSearchTerms: (days = 30, limit = 50, h = {}) =>
+    fetchJSON(`/api/ads/search-terms?days=${days}&limit=${limit}${_hq(h)}`),
+  adsNegativeKeywords: (h = {}) => fetchJSON(`/api/ads/negative-keywords${_hq(h) ? '?' + _hq(h).slice(1) : ''}`),
 
   // Original Warehouse (Moose 3PL grouped)
   warehouse: () => fetchJSON(`/api/warehouse`),

@@ -17,7 +17,7 @@ from datetime import datetime, timedelta
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
-import duckdb
+from core.database import get_db_rw
 from github import Github
 import base64
 
@@ -43,13 +43,37 @@ def _get_settings():
 
 
 def _get_drive_service():
-    """Authenticate with Google Drive using service account JSON from env var."""
-    from google.oauth2 import service_account
+    """Authenticate with Google Drive using OAuth2 refresh token (user account).
+
+    Falls back to service account if OAuth2 credentials are not configured.
+    OAuth2 is preferred because service accounts have no storage quota on
+    personal Google Drive.
+    """
     from googleapiclient.discovery import build
 
+    # Prefer OAuth2 user credentials (has storage quota)
+    refresh_token = os.environ.get("GOOGLE_OAUTH_REFRESH_TOKEN", "")
+    client_id = os.environ.get("GOOGLE_OAUTH_CLIENT_ID", "")
+    client_secret = os.environ.get("GOOGLE_OAUTH_CLIENT_SECRET", "")
+
+    if refresh_token and client_id and client_secret:
+        from google.oauth2.credentials import Credentials
+        credentials = Credentials(
+            token=None,
+            refresh_token=refresh_token,
+            client_id=client_id,
+            client_secret=client_secret,
+            token_uri="https://oauth2.googleapis.com/token",
+            scopes=["https://www.googleapis.com/auth/drive"],
+        )
+        logger.info("Drive auth: using OAuth2 user credentials")
+        return build("drive", "v3", credentials=credentials, cache_discovery=False)
+
+    # Fallback to service account
+    from google.oauth2 import service_account
     sa_json_str = os.environ.get("GOOGLE_SERVICE_ACCOUNT_JSON", "")
     if not sa_json_str:
-        raise RuntimeError("GOOGLE_SERVICE_ACCOUNT_JSON environment variable is not set")
+        raise RuntimeError("No Google Drive credentials configured (need GOOGLE_OAUTH_REFRESH_TOKEN or GOOGLE_SERVICE_ACCOUNT_JSON)")
 
     try:
         sa_info = json.loads(sa_json_str)
@@ -57,8 +81,9 @@ def _get_drive_service():
         raise RuntimeError(f"Failed to parse GOOGLE_SERVICE_ACCOUNT_JSON: {e}")
 
     credentials = service_account.Credentials.from_service_account_info(
-        sa_info, scopes=["https://www.googleapis.com/auth/drive.file"]
+        sa_info, scopes=["https://www.googleapis.com/auth/drive"]
     )
+    logger.info("Drive auth: using service account (warning: no storage quota on personal Drive)")
     return build("drive", "v3", credentials=credentials, cache_discovery=False)
 
 
@@ -90,7 +115,7 @@ def run_backup() -> dict:
 
         # Step 1: Export DuckDB to Parquet
         logger.info(f"Backup: Exporting DuckDB to Parquet in {export_dir}")
-        con = duckdb.connect(str(DB_PATH), read_only=False)
+        con = get_db_rw()
         try:
             con.execute(f"EXPORT DATABASE '{export_dir}' (FORMAT PARQUET)")
         finally:
@@ -123,7 +148,8 @@ def run_backup() -> dict:
         }
         media = MediaFileUpload(str(archive_path), mimetype="application/gzip", resumable=True)
         uploaded = drive.files().create(
-            body=file_metadata, media_body=media, fields="id,name,size,createdTime"
+            body=file_metadata, media_body=media, fields="id,name,size,createdTime",
+            supportsAllDrives=True
         ).execute()
 
         drive_file_id = uploaded.get("id", "")
@@ -304,7 +330,7 @@ def run_github_backup() -> dict:
         files_to_commit = {}
 
         # ── File 1: Database manifest ──
-        con = duckdb.connect(str(DB_PATH), read_only=False)
+        con = get_db_rw()
         tables_raw = con.execute("SHOW TABLES").fetchall()
         manifest = {
             "backup_time": now.isoformat(),
@@ -422,7 +448,7 @@ def get_github_backup_status() -> dict:
     """
     repo_name = os.environ.get("BACKUP_GITHUB_REPO", "")
     try:
-        con = duckdb.connect(str(DB_PATH), read_only=False)
+        con = get_db_rw()
         row = con.execute("""
             SELECT started_at, completed_at, status,
                    records_processed, error_message
@@ -460,3 +486,144 @@ def get_github_backup_status() -> dict:
             "repo": repo_name,
             "configured": bool(os.environ.get("GITHUB_TOKEN")) and bool(repo_name),
         }
+
+
+# ── Restore from Google Drive backup on startup ─────────────────
+def restore_from_latest_backup() -> dict:
+    """Download the latest Google Drive backup and restore DuckDB from it.
+
+    Called on container startup BEFORE any sync jobs. If a backup exists and
+    is newer than the seed database, the raw .duckdb file inside the archive
+    replaces the seed. This ensures every deploy starts with the most recent
+    data rather than the stale git-committed snapshot.
+
+    Returns a dict with restore status and details.
+    """
+    settings = _get_settings()
+    if not settings["has_credentials"] or not settings["has_folder_id"]:
+        logger.info("Restore: Google Drive not configured — using seed DB")
+        return {"status": "SKIPPED", "reason": "Google Drive not configured"}
+
+    try:
+        drive = _get_drive_service()
+        folder_id = settings["folder_id"]
+
+        # Find the most recent backup
+        query = (
+            f"'{folder_id}' in parents "
+            f"and name contains 'golfgen_backup_' "
+            f"and trashed = false"
+        )
+        results = drive.files().list(
+            q=query,
+            fields="files(id,name,size,createdTime)",
+            orderBy="createdTime desc",
+            pageSize=1,
+        ).execute()
+        files = results.get("files", [])
+
+        if not files:
+            logger.info("Restore: No backups found on Google Drive — using seed DB")
+            return {"status": "SKIPPED", "reason": "No backups found"}
+
+        latest = files[0]
+        backup_name = latest["name"]
+        backup_id = latest["id"]
+        backup_size = int(latest.get("size", 0))
+        backup_size_mb = round(backup_size / (1024 * 1024), 2)
+        logger.info(f"Restore: Found backup {backup_name} ({backup_size_mb} MB) — downloading...")
+
+        # Download the backup archive
+        from googleapiclient.http import MediaIoBaseDownload
+        import io
+
+        request = drive.files().get_media(fileId=backup_id)
+        buffer = io.BytesIO()
+        downloader = MediaIoBaseDownload(buffer, request)
+
+        done = False
+        while not done:
+            _, done = downloader.next_chunk()
+
+        buffer.seek(0)
+        logger.info(f"Restore: Downloaded {backup_size_mb} MB")
+
+        # Extract the raw .duckdb file from the archive
+        import shutil
+        with tempfile.TemporaryDirectory() as tmpdir:
+            archive_path = Path(tmpdir) / "backup.tar.gz"
+            with open(archive_path, "wb") as f:
+                f.write(buffer.read())
+
+            with tarfile.open(str(archive_path), "r:gz") as tar:
+                tar.extractall(path=tmpdir)
+
+            # Look for the .duckdb file in the extracted archive
+            duckdb_file = None
+            for root, dirs, fnames in os.walk(tmpdir):
+                for fname in fnames:
+                    if fname.endswith(".duckdb"):
+                        duckdb_file = Path(root) / fname
+                        break
+                if duckdb_file:
+                    break
+
+            if not duckdb_file:
+                logger.error("Restore: No .duckdb file found in backup archive")
+                return {"status": "FAILED", "reason": "No .duckdb in archive"}
+
+            restored_size = duckdb_file.stat().st_size
+            restored_size_mb = round(restored_size / (1024 * 1024), 2)
+
+            # Compare row counts, not file size — DuckDB compaction can make a richer DB smaller.
+            current_size = DB_PATH.stat().st_size if DB_PATH.exists() else 0
+            current_size_mb = round(current_size / (1024 * 1024), 2)
+
+            # Count rows in current DB
+            try:
+                import duckdb
+                cur_con = duckdb.connect(str(DB_PATH), read_only=True)
+                cur_rows = cur_con.execute("SELECT COUNT(*) FROM daily_sales").fetchone()[0]
+                cur_con.close()
+            except Exception:
+                cur_rows = 0
+
+            # Count rows in backup DB
+            try:
+                import duckdb
+                bak_con = duckdb.connect(str(duckdb_file), read_only=True)
+                bak_rows = bak_con.execute("SELECT COUNT(*) FROM daily_sales").fetchone()[0]
+                bak_con.close()
+            except Exception:
+                bak_rows = 0
+
+            if bak_rows <= cur_rows and cur_rows > 0:
+                logger.info(f"Restore: Backup DB ({bak_rows} rows, {restored_size_mb} MB) <= current ({cur_rows} rows, {current_size_mb} MB) — keeping current")
+                return {"status": "SKIPPED", "reason": f"Backup ({bak_rows} rows) not larger than current ({cur_rows} rows)"}
+            
+            logger.info(f"Restore: Backup has more data ({bak_rows} rows vs {cur_rows} rows)")
+
+            # Replace the database file
+            logger.info(f"Restore: Replacing DB ({current_size_mb} MB → {restored_size_mb} MB)")
+            shutil.copy2(str(duckdb_file), str(DB_PATH))
+
+            # Also remove any .wal file that might be stale
+            wal_path = DB_PATH.with_suffix(".duckdb.wal")
+            if wal_path.exists():
+                wal_path.unlink()
+                logger.info("Restore: Removed stale .wal file")
+
+            logger.info(f"Restore: SUCCESS — restored from {backup_name}")
+            return {
+                "status": "SUCCESS",
+                "backup_name": backup_name,
+                "backup_size_mb": backup_size_mb,
+                "restored_db_size_mb": restored_size_mb,
+                "previous_db_size_mb": current_size_mb,
+            }
+
+    except Exception as e:
+        logger.error(f"Restore: Failed — {e}")
+        import traceback
+        logger.error(traceback.format_exc())
+        return {"status": "FAILED", "reason": str(e)}

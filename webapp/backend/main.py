@@ -9,7 +9,6 @@ from pathlib import Path
 from typing import Optional
 from contextlib import asynccontextmanager
 
-import duckdb
 import bcrypt as _bcrypt
 from fastapi import FastAPI, Request, HTTPException, Cookie
 from fastapi.middleware.cors import CORSMiddleware
@@ -20,8 +19,11 @@ from pydantic import BaseModel
 from core.config import (
     DB_PATH, DB_DIR, TIMEZONE, ALL_TABS, TAB_API_PREFIXES,
     USERS, EMAIL_TO_USER, DASHBOARD_PASSWORD, get_frontend_dir,
+    GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET, GOOGLE_REDIRECT_URI,
+    SESSION_SECRET, ALLOWED_SSO_EMAILS,
+    SESSION_MAX_AGE_HOURS, SESSION_IDLE_TIMEOUT_HOURS,
 )
-from core.database import init_all_tables
+from core.database import init_all_tables, auto_migrate_from_duckdb, get_db, get_db_rw
 
 logger = logging.getLogger("golfgen")
 
@@ -39,7 +41,7 @@ def _get_session(token: str):
     """Look up session from DuckDB. Returns dict or None."""
     if not token:
         return None
-    con = duckdb.connect(str(DB_PATH), read_only=False)
+    con = get_db_rw()
     rows = con.execute(
         "SELECT token, user_email, user_name, role FROM sessions WHERE token = ?",
         [token],
@@ -53,7 +55,7 @@ def _get_session(token: str):
 
 def _get_user_permissions(user_name: str):
     """Return set of enabled tab_keys for a user."""
-    con = duckdb.connect(str(DB_PATH), read_only=False)
+    con = get_db_rw()
     rows = con.execute(
         "SELECT tab_key FROM user_permissions WHERE user_name = ? AND enabled = TRUE",
         [user_name],
@@ -79,6 +81,59 @@ def _require_auth(request: Request):
     return sess
 
 
+def _write_audit(user_email: str, user_name: str, action: str, detail: str = "",
+                 ip_address: str = "", path: str = ""):
+    """Write one row to the audit_log table."""
+    try:
+        con = get_db()
+        con.execute(
+            "INSERT INTO audit_log (user_email, user_name, action, detail, ip_address, path) "
+            "VALUES (?, ?, ?, ?, ?, ?)",
+            [user_email, user_name, action, detail, ip_address, path],
+        )
+        con.close()
+    except Exception as e:
+        logger.warning(f"Audit log write failed: {e}")
+
+
+def _check_session_timeouts(token: str) -> bool:
+    """Return True if session is still valid (not expired). Deletes expired sessions."""
+    if not token:
+        return False
+    try:
+        con = get_db()
+        row = con.execute(
+            "SELECT created_at, last_active_at FROM sessions WHERE token = ?", [token]
+        ).fetchone()
+        if not row:
+            con.close()
+            return False
+        from datetime import datetime, timedelta
+        now = datetime.utcnow()
+        created_at = row[0]
+        last_active = row[1] or created_at
+
+        # 18-hour absolute session lifetime
+        if created_at and (now - created_at) > timedelta(hours=SESSION_MAX_AGE_HOURS):
+            con.execute("DELETE FROM sessions WHERE token = ?", [token])
+            con.close()
+            return False
+
+        # 2-hour idle timeout
+        if last_active and (now - last_active) > timedelta(hours=SESSION_IDLE_TIMEOUT_HOURS):
+            con.execute("DELETE FROM sessions WHERE token = ?", [token])
+            con.close()
+            return False
+
+        # Touch last_active_at
+        con.execute("UPDATE sessions SET last_active_at = CURRENT_TIMESTAMP WHERE token = ?", [token])
+        con.close()
+        return True
+    except Exception as e:
+        logger.warning(f"Session timeout check error: {e}")
+        return True  # On error, allow through
+
+
 # ── Lifespan ─────────────────────────────────────────────
 
 @asynccontextmanager
@@ -89,6 +144,12 @@ async def lifespan(app: FastAPI):
     # Initialize all DuckDB tables
     init_all_tables()
     logger.info("All tables initialized")
+
+    # Auto-migrate DuckDB → PostgreSQL if Postgres is empty and DuckDB exists
+    try:
+        auto_migrate_from_duckdb()
+    except Exception as e:
+        logger.error(f"Auto-migration error (non-fatal): {e}")
 
     # Start background sync (imports scheduler module which imports services)
     task = None
@@ -159,6 +220,12 @@ async def tab_permission_middleware(request: Request, call_next):
     if not sess:
         return JSONResponse(status_code=401, content={"detail": "Not authenticated"})
 
+    # Enforce session timeouts (18hr absolute, 2hr idle)
+    if not _check_session_timeouts(token):
+        response = JSONResponse(status_code=401, content={"detail": "Session expired"})
+        response.delete_cookie("golfgen_session")
+        return response
+
     # For tab-gated endpoints, check permission
     tab_key = _tab_key_for_path(path)
     if tab_key and sess["role"] != "admin":
@@ -187,16 +254,16 @@ async def tab_permission_middleware(request: Request, call_next):
                 if mfa_routes.get(tab_key, False):
                     # This route requires MFA
                     user_settings = get_mfa_settings(sess["user_name"])
-                    if not user_settings or not user_settings.get("mfa_enabled"):
-                        # User hasn't enrolled in MFA → 404 (hidden page behavior)
-                        return JSONResponse({"detail": "Not found"}, status_code=404)
-                    token = request.cookies.get("golfgen_session", "")
-                    if not is_session_mfa_verified(token):
-                        # MFA enabled but session not verified → prompt for MFA
-                        return JSONResponse(
-                            {"detail": "MFA verification required", "mfa_required": True},
-                            status_code=403,
-                        )
+                    # Only enforce MFA if user has actually enrolled
+                    if user_settings and user_settings.get("mfa_enabled"):
+                        token = request.cookies.get("golfgen_session", "")
+                        if not is_session_mfa_verified(token):
+                            # MFA enabled but session not verified → prompt for MFA
+                            return JSONResponse(
+                                {"detail": "MFA verification required", "mfa_required": True},
+                                status_code=403,
+                            )
+                    # If user hasn't enrolled in MFA, let them through
         except Exception:
             pass  # MFA tables may not exist yet on first run
 
@@ -216,38 +283,42 @@ def login(req: MultiLoginRequest):
     if not user_key:
         # Legacy single-password fallback
         if req.password != DASHBOARD_PASSWORD:
+            _write_audit(req.email, "", "login_failed", "Invalid legacy password")
             raise HTTPException(status_code=401, detail="Invalid email or password.")
         # Create session for legacy login
         token = secrets.token_hex(32)
-        con = duckdb.connect(str(DB_PATH))
+        con = get_db()
         con.execute(
-            "INSERT INTO sessions (token, user_email, user_name, role) VALUES (?, ?, ?, ?)",
+            "INSERT INTO sessions (token, user_email, user_name, role, login_method) VALUES (?, ?, ?, ?, 'legacy')",
             [token, req.email.lower().strip(), req.email.split("@")[0], "admin"],
         )
         con.close()
+        _write_audit(req.email, req.email.split("@")[0], "login", "Legacy password login")
         response = JSONResponse({"ok": True, "name": req.email.split("@")[0], "role": "admin"})
         response.set_cookie(
             key="golfgen_session", value=token,
             httponly=True, samesite="none", secure=True,
-            max_age=60 * 60 * 24 * 7,
+            max_age=60 * 60 * SESSION_MAX_AGE_HOURS,
         )
         return response
 
     user = USERS[user_key]
     if not _bcrypt.checkpw(req.password.encode("utf-8"), user["password_hash"].encode("utf-8")):
+        _write_audit(req.email, "", "login_failed", "Invalid password")
         raise HTTPException(status_code=401, detail="Invalid email or password.")
     token = secrets.token_hex(32)
-    con = duckdb.connect(str(DB_PATH))
+    con = get_db()
     con.execute(
-        "INSERT INTO sessions (token, user_email, user_name, role) VALUES (?, ?, ?, ?)",
+        "INSERT INTO sessions (token, user_email, user_name, role, login_method) VALUES (?, ?, ?, ?, 'password')",
         [token, req.email.lower().strip(), user["name"], user["role"]],
     )
     con.close()
+    _write_audit(req.email, user["name"], "login", "Password login")
     response = JSONResponse({"ok": True, "name": user["name"], "role": user["role"]})
     response.set_cookie(
         key="golfgen_session", value=token,
         httponly=True, samesite="none", secure=True,
-        max_age=60 * 60 * 24 * 7,
+        max_age=60 * 60 * SESSION_MAX_AGE_HOURS,
     )
     return response
 
@@ -262,14 +333,105 @@ def auth_check(golfgen_session: Optional[str] = Cookie(None)):
 
 
 @app.post("/api/auth/logout")
-def logout(golfgen_session: Optional[str] = Cookie(None)):
+def logout(request: Request, golfgen_session: Optional[str] = Cookie(None)):
     """Clear the session from DuckDB."""
     if golfgen_session:
-        con = duckdb.connect(str(DB_PATH))
+        sess = _get_session(golfgen_session)
+        con = get_db()
         con.execute("DELETE FROM sessions WHERE token = ?", [golfgen_session])
         con.close()
+        if sess:
+            _write_audit(sess["user_email"], sess["user_name"], "logout", "User logout")
     response = JSONResponse({"ok": True})
     response.delete_cookie("golfgen_session")
+    return response
+
+
+# ── Google SSO Endpoints ──────────────────────────────────
+
+@app.get("/api/auth/google/login")
+def google_login():
+    """Redirect user to Google's OAuth consent screen."""
+    if not GOOGLE_CLIENT_ID or not GOOGLE_CLIENT_SECRET:
+        raise HTTPException(status_code=501, detail="Google SSO not configured")
+    import urllib.parse
+    # Build Google authorization URL directly
+    params = {
+        "client_id": GOOGLE_CLIENT_ID,
+        "redirect_uri": GOOGLE_REDIRECT_URI,
+        "response_type": "code",
+        "scope": "openid email profile",
+        "access_type": "offline",
+        "prompt": "select_account",
+        "state": secrets.token_hex(16),
+    }
+    url = "https://accounts.google.com/o/oauth2/v2/auth?" + urllib.parse.urlencode(params)
+    from fastapi.responses import RedirectResponse
+    return RedirectResponse(url)
+
+
+@app.get("/api/auth/google/callback")
+async def google_callback(code: str = "", error: str = ""):
+    """Handle the OAuth callback from Google."""
+    from fastapi.responses import RedirectResponse
+    if error or not code:
+        return RedirectResponse("/?auth_error=google_denied")
+    if not GOOGLE_CLIENT_ID or not GOOGLE_CLIENT_SECRET:
+        raise HTTPException(status_code=501, detail="Google SSO not configured")
+    import httpx
+    # Exchange code for tokens
+    async with httpx.AsyncClient() as client:
+        token_resp = await client.post("https://oauth2.googleapis.com/token", data={
+            "code": code,
+            "client_id": GOOGLE_CLIENT_ID,
+            "client_secret": GOOGLE_CLIENT_SECRET,
+            "redirect_uri": GOOGLE_REDIRECT_URI,
+            "grant_type": "authorization_code",
+        })
+        if token_resp.status_code != 200:
+            logger.error(f"Google token exchange failed: {token_resp.text}")
+            return RedirectResponse("/?auth_error=token_exchange_failed")
+        tokens = token_resp.json()
+        # Get user info
+        userinfo_resp = await client.get(
+            "https://www.googleapis.com/oauth2/v3/userinfo",
+            headers={"Authorization": f"Bearer {tokens['access_token']}"},
+        )
+        if userinfo_resp.status_code != 200:
+            return RedirectResponse("/?auth_error=userinfo_failed")
+        userinfo = userinfo_resp.json()
+
+    email = userinfo.get("email", "").lower().strip()
+    name = userinfo.get("name", email.split("@")[0])
+
+    # Check whitelist
+    if email not in ALLOWED_SSO_EMAILS:
+        logger.warning(f"Google SSO rejected: {email} not in whitelist")
+        _write_audit(email, name, "sso_rejected", f"Email not in whitelist: {email}")
+        return RedirectResponse("/?auth_error=not_authorized")
+
+    # Find matching user in USERS config (for role/permissions)
+    user_key = EMAIL_TO_USER.get(email)
+    role = "admin" if user_key and USERS[user_key]["role"] == "admin" else "staff"
+    user_name = USERS[user_key]["name"] if user_key else name
+
+    # Create session
+    session_token = secrets.token_hex(32)
+    con = get_db()
+    con.execute(
+        "INSERT INTO sessions (token, user_email, user_name, role, login_method) VALUES (?, ?, ?, ?, 'google_sso')",
+        [session_token, email, user_name, role],
+    )
+    con.close()
+
+    _write_audit(email, user_name, "login_sso", f"Google SSO login")
+
+    response = RedirectResponse("/")
+    response.set_cookie(
+        key="golfgen_session", value=session_token,
+        httponly=True, samesite="none", secure=True,
+        max_age=60 * 60 * SESSION_MAX_AGE_HOURS,
+    )
     return response
 
 
@@ -303,7 +465,7 @@ def get_all_permissions(request: Request):
     sess = _get_session(request.cookies.get("golfgen_session"))
     if not sess or sess["role"] != "admin":
         raise HTTPException(status_code=403, detail="Admin access required")
-    con = duckdb.connect(str(DB_PATH), read_only=False)
+    con = get_db_rw()
     rows = con.execute(
         "SELECT user_name, tab_key, enabled FROM user_permissions ORDER BY user_name, tab_key"
     ).fetchall()
@@ -338,13 +500,48 @@ def update_permission(req: PermissionUpdate, request: Request):
         raise HTTPException(status_code=403, detail="Admin access required")
     if req.user not in USERS or req.tab not in ALL_TABS:
         raise HTTPException(status_code=400, detail="Invalid user or tab")
-    con = duckdb.connect(str(DB_PATH))
+    con = get_db()
     con.execute("DELETE FROM user_permissions WHERE user_name = ? AND tab_key = ?",
                 [req.user, req.tab])
     con.execute("INSERT INTO user_permissions (user_name, tab_key, enabled) VALUES (?, ?, ?)",
                 [req.user, req.tab, req.enabled])
     con.close()
     return {"ok": True}
+
+
+# ── Audit Log Endpoint ────────────────────────────────────
+
+@app.get("/api/audit-log")
+def get_audit_log(request: Request, limit: int = 200, offset: int = 0):
+    """Admin only: return recent audit log entries."""
+    sess = _get_session(request.cookies.get("golfgen_session"))
+    if not sess or sess["role"] != "admin":
+        raise HTTPException(status_code=403, detail="Admin access required")
+    con = get_db()
+    try:
+        rows = con.execute(
+            "SELECT ts, user_email, user_name, action, detail, ip_address, path "
+            "FROM audit_log ORDER BY ts DESC LIMIT ? OFFSET ?",
+            [limit, offset],
+        ).fetchall()
+        total = con.execute("SELECT COUNT(*) FROM audit_log").fetchone()[0]
+    finally:
+        con.close()
+    return {
+        "total": total,
+        "entries": [
+            {
+                "ts": str(r[0]) if r[0] else "",
+                "user_email": r[1] or "",
+                "user_name": r[2] or "",
+                "action": r[3] or "",
+                "detail": r[4] or "",
+                "ip_address": r[5] or "",
+                "path": r[6] or "",
+            }
+            for r in rows
+        ],
+    }
 
 
 # ── Include Routers ──────────────────────────────────────

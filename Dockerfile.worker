@@ -1,0 +1,26 @@
+# GolfGen Analytics Worker
+FROM python:3.11-slim
+
+WORKDIR /app
+
+COPY webapp/backend/requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt
+
+# Copy backend code (worker imports from it)
+COPY webapp/backend/ ./webapp/backend/
+RUN touch ./webapp/__init__.py ./webapp/backend/__init__.py
+
+# Copy data files for seeding
+RUN mkdir -p ./data-seed ./data
+COPY data/cogs.csv ./data-seed/
+COPY data/item_master.csv ./data-seed/
+COPY data/item_plan_seed.json ./data-seed/
+COPY data/factory_orders_seed.json ./data-seed/
+
+# Copy worker script
+COPY worker.py ./worker.py
+
+ENV DB_DIR=/app/data
+ENV WORKER_MODE=1
+
+CMD ["python", "worker.py"]

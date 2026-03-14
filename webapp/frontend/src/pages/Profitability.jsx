@@ -35,7 +35,7 @@ const WATERFALL_COLORS = {
   netProfit_neg: "#D03030",
 };
 
-export default function Profitability() {
+export default function Profitability({ filters = {} }) {
   const [view, setView] = useState("realtime");
   const [periods, setPeriods] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -48,20 +48,20 @@ export default function Profitability() {
   // Load waterfall periods
   useEffect(() => {
     setLoading(true);
-    api.profitability(view).then(data => {
+    api.profitability(view, filters).then(data => {
       setPeriods(data.periods || []);
       setLoading(false);
     }).catch(() => setLoading(false));
-  }, [view]);
+  }, [view, filters.division, filters.customer]);
 
   // Load item-level data
   useEffect(() => {
     setItemLoading(true);
-    api.profitabilityItems(itemDays).then(data => {
+    api.profitabilityItems(itemDays, filters).then(data => {
       setItems(data.items || []);
       setItemLoading(false);
     }).catch(() => setItemLoading(false));
-  }, [itemDays]);
+  }, [itemDays, filters.division, filters.customer]);
 
   // Sort items
   const sortedItems = [...items].sort((a, b) => {
@@ -324,6 +324,7 @@ export default function Profitability() {
                     <th style={staticThStyle}>Coupon</th>
                     <th style={staticThStyle}>Coupon End</th>
                     <th style={staticThStyle}>Sale Price</th>
+                    <th style={staticThStyle}>Sale Dates</th>
                     <SortTh label="Units" col="units" sortCol={sortCol} sortDir={sortDir} onClick={handleSort} />
                     <SortTh label="Sales" col="sales" sortCol={sortCol} sortDir={sortDir} onClick={handleSort} />
                     <SortTh label="Ad Spend" col="adSpend" sortCol={sortCol} sortDir={sortDir} onClick={handleSort} />
@@ -360,6 +361,17 @@ export default function Profitability() {
                                 ${item.listPrice.toFixed(2)}
                               </span>
                             )}
+                          </span>
+                        ) : (
+                          <span style={{ color: "var(--muted)" }}>—</span>
+                        )}
+                      </td>
+                      <td style={{ ...cellStyle, textAlign: "center", fontSize: 10 }}>
+                        {item.salePriceStartDate || item.salePriceEndDate ? (
+                          <span>
+                            {item.salePriceStartDate ? fmtDate(item.salePriceStartDate) : "—"}
+                            <span style={{ color: "var(--muted)", margin: "0 2px" }}>→</span>
+                            {item.salePriceEndDate ? fmtDate(item.salePriceEndDate) : "—"}
                           </span>
                         ) : (
                           <span style={{ color: "var(--muted)" }}>—</span>

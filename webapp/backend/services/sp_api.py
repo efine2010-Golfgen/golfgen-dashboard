@@ -6,16 +6,117 @@ Handles Amazon SP-API synchronization including orders, financial events, invent
 import os
 import json
 import logging
-import duckdb
+import threading
+import time as _time_mod
+from core.database import get_db, get_db_rw
 from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
 from pathlib import Path
 from typing import Optional
 from collections import defaultdict
+from functools import wraps
 
 from core.config import DB_PATH, DB_DIR, CONFIG_PATH, TIMEZONE, COGS_PATH
 
 logger = logging.getLogger("golfgen")
+
+# In-memory ring buffer for recent log messages (accessible via /api/debug/logs)
+import collections
+_log_buffer = collections.deque(maxlen=200)
+
+class _BufferHandler(logging.Handler):
+    def emit(self, record):
+        try:
+            msg = self.format(record)
+            _log_buffer.append(msg)
+        except Exception:
+            pass
+
+_buf_handler = _BufferHandler()
+_buf_handler.setLevel(logging.DEBUG)
+_buf_handler.setFormatter(logging.Formatter('%(asctime)s %(levelname)s %(message)s', datefmt='%H:%M:%S'))
+logger.addHandler(_buf_handler)
+
+# ── Sync mutex — prevents overlapping sync operations ──────────
+_sync_lock = threading.Lock()
+_sync_running: str | None = None  # name of currently-running sync, or None
+
+
+def is_sync_running() -> str | None:
+    """Return the name of the currently-running sync, or None."""
+    return _sync_running
+
+
+# ── Retry with exponential backoff ─────────────────────────────
+def retry_with_backoff(max_retries: int = 5, base_delay: float = 2.0, max_delay: float = 120.0):
+    """Decorator: retry on throttle / QuotaExceeded / 429 with exponential backoff.
+
+    Usage:
+        @retry_with_backoff(max_retries=5)
+        def call_api():
+            ...
+    """
+    def decorator(fn):
+        @wraps(fn)
+        def wrapper(*args, **kwargs):
+            last_exc = None
+            for attempt in range(max_retries + 1):
+                try:
+                    return fn(*args, **kwargs)
+                except Exception as e:
+                    err_str = str(e).lower()
+                    is_throttle = any(k in err_str for k in ("throttl", "429", "quotaexceeded", "too many request", "rate limit"))
+                    if not is_throttle or attempt == max_retries:
+                        raise
+                    last_exc = e
+                    delay = min(base_delay * (2 ** attempt), max_delay)
+                    logger.warning(f"  Throttled (attempt {attempt+1}/{max_retries}), retrying in {delay:.1f}s: {e}")
+                    _time_mod.sleep(delay)
+            raise last_exc  # should never reach here
+        return wrapper
+    return decorator
+
+
+# ── Division lookup cache ──────────────────────────────────────
+_division_cache: dict[str, str] = {}
+
+
+def _get_division_for_asin(asin: str, con=None) -> str:
+    """Look up the division for an ASIN from item_master.
+
+    Returns the division string ('golf' or 'housewares').
+    Falls back to 'golf' if the ASIN isn't in item_master yet.
+    Results are cached in-memory for the lifetime of the process.
+    """
+    if not asin or asin == "ALL":
+        return "golf"
+
+    # Check cache first
+    if asin in _division_cache:
+        return _division_cache[asin]
+
+    # Query item_master
+    close_con = False
+    try:
+        if con is None:
+            con = get_db()
+            close_con = True
+        row = con.execute(
+            "SELECT division FROM item_master WHERE asin = ?", [asin]
+        ).fetchone()
+        division = row[0] if row and row[0] else "golf"
+        _division_cache[asin] = division
+        if close_con:
+            con.close()
+        return division
+    except Exception:
+        _division_cache[asin] = "golf"
+        if close_con:
+            try:
+                con.close()
+            except Exception:
+                pass
+        return "golf"
 
 
 def _load_sp_api_credentials() -> dict | None:
@@ -70,7 +171,30 @@ def _sync_today_orders():
     Strategy: Use getOrderItems for EVERY order to get accurate item-level
     prices.  OrderTotal is unreliable (missing for Pending, sometimes $0
     for FBA orders).  Item-level prices are the ground truth.
+
+    Hard timeout of 120 seconds to prevent blocking other syncs.
     """
+    global _sync_running
+    if not _sync_lock.acquire(blocking=False):
+        logger.warning(f"  Skipping today-sync — '{_sync_running}' already running")
+        return False
+    _sync_running = "today_orders"
+    try:
+        import concurrent.futures
+        with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
+            future = executor.submit(_sync_today_orders_inner)
+            try:
+                return future.result(timeout=120)  # 2-minute hard timeout
+            except concurrent.futures.TimeoutError:
+                logger.error("  Today sync TIMED OUT after 120s — releasing lock for other syncs")
+                return False
+    finally:
+        _sync_running = None
+        _sync_lock.release()
+
+
+def _sync_today_orders_inner():
+    """Inner implementation of today-orders sync (called under mutex)."""
     try:
         from sp_api.api import Orders as OrdersAPI
         from sp_api.base import Marketplaces
@@ -85,15 +209,19 @@ def _sync_today_orders():
     logger.info("  Syncing today's orders (real-time)...")
     try:
         import time as _t
+        _sync_start = _t.time()
         # Get orders from last 7 days to catch delayed/pending orders
         now_utc = datetime.now(ZoneInfo("UTC"))
         after_date = (now_utc - timedelta(days=7)).strftime("%Y-%m-%dT%H:%M:%SZ")
+        logger.info(f"  Creating Orders API client...")
         orders_api = OrdersAPI(credentials=credentials, marketplace=Marketplaces.US)
+        logger.info(f"  Calling get_orders(CreatedAfter={after_date})...")
         response = orders_api.get_orders(
             CreatedAfter=after_date,
             MarketplaceIds=["ATVPDKIKX0DER"],
             MaxResultsPerPage=100
         )
+        logger.info(f"  get_orders returned in {_t.time()-_sync_start:.1f}s")
 
         order_list = response.payload.get("Orders", [])
 
@@ -113,7 +241,8 @@ def _sync_today_orders():
 
         logger.info(f"  Got {len(order_list)} orders from last 7 days")
 
-        con = duckdb.connect(str(DB_PATH), read_only=False)
+        con = get_db_rw()
+        con.execute("BEGIN TRANSACTION")
 
         # Store raw orders
         for order in order_list:
@@ -123,8 +252,9 @@ def _sync_today_orders():
                 (order_id, purchase_date, order_status, fulfillment_channel,
                  sales_channel, order_total, currency_code, number_of_items,
                  ship_city, ship_state, ship_postal_code,
-                 is_business_order, is_prime)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                 is_business_order, is_prime,
+                 division, customer, platform)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'golf', 'amazon', 'sp_api')
             """, [
                 order.get("AmazonOrderId"),
                 order.get("PurchaseDate"),
@@ -147,9 +277,9 @@ def _sync_today_orders():
         now_central = datetime.now(ZoneInfo("America/Chicago"))
         today_str = now_central.strftime("%Y-%m-%d")
         yesterday_str = (now_central - timedelta(days=1)).strftime("%Y-%m-%d")
-        # Build set of recent dates we want item-level detail for
+        # Build set of recent dates we want item-level detail for (today + yesterday only)
         recent_dates = set()
-        for d in range(7):
+        for d in range(2):
             recent_dates.add((now_central - timedelta(days=d)).strftime("%Y-%m-%d"))
 
         # Build ASIN price lookup from historical data for fallback
@@ -200,8 +330,17 @@ def _sync_today_orders():
             if not order_id:
                 continue
 
+            # Cap at 50 orders to prevent long-running syncs
+            if items_fetched + items_failed >= 50:
+                logger.info(f"  Reached 50-order cap for today sync, stopping item fetch")
+                break
+
             try:
-                items_resp = orders_api.get_order_items(order_id)
+                @retry_with_backoff(max_retries=3, base_delay=1.0, max_delay=15.0)
+                def _fetch_items(oid):
+                    return orders_api.get_order_items(oid)
+
+                items_resp = _fetch_items(order_id)
                 item_list = items_resp.payload.get("OrderItems", [])
                 total_from_items = 0.0
                 total_qty = 0
@@ -237,16 +376,13 @@ def _sync_today_orders():
                 order["_item_qty"] = total_qty
                 items_fetched += 1
 
-                # Adaptive rate limiting: burst first 25, then sleep
+                # Adaptive rate limiting: burst first 15, then sleep
                 burst_count += 1
-                if burst_count > 25:
-                    _t.sleep(2.0)  # Stay well under rate limit
+                if burst_count > 15:
+                    _time_mod.sleep(1.0)  # Stay well under rate limit
             except Exception as e:
                 items_failed += 1
-                logger.warning(f"  getOrderItems failed for {order_id}: {e}")
-                # On rate limit, back off
-                if "throttl" in str(e).lower() or "429" in str(e):
-                    _t.sleep(5.0)
+                logger.warning(f"  getOrderItems failed for {order_id} after retries: {e}")
 
         logger.info(f"  Fetched items for {items_fetched} orders ({items_failed} failed)")
 
@@ -296,16 +432,29 @@ def _sync_today_orders():
             # Sales & Traffic Report data is more accurate for historical days,
             # Orders API may undercount (missing item prices on Pending orders).
             # Only overwrite if new revenue is >= existing — never lose data.
+            # CRITICAL: Preserve existing session/traffic data — Orders API doesn't have it.
             if agg["revenue"] >= existing_rev:
+                existing_full = con.execute(
+                    "SELECT sessions, session_percentage, page_views, buy_box_percentage, unit_session_percentage FROM daily_sales WHERE date = ? AND asin = 'ALL'",
+                    [day_str]
+                ).fetchone()
+                ex_sess = int(existing_full[0]) if existing_full and existing_full[0] else 0
+                ex_sess_pct = float(existing_full[1]) if existing_full and existing_full[1] else 0
+                ex_pv = int(existing_full[2]) if existing_full and existing_full[2] else 0
+                ex_bb = float(existing_full[3]) if existing_full and existing_full[3] else 0
+                ex_usp = float(existing_full[4]) if existing_full and existing_full[4] else 0
                 con.execute("""
                     INSERT OR REPLACE INTO daily_sales
                     (date, asin, units_ordered, ordered_product_sales,
                      sessions, session_percentage, page_views,
-                     buy_box_percentage, unit_session_percentage)
-                    VALUES (?, 'ALL', ?, ?, 0, 0, 0, 0, 0)
-                """, [day_str, agg["units"], agg["revenue"]])
-                logger.info(f"  {day_str}: ${agg['revenue']:.2f} rev, {agg['units']} units, {agg['orders']} orders (was ${existing_rev:.2f})")
+                     buy_box_percentage, unit_session_percentage,
+                     division, customer, platform)
+                    VALUES (?, 'ALL', ?, ?, ?, ?, ?, ?, ?, 'golf', 'amazon', 'sp_api')
+                """, [day_str, agg["units"], agg["revenue"],
+                      ex_sess, ex_sess_pct, ex_pv, ex_bb, ex_usp])
+                logger.info(f"  {day_str}: ${agg['revenue']:.2f} rev, {agg['units']} units, {agg['orders']} orders (was ${existing_rev:.2f}, preserved sessions={ex_sess})")
 
+        con.execute("COMMIT")
         con.close()
 
         # Log summary for debugging
@@ -319,6 +468,12 @@ def _sync_today_orders():
         logger.error(f"  Today orders sync error: {e}")
         import traceback
         logger.error(traceback.format_exc())
+        try:
+            con.execute("ROLLBACK")
+            con.close()
+            logger.info("  Today orders rolled back due to error")
+        except Exception:
+            pass
         return False
 
 
@@ -339,7 +494,7 @@ def _ensure_today_data():
 
     today_str = datetime.now(ZoneInfo("America/Chicago")).strftime("%Y-%m-%d")
     try:
-        con = duckdb.connect(str(DB_PATH), read_only=False)
+        con = get_db_rw()
         row = con.execute(
             "SELECT ordered_product_sales FROM daily_sales WHERE date = ? AND asin = 'ALL'",
             [today_str]
@@ -367,6 +522,20 @@ def _run_sp_api_sync():
     3. FBA Inventory (fast, ~5 seconds)
     4. Sales & Traffic Report (SLOW, 2-5 minutes) — historical data with sessions
     """
+    global _sync_running
+    if not _sync_lock.acquire(blocking=False):
+        logger.warning(f"  Skipping full SP-API sync — '{_sync_running}' already running")
+        return
+    _sync_running = "sp_api_full"
+    try:
+        _run_sp_api_sync_inner()
+    finally:
+        _sync_running = None
+        _sync_lock.release()
+
+
+def _run_sp_api_sync_inner():
+    """Inner implementation of full SP-API sync (called under mutex)."""
     try:
         from sp_api.api import Reports, Orders, Inventories, Finances
         from sp_api.base import Marketplaces, ReportType
@@ -384,7 +553,7 @@ def _run_sp_api_sync():
 
     # ── Ensure financial_events table exists ──────────────────────
     try:
-        _con = duckdb.connect(str(DB_PATH), read_only=False)
+        _con = get_db_rw()
         _con.execute("""
             CREATE TABLE IF NOT EXISTS financial_events (
                 date DATE,
@@ -432,7 +601,11 @@ def _run_sp_api_sync():
                 kwargs["NextToken"] = next_token
 
             try:
-                resp = finances.list_financial_events(**kwargs)
+                @retry_with_backoff(max_retries=3, base_delay=2.0, max_delay=30.0)
+                def _fetch_financial_page(**kw):
+                    return finances.list_financial_events(**kw)
+
+                resp = _fetch_financial_page(**kwargs)
             except Exception as api_err:
                 logger.error(f"  Financial events API call error (page {page}): {api_err}")
                 import traceback
@@ -469,32 +642,99 @@ def _run_sp_api_sync():
                 break
 
         logger.info(f"  Total financial events: {len(all_shipment_events)} shipments, {len(all_refund_events)} refunds")
-        con = duckdb.connect(str(DB_PATH), read_only=False)
+        con = get_db_rw()
+        con.execute("BEGIN TRANSACTION")
         fin_records = 0
 
         # Helper: Amazon uses CurrencyAmount (not Amount) in money objects
         # sp_api may return model objects, dicts, Decimals, or strings
+        # The python-amazon-sp-api library may use PascalCase OR snake_case
+        # attributes depending on version, so we check both patterns.
+        _money_debug_logged = False
+
         def _money(amt_obj):
+            nonlocal _money_debug_logged
             if amt_obj is None:
                 return 0.0
-            # Plain dict
+            # Plain dict — check multiple key conventions
             if isinstance(amt_obj, dict):
-                return float(amt_obj.get("CurrencyAmount", amt_obj.get("Amount", 0)) or 0)
-            # sp_api model object (has attributes instead of dict keys)
-            if hasattr(amt_obj, "CurrencyAmount"):
+                for key in ("CurrencyAmount", "Amount", "currency_amount", "amount", "value"):
+                    v = amt_obj.get(key)
+                    if v is not None:
+                        try:
+                            return float(v)
+                        except (ValueError, TypeError):
+                            continue
+                # Dict but no known keys — log once for diagnosis
+                if not _money_debug_logged:
+                    logger.warning(f"  _money: unknown dict keys: {list(amt_obj.keys())}, values: {list(amt_obj.values())[:3]}")
+                    _money_debug_logged = True
+                # Last resort: try first numeric value in dict
+                for v in amt_obj.values():
+                    try:
+                        fv = float(v)
+                        if fv != 0:
+                            return fv
+                    except (ValueError, TypeError):
+                        continue
+                return 0.0
+            # Try converting model object to dict first (most reliable)
+            if hasattr(amt_obj, "to_dict"):
                 try:
-                    return float(amt_obj.CurrencyAmount or 0)
+                    d = amt_obj.to_dict()
+                    if isinstance(d, dict):
+                        for key in ("CurrencyAmount", "Amount", "currency_amount", "amount", "value"):
+                            v = d.get(key)
+                            if v is not None:
+                                try:
+                                    return float(v)
+                                except (ValueError, TypeError):
+                                    continue
+                        # to_dict worked but no matching key — log and try any numeric
+                        if not _money_debug_logged:
+                            logger.warning(f"  _money: to_dict keys: {list(d.keys())}")
+                            _money_debug_logged = True
+                        for v in d.values():
+                            try:
+                                fv = float(v)
+                                if fv != 0:
+                                    return fv
+                            except (ValueError, TypeError):
+                                continue
                 except Exception:
                     pass
-            if hasattr(amt_obj, "Amount"):
-                try:
-                    return float(amt_obj.Amount or 0)
-                except Exception:
-                    pass
+            # sp_api model object — check PascalCase then snake_case attributes
+            for attr in ("CurrencyAmount", "currency_amount", "Amount", "amount", "value"):
+                if hasattr(amt_obj, attr):
+                    try:
+                        v = getattr(amt_obj, attr)
+                        if v is not None:
+                            return float(v)
+                    except (ValueError, TypeError):
+                        continue
+            # Try __dict__ as last resort for model objects
+            if hasattr(amt_obj, "__dict__"):
+                d = amt_obj.__dict__
+                for key in ("CurrencyAmount", "currency_amount", "Amount", "amount", "value",
+                            "_currency_amount", "_amount"):
+                    v = d.get(key)
+                    if v is not None:
+                        try:
+                            return float(v)
+                        except (ValueError, TypeError):
+                            continue
+                # Log unknown model attrs once
+                if not _money_debug_logged:
+                    non_private = {k: v for k, v in d.items() if not k.startswith("__")}
+                    logger.warning(f"  _money: model __dict__ keys: {list(non_private.keys())}")
+                    _money_debug_logged = True
             # Already a number (Decimal, float, int)
             try:
                 return float(amt_obj)
             except Exception:
+                if not _money_debug_logged:
+                    logger.warning(f"  _money: could not parse type={type(amt_obj).__name__}, repr={repr(amt_obj)[:200]}")
+                    _money_debug_logged = True
                 return 0.0
 
         # Helper: extract string date from PostedDate (may be str or datetime)
@@ -517,13 +757,17 @@ def _run_sp_api_sync():
             # sp_api model object — try attribute access
             return getattr(obj, key, default)
 
-        # Clear old financial events for re-sync (avoids duplicates without needing PK)
-        try:
-            cutoff_date = (datetime.utcnow() - timedelta(days=90)).strftime("%Y-%m-%d")
-            con.execute("DELETE FROM financial_events WHERE date >= ?", [cutoff_date])
-            logger.info(f"  Cleared financial_events from {cutoff_date} for re-sync")
-        except Exception as e:
-            logger.warning(f"  Could not clear old financial_events: {e}")
+        # Only clear old financial events if we actually got new data to replace them.
+        # This prevents data loss when the API returns empty results.
+        if all_shipment_events or all_refund_events:
+            try:
+                cutoff_date = (datetime.utcnow() - timedelta(days=90)).strftime("%Y-%m-%d")
+                con.execute("DELETE FROM financial_events WHERE date >= ?", [cutoff_date])
+                logger.info(f"  Cleared financial_events from {cutoff_date} for re-sync ({len(all_shipment_events)} shipments + {len(all_refund_events)} refunds to insert)")
+            except Exception as e:
+                logger.warning(f"  Could not clear old financial_events: {e}")
+        else:
+            logger.warning("  Financial events: API returned NO data — keeping existing records to prevent data loss")
 
         # Process shipment events (sales fees)
         first_shipment_logged = False
@@ -551,10 +795,32 @@ def _run_sp_api_sync():
                 if not first_shipment_logged and charge_list:
                     first_c = charge_list[0]
                     ca = _safe_get(first_c, "ChargeAmount")
-                    logger.info(f"  DEBUG charge structure: type={type(first_c).__name__}, "
-                               f"ChargeAmount type={type(ca).__name__}, "
-                               f"ChargeAmount value={ca}, "
-                               f"parsed_val={_money(ca)}")
+                    # Log the raw charge item completely
+                    if isinstance(first_c, dict):
+                        logger.info(f"  DEBUG charge item (dict): {first_c}")
+                    else:
+                        logger.info(f"  DEBUG charge item type={type(first_c).__name__}, repr={repr(first_c)[:500]}")
+                        if hasattr(first_c, "to_dict"):
+                            try:
+                                logger.info(f"  DEBUG charge item to_dict={first_c.to_dict()}")
+                            except Exception:
+                                pass
+                        if hasattr(first_c, "__dict__"):
+                            logger.info(f"  DEBUG charge item __dict__={first_c.__dict__}")
+                    # Log ChargeAmount specifically
+                    logger.info(f"  DEBUG ChargeAmount type={type(ca).__name__}, repr={repr(ca)[:300]}, parsed={_money(ca)}")
+                    # Also log the ShipmentItem itself
+                    first_item = (_safe_get(event, "ShipmentItemList") or [None])[0]
+                    if first_item:
+                        if isinstance(first_item, dict):
+                            logger.info(f"  DEBUG ShipmentItem keys={list(first_item.keys())}")
+                        else:
+                            logger.info(f"  DEBUG ShipmentItem type={type(first_item).__name__}")
+                            if hasattr(first_item, "to_dict"):
+                                try:
+                                    logger.info(f"  DEBUG ShipmentItem to_dict={first_item.to_dict()}")
+                                except Exception:
+                                    pass
                     first_shipment_logged = True
 
                 fba_fees_val = 0.0
@@ -577,16 +843,19 @@ def _run_sp_api_sync():
                 net = product_charges + shipping_ch - fba_fees_val - commission_val + promo_val
 
                 try:
+                    _div = _get_division_for_asin(asin_val)
                     con.execute("""
                         INSERT INTO financial_events
                         (date, asin, sku, order_id, event_type,
                          product_charges, shipping_charges, fba_fees,
-                         commission, promotion_amount, other_fees, net_proceeds)
-                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                         commission, promotion_amount, other_fees, net_proceeds,
+                         division, customer, platform)
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'amazon', 'sp_api')
                     """, [
                         date_str, asin_val, sku, order_id, "Shipment",
                         product_charges, shipping_ch,
-                        fba_fees_val, commission_val, promo_val, other_val, net
+                        fba_fees_val, commission_val, promo_val, other_val, net,
+                        _div
                     ])
                     fin_records += 1
                 except Exception as ins_err:
@@ -643,67 +912,98 @@ def _run_sp_api_sync():
                         refund_comm += abs(val)
 
                 try:
+                    _div = _get_division_for_asin(asin_val)
                     con.execute("""
                         INSERT INTO financial_events
                         (date, asin, sku, order_id, event_type,
                          product_charges, shipping_charges, fba_fees,
-                         commission, promotion_amount, other_fees, net_proceeds)
-                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                         commission, promotion_amount, other_fees, net_proceeds,
+                         division, customer, platform)
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'amazon', 'sp_api')
                     """, [
                         date_str,
                         asin_val, sku, order_id, "Refund",
                         abs(refund_amount), 0, refund_fba, refund_comm, 0, refund_other,
-                        abs(refund_amount)
+                        abs(refund_amount),
+                        _div
                     ])
                     fin_records += 1
                     logger.info(f"  Inserted refund: order={order_id}, asin={asin_val}, amount=${abs(refund_amount):.2f}")
                 except Exception as ins_err:
                     logger.error(f"  Refund insert error for {order_id}/{asin_val}: {ins_err}")
 
+        con.execute("COMMIT")
         con.close()
         logger.info(f"  Financial events sync done: {fin_records} records (shipments + refunds)")
     except Exception as e:
         logger.error(f"  Financial events sync error: {e}")
+        # Rollback on failure so partial data doesn't corrupt the table
+        try:
+            con.execute("ROLLBACK")
+            con.close()
+            logger.info("  Financial events rolled back due to error")
+        except Exception:
+            pass
 
-    # ── 3. FBA INVENTORY ────────────────────────────────────────
+    # ── 3. FBA INVENTORY (with retry + transaction wrapping) ────
     try:
         logger.info("  Pulling FBA inventory...")
         inventory_api = Inventories(credentials=credentials, marketplace=Marketplaces.US)
-        response = inventory_api.get_inventory_summary_marketplace(
-            marketplaceIds=["ATVPDKIKX0DER"],
-            granularityType="Marketplace",
-            granularityId="ATVPDKIKX0DER"
-        )
+
+        @retry_with_backoff(max_retries=3, base_delay=2.0, max_delay=30.0)
+        def _fetch_inventory():
+            return inventory_api.get_inventory_summary_marketplace(
+                marketplaceIds=["ATVPDKIKX0DER"],
+                granularityType="Marketplace",
+                granularityId="ATVPDKIKX0DER"
+            )
+
+        response = _fetch_inventory()
         summaries = response.payload.get("inventorySummaries", [])
         if summaries:
-            con = duckdb.connect(str(DB_PATH), read_only=False)
-            today = datetime.now(ZoneInfo("America/Chicago")).date()
-            for item in summaries:
-                inv = item.get("inventoryDetails", {})
-                fulfillable = inv.get("fulfillableQuantity", 0) or item.get("totalQuantity", 0)
-                reserved = inv.get("reservedQuantity", {})
-                reserved_qty = reserved.get("totalReservedQuantity", 0) if isinstance(reserved, dict) else int(reserved or 0)
-                con.execute("""
-                    INSERT OR REPLACE INTO fba_inventory
-                    (date, asin, sku, product_name, condition,
-                     fulfillable_quantity, inbound_working_quantity,
-                     inbound_shipped_quantity, inbound_receiving_quantity,
-                     reserved_quantity, unfulfillable_quantity, total_quantity)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                """, [
-                    today, item.get("asin", ""),
-                    item.get("sellerSku", item.get("fnSku", "")),
-                    item.get("productName", "")[:200],
-                    item.get("condition", "NewItem"),
-                    int(fulfillable or 0),
-                    int(inv.get("inboundWorkingQuantity", 0) or 0),
-                    int(inv.get("inboundShippedQuantity", 0) or 0),
-                    int(inv.get("inboundReceivingQuantity", 0) or 0),
-                    int(reserved_qty or 0), 0,
-                    int(item.get("totalQuantity", 0)),
-                ])
-            con.close()
-            logger.info(f"  Inventory sync done: {len(summaries)} items")
+            con = get_db_rw()
+            con.execute("BEGIN TRANSACTION")
+            try:
+                today = datetime.now(ZoneInfo("America/Chicago")).date()
+                for item in summaries:
+                    inv = item.get("inventoryDetails", {})
+                    fulfillable = inv.get("fulfillableQuantity", 0) or item.get("totalQuantity", 0)
+                    reserved = inv.get("reservedQuantity", {})
+                    reserved_qty = reserved.get("totalReservedQuantity", 0) if isinstance(reserved, dict) else int(reserved or 0)
+                    _inv_asin = item.get("asin", "")
+                    _div = _get_division_for_asin(_inv_asin)
+                    con.execute("""
+                        INSERT OR REPLACE INTO fba_inventory
+                        (date, asin, sku, product_name, condition,
+                         fulfillable_quantity, inbound_working_quantity,
+                         inbound_shipped_quantity, inbound_receiving_quantity,
+                         reserved_quantity, unfulfillable_quantity, total_quantity,
+                         division, customer, platform)
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'amazon', 'sp_api')
+                    """, [
+                        today, _inv_asin,
+                        item.get("sellerSku", item.get("fnSku", "")),
+                        item.get("productName", "")[:200],
+                        item.get("condition", "NewItem"),
+                        int(fulfillable or 0),
+                        int(inv.get("inboundWorkingQuantity", 0) or 0),
+                        int(inv.get("inboundShippedQuantity", 0) or 0),
+                        int(inv.get("inboundReceivingQuantity", 0) or 0),
+                        int(reserved_qty or 0), 0,
+                        int(item.get("totalQuantity", 0)),
+                        _div
+                    ])
+                con.execute("COMMIT")
+                logger.info(f"  Inventory sync done: {len(summaries)} items")
+            except Exception as e:
+                logger.error(f"  Inventory transaction error: {e}")
+                try:
+                    con.execute("ROLLBACK")
+                    logger.info("  Inventory rolled back due to error")
+                except Exception:
+                    pass
+            finally:
+                con.close()
     except Exception as e:
         logger.error(f"  Inventory sync error: {e}")
 
@@ -750,7 +1050,8 @@ def _run_sp_api_sync():
             if isinstance(report_data, str):
                 report_data = json.loads(report_data)
 
-            con = duckdb.connect(str(DB_PATH), read_only=False)
+            con = get_db_rw()
+            con.execute("BEGIN TRANSACTION")
             records = 0
 
             for day_entry in report_data.get("salesAndTrafficByDate", []):
@@ -764,8 +1065,9 @@ def _run_sp_api_sync():
                     INSERT OR REPLACE INTO daily_sales
                     (date, asin, units_ordered, ordered_product_sales,
                      sessions, session_percentage, page_views,
-                     buy_box_percentage, unit_session_percentage)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                     buy_box_percentage, unit_session_percentage,
+                     division, customer, platform)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'golf', 'amazon', 'sp_api')
                 """, [
                     entry_date, "ALL",
                     int(sales_info.get("unitsOrdered", 0)),
@@ -786,12 +1088,14 @@ def _run_sp_api_sync():
                 ordered_sales = sales_info.get("orderedProductSales", {})
                 sales_amount = float(ordered_sales.get("amount", 0)) if isinstance(ordered_sales, dict) else float(ordered_sales or 0)
 
+                _div = _get_division_for_asin(asin)
                 con.execute("""
                     INSERT OR REPLACE INTO daily_sales
                     (date, asin, units_ordered, ordered_product_sales,
                      sessions, session_percentage, page_views,
-                     buy_box_percentage, unit_session_percentage)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                     buy_box_percentage, unit_session_percentage,
+                     division, customer, platform)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'amazon', 'sp_api')
                 """, [
                     entry_date, asin,
                     int(sales_info.get("unitsOrdered", 0)),
@@ -801,19 +1105,41 @@ def _run_sp_api_sync():
                     int(traffic.get("pageViews", 0)),
                     float(traffic.get("buyBoxPercentage", 0)),
                     float(traffic.get("unitSessionPercentage", 0)),
+                    _div
                 ])
                 records += 1
 
+            con.execute("COMMIT")
             con.close()
             logger.info(f"  Sales sync done: {records} records stored")
 
     except Exception as e:
         logger.error(f"  Sales sync error: {e}")
+        try:
+            con.execute("ROLLBACK")
+            con.close()
+            logger.info("  Sales sync rolled back due to error")
+        except Exception:
+            pass
 
     logger.info("SP-API background sync complete.")
 
 
 def _backfill_orders(days: int = 90):
+    """Backfill historical orders (mutex-protected wrapper)."""
+    global _sync_running
+    if not _sync_lock.acquire(blocking=False):
+        logger.warning(f"  Skipping order backfill — '{_sync_running}' already running")
+        return {"status": "skipped", "reason": f"'{_sync_running}' already running"}
+    _sync_running = "order_backfill"
+    try:
+        return _backfill_orders_inner(days)
+    finally:
+        _sync_running = None
+        _sync_lock.release()
+
+
+def _backfill_orders_inner(days: int = 90):
     """Backfill historical orders using the Orders API.
 
     Quota-safe: burst 25 getOrderItems calls, then 2s sleep.
@@ -872,123 +1198,151 @@ def _backfill_orders(days: int = 90):
     logger.info(f"Order backfill: got {len(all_orders)} orders total")
 
     # Insert all orders into the orders table
-    con = duckdb.connect(str(DB_PATH), read_only=False)
+    con = get_db_rw()
+    con.execute("BEGIN TRANSACTION")
     inserted = 0
-    for order in all_orders:
-        try:
-            order_total = order.get("OrderTotal", {})
-            con.execute("""
-                INSERT OR REPLACE INTO orders
-                (order_id, purchase_date, order_status, fulfillment_channel,
-                 sales_channel, order_total, currency_code, number_of_items,
-                 ship_city, ship_state, ship_postal_code,
-                 is_business_order, is_prime)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            """, [
-                order.get("AmazonOrderId"),
-                order.get("PurchaseDate"),
-                order.get("OrderStatus"),
-                order.get("FulfillmentChannel"),
-                order.get("SalesChannel"),
-                float(order_total.get("Amount", 0)) if order_total else 0,
-                order_total.get("CurrencyCode", "USD") if order_total else "USD",
-                order.get("NumberOfItemsShipped", 0) + order.get("NumberOfItemsUnshipped", 0),
-                order.get("ShippingAddress", {}).get("City", ""),
-                order.get("ShippingAddress", {}).get("StateOrRegion", ""),
-                order.get("ShippingAddress", {}).get("PostalCode", ""),
-                order.get("IsBusinessOrder", False),
-                order.get("IsPrime", False),
-            ])
-            inserted += 1
-        except Exception as e:
-            logger.warning(f"Order insert error: {e}")
-
-    # Fetch item-level detail for accurate revenue
-    daily_agg = defaultdict(lambda: {"revenue": 0.0, "units": 0, "orders": 0})
-    items_fetched = 0
-    burst_count = 0
-
-    for order in all_orders:
-        status = order.get("OrderStatus", "")
-        if status in ("Canceled", "Cancelled"):
-            continue
-
-        purchase_date = order.get("PurchaseDate", "")
-        if not purchase_date:
-            continue
-        try:
-            if "T" in purchase_date:
-                dt = datetime.fromisoformat(purchase_date.replace("Z", "+00:00"))
-                dt = dt.astimezone(ZoneInfo("America/Chicago"))
-                day_str = dt.strftime("%Y-%m-%d")
-            else:
+    try:
+        for order in all_orders:
+            try:
+                order_total = order.get("OrderTotal", {})
+                con.execute("""
+                    INSERT OR REPLACE INTO orders
+                    (order_id, purchase_date, order_status, fulfillment_channel,
+                     sales_channel, order_total, currency_code, number_of_items,
+                     ship_city, ship_state, ship_postal_code,
+                     is_business_order, is_prime,
+                     division, customer, platform)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'golf', 'amazon', 'sp_api')
+                """, [
+                    order.get("AmazonOrderId"),
+                    order.get("PurchaseDate"),
+                    order.get("OrderStatus"),
+                    order.get("FulfillmentChannel"),
+                    order.get("SalesChannel"),
+                    float(order_total.get("Amount", 0)) if order_total else 0,
+                    order_total.get("CurrencyCode", "USD") if order_total else "USD",
+                    order.get("NumberOfItemsShipped", 0) + order.get("NumberOfItemsUnshipped", 0),
+                    order.get("ShippingAddress", {}).get("City", ""),
+                    order.get("ShippingAddress", {}).get("StateOrRegion", ""),
+                    order.get("ShippingAddress", {}).get("PostalCode", ""),
+                    order.get("IsBusinessOrder", False),
+                    order.get("IsPrime", False),
+                ])
+                inserted += 1
+            except Exception as e:
+                logger.warning(f"Order insert error: {e}")
+    
+        # Fetch item-level detail for accurate revenue
+        daily_agg = defaultdict(lambda: {"revenue": 0.0, "units": 0, "orders": 0})
+        items_fetched = 0
+        burst_count = 0
+    
+        for order in all_orders:
+            status = order.get("OrderStatus", "")
+            if status in ("Canceled", "Cancelled"):
+                continue
+    
+            purchase_date = order.get("PurchaseDate", "")
+            if not purchase_date:
+                continue
+            try:
+                if "T" in purchase_date:
+                    dt = datetime.fromisoformat(purchase_date.replace("Z", "+00:00"))
+                    dt = dt.astimezone(ZoneInfo("America/Chicago"))
+                    day_str = dt.strftime("%Y-%m-%d")
+                else:
+                    day_str = purchase_date[:10]
+            except Exception:
                 day_str = purchase_date[:10]
-        except Exception:
-            day_str = purchase_date[:10]
+    
+            order_id = order.get("AmazonOrderId", "")
+            total_from_items = 0.0
+            total_qty = 0
+    
+            try:
+                @retry_with_backoff(max_retries=5, base_delay=2.0, max_delay=60.0)
+                def _fetch_backfill_items(oid):
+                    return orders_api.get_order_items(oid)
+    
+                items_resp = _fetch_backfill_items(order_id)
+                item_list = items_resp.payload.get("OrderItems", [])
+                for item in item_list:
+                    qty = int(item.get("QuantityOrdered", 0) or 0)
+                    price = item.get("ItemPrice")
+                    item_amount = 0.0
+                    if price and isinstance(price, dict):
+                        try:
+                            item_amount = float(price.get("Amount", "0"))
+                        except (ValueError, TypeError):
+                            pass
+                    total_from_items += item_amount
+                    total_qty += qty
+                items_fetched += 1
+                burst_count += 1
+                if burst_count > 25:
+                    _t.sleep(2.0)
+                    burst_count = 0
+            except Exception:
+                order_total = order.get("OrderTotal", {})
+                total_from_items = float(order_total.get("Amount", 0)) if order_total else 0
+                total_qty = order.get("NumberOfItemsShipped", 0) + order.get("NumberOfItemsUnshipped", 0)
+    
+            daily_agg[day_str]["revenue"] += total_from_items
+            daily_agg[day_str]["units"] += total_qty
+            daily_agg[day_str]["orders"] += 1
+    
+        # Write daily aggregates — only update if Orders API revenue >= existing
+        # Never overwrite with lower data — Sales & Traffic Report is more accurate
+        days_updated = 0
+        for day_str in sorted(daily_agg.keys()):
+            agg = daily_agg[day_str]
+            if agg["revenue"] <= 0:
+                continue
+            existing = con.execute(
+                "SELECT ordered_product_sales FROM daily_sales WHERE date = ? AND asin = 'ALL'",
+                [day_str]
+            ).fetchone()
+            existing_rev = float(existing[0]) if existing and existing[0] else 0.0
+    
+            if agg["revenue"] >= existing_rev:
+                # Preserve existing session/traffic data — Orders API doesn't have it
+                existing_full = con.execute(
+                    "SELECT sessions, session_percentage, page_views, buy_box_percentage, unit_session_percentage FROM daily_sales WHERE date = ? AND asin = 'ALL'",
+                    [day_str]
+                ).fetchone()
+                ex_sess = int(existing_full[0]) if existing_full and existing_full[0] else 0
+                ex_sess_pct = float(existing_full[1]) if existing_full and existing_full[1] else 0
+                ex_pv = int(existing_full[2]) if existing_full and existing_full[2] else 0
+                ex_bb = float(existing_full[3]) if existing_full and existing_full[3] else 0
+                ex_usp = float(existing_full[4]) if existing_full and existing_full[4] else 0
+                con.execute("""
+                    INSERT OR REPLACE INTO daily_sales
+                    (date, asin, units_ordered, ordered_product_sales,
+                     sessions, session_percentage, page_views,
+                     buy_box_percentage, unit_session_percentage,
+                     division, customer, platform)
+                    VALUES (?, 'ALL', ?, ?, ?, ?, ?, ?, ?, 'golf', 'amazon', 'sp_api')
+                """, [day_str, agg["units"], agg["revenue"],
+                      ex_sess, ex_sess_pct, ex_pv, ex_bb, ex_usp])
+                days_updated += 1
 
-        order_id = order.get("AmazonOrderId", "")
-        total_from_items = 0.0
-        total_qty = 0
-
+        con.execute("COMMIT")
+        con.close()
+        result = {
+            "status": "done",
+            "orders_found": len(all_orders),
+            "orders_inserted": inserted,
+            "items_fetched": items_fetched,
+            "days_updated": days_updated,
+        }
+        logger.info(f"Order backfill complete: {result}")
+        return result
+    except Exception as e:
+        logger.error(f"Order backfill DB error: {e}")
         try:
-            items_resp = orders_api.get_order_items(order_id)
-            item_list = items_resp.payload.get("OrderItems", [])
-            for item in item_list:
-                qty = int(item.get("QuantityOrdered", 0) or 0)
-                price = item.get("ItemPrice")
-                item_amount = 0.0
-                if price and isinstance(price, dict):
-                    try:
-                        item_amount = float(price.get("Amount", "0"))
-                    except (ValueError, TypeError):
-                        pass
-                total_from_items += item_amount
-                total_qty += qty
-            items_fetched += 1
-            burst_count += 1
-            if burst_count > 25:
-                _t.sleep(2.0)
-                burst_count = 0
+            con.execute("ROLLBACK")
+            con.close()
+            logger.info("  Order backfill rolled back due to error")
         except Exception:
-            order_total = order.get("OrderTotal", {})
-            total_from_items = float(order_total.get("Amount", 0)) if order_total else 0
-            total_qty = order.get("NumberOfItemsShipped", 0) + order.get("NumberOfItemsUnshipped", 0)
-
-        daily_agg[day_str]["revenue"] += total_from_items
-        daily_agg[day_str]["units"] += total_qty
-        daily_agg[day_str]["orders"] += 1
-
-    # Write daily aggregates — only update if Orders API revenue >= existing
-    # Never overwrite with lower data — Sales & Traffic Report is more accurate
-    days_updated = 0
-
-    for day_str in sorted(daily_agg.keys()):
-        agg = daily_agg[day_str]
-        if agg["revenue"] <= 0:
-            continue
-        existing = con.execute(
-            "SELECT ordered_product_sales FROM daily_sales WHERE date = ? AND asin = 'ALL'",
-            [day_str]
-        ).fetchone()
-        existing_rev = float(existing[0]) if existing and existing[0] else 0.0
-
-        if agg["revenue"] >= existing_rev:
-            con.execute("""
-                INSERT OR REPLACE INTO daily_sales
-                (date, asin, units_ordered, ordered_product_sales,
-                 sessions, session_percentage, page_views,
-                 buy_box_percentage, unit_session_percentage)
-                VALUES (?, 'ALL', ?, ?, 0, 0, 0, 0, 0)
-            """, [day_str, agg["units"], agg["revenue"]])
-            days_updated += 1
-
-    con.close()
-    result = {
-        "status": "done",
-        "orders_found": len(all_orders),
-        "orders_inserted": inserted,
-        "items_fetched": items_fetched,
-        "days_updated": days_updated,
-    }
-    logger.info(f"Order backfill complete: {result}")
-    return result
+            pass
+        return {"error": str(e)}
