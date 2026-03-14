@@ -1,0 +1,29 @@
+# GolfGen API Server (reads from Postgres, no sync jobs)
+FROM python:3.11-slim
+
+WORKDIR /app
+
+COPY webapp/backend/requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt
+
+# Copy backend
+COPY webapp/backend/main.py ./webapp/backend/main.py
+COPY webapp/backend/core/ ./webapp/backend/core/
+COPY webapp/backend/routers/ ./webapp/backend/routers/
+COPY webapp/backend/services/ ./webapp/backend/services/
+RUN touch ./webapp/__init__.py ./webapp/backend/__init__.py
+
+# Copy pre-built frontend
+COPY webapp/backend/dist/ ./webapp/backend/dist/
+
+# Copy data files (for seed/reference only — primary data in Postgres)
+RUN mkdir -p ./data
+COPY data/cogs.csv ./data/
+COPY data/item_master.csv ./data/
+
+ENV DB_DIR=/app/data
+ENV PORT=8000
+
+EXPOSE 8000
+
+CMD ["uvicorn", "webapp.backend.main:app", "--host", "0.0.0.0", "--port", "8000"]
