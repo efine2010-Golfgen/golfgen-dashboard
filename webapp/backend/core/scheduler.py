@@ -17,7 +17,7 @@ from apscheduler.triggers.cron import CronTrigger
 from core.config import DB_PATH, DB_DIR, TIMEZONE, SYNC_INTERVAL_HOURS
 from services.sp_api import _sync_today_orders, _run_sp_api_sync, _backfill_orders
 from services.ads_api import _sync_ads_data, _sync_pricing_and_coupons
-from services.sync_engine import _auto_backfill_if_needed, _write_sync_log, run_nightly_deep_sync
+from services.sync_engine import _auto_backfill_if_needed, _write_sync_log, run_nightly_deep_sync, run_incremental_gap_fill
 from services.analytics_rollup import run_full_rollup
 from services.backup import restore_from_latest_backup
 
@@ -176,6 +176,37 @@ def _run_scheduled_nightly_deep_sync():
         logger.info(f"Nightly deep sync result: {result}")
     except Exception as e:
         logger.error(f"Nightly deep sync failed: {e}")
+    finally:
+        _scheduler_locks["sp_api"].release()
+
+
+def _run_scheduled_gap_fill():
+    """Pull exactly one missing historical chunk (30 days) every 2 hours.
+
+    Fills historical gaps gradually without exhausting quota:
+    - 12 gap-fill calls/day + 4 full sync calls = 16 total createReport calls/day
+    - Amazon burst limit is 15; spacing at 2-hour intervals keeps us safe
+    - No-op when coverage >= 97% so it self-deactivates once gaps are filled
+    - Skips if main SP-API sync is currently running (shares sp_api lock)
+    """
+    if not _scheduler_locks["sp_api"].acquire(blocking=False):
+        logger.info("Gap-fill: skipping — main SP-API sync is running")
+        return
+    try:
+        result = run_incremental_gap_fill()
+        status = result.get("status", "UNKNOWN")
+        if status == "SUCCESS":
+            logger.info(
+                f"Gap-fill: filled {result.get('chunk')} — "
+                f"{result.get('records')} records, "
+                f"{result.get('remaining_missing_days')} days still missing"
+            )
+        elif status == "COMPLETE":
+            logger.info(f"Gap-fill: coverage {result.get('coverage_pct')}% — nothing to fill")
+        else:
+            logger.warning(f"Gap-fill: {status} — {result.get('reason') or result.get('retry_in')}")
+    except Exception as e:
+        logger.error(f"Gap-fill job failed: {e}")
     finally:
         _scheduler_locks["sp_api"].release()
 
@@ -347,6 +378,10 @@ async def _sync_loop():
 
         # Schedule nightly deep sync at 3am Central — fills all data gaps + re-pulls last 30 days
         scheduler.add_job(_run_scheduled_nightly_deep_sync, CronTrigger(hour=3, minute=0, timezone="America/Chicago"), id="nightly_deep_sync_3am", misfire_grace_time=7200)
+
+        # Schedule incremental gap-fill every 2 hours at :45 (avoids :00 full syncs)
+        # Pulls one missing 30-day historical chunk per run; self-deactivates at 97% coverage
+        scheduler.add_job(_run_scheduled_gap_fill, CronTrigger(hour='*/2', minute=45, second=0, timezone="America/Chicago"), id="gap_fill_2hourly")
 
         # Schedule analytics rollup at 2:30am Central (after backup completes)
         scheduler.add_job(_run_scheduled_analytics_rollup, CronTrigger(hour=2, minute=30, timezone="America/Chicago"), id="analytics_rollup_230am", misfire_grace_time=3600)

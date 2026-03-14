@@ -10,6 +10,7 @@ Provides:
 
 import json
 import logging
+import threading
 from datetime import datetime, timedelta, date as dt_date
 from zoneinfo import ZoneInfo
 
@@ -18,6 +19,51 @@ from core.database import get_db, get_db_rw
 from core.config import DB_PATH
 
 logger = logging.getLogger("golfgen")
+
+
+# ── Daily report budget tracker ───────────────────────────────────────────────
+# Amazon's Reports API: rate=0.0167 req/sec, burst=15 tokens.
+# The 4 scheduled full syncs (current data) are NOT counted here — they're
+# critical and run via the sp_api lock. This budget governs historical
+# backfill calls only (gap-fill + startup backfill).
+#
+# Budget math:
+#   gap-fill every 2h = 12 calls/day
+#   startup backfill  = max 3 calls/startup (throttled to 1 per 4h)
+#   Budget cap of 14 leaves headroom and resets at midnight Central.
+
+_HISTORICAL_REPORT_BUDGET = 14      # max historical createReport calls per day
+_report_budget: dict = {"date": None, "used": 0}
+_report_budget_lock = threading.Lock()
+
+
+def _check_and_use_report_budget(caller: str = "unknown") -> bool:
+    """Reserve one historical report slot from the daily budget.
+
+    Returns True if the call is allowed (budget decremented).
+    Returns False if today's budget is exhausted — caller should abort.
+    Resets automatically at midnight Central.
+    """
+    today = datetime.now(ZoneInfo("America/Chicago")).date()
+    with _report_budget_lock:
+        if _report_budget["date"] != today:
+            _report_budget["date"] = today
+            _report_budget["used"] = 0
+        used = _report_budget["used"]
+        if used >= _HISTORICAL_REPORT_BUDGET:
+            logger.warning(
+                f"{caller}: Daily historical report budget exhausted "
+                f"({used}/{_HISTORICAL_REPORT_BUDGET}). "
+                f"Skipping — resets at midnight Central."
+            )
+            return False
+        _report_budget["used"] += 1
+        remaining = _HISTORICAL_REPORT_BUDGET - _report_budget["used"]
+        logger.info(
+            f"{caller}: Report budget {_report_budget['used']}/{_HISTORICAL_REPORT_BUDGET} "
+            f"({remaining} remaining today)"
+        )
+        return True
 
 
 def _auto_backfill_if_needed():
@@ -152,6 +198,9 @@ def _auto_backfill_if_needed():
 
     for chunk_start, chunk_end in run_chunks:
         if quota_hit:
+            break
+        if not _check_and_use_report_budget("auto_backfill"):
+            logger.info("Auto-backfill: daily budget exhausted, stopping this run")
             break
         logger.info(f"  Auto-backfill: chunk {chunk_start} → {chunk_end}...")
         try:
@@ -586,3 +635,245 @@ def run_nightly_deep_sync():
         "missing_dates_found": len(missing_dates),
         "elapsed_seconds": round(elapsed, 1),
     }
+
+
+# ── Incremental Gap Fill (runs every 2 hours) ──────────────────────────────
+def run_incremental_gap_fill():
+    """Pull exactly ONE missing historical chunk (30 days) every 2 hours.
+
+    Designed to fill data gaps gradually without exhausting SP-API quota:
+    - Amazon allows ~15 burst report requests; we use 1 every 2 hours (12/day)
+    - Combined with 4 daily full syncs = 16 createReport calls/day — well within limits
+    - Finds the oldest missing 30-day block and fills it
+    - No-op when data is 95%+ complete
+
+    Returns dict with status, chunk filled, and records inserted.
+    """
+    import time as _time
+    import gzip as gz
+    import requests as req
+    from sp_api.api import Reports
+    from sp_api.base import Marketplaces, ReportType
+
+    started = datetime.now(ZoneInfo("America/Chicago"))
+
+    # ── Find missing dates ────────────────────────────────────────────────────
+    expected_start = dt_date(2024, 4, 1)
+    expected_end = datetime.now(ZoneInfo("America/Chicago")).date() - timedelta(days=1)
+    expected_days = (expected_end - expected_start).days + 1
+
+    con = get_db()
+    try:
+        count_row = con.execute(
+            "SELECT COUNT(DISTINCT date) FROM daily_sales WHERE asin = 'ALL'"
+        ).fetchone()
+        total_days = count_row[0] if count_row else 0
+
+        existing_rows = con.execute(
+            "SELECT DISTINCT date FROM daily_sales WHERE asin = 'ALL' AND date >= '2024-04-01'"
+        ).fetchall()
+        existing_dates: set = set()
+        for r in existing_rows:
+            d = r[0]
+            if isinstance(d, str):
+                d = datetime.strptime(d, "%Y-%m-%d").date()
+            elif hasattr(d, "date"):
+                d = d.date()
+            existing_dates.add(d)
+    except Exception as e:
+        logger.error(f"Gap-fill: DB query failed: {e}")
+        return {"status": "FAILED", "reason": str(e)}
+    finally:
+        con.close()
+
+    coverage_pct = (total_days / expected_days * 100) if expected_days > 0 else 0
+    if coverage_pct >= 97:
+        logger.info(
+            f"Gap-fill: {total_days}/{expected_days} days ({coverage_pct:.0f}% coverage), "
+            f"nothing to do"
+        )
+        return {"status": "COMPLETE", "coverage_pct": round(coverage_pct, 1)}
+
+    # ── Find the oldest missing 30-day block ─────────────────────────────────
+    all_expected: set = set()
+    d = expected_start
+    while d <= expected_end:
+        all_expected.add(d)
+        d += timedelta(days=1)
+
+    missing_dates = sorted(all_expected - existing_dates)
+    if not missing_dates:
+        return {"status": "COMPLETE", "coverage_pct": 100.0}
+
+    # Build the first missing chunk (oldest gap, max 30 days)
+    chunk_start = missing_dates[0]
+    # Extend to end of this contiguous gap or 30 days, whichever comes first
+    chunk_end = chunk_start
+    for md in missing_dates[1:]:
+        if (md - chunk_end).days <= 2:
+            next_end = md
+            if (next_end - chunk_start).days >= 29:
+                break
+            chunk_end = next_end
+        else:
+            break
+
+    remaining_gaps = len(missing_dates)
+    logger.info(
+        f"Gap-fill: {remaining_gaps} missing days total. "
+        f"Pulling oldest gap: {chunk_start} → {chunk_end} "
+        f"({(chunk_end - chunk_start).days + 1} days) | "
+        f"Coverage: {coverage_pct:.0f}%"
+    )
+
+    # ── Pull the chunk ────────────────────────────────────────────────────────
+    from services.sp_api import _load_sp_api_credentials, _get_division_for_asin
+    creds = _load_sp_api_credentials()
+    if not creds:
+        logger.error("Gap-fill: no SP-API credentials")
+        return {"status": "FAILED", "reason": "No credentials"}
+
+    reports_api = Reports(credentials=creds, marketplace=Marketplaces.US)
+
+    # Check daily budget before making a createReport API call
+    if not _check_and_use_report_budget("gap_fill"):
+        return {"status": "BUDGET_EXHAUSTED", "retry_in": "next day at midnight"}
+
+    try:
+        report_response = reports_api.create_report(
+            reportType=ReportType.GET_SALES_AND_TRAFFIC_REPORT,
+            dataStartTime=chunk_start.isoformat(),
+            dataEndTime=chunk_end.isoformat(),
+            reportOptions={"dateGranularity": "DAY", "asinGranularity": "CHILD"}
+        )
+        report_id = report_response.payload.get("reportId")
+        logger.info(f"Gap-fill: report {report_id} created, waiting for DONE...")
+
+        report_data = None
+        for attempt in range(30):
+            _time.sleep(10)
+            status_response = reports_api.get_report(report_id)
+            status = status_response.payload.get("processingStatus")
+            if status == "DONE":
+                doc_id = status_response.payload.get("reportDocumentId")
+                doc_response = reports_api.get_report_document(doc_id)
+                report_data = doc_response.payload
+                break
+            elif status in ("CANCELLED", "FATAL"):
+                logger.warning(f"Gap-fill: report {report_id} status={status}")
+                _write_sync_log("gap_fill", started, "FAILED",
+                                error=f"Report {status} for {chunk_start}-{chunk_end}")
+                return {"status": "FAILED", "reason": f"Report {status}"}
+
+        if not report_data:
+            logger.warning(f"Gap-fill: no data returned for {chunk_start}-{chunk_end}")
+            _write_sync_log("gap_fill", started, "FAILED",
+                            error=f"No data for {chunk_start}-{chunk_end}")
+            return {"status": "FAILED", "reason": "No report data"}
+
+        # ── Decompress + parse ────────────────────────────────────────────────
+        if isinstance(report_data, dict) and "url" in report_data:
+            is_gzipped = report_data.get("compressionAlgorithm", "").upper() == "GZIP"
+            resp = req.get(report_data["url"])
+            report_text = (
+                gz.decompress(resp.content).decode("utf-8") if is_gzipped else resp.text
+            )
+            report_data = json.loads(report_text)
+        if isinstance(report_data, str):
+            report_data = json.loads(report_data)
+
+        # ── Insert records ────────────────────────────────────────────────────
+        wcon = get_db_rw()
+        wcon.execute("BEGIN TRANSACTION")
+        records = 0
+
+        for day_entry in report_data.get("salesAndTrafficByDate", []):
+            entry_date = day_entry.get("date", "")
+            traffic = day_entry.get("trafficByDate", {})
+            sales_info = day_entry.get("salesByDate", {})
+            ordered_sales = sales_info.get("orderedProductSales", {})
+            sales_amount = (
+                float(ordered_sales.get("amount", 0))
+                if isinstance(ordered_sales, dict) else float(ordered_sales or 0)
+            )
+            wcon.execute("""
+                INSERT OR REPLACE INTO daily_sales
+                (date, asin, units_ordered, ordered_product_sales,
+                 sessions, session_percentage, page_views,
+                 buy_box_percentage, unit_session_percentage,
+                 division, customer, platform)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'golf', 'amazon', 'sp_api')
+            """, [
+                entry_date, "ALL",
+                int(sales_info.get("unitsOrdered", 0)),
+                sales_amount,
+                int(traffic.get("sessions", 0)),
+                float(traffic.get("sessionPercentage", 0)),
+                int(traffic.get("pageViews", 0)),
+                float(traffic.get("buyBoxPercentage", 0)),
+                float(traffic.get("unitSessionPercentage", 0)),
+            ])
+            records += 1
+
+        for asin_entry in report_data.get("salesAndTrafficByAsin", []):
+            asin = asin_entry.get("childAsin") or asin_entry.get("parentAsin", "")
+            traffic = asin_entry.get("trafficByAsin", {})
+            sales_info = asin_entry.get("salesByAsin", {})
+            entry_date = asin_entry.get("date", str(chunk_start))
+            ordered_sales = sales_info.get("orderedProductSales", {})
+            sales_amount = (
+                float(ordered_sales.get("amount", 0))
+                if isinstance(ordered_sales, dict) else float(ordered_sales or 0)
+            )
+            _div = _get_division_for_asin(asin)
+            wcon.execute("""
+                INSERT OR REPLACE INTO daily_sales
+                (date, asin, units_ordered, ordered_product_sales,
+                 sessions, session_percentage, page_views,
+                 buy_box_percentage, unit_session_percentage,
+                 division, customer, platform)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'amazon', 'sp_api')
+            """, [
+                entry_date, asin,
+                int(sales_info.get("unitsOrdered", 0)),
+                sales_amount,
+                int(traffic.get("sessions", 0)),
+                float(traffic.get("sessionPercentage", 0)),
+                int(traffic.get("pageViews", 0)),
+                float(traffic.get("buyBoxPercentage", 0)),
+                float(traffic.get("unitSessionPercentage", 0)),
+                _div,
+            ])
+            records += 1
+
+        wcon.execute("COMMIT")
+        wcon.close()
+
+        elapsed = (datetime.now(ZoneInfo("America/Chicago")) - started).total_seconds()
+        logger.info(
+            f"Gap-fill ✓ {chunk_start}→{chunk_end}: {records} records in {elapsed:.0f}s. "
+            f"{remaining_gaps - (chunk_end - chunk_start).days - 1} days still missing."
+        )
+        _write_sync_log("gap_fill", started, "SUCCESS", inserted=records)
+        return {
+            "status": "SUCCESS",
+            "chunk": f"{chunk_start} → {chunk_end}",
+            "records": records,
+            "remaining_missing_days": max(0, remaining_gaps - (chunk_end - chunk_start).days - 1),
+            "elapsed_seconds": round(elapsed, 1),
+        }
+
+    except Exception as e:
+        err_str = str(e).lower()
+        if "quota" in err_str or "quotaexceeded" in err_str or "429" in err_str:
+            logger.warning(
+                f"Gap-fill: QuotaExceeded on {chunk_start}-{chunk_end}. "
+                f"Will retry at next scheduled run (2 hours)."
+            )
+            _write_sync_log("gap_fill", started, "FAILED",
+                            error=f"QuotaExceeded: {chunk_start}-{chunk_end}")
+            return {"status": "QUOTA_EXCEEDED", "retry_in": "2 hours"}
+        else:
+            logger.error(f"Gap-fill error {chunk_start}-{chunk_end}: {e}")
+            _write_sync_log("gap_fill", started, "FAILED", error=str(e))
+            return {"status": "FAILED", "reason": str(e)}
