@@ -584,10 +584,12 @@ def _run_sp_api_sync_inner():
         logger.warning(f"  Could not ensure financial_events table: {e}")
 
     # ── 1. TODAY'S ORDERS (fast, real-time) ──────────────────────
+    # Call _inner directly — we already hold the mutex, so the wrapper would
+    # always skip (it tries to acquire the same non-reentrant lock).
     global _last_today_sync
     import time as _time
     _last_today_sync = _time.time()
-    _sync_today_orders()
+    _sync_today_orders_inner()
 
     # ── 2. FINANCIAL EVENTS (actual fees, refunds, promos) ──────
     try:
