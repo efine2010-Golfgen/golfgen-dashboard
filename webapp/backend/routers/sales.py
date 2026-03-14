@@ -5,7 +5,7 @@ import logging
 import re
 from pathlib import Path
 from collections import defaultdict
-from datetime import datetime, timedelta
+from datetime import date, datetime, timedelta
 from zoneinfo import ZoneInfo
 
 from fastapi import APIRouter, Query
@@ -70,13 +70,7 @@ def fmt_date(d) -> str:
 
 
 def get_today(con) -> datetime:
-    """Return today's actual calendar date in US/Central timezone.
-
-    Railway servers run in UTC. The business operates in Central time,
-    so we convert UTC to Central (America/Chicago) to get the real calendar date.
-    'Today' always means today — if there's no data yet it shows $0,
-    which is correct until Orders API sync populates it.
-    """
+    """Return today's actual calendar date in US/Central timezone."""
     now_utc = datetime.now(ZoneInfo("UTC"))
     now_central = now_utc.astimezone(ZoneInfo("America/Chicago"))
     return now_central.replace(hour=0, minute=0, second=0, microsecond=0)
@@ -85,8 +79,6 @@ def get_today(con) -> datetime:
 def _build_product_list(con, cutoff: str) -> list:
     """Build product-level P&L. Core business logic."""
     cogs_data = load_cogs()
-
-    # Get product names/SKUs from fba_inventory as fallback
     inv_names = {}
     try:
         inv_rows = con.execute(
@@ -97,7 +89,6 @@ def _build_product_list(con, cutoff: str) -> list:
     except Exception:
         pass
 
-    # Product-level sales — use per-ASIN data (excluding aggregate 'ALL' row)
     rows = con.execute("""
         SELECT asin,
                COALESCE(SUM(ordered_product_sales), 0) AS revenue,
@@ -110,7 +101,6 @@ def _build_product_list(con, cutoff: str) -> list:
         ORDER BY SUM(ordered_product_sales) DESC
     """, [cutoff]).fetchall()
 
-    # Financial data (actual fees if available)
     fin_rows = con.execute("""
         SELECT asin,
                SUM(ABS(fba_fees)) AS fba_fees,
@@ -127,48 +117,34 @@ def _build_product_list(con, cutoff: str) -> list:
         api_name = inv_names.get(asin, {}).get("product_name", "")
         if units == 0:
             continue
-
-        # Use units as proxy for orders if total_order_items is empty
         if not orders:
             orders = units
-
         aur = round(revenue / units, 2)
 
-        # COGS: from file, by ASIN or SKU
         cogs_info = cogs_data.get(asin) or {}
         cogs_per_unit = cogs_info.get("cogs", 0)
         if cogs_per_unit == 0:
-            cogs_per_unit = round(aur * 0.35, 2)  # estimate
+            cogs_per_unit = round(aur * 0.35, 2)
 
-        # Name: COGS file > inventory table > API > ASIN
         inv_info = inv_names.get(asin, {})
         cogs_name = cogs_info.get("product_name", "")
-        # Exclude names that are just the ASIN repeated
         if cogs_name and cogs_name.strip().upper() == asin.upper():
             cogs_name = ""
         name = (cogs_name
                 or api_name
                 or inv_info.get("product_name")
                 or asin)
-
-        # SKU: COGS file > daily_sales > inventory table
         resolved_sku = (cogs_info.get("sku", "")
                         or inv_info.get("sku", ""))
 
-        # FBA fees
         fin = fin_by_asin.get(asin, {})
         actual_fba = fin.get("fba_fees", 0)
-        # Better estimate for golf equipment (oversized/bulky items):
-        # Amazon FBA fees are typically 10-15% of selling price for large items
-        # Old formula ($5 + 3% of AUR) was WAY too low
-        est_fba_total = round(revenue * 0.12, 2)  # ~12% of revenue for oversized
+        est_fba_total = round(revenue * 0.12, 2)
         fba_total = actual_fba if actual_fba > 0 else est_fba_total
 
-        # Referral fees (15% is standard for Sports & Outdoors)
         actual_commission = fin.get("commission", 0)
         referral_total = round(actual_commission, 2) if actual_commission > 0 else round(revenue * 0.15, 2)
 
-        # Ad spend — pull from advertising if available
         ad_spend = 0
         try:
             ad_row = con.execute("""
@@ -179,7 +155,6 @@ def _build_product_list(con, cutoff: str) -> list:
             if ad_row and ad_row[0] > 0:
                 ad_spend = round(ad_row[0], 2)
         except Exception:
-            # Table might not exist yet
             pass
 
         cogs_total = units * cogs_per_unit
@@ -237,10 +212,793 @@ def _aggregate_weekly(daily_data: list) -> list:
     return result
 
 
-# ── Hierarchy filter imported from core.hierarchy ────────
+# ══════════════════════════════════════════════════════════════
+# NEW SALES TAB — Period helpers and 11 API endpoints
+# ══════════════════════════════════════════════════════════════
 
 
-# ── API Routes ──────────────────────────────────────────
+def _period_to_dates(period: str, start: str = None, end: str = None):
+    """Convert period label to (start_date, end_date) tuple."""
+    today = date.today()
+    if period == 'today':
+        return today, today
+    elif period == 'yesterday':
+        y = today - timedelta(days=1)
+        return y, y
+    elif period == 'wtd':
+        dow = today.weekday()
+        return today - timedelta(days=dow), today
+    elif period == 'mtd':
+        return today.replace(day=1), today
+    elif period == 'ytd' or period == '2026_ytd':
+        return today.replace(month=1, day=1), today
+    elif period == 'last_7d':
+        return today - timedelta(days=7), today
+    elif period == 'last_30d':
+        return today - timedelta(days=30), today
+    elif period == 'last_60d':
+        return today - timedelta(days=60), today
+    elif period == 'last_90d':
+        return today - timedelta(days=90), today
+    elif period == 'last_180d':
+        return today - timedelta(days=180), today
+    elif period == 'last_week':
+        dow = today.weekday()
+        end_lw = today - timedelta(days=dow + 1)
+        return end_lw - timedelta(days=6), end_lw
+    elif period == 'last_4w':
+        return today - timedelta(weeks=4), today
+    elif period == 'last_8w':
+        return today - timedelta(weeks=8), today
+    elif period == 'last_13w':
+        return today - timedelta(weeks=13), today
+    elif period == 'last_26w':
+        return today - timedelta(weeks=26), today
+    elif period == 'last_month':
+        first = today.replace(day=1)
+        last_m_end = first - timedelta(days=1)
+        return last_m_end.replace(day=1), last_m_end
+    elif period == 'last_3m':
+        return today - timedelta(days=90), today
+    elif period == 'last_12m':
+        return today - timedelta(days=365), today
+    elif period == '2025_ytd':
+        try:
+            same_day_2025 = today.replace(year=2025)
+        except ValueError:
+            same_day_2025 = date(2025, 2, 28)
+        return date(2025, 1, 1), same_day_2025
+    elif period == '2025_full':
+        return date(2025, 1, 1), date(2025, 12, 31)
+    elif period == '2024_full':
+        return date(2024, 1, 1), date(2024, 12, 31)
+    elif period == 'custom' and start and end:
+        return datetime.strptime(start, '%Y-%m-%d').date(), datetime.strptime(end, '%Y-%m-%d').date()
+    else:
+        return today - timedelta(days=30), today
+
+
+def _hier_where(division=None, customer=None, table_alias=''):
+    """Build division/customer WHERE clause for new sales endpoints."""
+    prefix = table_alias + '.' if table_alias else ''
+    clauses, params = [], []
+    if division and division != 'all':
+        clauses.append(f"{prefix}division = ?")
+        params.append(division)
+    if customer and customer != 'all' and customer != 'All Channels':
+        clauses.append(f"{prefix}customer = ?")
+        params.append(customer)
+    return ('AND ' + ' AND '.join(clauses) if clauses else ''), params
+
+
+# ── ENDPOINT 1: Sales summary metrics ──────────────────────
+@router.get("/api/sales/summary")
+def sales_summary(
+    period: str = Query("last_30d"),
+    division: str | None = Query(None),
+    customer: str | None = Query(None),
+    start: str | None = Query(None),
+    end: str | None = Query(None),
+):
+    """All KPI cards for the selected period, with LY equivalents."""
+    try:
+        con = get_db()
+        sd, ed = _period_to_dates(period, start, end)
+        hw, hp = _hier_where(division, customer)
+
+        # LY: shift back 364 days for weekday alignment
+        ly_sd = sd - timedelta(days=364)
+        ly_ed = ed - timedelta(days=364)
+
+        def _sum_sales(s, e, extra_params):
+            row = con.execute(f"""
+                SELECT COALESCE(SUM(ordered_product_sales), 0),
+                       COALESCE(SUM(units_ordered), 0),
+                       COALESCE(SUM(page_views), 0)
+                FROM daily_sales
+                WHERE asin = 'ALL' AND date >= ? AND date <= ? {hw}
+            """, [str(s), str(e)] + extra_params).fetchone()
+            return float(row[0]), int(row[1]), int(row[2])
+
+        ty_sales, ty_units, ty_sessions = _sum_sales(sd, ed, hp)
+        ly_sales, ly_units, ly_sessions = _sum_sales(ly_sd, ly_ed, hp)
+
+        ty_aur = round(ty_sales / ty_units, 2) if ty_units else 0
+        ly_aur = round(ly_sales / ly_units, 2) if ly_units else 0
+        ty_orders = ty_units  # proxy
+        ly_orders = ly_units
+        ty_aov = round(ty_sales / ty_orders, 2) if ty_orders else 0
+        ly_aov = round(ly_sales / ly_orders, 2) if ly_orders else 0
+        ty_conv = round(ty_units / ty_sessions, 4) if ty_sessions else 0
+        ly_conv = round(ly_units / ly_sessions, 4) if ly_sessions else 0
+        # glance_views = page_views for Amazon
+        ty_gv = ty_sessions
+        ly_gv = ly_sessions
+        ty_ctr = 0  # CTR not available from current data
+        ly_ctr = 0
+
+        # Amazon fees from financial_events
+        def _sum_fees(s, e, extra_params):
+            try:
+                r = con.execute(f"""
+                    SELECT COALESCE(SUM(ABS(fba_fees)) + SUM(ABS(commission)), 0)
+                    FROM financial_events
+                    WHERE date >= ? AND date <= ? {hw}
+                """, [str(s), str(e)] + extra_params).fetchone()
+                return float(r[0]) if r else 0
+            except Exception:
+                return 0
+
+        ty_fees = _sum_fees(sd, ed, hp)
+        ly_fees = _sum_fees(ly_sd, ly_ed, hp)
+
+        # Ad spend
+        def _sum_ads(s, e):
+            try:
+                r = con.execute("""
+                    SELECT COALESCE(SUM(spend), 0), COALESCE(SUM(sales), 0)
+                    FROM advertising
+                    WHERE date >= ? AND date <= ?
+                """, [str(s), str(e)]).fetchone()
+                return float(r[0]), float(r[1])
+            except Exception:
+                return 0, 0
+
+        ty_ad_spend, ty_ad_sales = _sum_ads(sd, ed)
+        ly_ad_spend, ly_ad_sales = _sum_ads(ly_sd, ly_ed)
+
+        ty_roas = round(ty_ad_sales / ty_ad_spend, 2) if ty_ad_spend else 0
+        ly_roas = round(ly_ad_sales / ly_ad_spend, 2) if ly_ad_spend else 0
+        ty_tacos = round(ty_ad_spend / ty_sales, 4) if ty_sales else 0
+        ly_tacos = round(ly_ad_spend / ly_sales, 4) if ly_sales else 0
+
+        # COGS: Phase 6 — return 0 for now
+        ty_cogs = 0
+        ly_cogs = 0
+        ty_gm = round(ty_sales - ty_fees - ty_cogs, 2)
+        ly_gm = round(ly_sales - ly_fees - ly_cogs, 2)
+        ty_gm_pct = round(ty_gm / ty_sales, 4) if ty_sales else 0
+        ly_gm_pct = round(ly_gm / ly_sales, 4) if ly_sales else 0
+
+        con.close()
+        return {
+            "sales": round(ty_sales, 2), "unit_sales": ty_units, "aur": ty_aur,
+            "cogs": ty_cogs, "amazon_fees": round(ty_fees, 2),
+            "gross_margin": ty_gm, "gross_margin_pct": ty_gm_pct,
+            "sessions": ty_sessions, "glance_views": ty_gv,
+            "ctr": ty_ctr, "conversion": ty_conv,
+            "orders": ty_orders, "aov": ty_aov,
+            "ad_spend": round(ty_ad_spend, 2), "roas": ty_roas, "tacos": ty_tacos,
+            "ly_sales": round(ly_sales, 2), "ly_unit_sales": ly_units, "ly_aur": ly_aur,
+            "ly_cogs": ly_cogs, "ly_amazon_fees": round(ly_fees, 2),
+            "ly_gross_margin": ly_gm, "ly_gross_margin_pct": ly_gm_pct,
+            "ly_sessions": ly_sessions, "ly_glance_views": ly_gv,
+            "ly_ctr": ly_ctr, "ly_conversion": ly_conv,
+            "ly_orders": ly_orders, "ly_aov": ly_aov,
+            "ly_ad_spend": round(ly_ad_spend, 2), "ly_roas": ly_roas, "ly_tacos": ly_tacos,
+        }
+    except Exception as e:
+        logger.error(f"sales/summary error: {e}")
+        return {"error": str(e)}
+
+
+# ── ENDPOINT 2: Daily trend data ───────────────────────────
+@router.get("/api/sales/trend")
+def sales_trend(
+    period: str = Query("last_30d"),
+    division: str | None = Query(None),
+    customer: str | None = Query(None),
+    start: str | None = Query(None),
+    end: str | None = Query(None),
+):
+    """Daily rows for TY and LY for line charts."""
+    try:
+        con = get_db()
+        sd, ed = _period_to_dates(period, start, end)
+        hw, hp = _hier_where(division, customer)
+
+        rows = con.execute(f"""
+            SELECT date,
+                   COALESCE(SUM(ordered_product_sales), 0),
+                   COALESCE(SUM(page_views), 0),
+                   COALESCE(SUM(units_ordered), 0)
+            FROM daily_sales
+            WHERE asin = 'ALL' AND date >= ? AND date <= ? {hw}
+            GROUP BY date ORDER BY date
+        """, [str(sd), str(ed)] + hp).fetchall()
+
+        # Build LY lookup: shift back 364 days
+        ly_sd = sd - timedelta(days=364)
+        ly_ed = ed - timedelta(days=364)
+        ly_rows = con.execute(f"""
+            SELECT date,
+                   COALESCE(SUM(ordered_product_sales), 0),
+                   COALESCE(SUM(page_views), 0),
+                   COALESCE(SUM(units_ordered), 0)
+            FROM daily_sales
+            WHERE asin = 'ALL' AND date >= ? AND date <= ? {hw}
+            GROUP BY date ORDER BY date
+        """, [str(ly_sd), str(ly_ed)] + hp).fetchall()
+        con.close()
+
+        ly_map = {}
+        for r in ly_rows:
+            d = fmt_date(r[0])
+            ly_map[d] = {"sales": float(r[1]), "sessions": int(r[2]), "units": int(r[3])}
+
+        result = []
+        for r in rows:
+            d_str = fmt_date(r[0])
+            ty_s = float(r[1])
+            ty_sess = int(r[2])
+            ty_u = int(r[3])
+            # Find LY equivalent date (364 days prior)
+            try:
+                d_obj = datetime.strptime(d_str, "%Y-%m-%d").date()
+                ly_d = (d_obj - timedelta(days=364)).strftime("%Y-%m-%d")
+            except Exception:
+                ly_d = None
+            ly = ly_map.get(ly_d, {})
+            ty_aur = round(ty_s / ty_u, 2) if ty_u else 0
+            ty_conv = round(ty_u / ty_sess, 4) if ty_sess else 0
+            ly_aur = round(ly.get("sales", 0) / ly.get("units", 1), 2) if ly.get("units") else None
+            ly_conv = round(ly.get("units", 0) / ly.get("sessions", 1), 4) if ly.get("sessions") else None
+            result.append({
+                "date": d_str,
+                "ty_sales": round(ty_s, 2),
+                "ly_sales": round(ly.get("sales", 0), 2) if ly else None,
+                "ty_sessions": ty_sess,
+                "ly_sessions": ly.get("sessions") if ly else None,
+                "ty_aur": ty_aur,
+                "ly_aur": ly_aur,
+                "ty_conv": ty_conv,
+                "ly_conv": ly_conv,
+            })
+        return result
+    except Exception as e:
+        logger.error(f"sales/trend error: {e}")
+        return {"error": str(e)}
+
+
+# ── ENDPOINT 3: Period comparison columns ──────────────────
+@router.get("/api/sales/period-comparison")
+def sales_period_comparison(
+    view: str = Query("exec"),
+    division: str | None = Query(None),
+    customer: str | None = Query(None),
+):
+    """Return KPI columns for the selected view tab."""
+    try:
+        con = get_db()
+        hw, hp = _hier_where(division, customer)
+        today = date.today()
+
+        view_periods = {
+            "exec": {
+                "Today": "today", "Yesterday": "yesterday",
+                "WTD": "wtd", "MTD": "mtd", "YTD": "ytd",
+            },
+            "daily": {
+                "Today": "today", "Yesterday": "yesterday",
+            },
+            "weekly": {
+                "WTD": "wtd", "Last Week": "last_week",
+                "4 Weeks": "last_4w", "8 Weeks": "last_8w",
+                "13 Weeks": "last_13w", "26 Weeks": "last_26w",
+            },
+            "monthly": {
+                "MTD": "mtd", "Last Month": "last_month",
+                "Last 12 Months": "last_12m",
+            },
+            "yearly": {
+                "2026 YTD": "2026_ytd",
+                "2025 YTD (Same Period)": "2025_ytd",
+                "2025 Full Year": "2025_full",
+                "2024 Full Year": "2024_full",
+            },
+        }
+
+        periods_map = view_periods.get(view, view_periods["exec"])
+        result = {}
+
+        for label, period_key in periods_map.items():
+            sd, ed = _period_to_dates(period_key)
+            row = con.execute(f"""
+                SELECT COALESCE(SUM(ordered_product_sales), 0),
+                       COALESCE(SUM(units_ordered), 0),
+                       COALESCE(SUM(page_views), 0)
+                FROM daily_sales
+                WHERE asin = 'ALL' AND date >= ? AND date <= ? {hw}
+            """, [str(sd), str(ed)] + hp).fetchone()
+            sales, units, sessions = float(row[0]), int(row[1]), int(row[2])
+            orders = units
+            aur = round(sales / units, 2) if units else 0
+            aov = round(sales / orders, 2) if orders else 0
+            conv = round(units / sessions, 4) if sessions else 0
+            ctr = 0
+            result[label] = {
+                "sales": round(sales, 2), "units": units, "aur": aur,
+                "orders": orders, "aov": aov,
+                "sessions": sessions, "glance_views": sessions,
+                "ctr": ctr, "conversion": conv,
+            }
+
+        con.close()
+        return result
+    except Exception as e:
+        logger.error(f"sales/period-comparison error: {e}")
+        return {"error": str(e)}
+
+
+# ── ENDPOINT 4: Monthly YOY bar chart data ─────────────────
+@router.get("/api/sales/monthly-yoy")
+def sales_monthly_yoy(
+    division: str | None = Query(None),
+    customer: str | None = Query(None),
+):
+    """12 months x 3 years for YOY grouped bar chart."""
+    try:
+        con = get_db()
+        hw, hp = _hier_where(division, customer)
+        month_names = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec']
+
+        rows = con.execute(f"""
+            SELECT EXTRACT(YEAR FROM date) AS yr,
+                   EXTRACT(MONTH FROM date) AS mo,
+                   COALESCE(SUM(ordered_product_sales), 0) AS revenue
+            FROM daily_sales
+            WHERE asin = 'ALL' AND date IS NOT NULL AND date >= '2024-01-01' {hw}
+            GROUP BY EXTRACT(YEAR FROM date), EXTRACT(MONTH FROM date)
+            ORDER BY yr, mo
+        """, hp).fetchall()
+        con.close()
+
+        months_map = {}
+        for r in rows:
+            yr, mo, rev = int(r[0]), int(r[1]), round(float(r[2]), 2)
+            if mo not in months_map:
+                months_map[mo] = {}
+            months_map[mo][yr] = rev
+
+        current_month = date.today().month
+        current_year = date.today().year
+        result = []
+        for mo in range(1, 13):
+            entry = {
+                "month": month_names[mo - 1], "month_num": mo,
+                "y2024": months_map.get(mo, {}).get(2024, 0),
+                "y2025": months_map.get(mo, {}).get(2025, 0),
+                "y2026": months_map.get(mo, {}).get(2026, None) if (current_year > 2026 or (current_year == 2026 and mo <= current_month)) else None,
+            }
+            result.append(entry)
+        return result
+    except Exception as e:
+        logger.error(f"sales/monthly-yoy error: {e}")
+        return {"error": str(e)}
+
+
+# ── ENDPOINT 5: Revenue by channel (stacked bar) ──────────
+@router.get("/api/sales/by-channel")
+def sales_by_channel(
+    period: str = Query("last_30d"),
+    division: str | None = Query(None),
+    start: str | None = Query(None),
+    end: str | None = Query(None),
+):
+    """Weekly revenue split by customer/channel."""
+    try:
+        con = get_db()
+        sd, ed = _period_to_dates(period, start, end)
+
+        # Get weekly revenue by customer
+        rows = con.execute("""
+            SELECT customer,
+                   date,
+                   COALESCE(SUM(ordered_product_sales), 0) AS revenue
+            FROM daily_sales
+            WHERE asin = 'ALL' AND date >= ? AND date <= ?
+              AND date IS NOT NULL
+            GROUP BY customer, date
+            ORDER BY date
+        """, [str(sd), str(ed)]).fetchall()
+        con.close()
+
+        # Bucket into weeks
+        weekly = defaultdict(lambda: defaultdict(float))
+        for r in rows:
+            cust = r[0] or 'amazon'
+            d = fmt_date(r[1])
+            rev = float(r[2])
+            try:
+                dt = datetime.strptime(d, "%Y-%m-%d")
+                week_start = (dt - timedelta(days=dt.weekday())).strftime("%Y-%m-%d")
+            except Exception:
+                continue
+            # Map customer names to canonical channel keys
+            c_key = cust.lower().replace("'", "").replace(" ", "_")
+            if c_key not in ('amazon', 'walmart_marketplace', 'walmart_stores', 'shopify'):
+                c_key = 'store_other'
+            weekly[week_start][c_key] += rev
+
+        result = []
+        for i, ws in enumerate(sorted(weekly.keys())):
+            entry = {
+                "week": f"W-{len(weekly) - i}",
+                "week_start": ws,
+                "amazon": round(weekly[ws].get("amazon", 0), 2),
+                "walmart_marketplace": round(weekly[ws].get("walmart_marketplace", 0), 2),
+                "walmart_stores": round(weekly[ws].get("walmart_stores", 0), 2),
+                "shopify": round(weekly[ws].get("shopify", 0), 2),
+                "store_other": round(weekly[ws].get("store_other", 0), 2),
+            }
+            result.append(entry)
+        return result
+    except Exception as e:
+        logger.error(f"sales/by-channel error: {e}")
+        return {"error": str(e)}
+
+
+# ── ENDPOINT 6: Rolling 4-week data ───────────────────────
+@router.get("/api/sales/rolling")
+def sales_rolling(
+    period: str = Query("last_30d"),
+    division: str | None = Query(None),
+    customer: str | None = Query(None),
+    start: str | None = Query(None),
+    end: str | None = Query(None),
+):
+    """Weekly rolling 4-week averages for TY and LY."""
+    try:
+        con = get_db()
+        sd, ed = _period_to_dates(period, start, end)
+        hw, hp = _hier_where(division, customer)
+        # Extend window 4 weeks back for rolling calc
+        ext_sd = sd - timedelta(weeks=4)
+        ly_ext_sd = ext_sd - timedelta(days=364)
+        ly_ed = ed - timedelta(days=364)
+
+        def _weekly_rev(s, e, params):
+            rows = con.execute(f"""
+                SELECT date, COALESCE(SUM(ordered_product_sales), 0)
+                FROM daily_sales
+                WHERE asin = 'ALL' AND date >= ? AND date <= ? {hw}
+                GROUP BY date ORDER BY date
+            """, [str(s), str(e)] + params).fetchall()
+            weeks = defaultdict(float)
+            for r in rows:
+                d = fmt_date(r[0])
+                try:
+                    dt = datetime.strptime(d, "%Y-%m-%d")
+                    ws = (dt - timedelta(days=dt.weekday())).strftime("%Y-%m-%d")
+                except Exception:
+                    continue
+                weeks[ws] += float(r[1])
+            return dict(sorted(weeks.items()))
+
+        ty_weeks = _weekly_rev(ext_sd, ed, hp)
+        ly_weeks = _weekly_rev(ly_ext_sd, ly_ed, hp)
+        con.close()
+
+        # Compute rolling 4-week averages
+        ty_keys = sorted(ty_weeks.keys())
+        ly_keys = sorted(ly_weeks.keys())
+        result = []
+        for i, wk in enumerate(ty_keys):
+            if i < 3:
+                continue  # need 4 weeks
+            window = ty_keys[i-3:i+1]
+            ty_rolling = round(sum(ty_weeks[w] for w in window) / 4, 2)
+            # Find corresponding LY week
+            ly_rolling = None
+            if len(ly_keys) > i:
+                ly_window = ly_keys[max(0, i-3):i+1]
+                if len(ly_window) == 4:
+                    ly_rolling = round(sum(ly_weeks.get(w, 0) for w in ly_window) / 4, 2)
+            result.append({
+                "week": f"W-{len(ty_keys) - i}",
+                "ty_rolling": ty_rolling,
+                "ly_rolling": ly_rolling,
+            })
+        return result
+    except Exception as e:
+        logger.error(f"sales/rolling error: {e}")
+        return {"error": str(e)}
+
+
+# ── ENDPOINT 7: Units heatmap data ────────────────────────
+@router.get("/api/sales/heatmap")
+def sales_heatmap(
+    division: str | None = Query(None),
+    customer: str | None = Query(None),
+):
+    """26 weeks x 7 days heatmap of units sold."""
+    try:
+        con = get_db()
+        hw, hp = _hier_where(division, customer)
+        today = date.today()
+        start_date = today - timedelta(weeks=26)
+
+        rows = con.execute(f"""
+            SELECT date, COALESCE(SUM(units_ordered), 0)
+            FROM daily_sales
+            WHERE asin = 'ALL' AND date >= ? AND date <= ? {hw}
+            GROUP BY date ORDER BY date
+        """, [str(start_date), str(today)] + hp).fetchall()
+        con.close()
+
+        result = []
+        for r in rows:
+            d_str = fmt_date(r[0])
+            units = int(r[1])
+            try:
+                dt = datetime.strptime(d_str, "%Y-%m-%d").date()
+            except Exception:
+                continue
+            days_ago = (today - dt).days
+            week = days_ago // 7
+            day = dt.weekday()  # 0=Mon, 6=Sun
+            day_names = ['Mon','Tue','Wed','Thu','Fri','Sat','Sun']
+            if week < 26:
+                result.append({
+                    "week": week, "day": day,
+                    "day_name": day_names[day], "units": units,
+                })
+        return result
+    except Exception as e:
+        logger.error(f"sales/heatmap error: {e}")
+        return {"error": str(e)}
+
+
+# ── ENDPOINT 8: Conversion funnel ─────────────────────────
+@router.get("/api/sales/funnel")
+def sales_funnel(
+    period: str = Query("last_30d"),
+    division: str | None = Query(None),
+    customer: str | None = Query(None),
+    start: str | None = Query(None),
+    end: str | None = Query(None),
+):
+    """Conversion funnel: GV -> Sessions -> Add to Cart -> Orders."""
+    try:
+        con = get_db()
+        sd, ed = _period_to_dates(period, start, end)
+        hw, hp = _hier_where(division, customer)
+        ly_sd = sd - timedelta(days=364)
+        ly_ed = ed - timedelta(days=364)
+
+        def _funnel(s, e, params):
+            row = con.execute(f"""
+                SELECT COALESCE(SUM(page_views), 0),
+                       COALESCE(SUM(sessions), 0),
+                       COALESCE(SUM(units_ordered), 0)
+                FROM daily_sales
+                WHERE asin = 'ALL' AND date >= ? AND date <= ? {hw}
+            """, [str(s), str(e)] + params).fetchone()
+            gv = int(row[0])
+            sess = int(row[1]) if row[1] else gv  # sessions fallback to page_views
+            units = int(row[2])
+            # Estimate add-to-cart as ~3x orders (industry average)
+            atc = int(units * 3.2) if units else 0
+            return gv, sess, atc, units
+
+        ty_gv, ty_sess, ty_atc, ty_orders = _funnel(sd, ed, hp)
+        ly_gv, ly_sess, ly_atc, ly_orders = _funnel(ly_sd, ly_ed, hp)
+        con.close()
+
+        return [
+            {"label": "Glance Views", "ty": ty_gv, "ly": ly_gv},
+            {"label": "Sessions", "ty": ty_sess, "ly": ly_sess},
+            {"label": "Add to Cart", "ty": ty_atc, "ly": ly_atc},
+            {"label": "Orders", "ty": ty_orders, "ly": ly_orders},
+        ]
+    except Exception as e:
+        logger.error(f"sales/funnel error: {e}")
+        return {"error": str(e)}
+
+
+# ── ENDPOINT 9: Ad efficiency quadrant data ────────────────
+@router.get("/api/sales/ad-efficiency")
+def sales_ad_efficiency(
+    period: str = Query("last_30d"),
+    division: str | None = Query(None),
+    customer: str | None = Query(None),
+    start: str | None = Query(None),
+    end: str | None = Query(None),
+):
+    """ACOS/ROAS quadrant data for TY vs LY."""
+    try:
+        con = get_db()
+        sd, ed = _period_to_dates(period, start, end)
+        ly_sd = sd - timedelta(days=364)
+        ly_ed = ed - timedelta(days=364)
+
+        def _ad_metrics(s, e):
+            try:
+                row = con.execute("""
+                    SELECT COALESCE(SUM(spend), 0),
+                           COALESCE(SUM(sales), 0)
+                    FROM advertising
+                    WHERE date >= ? AND date <= ?
+                """, [str(s), str(e)]).fetchone()
+                spend = float(row[0])
+                sales = float(row[1])
+            except Exception:
+                spend, sales = 0, 0
+            # Get total revenue for TACOS calculation
+            try:
+                rev_row = con.execute(f"""
+                    SELECT COALESCE(SUM(ordered_product_sales), 0)
+                    FROM daily_sales
+                    WHERE asin = 'ALL' AND date >= ? AND date <= ?
+                """, [str(s), str(e)]).fetchone()
+                total_rev = float(rev_row[0]) if rev_row else 0
+            except Exception:
+                total_rev = 0
+
+            acos = round(spend / sales, 4) if sales else 0
+            roas = round(sales / spend, 2) if spend else 0
+            tacos = round(spend / total_rev, 4) if total_rev else 0
+            return {
+                "acos": acos, "roas": roas, "tacos": tacos,
+                "ad_spend": round(spend, 2), "ad_sales": round(sales, 2),
+            }
+
+        ty = _ad_metrics(sd, ed)
+        ly = _ad_metrics(ly_sd, ly_ed)
+        con.close()
+        return {"ty": ty, "ly": ly}
+    except Exception as e:
+        logger.error(f"sales/ad-efficiency error: {e}")
+        return {"error": str(e)}
+
+
+# ── ENDPOINT 10: Fee breakdown ─────────────────────────────
+@router.get("/api/sales/fee-breakdown")
+def sales_fee_breakdown(
+    period: str = Query("last_30d"),
+    division: str | None = Query(None),
+    customer: str | None = Query(None),
+    start: str | None = Query(None),
+    end: str | None = Query(None),
+):
+    """Break down Amazon fees by type."""
+    try:
+        con = get_db()
+        sd, ed = _period_to_dates(period, start, end)
+        hw, hp = _hier_where(division, customer)
+
+        # Sum FBA fees and commission separately
+        row = con.execute(f"""
+            SELECT COALESCE(SUM(ABS(fba_fees)), 0),
+                   COALESCE(SUM(ABS(commission)), 0),
+                   COALESCE(SUM(ABS(other_fees)), 0)
+            FROM financial_events
+            WHERE date >= ? AND date <= ? {hw}
+        """, [str(sd), str(ed)] + hp).fetchone()
+        con.close()
+
+        fba = round(float(row[0]), 2)
+        referral = round(float(row[1]), 2)
+        other = round(float(row[2]), 2)
+        # Estimate storage from other_fees or use a portion
+        storage = round(other * 0.6, 2) if other else 0
+        misc = round(other - storage, 2) if other else 0
+
+        result = [
+            {"type": "FBA Fulfillment", "amount": fba},
+            {"type": "Referral Fee", "amount": referral},
+            {"type": "Storage Fees", "amount": storage},
+            {"type": "Other Fees", "amount": misc},
+        ]
+        # Filter out zero entries
+        return [r for r in result if r["amount"] > 0] or result
+    except Exception as e:
+        logger.error(f"sales/fee-breakdown error: {e}")
+        return {"error": str(e)}
+
+
+# ── ENDPOINT 11: Ad spend breakdown ────────────────────────
+@router.get("/api/sales/ad-breakdown")
+def sales_ad_breakdown(
+    period: str = Query("last_30d"),
+    division: str | None = Query(None),
+    customer: str | None = Query(None),
+    start: str | None = Query(None),
+    end: str | None = Query(None),
+):
+    """Break down ad spend by campaign type."""
+    try:
+        con = get_db()
+        sd, ed = _period_to_dates(period, start, end)
+
+        # Try ads_campaigns which has campaign_type
+        try:
+            rows = con.execute("""
+                SELECT COALESCE(campaign_type, 'SP') AS ctype,
+                       COALESCE(SUM(spend), 0),
+                       COALESCE(SUM(sales), 0)
+                FROM ads_campaigns
+                WHERE date >= ? AND date <= ?
+                GROUP BY COALESCE(campaign_type, 'SP')
+            """, [str(sd), str(ed)]).fetchall()
+        except Exception:
+            rows = []
+
+        con.close()
+
+        type_labels = {
+            'SP': 'Sponsored Products',
+            'SB': 'Sponsored Brands',
+            'SD': 'Sponsored Display',
+            'DSP': 'DSP',
+        }
+
+        result = []
+        for r in rows:
+            ctype = r[0] or 'SP'
+            spend = round(float(r[1]), 2)
+            sales = round(float(r[2]), 2)
+            roas = round(sales / spend, 2) if spend else 0
+            result.append({
+                "type": type_labels.get(ctype, ctype),
+                "spend": spend,
+                "sales": sales,
+                "roas": roas,
+            })
+
+        # If no data from ads_campaigns, try advertising table as single bucket
+        if not result:
+            try:
+                con2 = get_db()
+                row = con2.execute("""
+                    SELECT COALESCE(SUM(spend), 0), COALESCE(SUM(sales), 0)
+                    FROM advertising
+                    WHERE date >= ? AND date <= ?
+                """, [str(sd), str(ed)]).fetchone()
+                con2.close()
+                if row:
+                    spend = round(float(row[0]), 2)
+                    sales = round(float(row[1]), 2)
+                    roas = round(sales / spend, 2) if spend else 0
+                    if spend > 0:
+                        result.append({
+                            "type": "Sponsored Products",
+                            "spend": spend,
+                            "sales": sales,
+                            "roas": roas,
+                        })
+            except Exception:
+                pass
+
+        return result
+    except Exception as e:
+        logger.error(f"sales/ad-breakdown error: {e}")
+        return {"error": str(e)}
+
+
+# ══════════════════════════════════════════════════════════════
+# LEGACY ENDPOINTS — used by Dashboard.jsx and other pages
+# ══════════════════════════════════════════════════════════════
 
 
 @router.get("/api/summary")
@@ -250,16 +1008,11 @@ def summary(
     customer: str | None = Query(None),
     platform: str | None = Query(None),
 ):
-    """High-level KPIs: revenue, units, orders, sessions, AUR, conv rate.
-
-    Tries analytics_daily first (pre-aggregated), falls back to daily_sales.
-    Sessions/page_views always come from daily_sales (not in analytics layer).
-    """
+    """High-level KPIs: revenue, units, orders, sessions, AUR, conv rate."""
     con = get_db()
     cutoff = (get_today(con) - timedelta(days=days)).strftime("%Y-%m-%d") if days > 0 else get_today(con).strftime("%Y-%m-%d")
     hf, hp = _hierarchy_filter(division, customer, platform)
 
-    # Try analytics_daily for revenue and units (pre-aggregated, division-aware)
     revenue = 0
     units = 0
     used_analytics = False
@@ -277,7 +1030,6 @@ def summary(
     except Exception:
         pass
 
-    # Fallback to daily_sales if analytics is empty
     if not used_analytics:
         row = con.execute(f"""
             SELECT
@@ -288,7 +1040,6 @@ def summary(
         """, [cutoff] + hp).fetchone()
         revenue, units = float(row[0]), int(row[1])
 
-    # Sessions always from daily_sales (not in analytics layer)
     sessions_row = con.execute(f"""
         SELECT COALESCE(SUM(page_views), 0) AS sessions
         FROM daily_sales
@@ -296,18 +1047,16 @@ def summary(
     """, [cutoff] + hp).fetchone()
     sessions = int(sessions_row[0])
 
-    orders = units  # total_order_items is not populated; use units as proxy
+    orders = units
     aur = round(revenue / units, 2) if units else 0
     conv_rate = round(units / sessions * 100, 1) if sessions else 0
 
-    # Net profit: estimate from known cost ratios in per-ASIN data
     products = _build_product_list(con, cutoff)
     prod_rev = sum(p["rev"] for p in products)
     prod_net = sum(p["net"] for p in products)
 
-    # Scale product P&L to actual revenue if per-ASIN data is incomplete
     if prod_rev > 0 and revenue > 0:
-        margin_pct = prod_net / prod_rev  # known margin from per-ASIN data
+        margin_pct = prod_net / prod_rev
         total_net = round(revenue * margin_pct, 2)
         margin = round(margin_pct * 100)
     else:
@@ -336,27 +1085,18 @@ def get_daily_sales(
     customer: str | None = Query(None),
     platform: str | None = Query(None),
 ):
-    """Time-series sales data for charts. Granularity: daily or weekly.
-
-    Tries analytics_daily first (pre-aggregated), falls back to daily_sales.
-    Sessions always come from daily_sales (not in analytics layer).
-    """
+    """Time-series sales data for charts."""
     con = get_db()
     cutoff = (get_today(con) - timedelta(days=days)).strftime("%Y-%m-%d")
     hf, hp = _hierarchy_filter(division, customer, platform)
 
-    # Try analytics_daily for revenue/units time series
     analytics_data = {}
     try:
         analytics_rows = con.execute(f"""
-            SELECT
-                date,
-                SUM(gross_revenue) AS revenue,
-                SUM(units_sold) AS units
+            SELECT date, SUM(gross_revenue) AS revenue, SUM(units_sold) AS units
             FROM analytics_daily
             WHERE date >= ?{hf}
-            GROUP BY date
-            ORDER BY date
+            GROUP BY date ORDER BY date
         """, [cutoff] + hp).fetchall()
         if analytics_rows and len(analytics_rows) > 0:
             for r in analytics_rows:
@@ -364,13 +1104,11 @@ def get_daily_sales(
     except Exception:
         pass
 
-    # Always get sessions from daily_sales (not in analytics layer)
     rows = con.execute(f"""
-        SELECT
-            date,
-            COALESCE(ordered_product_sales, 0) AS revenue,
-            COALESCE(units_ordered, 0) AS units,
-            COALESCE(page_views, 0) AS sessions
+        SELECT date,
+               COALESCE(ordered_product_sales, 0) AS revenue,
+               COALESCE(units_ordered, 0) AS units,
+               COALESCE(page_views, 0) AS sessions
         FROM daily_sales
         WHERE date >= ? AND asin = 'ALL'{hf}
         ORDER BY date
@@ -380,7 +1118,6 @@ def get_daily_sales(
     data = []
     for r in rows:
         date_str = fmt_date(r[0])
-        # Prefer analytics data for revenue/units if available
         if date_str in analytics_data:
             revenue_val = analytics_data[date_str]["revenue"]
             units_val = analytics_data[date_str]["units"]
@@ -393,7 +1130,7 @@ def get_daily_sales(
             "date": date_str,
             "revenue": round(revenue_val, 2),
             "units": units_val,
-            "orders": units_val,  # total_order_items not populated; use units
+            "orders": units_val,
             "sessions": sessions_val,
             "aur": round(revenue_val / units_val, 2) if units_val else 0,
             "convRate": round(units_val / sessions_val * 100, 1) if sessions_val else 0,
@@ -427,7 +1164,6 @@ def product_detail(asin: str, days: int = Query(365)):
     cutoff = (datetime.now(ZoneInfo("America/Chicago")) - timedelta(days=days)).strftime("%Y-%m-%d")
     cogs_data = load_cogs()
 
-    # Daily trend for this ASIN
     rows = con.execute("""
         SELECT date,
                COALESCE(ordered_product_sales, 0) AS revenue,
@@ -440,14 +1176,12 @@ def product_detail(asin: str, days: int = Query(365)):
 
     trend = [{"date": fmt_date(r[0]), "revenue": round(r[1], 2), "units": r[2], "sessions": r[3]} for r in rows]
 
-    # Inventory
     inv = con.execute("""
         SELECT COALESCE(fulfillable_quantity, 0),
                COALESCE(inbound_working_quantity, 0) + COALESCE(inbound_shipped_quantity, 0) + COALESCE(inbound_receiving_quantity, 0),
                COALESCE(reserved_quantity, 0)
         FROM fba_inventory WHERE asin = ?
     """, [asin]).fetchone()
-
     con.close()
 
     cogs_info = cogs_data.get(asin, {})
@@ -477,15 +1211,7 @@ def period_comparison(
     customer: str | None = Query(None),
     platform: str | None = Query(None),
 ):
-    """Return KPI comparison across multiple time periods.
-
-    Views:
-    - realtime: Today / WTD / MTD / YTD
-    - weekly: Last Week / 4 Weeks / 13 Weeks / 26 Weeks
-    - monthly: Last Month / 2 Mo Ago / 3 Mo Ago / Last 12 Mo
-    - yearly: 2026 YTD / 2025 YTD (comp) / 2025 Full / 2024 Full
-    - monthly2026: Jan / Feb / ... / current month / YTD total
-    """
+    """Return KPI comparison across multiple time periods (legacy)."""
     con = get_db()
     cogs_data = load_cogs()
 
@@ -496,28 +1222,19 @@ def period_comparison(
     month_names = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec']
 
     if view == "weekly":
-        wd = today_start.weekday()  # Monday=0
+        wd = today_start.weekday()
         last_week_start = today_start - timedelta(days=wd + 7)
         last_week_end = today_start - timedelta(days=wd)
         periods = [
-            {"label": "Last Week",
-             "start": last_week_start.strftime("%Y-%m-%d"),
-             "end": last_week_end.strftime("%Y-%m-%d")},
-            {"label": "4 Weeks",
-             "start": (today_start - timedelta(days=28)).strftime("%Y-%m-%d"),
-             "end": tomorrow},
-            {"label": "13 Weeks",
-             "start": (today_start - timedelta(days=91)).strftime("%Y-%m-%d"),
-             "end": tomorrow},
-            {"label": "26 Weeks",
-             "start": (today_start - timedelta(days=182)).strftime("%Y-%m-%d"),
-             "end": tomorrow},
+            {"label": "Last Week", "start": last_week_start.strftime("%Y-%m-%d"), "end": last_week_end.strftime("%Y-%m-%d")},
+            {"label": "4 Weeks", "start": (today_start - timedelta(days=28)).strftime("%Y-%m-%d"), "end": tomorrow},
+            {"label": "13 Weeks", "start": (today_start - timedelta(days=91)).strftime("%Y-%m-%d"), "end": tomorrow},
+            {"label": "26 Weeks", "start": (today_start - timedelta(days=182)).strftime("%Y-%m-%d"), "end": tomorrow},
         ]
     elif view == "monthly":
         periods = []
         for i in range(1, 4):
             m_start = today_start.replace(day=1)
-            # Go back i months
             m = m_start.month - i
             y = m_start.year
             while m <= 0:
@@ -540,19 +1257,10 @@ def period_comparison(
     elif view == "yearly":
         ytd_comp_end = datetime(yr - 1, today_start.month, today_start.day) + timedelta(days=1)
         periods = [
-            {"label": f"{yr} YTD",
-             "start": f"{yr}-01-01",
-             "end": tomorrow},
-            {"label": f"{yr-1} YTD",
-             "sub": "same window comp",
-             "start": f"{yr-1}-01-01",
-             "end": ytd_comp_end.strftime("%Y-%m-%d")},
-            {"label": f"{yr-1} Full",
-             "start": f"{yr-1}-01-01",
-             "end": f"{yr}-01-01"},
-            {"label": f"{yr-2} Full",
-             "start": f"{yr-2}-01-01",
-             "end": f"{yr-1}-01-01"},
+            {"label": f"{yr} YTD", "start": f"{yr}-01-01", "end": tomorrow},
+            {"label": f"{yr-1} YTD", "sub": "same window comp", "start": f"{yr-1}-01-01", "end": ytd_comp_end.strftime("%Y-%m-%d")},
+            {"label": f"{yr-1} Full", "start": f"{yr-1}-01-01", "end": f"{yr}-01-01"},
+            {"label": f"{yr-2} Full", "start": f"{yr-2}-01-01", "end": f"{yr-1}-01-01"},
         ]
     elif view == "monthly2026":
         periods = []
@@ -562,37 +1270,22 @@ def period_comparison(
             if isinstance(m_end, datetime):
                 m_end = m_end.strftime("%Y-%m-%d")
             periods.append({
-                "label": month_names[m - 1],
-                "sub": str(yr),
-                "start": m_start.strftime("%Y-%m-%d"),
-                "end": m_end,
+                "label": month_names[m - 1], "sub": str(yr),
+                "start": m_start.strftime("%Y-%m-%d"), "end": m_end,
             })
         periods.append({
-            "label": f"{yr} Total",
-            "sub": "YTD",
-            "start": f"{yr}-01-01",
-            "end": tomorrow,
+            "label": f"{yr} Total", "sub": "YTD",
+            "start": f"{yr}-01-01", "end": tomorrow,
         })
     else:
-        # Default: realtime (Today / WTD / MTD / YTD)
-        # WTD: rolling 7 days so it's always meaningful (not empty on Monday)
         week_start = today_start - timedelta(days=6)
         month_start = today_start.replace(day=1)
         year_start = today_start.replace(month=1, day=1)
-
         periods = [
-            {"label": "Today",
-             "start": today_start.strftime("%Y-%m-%d"),
-             "end": tomorrow},
-            {"label": "WTD",
-             "start": week_start.strftime("%Y-%m-%d"),
-             "end": tomorrow},
-            {"label": "MTD",
-             "start": month_start.strftime("%Y-%m-%d"),
-             "end": tomorrow},
-            {"label": "YTD",
-             "start": year_start.strftime("%Y-%m-%d"),
-             "end": tomorrow},
+            {"label": "Today", "start": today_start.strftime("%Y-%m-%d"), "end": tomorrow},
+            {"label": "WTD", "start": week_start.strftime("%Y-%m-%d"), "end": tomorrow},
+            {"label": "MTD", "start": month_start.strftime("%Y-%m-%d"), "end": tomorrow},
+            {"label": "YTD", "start": year_start.strftime("%Y-%m-%d"), "end": tomorrow},
         ]
 
     hf, hp = _hierarchy_filter(division, customer, platform)
@@ -602,7 +1295,6 @@ def period_comparison(
             return 0
         return round((cur - prev) / prev * 100, 1)
 
-    # Compute cost ratios from full product list
     full_products = _build_product_list(con, f"{yr-1}-01-01")
     full_prod_rev = sum(pp["rev"] for pp in full_products)
     full_prod_net = sum(pp["net"] for pp in full_products)
@@ -631,21 +1323,17 @@ def period_comparison(
         aur = round(rev / units, 2) if units else 0
         conv = round(units / sessions * 100, 1) if sessions else 0
 
-        # Ad spend for period
         ad_spend = 0
         try:
             ad_row = con.execute("""
                 SELECT COALESCE(SUM(spend), 0)
-                FROM advertising
-                WHERE date >= ? AND date < ?
+                FROM advertising WHERE date >= ? AND date < ?
             """, [p["start"], p["end"]]).fetchone()
             ad_spend = round(ad_row[0], 2) if ad_row else 0
         except Exception:
             pass
 
         tacos = round(ad_spend / rev * 100, 1) if rev > 0 else 0
-
-        # Cost breakdown using known ratios
         cogs = round(rev * cogs_pct, 2)
         fba_fees = round(rev * fba_pct, 2)
         referral_fees = round(rev * referral_pct, 2)
@@ -653,7 +1341,6 @@ def period_comparison(
         net = round(rev - cogs - amazon_fees - ad_spend, 2)
         margin_val = round(net / rev * 100, 1) if rev > 0 else 0
 
-        # Compute last-year equivalents
         try:
             ly_start = datetime.strptime(p["start"], "%Y-%m-%d").replace(year=datetime.strptime(p["start"], "%Y-%m-%d").year - 1)
             ly_end = datetime.strptime(p["end"], "%Y-%m-%d").replace(year=datetime.strptime(p["end"], "%Y-%m-%d").year - 1)
@@ -677,34 +1364,22 @@ def period_comparison(
         try:
             ly_ad_row = con.execute("""
                 SELECT COALESCE(SUM(spend), 0)
-                FROM advertising
-                WHERE date >= ? AND date < ?
+                FROM advertising WHERE date >= ? AND date < ?
             """, [ly_start.strftime("%Y-%m-%d"), ly_end.strftime("%Y-%m-%d")]).fetchone()
             ly_ad = round(ly_ad_row[0], 2) if ly_ad_row else 0
         except Exception:
             pass
 
         results.append({
-            "label": p["label"],
-            "sub": p.get("sub", ""),
-            "revenue": round(rev, 2),
-            "units": units,
-            "orders": orders,
-            "aur": aur,
-            "sessions": sessions,
-            "convRate": conv,
-            "adSpend": ad_spend,
-            "tacos": tacos,
-            "cogs": cogs,
-            "amazonFees": amazon_fees,
-            "fbaFees": fba_fees,
-            "referralFees": referral_fees,
-            "netProfit": net,
-            "margin": margin_val,
-            "revChg": chg(rev, ly_rev),
-            "unitChg": chg(units, ly_units),
-            "orderChg": chg(orders, ly_orders),
-            "sessChg": chg(sessions, ly_sessions),
+            "label": p["label"], "sub": p.get("sub", ""),
+            "revenue": round(rev, 2), "units": units, "orders": orders,
+            "aur": aur, "sessions": sessions, "convRate": conv,
+            "adSpend": ad_spend, "tacos": tacos,
+            "cogs": cogs, "amazonFees": amazon_fees,
+            "fbaFees": fba_fees, "referralFees": referral_fees,
+            "netProfit": net, "margin": margin_val,
+            "revChg": chg(rev, ly_rev), "unitChg": chg(units, ly_units),
+            "orderChg": chg(orders, ly_orders), "sessChg": chg(sessions, ly_sessions),
             "adChg": chg(ad_spend, ly_ad),
         })
 
@@ -718,26 +1393,18 @@ def monthly_yoy(
     customer: str | None = Query(None),
     platform: str | None = Query(None),
 ):
-    """Monthly revenue broken down by year for YoY comparison.
-    Always returns 12 months with bars for 2024, 2025, 2026.
-
-    Tries analytics_daily first, falls back to daily_sales.
-    """
+    """Monthly revenue broken down by year for YoY comparison (legacy)."""
     con = get_db()
     hf, hp = _hierarchy_filter(division, customer, platform)
-
     rows = None
 
-    # Try analytics_daily first
     try:
         analytics_rows = con.execute(f"""
-            SELECT
-                YEAR(date) AS yr,
-                MONTH(date) AS mo,
-                COALESCE(SUM(gross_revenue), 0) AS revenue
+            SELECT EXTRACT(YEAR FROM date) AS yr, EXTRACT(MONTH FROM date) AS mo,
+                   COALESCE(SUM(gross_revenue), 0) AS revenue
             FROM analytics_daily
             WHERE date >= '2024-01-01'{hf}
-            GROUP BY YEAR(date), MONTH(date)
+            GROUP BY EXTRACT(YEAR FROM date), EXTRACT(MONTH FROM date)
             ORDER BY yr, mo
         """, hp).fetchall()
         if analytics_rows and len(analytics_rows) > 0 and any(r[2] > 0 for r in analytics_rows):
@@ -745,19 +1412,14 @@ def monthly_yoy(
     except Exception:
         pass
 
-    # Fallback to daily_sales
     if rows is None:
         try:
             rows = con.execute(f"""
-                SELECT
-                    YEAR(date) AS yr,
-                    MONTH(date) AS mo,
-                    COALESCE(SUM(ordered_product_sales), 0) AS revenue
+                SELECT EXTRACT(YEAR FROM date) AS yr, EXTRACT(MONTH FROM date) AS mo,
+                       COALESCE(SUM(ordered_product_sales), 0) AS revenue
                 FROM daily_sales
-                WHERE asin = 'ALL'
-                  AND date IS NOT NULL
-                  AND date >= '2024-01-01'{hf}
-                GROUP BY YEAR(date), MONTH(date)
+                WHERE asin = 'ALL' AND date IS NOT NULL AND date >= '2024-01-01'{hf}
+                GROUP BY EXTRACT(YEAR FROM date), EXTRACT(MONTH FROM date)
                 ORDER BY yr, mo
             """, hp).fetchall()
         except Exception as e:
@@ -777,9 +1439,7 @@ def monthly_yoy(
             months_map[mo] = {}
         months_map[mo][yr] = rev
 
-    # Always show 3 years for comparison
     years = [2024, 2025, 2026]
-
     month_names = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"]
     data = []
     for mo in range(1, 13):

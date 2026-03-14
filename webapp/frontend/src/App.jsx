@@ -19,6 +19,7 @@ import System from "./pages/System";
 import MfaSetup from "./pages/MfaSetup";
 import MfaVerify from "./pages/MfaVerify";
 import AuditLog from "./pages/AuditLog";
+import Sales from "./pages/Sales";
 import HierarchyFilter from "./components/HierarchyFilter";
 import "./App.css";
 
@@ -27,7 +28,7 @@ const CATEGORIES = [
   {
     key: "exec-summary", label: "Exec Summary",
     views: [
-      { key: "dashboard", path: "/", label: "Exec Summary", end: true },
+      { key: "sales", path: "/sales", label: "Exec Summary" },
     ],
   },
   {
@@ -336,6 +337,7 @@ export default function App() {
         <main className="main-content">
           <Routes>
             {allowed["dashboard"] !== false && <Route path="/" element={<Dashboard filters={filters} />} />}
+            <Route path="/sales" element={<Sales />} />
             {allowed["products"] !== false && <Route path="/products" element={<Products filters={filters} />} />}
             {allowed["profitability"] !== false && <Route path="/profitability" element={<Profitability filters={filters} />} />}
             {allowed["inventory"] !== false && <Route path="/inventory" element={<Inventory filters={filters} />} />}
