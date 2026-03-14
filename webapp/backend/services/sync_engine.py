@@ -21,63 +21,139 @@ logger = logging.getLogger("golfgen")
 
 
 def _auto_backfill_if_needed():
-    """Check if historical data is missing and backfill automatically.
-    This prevents data loss when Railway redeploys (ephemeral filesystem).
-    Backfills: Apr 2024 to yesterday, in 30-day chunks."""
+    """Check if historical data is missing and backfill a small batch automatically.
+
+    Conservative strategy — fills data in small pieces so it never blows quota:
+    - Skips if another backfill ran within THROTTLE_HOURS (prevents multi-deploy pile-up)
+    - Finds the oldest actual date gaps instead of always restarting from Apr 2024
+    - Processes at most MAX_CHUNKS_PER_RUN chunks per startup call
+    - Stops immediately on QuotaExceeded (don't hammer 14 dead chunks)
+    - The nightly deep sync (3am) is the real workhorse for full gap-fill
+    """
+    MAX_CHUNKS_PER_RUN = 3      # How many 30-day chunks to pull per startup call
+    THROTTLE_HOURS = 4          # Skip if a backfill ran within this many hours
     import time as _time
     import gzip as gz
     import requests as req
     from sp_api.api import Reports
     from sp_api.base import Marketplaces, ReportType
 
-    con = get_db_rw()
+    started = datetime.now(ZoneInfo("America/Chicago"))
+
+    # ── Throttle: skip if we already ran recently ────────────────────────────
     try:
-        earliest_row = con.execute(
-            "SELECT MIN(date) FROM daily_sales WHERE asin = 'ALL'"
+        con = get_db()
+        row = con.execute(
+            "SELECT MAX(completed_at) FROM sync_log WHERE job_name = 'auto_backfill'"
         ).fetchone()
-        earliest = earliest_row[0] if earliest_row and earliest_row[0] else None
+        con.close()
+        if row and row[0]:
+            last_dt = row[0]
+            if hasattr(last_dt, "tzinfo") and last_dt.tzinfo is None:
+                last_dt = last_dt.replace(tzinfo=ZoneInfo("America/Chicago"))
+            hours_ago = (started - last_dt).total_seconds() / 3600
+            if hours_ago < THROTTLE_HOURS:
+                logger.info(
+                    f"Auto-backfill: last run {hours_ago:.1f}h ago "
+                    f"(throttle={THROTTLE_HOURS}h), skipping"
+                )
+                return
+    except Exception as te:
+        logger.warning(f"Auto-backfill: throttle check error: {te}")
+
+    # ── Coverage check ────────────────────────────────────────────────────────
+    expected_start = dt_date(2024, 4, 1)
+    expected_end = datetime.now(ZoneInfo("America/Chicago")).date() - timedelta(days=1)
+    expected_days = (expected_end - expected_start).days + 1
+
+    con = get_db()
+    try:
         count_row = con.execute(
             "SELECT COUNT(DISTINCT date) FROM daily_sales WHERE asin = 'ALL'"
         ).fetchone()
         total_days = count_row[0] if count_row else 0
+
+        existing_rows = con.execute(
+            "SELECT DISTINCT date FROM daily_sales WHERE asin = 'ALL' AND date >= '2024-04-01'"
+        ).fetchall()
+        existing_dates: set = set()
+        for r in existing_rows:
+            d = r[0]
+            if isinstance(d, str):
+                d = datetime.strptime(d, "%Y-%m-%d").date()
+            elif hasattr(d, "date"):
+                d = d.date()
+            existing_dates.add(d)
     except Exception:
-        earliest = None
         total_days = 0
+        existing_dates = set()
     finally:
         con.close()
 
-    # Calculate expected days (Apr 2024 to yesterday)
-    expected_start = dt_date(2024, 4, 1)
-    expected_end = datetime.now(ZoneInfo("America/Chicago")).date() - timedelta(days=1)
-    expected_days = (expected_end - expected_start).days + 1
     coverage_pct = (total_days / expected_days * 100) if expected_days > 0 else 0
-
-    # Skip backfill if we have 95%+ coverage
     if coverage_pct >= 95:
-        logger.info(f"Auto-backfill: {total_days}/{expected_days} days ({coverage_pct:.0f}% coverage), skipping backfill")
+        logger.info(
+            f"Auto-backfill: {total_days}/{expected_days} days "
+            f"({coverage_pct:.0f}% coverage), skipping"
+        )
         return
 
-    logger.info(f"Auto-backfill: only {total_days} days found (earliest={earliest}). Starting historical backfill...")
+    # ── Find missing date gaps → build chunks ────────────────────────────────
+    all_expected: set = set()
+    d = expected_start
+    while d <= expected_end:
+        all_expected.add(d)
+        d += timedelta(days=1)
 
-    from services.sp_api import _load_sp_api_credentials
+    missing_dates = sorted(all_expected - existing_dates)
+    if not missing_dates:
+        logger.info("Auto-backfill: no missing dates detected, skipping")
+        return
+
+    # Group contiguous missing dates into 30-day chunks
+    chunks: list = []
+    gap_start = missing_dates[0]
+    gap_end = missing_dates[0]
+    for md in missing_dates[1:]:
+        if (md - gap_end).days <= 2:
+            gap_end = md
+        else:
+            cs = gap_start
+            while cs <= gap_end:
+                ce = min(cs + timedelta(days=29), gap_end)
+                chunks.append((cs, ce))
+                cs = ce + timedelta(days=1)
+            gap_start = md
+            gap_end = md
+    cs = gap_start
+    while cs <= gap_end:
+        ce = min(cs + timedelta(days=29), gap_end)
+        chunks.append((cs, ce))
+        cs = ce + timedelta(days=1)
+
+    total_chunks = len(chunks)
+    run_chunks = chunks[:MAX_CHUNKS_PER_RUN]
+    logger.info(
+        f"Auto-backfill: {len(missing_dates)} missing days across {total_chunks} chunks. "
+        f"Processing {len(run_chunks)} this startup (max={MAX_CHUNKS_PER_RUN}). "
+        f"Remaining {total_chunks - len(run_chunks)} will fill via nightly sync."
+    )
+
+    from services.sp_api import _load_sp_api_credentials, _get_division_for_asin
     creds = _load_sp_api_credentials()
     if not creds:
         logger.error("Auto-backfill: no SP-API credentials, skipping")
         return
 
     reports_api = Reports(credentials=creds, marketplace=Marketplaces.US)
-
-    # Backfill from Apr 2024 to yesterday
-    backfill_start = dt_date(2024, 4, 1)
-    backfill_end = datetime.now(ZoneInfo("America/Chicago")).date() - timedelta(days=1)
-
-    chunk_start = backfill_start
     total_records = 0
+    chunks_ok = 0
+    quota_hit = False
 
-    while chunk_start < backfill_end:
-        chunk_end = min(chunk_start + timedelta(days=29), backfill_end)
-        logger.info(f"  Auto-backfill: requesting {chunk_start} to {chunk_end}...")
-
+    for chunk_start, chunk_end in run_chunks:
+        if quota_hit:
+            break
+        logger.info(f"  Auto-backfill: chunk {chunk_start} → {chunk_end}...")
         try:
             report_response = reports_api.create_report(
                 reportType=ReportType.GET_SALES_AND_TRAFFIC_REPORT,
@@ -88,7 +164,7 @@ def _auto_backfill_if_needed():
             report_id = report_response.payload.get("reportId")
 
             report_data = None
-            for attempt in range(30):
+            for _ in range(30):
                 _time.sleep(10)
                 status_response = reports_api.get_report(report_id)
                 status = status_response.payload.get("processingStatus")
@@ -98,17 +174,23 @@ def _auto_backfill_if_needed():
                     report_data = doc_response.payload
                     break
                 elif status in ("CANCELLED", "FATAL"):
-                    logger.warning(f"  Auto-backfill: report {chunk_start}-{chunk_end} status={status}")
+                    logger.warning(
+                        f"  Auto-backfill: report {chunk_start}-{chunk_end} "
+                        f"status={status}"
+                    )
                     break
 
             if report_data:
                 if isinstance(report_data, dict) and "url" in report_data:
-                    is_gzipped = report_data.get("compressionAlgorithm", "").upper() == "GZIP"
+                    is_gzipped = (
+                        report_data.get("compressionAlgorithm", "").upper() == "GZIP"
+                    )
                     resp = req.get(report_data["url"])
-                    if is_gzipped:
-                        report_text = gz.decompress(resp.content).decode("utf-8")
-                    else:
-                        report_text = resp.text
+                    report_text = (
+                        gz.decompress(resp.content).decode("utf-8")
+                        if is_gzipped
+                        else resp.text
+                    )
                     report_data = json.loads(report_text)
 
                 if isinstance(report_data, str):
@@ -122,8 +204,11 @@ def _auto_backfill_if_needed():
                     traffic = day_entry.get("trafficByDate", {})
                     sales_info = day_entry.get("salesByDate", {})
                     ordered_sales = sales_info.get("orderedProductSales", {})
-                    sales_amount = float(ordered_sales.get("amount", 0)) if isinstance(ordered_sales, dict) else float(ordered_sales or 0)
-
+                    sales_amount = (
+                        float(ordered_sales.get("amount", 0))
+                        if isinstance(ordered_sales, dict)
+                        else float(ordered_sales or 0)
+                    )
                     wcon.execute("""
                         INSERT OR REPLACE INTO daily_sales
                         (date, asin, units_ordered, ordered_product_sales,
@@ -149,15 +234,19 @@ def _auto_backfill_if_needed():
                     sales_info = asin_entry.get("salesByAsin", {})
                     entry_date = asin_entry.get("date", str(chunk_start))
                     ordered_sales = sales_info.get("orderedProductSales", {})
-                    sales_amount = float(ordered_sales.get("amount", 0)) if isinstance(ordered_sales, dict) else float(ordered_sales or 0)
-
+                    sales_amount = (
+                        float(ordered_sales.get("amount", 0))
+                        if isinstance(ordered_sales, dict)
+                        else float(ordered_sales or 0)
+                    )
+                    _div = _get_division_for_asin(asin)
                     wcon.execute("""
                         INSERT OR REPLACE INTO daily_sales
                         (date, asin, units_ordered, ordered_product_sales,
                          sessions, session_percentage, page_views,
                          buy_box_percentage, unit_session_percentage,
                          division, customer, platform)
-                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'golf', 'amazon', 'sp_api')
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'amazon', 'sp_api')
                     """, [
                         entry_date, asin,
                         int(sales_info.get("unitsOrdered", 0)),
@@ -167,19 +256,42 @@ def _auto_backfill_if_needed():
                         int(traffic.get("pageViews", 0)),
                         float(traffic.get("buyBoxPercentage", 0)),
                         float(traffic.get("unitSessionPercentage", 0)),
+                        _div,
                     ])
                     records += 1
 
                 wcon.close()
                 total_records += records
-                logger.info(f"  Auto-backfill: {chunk_start}-{chunk_end}: {records} records")
+                chunks_ok += 1
+                logger.info(
+                    f"  Auto-backfill: {chunk_start}-{chunk_end}: {records} records"
+                )
 
         except Exception as e:
-            logger.error(f"  Auto-backfill error {chunk_start}-{chunk_end}: {e}")
+            err_str = str(e).lower()
+            if "quota" in err_str or "quotaexceeded" in err_str or "429" in err_str:
+                quota_hit = True
+                logger.warning(
+                    f"  Auto-backfill: QuotaExceeded on {chunk_start}-{chunk_end}. "
+                    f"Stopping this run — nightly sync will retry after quota resets."
+                )
+            else:
+                logger.error(f"  Auto-backfill error {chunk_start}-{chunk_end}: {e}")
 
-        chunk_start = chunk_end + timedelta(days=1)
+        # Small pause between chunks to be gentle on rate limits
+        _time.sleep(2)
 
-    logger.info(f"Auto-backfill complete: {total_records} total records inserted")
+    status = "SUCCESS" if chunks_ok == len(run_chunks) and not quota_hit else \
+             ("PARTIAL" if chunks_ok > 0 else "FAILED")
+    stop_reason = " (quota exceeded — will retry at nightly sync)" if quota_hit else ""
+    logger.info(
+        f"Auto-backfill complete: {chunks_ok}/{len(run_chunks)} chunks, "
+        f"{total_records} records inserted{stop_reason}"
+    )
+    _write_sync_log(
+        "auto_backfill", started, status, inserted=total_records,
+        error=f"quota_exceeded after {chunks_ok} chunks" if quota_hit else None
+    )
 
 
 def _write_sync_log(job_name, started_at, status, inserted=0, error=None):
@@ -442,9 +554,16 @@ def run_nightly_deep_sync():
 
         except Exception as e:
             chunks_failed += 1
-            logger.error(f"  Chunk {cs}-{ce} error: {e}")
-            # Continue to next chunk — don't let one failure stop everything
-            _time.sleep(5)
+            err_str = str(e).lower()
+            if "quota" in err_str or "quotaexceeded" in err_str or "429" in err_str:
+                logger.warning(
+                    f"  Chunk {cs}-{ce}: QuotaExceeded — stopping nightly sync early. "
+                    f"Remaining {len(chunks) - chunk_idx - 1} chunks will run tomorrow."
+                )
+                break  # No point hammering more chunks — quota is exhausted
+            else:
+                logger.error(f"  Chunk {cs}-{ce} error: {e}")
+                _time.sleep(5)  # Brief pause before continuing to next chunk
 
         # Rate-limit: Amazon allows ~15 report requests per minute
         if chunk_idx < len(chunks) - 1:
