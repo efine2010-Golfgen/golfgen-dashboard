@@ -201,8 +201,13 @@ function funnelSVG(data) {
   const conv_ty   = sess_ty > 0 ? (ord_ty / sess_ty * 100).toFixed(2) : null;
   const conv_ly   = sess_ly > 0 ? (ord_ly / sess_ly * 100).toFixed(2) : null;
 
-  const maxVal = Math.max(data[0].ty, data[0].ly, 1);
-  const stageW = val => Math.max(maxFW * 0.14, (val / maxVal) * (maxFW * 0.94));
+  // TY bar width: normalized to first stage TY — drives the funnel shape
+  const maxVal = data[0].ty || 1;
+  const minW = maxFW * 0.10;
+  const tyW_fn  = val => Math.max(minW, (val / maxVal) * maxFW);
+  // LY bar width: proportional to TY width *within that row* so visual ratio is always correct
+  // e.g. TY=320, LY=240 → LY bar = 75% of TY bar regardless of absolute scale
+  const lyW_fn  = (ty, ly) => ty > 0 ? (ly / ty) * tyW_fn(ty) : tyW_fn(ly);
 
   let s = `<svg width="100%" viewBox="0 0 ${W} ${H}" style="overflow:visible;display:block">`;
   s += `<defs>${data.map((_,i) => `<linearGradient id="fg${i}" x1="0" y1="0" x2="1" y2="0"><stop offset="0%" stop-color="${B.b1}" stop-opacity=".92"/><stop offset="100%" stop-color="${B.b3}" stop-opacity=".92"/></linearGradient>`).join('')}</defs>`;
@@ -216,9 +221,11 @@ function funnelSVG(data) {
 
   // ── Funnel + table rows ───────────────────────────────────
   data.forEach((f, i) => {
-    const tyW = stageW(f.ty), lyW = stageW(f.ly);
-    const nextTyW = i < n - 1 ? stageW(data[i+1].ty) : tyW * 0.55;
-    const nextLyW = i < n - 1 ? stageW(data[i+1].ly) : lyW * 0.55;
+    const tyW  = tyW_fn(f.ty);
+    const lyW  = lyW_fn(f.ty, f.ly);
+    const nextF    = i < n - 1 ? data[i+1] : null;
+    const nextTyW  = nextF ? tyW_fn(nextF.ty)            : tyW  * 0.55;
+    const nextLyW  = nextF ? lyW_fn(nextF.ty, nextF.ly)  : lyW  * 0.55;
     const rowY  = padT + i * rowH;
     const segH  = rowH - 4;
     const rowMid = rowY + rowH / 2;
