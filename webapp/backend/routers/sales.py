@@ -750,16 +750,14 @@ def monthly_yoy(
         try:
             rows = con.execute(f"""
                 SELECT
-                    YEAR(TRY_CAST(date AS DATE)) AS yr,
-                    MONTH(TRY_CAST(date AS DATE)) AS mo,
+                    YEAR(date) AS yr,
+                    MONTH(date) AS mo,
                     COALESCE(SUM(ordered_product_sales), 0) AS revenue
                 FROM daily_sales
                 WHERE asin = 'ALL'
                   AND date IS NOT NULL
-                  AND date != ''
-                  AND TRY_CAST(date AS DATE) IS NOT NULL
-                  AND TRY_CAST(date AS DATE) >= '2024-01-01'{hf}
-                GROUP BY YEAR(TRY_CAST(date AS DATE)), MONTH(TRY_CAST(date AS DATE))
+                  AND date >= '2024-01-01'{hf}
+                GROUP BY YEAR(date), MONTH(date)
                 ORDER BY yr, mo
             """, hp).fetchall()
         except Exception as e:
