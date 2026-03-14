@@ -1351,9 +1351,14 @@ def auto_migrate_from_duckdb():
                     success += 1
                     continue
 
-                # Get column names
-                schema = duck_conn.execute(f"PRAGMA table_info('{table}')").fetchall()
-                columns = [col[1] for col in schema]
+                # Get column names (PRAGMA is DuckDB-specific; use DESCRIBE as fallback)
+                try:
+                    schema = duck_conn.execute(f"PRAGMA table_info('{table}')").fetchall()
+                    columns = [col[1] for col in schema]
+                except Exception:
+                    # Fallback: infer columns from a SELECT
+                    sample = duck_conn.execute(f"SELECT * FROM {table} LIMIT 1")
+                    columns = [desc[0] for desc in sample.description]
 
                 # Fetch all rows
                 rows = duck_conn.execute(f"SELECT * FROM {table}").fetchall()

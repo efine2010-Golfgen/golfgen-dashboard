@@ -1151,7 +1151,7 @@ def test_financial_parse():
                             try:
                                 parsed_fee = abs(float(v))
                                 break
-                            except:
+                            except (ValueError, TypeError):
                                 pass
                 fee_details.append({"fee_type": ft, "raw": str(fa)[:200], "parsed": parsed_fee})
 

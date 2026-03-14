@@ -190,11 +190,11 @@ async def upload_logistics(request: Request, file: UploadFile = File(...)):
 
     def _sr(v, n=2):
         try: return round(float(v), n)
-        except: return 0
+        except (ValueError, TypeError): return 0
 
     def _si(v):
         try: return int(float(v))
-        except: return 0
+        except (ValueError, TypeError): return 0
 
     _STOP_WORDS = {"SHIPMENT STATUS SUMMARY", "STATUS SUMMARY", "UPCOMING ARRIVALS",
                     "TOTAL", "TOTALS", "ITEM SUMMARY", "PO#"}

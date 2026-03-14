@@ -31,7 +31,7 @@ DOCS_DIR.mkdir(parents=True, exist_ok=True)
 
 # ── Environment & Sync Configuration ────────────────────
 SYNC_INTERVAL_HOURS = 2
-DASHBOARD_PASSWORD = "Golfgen2026"  # Legacy single-password fallback
+DASHBOARD_PASSWORD = os.environ.get("DASHBOARD_PASSWORD", "changeme")  # Set via Railway env vars
 TIMEZONE = ZoneInfo("America/Chicago")
 
 # ── Multi-User Authentication ──────────────────────────────

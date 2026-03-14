@@ -26,6 +26,16 @@ else
     done
 fi
 
+# ── Environment diagnostic (helps debug Railway env var injection) ──
+for _varname in DATABASE_URL SP_API_REFRESH_TOKEN GOOGLE_OAUTH_REFRESH_TOKEN BACKUP_DRIVE_FOLDER_ID DASHBOARD_PASSWORD; do
+  _val="${!_varname}"
+  if [ -n "$_val" ]; then
+    echo "INFO  [entrypoint] $_varname: SET (len=${#_val})"
+  else
+    echo "WARN  [entrypoint] $_varname: MISSING"
+  fi
+done
+
 echo "INFO  [entrypoint] Starting uvicorn on port ${PORT:-8000} ..."
 cd /app/webapp/backend
 exec uvicorn main:app --host 0.0.0.0 --port "${PORT:-8000}"

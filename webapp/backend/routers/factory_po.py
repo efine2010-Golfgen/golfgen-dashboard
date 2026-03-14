@@ -195,7 +195,7 @@ async def upload_factory_po(request: Request, file: UploadFile = File(...)):
         return str(dt) if dt else None
     def _sr(v):
         try: return round(float(v), 2)
-        except: return 0
+        except (ValueError, TypeError): return 0
     pos = []
     for i in range(7, len(rows)):
         cells = rows[i]

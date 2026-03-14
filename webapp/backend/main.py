@@ -24,8 +24,21 @@ from core.config import (
     SESSION_MAX_AGE_HOURS, SESSION_IDLE_TIMEOUT_HOURS,
 )
 from core.database import init_all_tables, auto_migrate_from_duckdb, get_db, get_db_rw
+from core.config import USE_POSTGRES, DATABASE_URL
 
 logger = logging.getLogger("golfgen")
+
+# ── Startup Diagnostics ──────────────────────────────────
+_env_keys = [
+    "DATABASE_URL", "DASHBOARD_PASSWORD",
+    "SP_API_REFRESH_TOKEN", "SP_API_CLIENT_ID",
+    "GOOGLE_OAUTH_REFRESH_TOKEN", "GOOGLE_OAUTH_CLIENT_ID",
+    "BACKUP_DRIVE_FOLDER_ID", "GOOGLE_SERVICE_ACCOUNT_JSON",
+]
+for _k in _env_keys:
+    _v = os.environ.get(_k, "")
+    logger.info(f"[STARTUP ENV] {_k}: {'SET' if _v else 'MISSING'} (len={len(_v)})")
+logger.info(f"[STARTUP] USE_POSTGRES={USE_POSTGRES}, DB_PATH={DB_PATH}")
 
 
 # ── Session & Permission Helpers ─────────────────────────
@@ -180,7 +193,10 @@ app = FastAPI(title="GolfGen Dashboard API", version="1.0.0", lifespan=lifespan)
 # ── CORS Middleware ──────────────────────────────────────
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:3000", "http://localhost:5173", "http://127.0.0.1:3000"],
+    allow_origins=[
+        "http://localhost:3000", "http://localhost:5173", "http://127.0.0.1:3000",
+        "https://golfgen-dashboard-production.up.railway.app",
+    ],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -214,8 +230,9 @@ async def tab_permission_middleware(request: Request, call_next):
     token = request.cookies.get("golfgen_session")
     try:
         sess = _get_session(token)
-    except Exception:
-        # DuckDB error (table not exist, lock, etc.) — let request through
+    except Exception as e:
+        # DB error (table not exist, lock, etc.) — let request through
+        logger.warning(f"Session lookup error (allowing request): {e}")
         return await call_next(request)
 
     if not sess:
@@ -239,8 +256,8 @@ async def tab_permission_middleware(request: Request, call_next):
                         status_code=403,
                         content={"detail": "You do not have access to this page"},
                     )
-            except Exception:
-                pass  # DuckDB error — allow through
+            except Exception as e:
+                logger.warning(f"Permission check error for {user_key}/{tab_key}: {e}")
 
     # ── MFA enforcement ──────────────────────────────────────
     # Skip MFA check for MFA endpoints themselves, auth, and static
@@ -265,8 +282,8 @@ async def tab_permission_middleware(request: Request, call_next):
                                 status_code=403,
                             )
                     # If user hasn't enrolled in MFA, let them through
-        except Exception:
-            pass  # MFA tables may not exist yet on first run
+        except Exception as e:
+            logger.debug(f"MFA check skipped: {e}")  # MFA tables may not exist yet
 
     return await call_next(request)
 
