@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, useMemo } from "react";
+import { useState, useEffect, useRef, useMemo, Fragment } from "react";
 import { api } from "../lib/api";
 
 // ── Status helpers ─────────────────────────────────────────────────────────────
@@ -936,6 +936,7 @@ function ItemsView({ itemPivot, containers, expandedRows, setExpandedRows, sortS
   }, [items, statusFilter, search, sortState]);
 
   const tu = filtered.reduce((s, r) => s + (r.total || 0), 0);
+  const tc = filtered.reduce((s, r) => s + (r.cbm  || 0), 0);
 
   return (
     <Card
@@ -965,7 +966,7 @@ function ItemsView({ itemPivot, containers, expandedRows, setExpandedRows, sortS
               const expTab = exp || 'po';
               const ctrList = Object.entries(item.containers || {});
               const ctrObjects = ctrList.map(([cid]) => containers.find(c => c.container_number === cid)).filter(Boolean);
-              // Group by PO, Container, Invoice
+              // Group by PO, Container, Invoice — track proportional CBM per SKU
               const byPO = {}, byCtr2 = {}, byInv2 = {};
               ctrList.forEach(([cid, units]) => {
                 const c = containers.find(ct => ct.container_number === cid);
@@ -973,27 +974,31 @@ function ItemsView({ itemPivot, containers, expandedRows, setExpandedRows, sortS
                 const po = c.po_number || '—';
                 const inv = c.invoice_number || '—';
                 const st = normStatus(c.status);
+                const propCbm = (c.units && c.cbm) ? (units / c.units) * c.cbm : 0;
                 // byPO
-                if (!byPO[po]) byPO[po] = { po, units: 0, containers: [], invoices: [], status: st };
+                if (!byPO[po]) byPO[po] = { po, units: 0, cbm: 0, containers: [], invoices: [], status: st };
                 byPO[po].units += units;
+                byPO[po].cbm  += propCbm;
                 if (!byPO[po].containers.includes(cid)) byPO[po].containers.push(cid);
                 if (inv !== '—' && !byPO[po].invoices.includes(inv)) byPO[po].invoices.push(inv);
                 if (st === 'transit') byPO[po].status = 'transit';
                 else if (st === 'open' && byPO[po].status === 'delivered') byPO[po].status = 'open';
                 // byCtr
-                if (!byCtr2[cid]) byCtr2[cid] = { cid, units: 0, pos: [], invoices: [], status: st, eta: c.container_eta };
+                if (!byCtr2[cid]) byCtr2[cid] = { cid, units: 0, cbm: 0, pos: [], invoices: [], status: st, eta: c.container_eta };
                 byCtr2[cid].units += units;
+                byCtr2[cid].cbm  += propCbm;
                 if (!byCtr2[cid].pos.includes(po)) byCtr2[cid].pos.push(po);
                 if (inv !== '—' && !byCtr2[cid].invoices.includes(inv)) byCtr2[cid].invoices.push(inv);
                 // byInv
-                if (!byInv2[inv]) byInv2[inv] = { inv, units: 0, pos: [], containers: [], status: st, eta: c.container_eta };
+                if (!byInv2[inv]) byInv2[inv] = { inv, units: 0, cbm: 0, pos: [], containers: [], status: st, eta: c.container_eta };
                 byInv2[inv].units += units;
+                byInv2[inv].cbm  += propCbm;
                 if (!byInv2[inv].pos.includes(po)) byInv2[inv].pos.push(po);
                 if (!byInv2[inv].containers.includes(cid)) byInv2[inv].containers.push(cid);
               });
               return (
-                <>
-                  <DataRow key={key}>
+                <Fragment key={key}>
+                  <DataRow>
                     <td style={{ ...TD0, fontFamily: "'Space Grotesk',monospace", color: 'var(--acc3)', fontWeight: 700 }}>{item.sku}</td>
                     <td style={{ ...TD0, maxWidth: 280, overflow: 'hidden', textOverflow: 'ellipsis' }}>{item.description}</td>
                     <td style={TD0}><StatusBadge status={item.status} /></td>
@@ -1023,19 +1028,20 @@ function ItemsView({ itemPivot, containers, expandedRows, setExpandedRows, sortS
                       </div>
                       {expTab === 'po' && (
                         <MiniTable
-                          headers={['PO #','Containers','Invoices','Status','Units']}
+                          headers={['PO #','Containers','Invoices','Status','Units','CBM']}
                           rows={Object.values(byPO).map(p => [
                             { content: p.po, style: { fontWeight: 700, color: 'var(--acc3)' } },
                             { content: p.containers.map(c => c === '—' ? '(unbooked)' : c.slice(0,11)).join(', '), style: { fontFamily: "'Space Grotesk',monospace", fontSize: 9, color: 'var(--txt3)' } },
                             { content: p.invoices.length ? p.invoices.join(', ') : '—', style: { fontFamily: "'Space Grotesk',monospace", fontSize: 9, color: 'var(--txt2)' } },
                             { content: <StatusBadge status={p.status} />, style: {} },
                             { content: fmtNum(p.units), style: { textAlign: 'right', fontWeight: 700, color: 'var(--txt)' } },
+                            { content: p.cbm > 0 ? p.cbm.toFixed(1) : '—', style: { textAlign: 'right', color: 'var(--txt3)' } },
                           ])}
                         />
                       )}
                       {expTab === 'container' && (
                         <MiniTable
-                          headers={['Container #','PO(s)','Invoice(s)','ETA','Status','Units']}
+                          headers={['Container #','PO(s)','Invoice(s)','ETA','Status','Units','CBM']}
                           rows={Object.entries(byCtr2).map(([cid, d]) => [
                             { content: cid === '—' ? '(unbooked)' : cid, style: { fontFamily: "'Space Grotesk',monospace", color: 'var(--acc3)' } },
                             { content: d.pos.join(', '), style: { fontWeight: 700, color: 'var(--txt)' } },
@@ -1043,12 +1049,13 @@ function ItemsView({ itemPivot, containers, expandedRows, setExpandedRows, sortS
                             { content: fmtDate(d.eta), style: { fontWeight: 600, color: 'var(--txt)' } },
                             { content: <StatusBadge status={d.status} />, style: {} },
                             { content: fmtNum(d.units), style: { textAlign: 'right', fontWeight: 700, color: 'var(--txt)' } },
+                            { content: d.cbm > 0 ? d.cbm.toFixed(1) : '—', style: { textAlign: 'right', color: 'var(--txt3)' } },
                           ])}
                         />
                       )}
                       {expTab === 'invoice' && (
                         <MiniTable
-                          headers={['Invoice #','PO(s)','Container(s)','ETA','Status','Units']}
+                          headers={['Invoice #','PO(s)','Container(s)','ETA','Status','Units','CBM']}
                           rows={Object.entries(byInv2).map(([inv, d]) => [
                             { content: inv, style: { fontFamily: "'Space Grotesk',monospace", color: 'var(--acc3)' } },
                             { content: d.pos.join(', '), style: { fontWeight: 700, color: 'var(--txt)' } },
@@ -1056,18 +1063,19 @@ function ItemsView({ itemPivot, containers, expandedRows, setExpandedRows, sortS
                             { content: fmtDate(d.eta), style: { fontWeight: 600, color: 'var(--txt)' } },
                             { content: <StatusBadge status={d.status} />, style: {} },
                             { content: fmtNum(d.units), style: { textAlign: 'right', fontWeight: 700, color: 'var(--txt)' } },
+                            { content: d.cbm > 0 ? d.cbm.toFixed(1) : '—', style: { textAlign: 'right', color: 'var(--txt3)' } },
                           ])}
                         />
                       )}
                     </ExpandPanel>
                   )}
-                </>
+                </Fragment>
               );
             })}
             <tr style={{ background: 'var(--card2)', fontFamily: "'Space Grotesk',monospace", fontSize: 11, fontWeight: 800, color: 'var(--txt)' }}>
               <td colSpan={3} style={{ padding: '10px 12px', borderTop: '1px solid var(--brd2)' }}>TOTAL — {filtered.length} SKUs</td>
               <td style={{ padding: '10px 12px', borderTop: '1px solid var(--brd2)', textAlign: 'right' }}>{fmtNum(tu)}</td>
-              <td style={{ padding: '10px 12px', borderTop: '1px solid var(--brd2)' }}/>
+              <td style={{ padding: '10px 12px', borderTop: '1px solid var(--brd2)', textAlign: 'right', color: 'var(--txt3)' }}>{tc > 0 ? tc.toFixed(1) : '—'}</td>
               <td style={{ padding: '10px 12px', borderTop: '1px solid var(--brd2)' }}/>
             </tr>
           </tbody>
