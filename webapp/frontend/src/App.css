@@ -1,6 +1,141 @@
-/* ── GolfGen Dashboard — Brand Colors (Light Theme) ────── */
-@import url('https://fonts.googleapis.com/css2?family=DM+Serif+Display&family=Sora:wght@400;500;600;700&family=Space+Grotesk:wght@400;500;600;700&display=swap');
+/* ═══════════════════════════════════════════════════════════
+   GOLFGEN THEME SYSTEM v3.0 — 6 themes via CSS custom properties
+   Teal #2ECFAA · Navy #0E1F2D · Orange #E87830 · Blue #3E658C
+   NO pure black · Header always hardcoded #0E1F2D
+   ═══════════════════════════════════════════════════════════ */
+@import url('https://fonts.googleapis.com/css2?family=DM+Serif+Display&family=Sora:wght@300;400;500;600;700&family=Space+Grotesk:wght@400;500;600;700&display=swap');
 
+/* ── MIDNIGHT (default) ─────────────────────────────────── */
+:root {
+  --bg:#07111f;  --hdr:#0E1F2D;  --surf:#0c1a2e;
+  --card:#112030; --card2:#1A2D42;
+  --brd:#1e3248;  --brd2:#2a4060;
+  --txt:#f0f8ff;  --txt2:#8daec8;  --txt3:#4d6d8a;
+  --acc1:#2ECFAA; --acc2:#E87830; --acc3:#3E658C;
+  --s1:#2ECFAA;   --s2:#3E658C;   --s3:#E87830;
+  --atab:#1a4060; --apill:#1a4060;
+  --kblue:#3E658C; --koran:#E87830; --kteal:#2ECFAA;
+  --ibg:rgba(255,255,255,.05);
+  --shad:0 4px 24px rgba(0,0,0,.45);
+  --btnbrd:rgba(255,255,255,.15);
+}
+/* ── NIGHT ──────────────────────────────────────────────── */
+body.night {
+  --bg:#0a1520;  --hdr:#0d1e2e;  --surf:#0f1e30;
+  --card:#132540; --card2:#1a304a;
+  --brd:#1e3850;  --brd2:#2a4a64;
+  --txt:#e8f4ff;  --txt2:#7090b0;  --txt3:#406080;
+  --acc1:#2ECFAA; --acc2:#E87830; --acc3:#3E658C;
+  --s1:#2ECFAA;   --s2:#3E658C;   --s3:#E87830;
+  --atab:#0d4535; --apill:#0d4535;
+  --kblue:#2ECFAA; --koran:#E87830; --kteal:#2ECFAA;
+  --ibg:rgba(255,255,255,.06);
+  --shad:0 4px 32px rgba(0,0,0,.55);
+  --btnbrd:rgba(255,255,255,.15);
+}
+/* ── FAIRWAY ────────────────────────────────────────────── */
+body.fairway {
+  --bg:#101820;  --hdr:#0E1F2D;  --surf:#141e28;
+  --card:#1a2a38; --card2:#202e3c;
+  --brd:#2a3d50;  --brd2:#364d62;
+  --txt:#ddeeff;  --txt2:#8aaccb;  --txt3:#5a7a98;
+  --acc1:#2ECFAA; --acc2:#E87830; --acc3:#3E658C;
+  --s1:#E87830;   --s2:#F5B731;   --s3:#2ECFAA;
+  --atab:#2a4a2a; --apill:#2a4a2a;
+  --kblue:#90c8e8; --koran:#E87830; --kteal:#2ECFAA;
+  --ibg:rgba(255,255,255,.06);
+  --shad:0 4px 24px rgba(0,0,0,.4);
+  --btnbrd:rgba(255,255,255,.15);
+}
+/* ── SLATE ──────────────────────────────────────────────── */
+body.slate {
+  --bg:#e8eef6;  --hdr:#0E1F2D;  --surf:#ffffff;
+  --card:#ffffff; --card2:#f0f4fa;
+  --brd:#d8e2ee;  --brd2:#c0cedf;
+  --txt:#0E1F2D;  --txt2:#3a5472;  --txt3:#6a88a8;
+  --acc1:#2ECFAA; --acc2:#E87830; --acc3:#3E658C;
+  --s1:#2ECFAA;   --s2:#3E658C;   --s3:#E87830;
+  --atab:#3E658C; --apill:#3E658C;
+  --kblue:#3E658C; --koran:#E87830; --kteal:#0E1F2D;
+  --ibg:#f4f8fc;
+  --shad:0 2px 16px rgba(14,31,45,.12);
+  --btnbrd:#c0cedf;
+}
+/* ── WARM ───────────────────────────────────────────────── */
+body.warm {
+  --bg:#f5efe8;  --hdr:#0E1F2D;  --surf:#ffffff;
+  --card:#ffffff; --card2:#faf4ed;
+  --brd:#e4d8cc;  --brd2:#d0bfb0;
+  --txt:#1e1008;  --txt2:#5e4030;  --txt3:#9a7860;
+  --acc1:#2ECFAA; --acc2:#E87830; --acc3:#3E658C;
+  --s1:#E87830;   --s2:#F5B731;   --s3:#2ECFAA;
+  --atab:#7a3010; --apill:#7a3010;
+  --kblue:#3E658C; --koran:#E87830; --kteal:#0E1F2D;
+  --ibg:#faf4ed;
+  --shad:0 2px 16px rgba(30,16,8,.10);
+  --btnbrd:#d0bfb0;
+}
+/* ── FRESH ──────────────────────────────────────────────── */
+body.fresh {
+  --bg:#eaf4ef;  --hdr:#0E1F2D;  --surf:#ffffff;
+  --card:#ffffff; --card2:#e8f5ef;
+  --brd:#c8e4d8;  --brd2:#a8cfc0;
+  --txt:#071e10;  --txt2:#285040;  --txt3:#5a9078;
+  --acc1:#2ECFAA; --acc2:#E87830; --acc3:#3E658C;
+  --s1:#2ECFAA;   --s2:#3E658C;   --s3:#E87830;
+  --atab:#0a4030; --apill:#0a4030;
+  --kblue:#3E658C; --koran:#E87830; --kteal:#071e10;
+  --ibg:#e8f5ef;
+  --shad:0 2px 16px rgba(7,30,16,.09);
+  --btnbrd:#a8cfc0;
+}
+
+/* ── HEADER — always navy #0E1F2D ───────────────────────── */
+.hdr { background:#0E1F2D; position:sticky; top:0; z-index:100; box-shadow:var(--shad); }
+.hdr-inner { display:flex; align-items:center; padding:0 20px; height:64px; gap:14px; }
+.hdr-mid { flex:1; display:flex; flex-direction:column; align-items:center; justify-content:center; gap:1px; }
+.hdr-title { font-family:'Sora',sans-serif; font-size:14px; font-weight:700; color:rgba(255,255,255,.92); letter-spacing:.02em; }
+.hdr-sub { font-family:'Space Grotesk',monospace; font-size:9px; font-weight:500; letter-spacing:.16em; color:#2ECFAA; text-transform:uppercase; }
+.hdr-right { display:flex; align-items:center; gap:10px; flex-shrink:0; }
+.hdr-div { width:1px; height:26px; background:rgba(255,255,255,.12); flex-shrink:0; }
+.user-badge { display:flex; align-items:center; gap:7px; white-space:nowrap; }
+.user-name-hdr { font-size:12px; font-weight:600; color:rgba(255,255,255,.85); }
+.admin-pill { padding:2px 7px; border-radius:99px; background:#E87830; color:#fff; font-size:9px; font-weight:800; letter-spacing:.06em; font-family:'Space Grotesk',monospace; }
+.hdr-btn-grid { display:grid; grid-template-columns:1fr 1fr; gap:3px; }
+.hnav { padding:3px 9px; border-radius:5px; font-size:9px; font-weight:600; font-family:'Sora',sans-serif; border:1px solid rgba(255,255,255,.15); background:transparent; color:rgba(255,255,255,.55); cursor:pointer; white-space:nowrap; transition:all .15s; text-align:center; text-decoration:none; display:inline-flex; align-items:center; justify-content:center; }
+.hnav:hover { border-color:#2ECFAA; color:#2ECFAA; }
+.hnav.live { background:#E87830; color:#fff; border-color:#E87830; font-weight:700; cursor:default; }
+.hnav-hidden { visibility:hidden; }
+.stripe { height:3px; background:linear-gradient(90deg,var(--s1),var(--s2),var(--s3)); transition:background .35s; }
+
+/* ── FILTER BAR ─────────────────────────────────────────── */
+.filter-bar { background:var(--surf); border-bottom:1px solid var(--brd); padding:6px 20px; display:flex; align-items:center; gap:10px; transition:background .3s; }
+.filter-lbl { font-family:'Space Grotesk',monospace; font-size:10px; font-weight:600; text-transform:uppercase; letter-spacing:.08em; color:var(--txt3); white-space:nowrap; }
+
+/* ── SUB-NAV ────────────────────────────────────────────── */
+.subnav { background:var(--surf); border-bottom:1px solid var(--brd); padding:0 20px; display:flex; align-items:center; height:40px; overflow-x:auto; transition:background .3s; }
+.snbtn { display:flex; align-items:center; padding:0 13px; height:100%; font-size:12px; font-weight:600; font-family:'Sora',sans-serif; color:var(--txt2); border:none; background:transparent; cursor:pointer; border-bottom:2px solid transparent; transition:all .15s; white-space:nowrap; }
+.snbtn.active { color:var(--acc1); border-bottom-color:var(--acc1); }
+.snbtn:hover:not(.active) { color:var(--txt); }
+.sn-div { width:1px; height:16px; background:var(--brd); flex-shrink:0; }
+.subnav-sub { height:34px; }
+
+/* ── PAGE & THEME BANNER ────────────────────────────────── */
+.page { padding:20px 24px; max-width:1440px; margin:0 auto; }
+.theme-banner { display:flex; align-items:center; gap:14px; padding:7px 14px; background:var(--card); border:1px solid var(--brd); border-radius:10px; margin-bottom:16px; transition:background .3s; flex-wrap:wrap; }
+.theme-swatch { width:22px; height:22px; border-radius:5px; flex-shrink:0; border:1px solid var(--brd2); }
+.theme-info { flex:0 0 auto; min-width:180px; }
+.theme-name { font-family:'DM Serif Display',Georgia,serif; font-size:13px; color:var(--acc1); }
+.theme-desc { font-size:10px; color:var(--txt3); margin-top:1px; font-family:'Sora',sans-serif; }
+.theme-groups { display:flex; align-items:center; gap:10px; margin-left:auto; flex-wrap:wrap; }
+.theme-group { display:flex; align-items:center; gap:4px; }
+.tg-label { font-family:'Space Grotesk',monospace; font-size:7px; font-weight:700; text-transform:uppercase; letter-spacing:.12em; color:var(--txt3); white-space:nowrap; border-right:1px solid var(--brd); padding-right:6px; margin-right:1px; }
+.tbtn { padding:3px 9px; border-radius:6px; font-size:10px; font-weight:700; font-family:'Sora',sans-serif; border:1px solid var(--brd2); background:transparent; color:var(--txt2); cursor:pointer; transition:all .15s; white-space:nowrap; }
+.tbtn:hover { border-color:var(--acc1); color:var(--acc1); }
+.tbtn.active { background:var(--acc1); border-color:var(--acc1); color:#0E1F2D; font-weight:800; }
+.tg-divider { width:1px; height:20px; background:var(--brd); flex-shrink:0; }
+
+/* ── GolfGen Dashboard — Brand Colors (kept for page components) ── */
 :root {
   --teal: #2ECFAA;
   --teal-dark: #22A387;
@@ -31,9 +166,10 @@
 
 body {
   font-family: 'Sora', system-ui, -apple-system, sans-serif;
-  background: var(--off-white);
-  color: var(--body-text);
+  background: var(--bg);
+  color: var(--txt);
   line-height: 1.5;
+  transition: background .3s, color .3s;
 }
 
 /* ── Sticky Header Wrapper ────────────────────────────── */

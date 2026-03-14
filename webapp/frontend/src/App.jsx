@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef } from "react";
 import { BrowserRouter, Routes, Route, useLocation, useNavigate, Navigate } from "react-router-dom";
 import { api } from "./lib/api";
+import { ThemeProvider, useTheme } from "./context/ThemeContext";
 import Login from "./pages/Login";
 import Dashboard from "./pages/Dashboard";
 import Profitability from "./pages/Profitability";
@@ -80,7 +81,6 @@ const CATEGORIES = [
   },
 ];
 
-// Build a flat map of path -> category key for auto-detecting active category
 function detectCategory(pathname) {
   for (const cat of CATEGORIES) {
     for (const v of cat.views) {
@@ -92,30 +92,57 @@ function detectCategory(pathname) {
   return "exec-summary";
 }
 
-/* ── Dropdown + View Tabs Navigation ── */
+/* ── Theme Banner ── */
+function ThemeBanner() {
+  const { theme, setTheme, themes } = useTheme();
+  return (
+    <div className="theme-banner">
+      <div className="theme-swatch" style={{ background: themes[theme].sw }} />
+      <div className="theme-info">
+        <div className="theme-name">{themes[theme].name}</div>
+        <div className="theme-desc">{themes[theme].desc}</div>
+      </div>
+      <div className="theme-groups">
+        <div className="theme-group">
+          <span className="tg-label">Dark</span>
+          {['midnight', 'night', 'fairway'].map(t => (
+            <button
+              key={t}
+              className={`tbtn${theme === t ? ' active' : ''}`}
+              onClick={() => setTheme(t)}
+            >
+              {themes[t].name}
+            </button>
+          ))}
+        </div>
+        <div className="tg-divider" />
+        <div className="theme-group">
+          <span className="tg-label">Light</span>
+          {['slate', 'warm', 'fresh'].map(t => (
+            <button
+              key={t}
+              className={`tbtn${theme === t ? ' active' : ''}`}
+              onClick={() => setTheme(t)}
+            >
+              {themes[t].name}
+            </button>
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/* ── Navigation (subnav bar + sub-views row) ── */
 function NavSystem({ permissions, mfaProtected, userMfaEnabled }) {
   const location = useLocation();
   const navigate = useNavigate();
-  const [dropdownOpen, setDropdownOpen] = useState(false);
-  const dropdownRef = useRef(null);
   const detected = detectCategory(location.pathname);
   const [activeCategory, setActiveCategory] = useState(detected);
 
-  // Sync category when route changes externally
   useEffect(() => {
     setActiveCategory(detectCategory(location.pathname));
   }, [location.pathname]);
-
-  // Close dropdown on outside click
-  useEffect(() => {
-    const handler = (e) => {
-      if (dropdownRef.current && !dropdownRef.current.contains(e.target)) {
-        setDropdownOpen(false);
-      }
-    };
-    document.addEventListener("mousedown", handler);
-    return () => document.removeEventListener("mousedown", handler);
-  }, []);
 
   const allowed = permissions || {};
   const isViewVisible = (v) => {
@@ -129,12 +156,8 @@ function NavSystem({ permissions, mfaProtected, userMfaEnabled }) {
 
   const handleCategorySelect = (cat) => {
     setActiveCategory(cat.key);
-    setDropdownOpen(false);
-    // Navigate to the first view of the category
     const firstVisible = cat.views.find(v => isViewVisible(v));
-    if (firstVisible) {
-      navigate(firstVisible.path);
-    }
+    if (firstVisible) navigate(firstVisible.path);
   };
 
   const handleViewClick = (v) => {
@@ -142,51 +165,148 @@ function NavSystem({ permissions, mfaProtected, userMfaEnabled }) {
   };
 
   return (
-    <nav className="nav-bar-unified">
-      <div className="nav-inner-unified">
-        {/* Category Dropdown */}
-        <div className="category-dropdown" ref={dropdownRef}>
-          <button className="category-dropdown-btn" onClick={() => setDropdownOpen(!dropdownOpen)}>
-            {activeCat.label}
-            <span className="dropdown-arrow">{dropdownOpen ? "▴" : "▾"}</span>
-          </button>
-          {dropdownOpen && (
-            <div className="category-dropdown-menu">
-              {CATEGORIES.map(cat => (
-                <button
-                  key={cat.key}
-                  className={`category-dropdown-item ${cat.key === activeCategory ? "active" : ""}`}
-                  onClick={() => handleCategorySelect(cat)}
-                >
-                  {cat.label}
-                </button>
-              ))}
-            </div>
-          )}
-        </div>
+    <>
+      {/* Primary: category tabs */}
+      <nav className="subnav">
+        {CATEGORIES.map((cat, i) => {
+          const hasVisible = cat.views.some(v => isViewVisible(v));
+          if (!hasVisible) return null;
+          return (
+            <span key={cat.key} style={{ display: 'contents' }}>
+              {i > 0 && <div className="sn-div" />}
+              <button
+                className={`snbtn${activeCategory === cat.key ? ' active' : ''}`}
+                onClick={() => handleCategorySelect(cat)}
+              >
+                {cat.label}
+              </button>
+            </span>
+          );
+        })}
+      </nav>
 
-        {/* View Tabs for Selected Category */}
-        {visibleViews.length > 1 && (
-          <div className="view-tabs">
-            {visibleViews.map(v => {
-              const isActive = location.pathname === v.path || (v.end && location.pathname === "/");
-              return (
+      {/* Secondary: sub-views for current category (only when > 1 view) */}
+      {visibleViews.length > 1 && (
+        <nav className="subnav subnav-sub" style={{ background: 'var(--card)', borderBottom: '1px solid var(--brd2)' }}>
+          {visibleViews.map((v, i) => {
+            const isActive = location.pathname === v.path;
+            return (
+              <span key={v.key} style={{ display: 'contents' }}>
+                {i > 0 && <div className="sn-div" />}
                 <button
-                  key={v.key}
-                  className={`view-tab ${isActive ? "active" : ""}`}
+                  className={`snbtn${isActive ? ' active' : ''}`}
+                  style={{ fontSize: 11 }}
                   onClick={() => handleViewClick(v)}
                 >
                   {v.label}
                 </button>
-              );
-            })}
-          </div>
-        )}
-      </div>
-    </nav>
+              </span>
+            );
+          })}
+        </nav>
+      )}
+    </>
   );
 }
 
+/* ── App Shell ── */
+function AppShell({ user, isAdmin, allowed, mfaProtected, userMfaEnabled, filters, division, customer, handleFilterChange, handleLogout }) {
+  return (
+    <div className="app">
+      {/* ── Sticky header wrapper ── */}
+      <div className="sticky-header-wrapper">
+
+        {/* ── Header ── */}
+        <div className="hdr">
+          <div className="hdr-inner">
+
+            {/* LEFT: existing logo — DO NOT CHANGE */}
+            <div className="header-brand">
+              <div className="brand-logo">
+                <span className="golf">Golf</span>
+                <span className="gen">Gen</span>
+              </div>
+              <div className="brand-tagline">GOLF FOR EVERYONE. SERIOUSLY EVERYONE.</div>
+            </div>
+
+            {/* CENTER: title block */}
+            <div className="hdr-mid">
+              <div className="hdr-title">GolfGen / EGB Analytics</div>
+              <div className="hdr-sub">Performance Dashboard</div>
+            </div>
+
+            {/* RIGHT: user badge | divider | 2×3 button grid */}
+            <div className="hdr-right">
+              {user && (
+                <div className="user-badge">
+                  <span className="user-name-hdr">{user.name}</span>
+                  {isAdmin && <span className="admin-pill">ADMIN</span>}
+                </div>
+              )}
+              <div className="hdr-div" />
+              <div className="hdr-btn-grid">
+                <a href="/account/security/mfa-setup" className="hnav">MFA Setup</a>
+                {isAdmin
+                  ? <a href="/permissions" className="hnav">Permissions</a>
+                  : <span className="hnav hnav-hidden" />
+                }
+                {isAdmin
+                  ? <a href="/system" className="hnav">System</a>
+                  : <span className="hnav hnav-hidden" />
+                }
+                {isAdmin
+                  ? <a href="/audit-log" className="hnav">Audit Log</a>
+                  : <span className="hnav hnav-hidden" />
+                }
+                <button className="hnav" onClick={handleLogout}>Sign Out</button>
+                <span className="hnav live">LIVE DATA</span>
+              </div>
+            </div>
+
+          </div>
+          <div className="stripe" />
+        </div>
+
+        {/* ── Filter Bar ── */}
+        <div className="filter-bar">
+          <span className="filter-lbl">View:</span>
+          <HierarchyFilter division={division} customer={customer} onChange={handleFilterChange} compact />
+        </div>
+
+        {/* ── Sub-nav ── */}
+        <NavSystem permissions={allowed} mfaProtected={mfaProtected} userMfaEnabled={userMfaEnabled} />
+
+      </div>
+
+      {/* ── Main Content ── */}
+      <main className="page">
+        <ThemeBanner />
+        <Routes>
+          {allowed["dashboard"] !== false && <Route path="/" element={<Dashboard filters={filters} />} />}
+          <Route path="/sales" element={<Sales />} />
+          {allowed["products"] !== false && <Route path="/products" element={<Products filters={filters} />} />}
+          {allowed["profitability"] !== false && <Route path="/profitability" element={<Profitability filters={filters} />} />}
+          {allowed["inventory"] !== false && <Route path="/inventory" element={<Inventory filters={filters} />} />}
+          {allowed["golfgen-inventory"] !== false && <Route path="/golfgen-inventory" element={<GolfGenInventory filters={filters} />} />}
+          {allowed["advertising"] !== false && <Route path="/advertising" element={<Advertising filters={filters} />} />}
+          {allowed["item-master"] !== false && <Route path="/item-master" element={<ItemMaster filters={filters} />} />}
+          {allowed["factory-po"] !== false && <Route path="/factory-po" element={<FactoryPO />} />}
+          {allowed["logistics"] !== false && <Route path="/logistics" element={<LogisticsTracking />} />}
+          {allowed["supply-chain"] !== false && <Route path="/supply-chain" element={<SupplyChain />} />}
+          {allowed["fba-shipments"] !== false && <Route path="/fba-shipments" element={<FBAShipments />} />}
+          {allowed["item-planning"] !== false && <Route path="/item-planning" element={<ItemPlanning />} />}
+          <Route path="/account/security/mfa-setup" element={<MfaSetup />} />
+          {isAdmin && <Route path="/permissions" element={<Permissions />} />}
+          {isAdmin && <Route path="/system" element={<System />} />}
+          {isAdmin && <Route path="/audit-log" element={<AuditLog />} />}
+          <Route path="*" element={<Navigate to="/" replace />} />
+        </Routes>
+      </main>
+    </div>
+  );
+}
+
+/* ── Root App ── */
 export default function App() {
   const [authed, setAuthed] = useState(null);
   const [user, setUser] = useState(null);
@@ -195,7 +315,6 @@ export default function App() {
   const [mfaProtected, setMfaProtected] = useState({});
   const [userMfaEnabled, setUserMfaEnabled] = useState(false);
 
-  // Global hierarchy filter state
   const [division, setDivision] = useState("");
   const [customer, setCustomer] = useState("");
   const handleFilterChange = ({ division: d, customer: c }) => {
@@ -255,11 +374,19 @@ export default function App() {
   }
 
   if (!authed) {
-    return <Login onLogin={() => loadUserData()} />;
+    return (
+      <ThemeProvider>
+        <Login onLogin={() => loadUserData()} />
+      </ThemeProvider>
+    );
   }
 
   if (mfaNeeded) {
-    return <MfaVerify onVerified={() => { setMfaNeeded(false); loadMfaState(); }} />;
+    return (
+      <ThemeProvider>
+        <MfaVerify onVerified={() => { setMfaNeeded(false); loadMfaState(); }} />
+      </ThemeProvider>
+    );
   }
 
   const handleLogout = async () => {
@@ -276,87 +403,21 @@ export default function App() {
   const allowed = permissions || {};
 
   return (
-    <BrowserRouter>
-      <div className="app">
-        {/* ── Sticky Header + Nav ── */}
-        <div className="sticky-header-wrapper">
-          <header className="header">
-            <div className="header-inner">
-              {/* Left: Logo */}
-              <div className="header-brand">
-                <div className="brand-logo">
-                  <span className="golf">Golf</span>
-                  <span className="gen">Gen</span>
-                </div>
-                <div className="brand-tagline">GOLF FOR EVERYONE. SERIOUSLY EVERYONE.</div>
-              </div>
-
-              {/* Center: Title + Filters */}
-              <div className="header-center">
-                <div className="brand-title">
-                  <h1>Golfgen/EGB Analytics</h1>
-                </div>
-                <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
-                  <HierarchyFilter division={division} customer={customer} onChange={handleFilterChange} compact />
-                  {user && <span className="user-name">{user.name}{isAdmin && <span className="admin-badge">Admin</span>}</span>}
-                </div>
-              </div>
-
-              {/* Right: Buttons Grid */}
-              <div className="header-right">
-                <div className="header-buttons-grid">
-                  <a href="/account/security/mfa-setup" className="header-grid-btn">MFA Setup</a>
-                  {isAdmin ? (
-                    <a href="/permissions" className="header-grid-btn">Permissions</a>
-                  ) : (
-                    <span className="header-grid-btn header-grid-btn-hidden"></span>
-                  )}
-                  {isAdmin ? (
-                    <a href="/system" className="header-grid-btn">System</a>
-                  ) : (
-                    <span className="header-grid-btn header-grid-btn-hidden"></span>
-                  )}
-                  {isAdmin && (
-                    <a href="/audit-log" className="header-grid-btn">Audit Log</a>
-                  )}
-                  <button className="header-grid-btn header-grid-btn-signout" onClick={handleLogout}>Sign Out</button>
-                </div>
-                <div className="live-badge-row">
-                  <span className="live-badge header-grid-btn">LIVE DATA</span>
-                </div>
-              </div>
-            </div>
-            <div className="gradient-bar" />
-          </header>
-
-          {/* ── Navigation (single row with dropdown + view tabs) ── */}
-          <NavSystem permissions={allowed} mfaProtected={mfaProtected} userMfaEnabled={userMfaEnabled} />
-        </div>
-
-        {/* ── Main Content ── */}
-        <main className="main-content">
-          <Routes>
-            {allowed["dashboard"] !== false && <Route path="/" element={<Dashboard filters={filters} />} />}
-            <Route path="/sales" element={<Sales />} />
-            {allowed["products"] !== false && <Route path="/products" element={<Products filters={filters} />} />}
-            {allowed["profitability"] !== false && <Route path="/profitability" element={<Profitability filters={filters} />} />}
-            {allowed["inventory"] !== false && <Route path="/inventory" element={<Inventory filters={filters} />} />}
-            {allowed["golfgen-inventory"] !== false && <Route path="/golfgen-inventory" element={<GolfGenInventory filters={filters} />} />}
-            {allowed["advertising"] !== false && <Route path="/advertising" element={<Advertising filters={filters} />} />}
-            {allowed["item-master"] !== false && <Route path="/item-master" element={<ItemMaster filters={filters} />} />}
-            {allowed["factory-po"] !== false && <Route path="/factory-po" element={<FactoryPO />} />}
-            {allowed["logistics"] !== false && <Route path="/logistics" element={<LogisticsTracking />} />}
-            {allowed["supply-chain"] !== false && <Route path="/supply-chain" element={<SupplyChain />} />}
-            {allowed["fba-shipments"] !== false && <Route path="/fba-shipments" element={<FBAShipments />} />}
-            {allowed["item-planning"] !== false && <Route path="/item-planning" element={<ItemPlanning />} />}
-            <Route path="/account/security/mfa-setup" element={<MfaSetup />} />
-            {isAdmin && <Route path="/permissions" element={<Permissions />} />}
-            {isAdmin && <Route path="/system" element={<System />} />}
-            {isAdmin && <Route path="/audit-log" element={<AuditLog />} />}
-            <Route path="*" element={<Navigate to="/" replace />} />
-          </Routes>
-        </main>
-      </div>
-    </BrowserRouter>
+    <ThemeProvider>
+      <BrowserRouter>
+        <AppShell
+          user={user}
+          isAdmin={isAdmin}
+          allowed={allowed}
+          mfaProtected={mfaProtected}
+          userMfaEnabled={userMfaEnabled}
+          filters={filters}
+          division={division}
+          customer={customer}
+          handleFilterChange={handleFilterChange}
+          handleLogout={handleLogout}
+        />
+      </BrowserRouter>
+    </ThemeProvider>
   );
 }

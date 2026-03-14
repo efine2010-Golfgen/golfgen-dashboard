@@ -66,9 +66,9 @@ export default function HierarchyFilter({ division, customer, onChange, compact 
   const selectStyle = {
     padding: compact ? "4px 8px" : "6px 12px",
     borderRadius: 6,
-    border: "1px solid #334155",
-    background: "#1e293b",
-    color: "#e2e8f0",
+    border: "1px solid var(--brd)",
+    background: "var(--ibg)",
+    color: "var(--txt2)",
     fontSize: compact ? 12 : 13,
     cursor: "pointer",
     outline: "none",
