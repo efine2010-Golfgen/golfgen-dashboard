@@ -376,7 +376,8 @@ async def _sync_loop():
         await loop.run_in_executor(None, run_full_rollup)
         logger.info("Startup: analytics rollup completed — analytics tables populated")
     except Exception as e:
-        logger.error(f"Startup analytics rollup error: {e}")
+        import traceback
+        logger.error(f"Startup analytics rollup error: {e}\n{traceback.format_exc()}")
 
     # Initialize APScheduler
     if not scheduler:

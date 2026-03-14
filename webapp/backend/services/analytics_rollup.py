@@ -426,12 +426,20 @@ def run_full_rollup():
         daily_total = 0
         for i in range(1, 8):
             target = (now - timedelta(days=i)).date()
-            daily_total += run_daily_rollup(con, target)
+            try:
+                daily_total += run_daily_rollup(con, target)
+            except Exception as e:
+                import traceback
+                logger.error(f"Daily rollup failed for {target}: {e}\n{traceback.format_exc()}")
 
         # Stage 3: Roll up SKU performance for all periods
         sku_total = 0
         for period in ['last_7d', 'last_30d', 'last_90d']:
-            sku_total += run_sku_rollup(con, period)
+            try:
+                sku_total += run_sku_rollup(con, period)
+            except Exception as e:
+                import traceback
+                logger.error(f"SKU rollup failed for {period}: {e}\n{traceback.format_exc()}")
 
         logger.info("Full analytics rollup complete")
         return {"daily_rows": daily_total, "sku_rows": sku_total,
