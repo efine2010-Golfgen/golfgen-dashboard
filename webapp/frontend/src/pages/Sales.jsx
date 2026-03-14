@@ -151,15 +151,22 @@ function heatmapSVG(data, W=1100) {
   const padL=36,padT=18,padR=8,padB=8,cellH=26;
   const cellW = Math.floor((W-padL-padR)/WEEKS);
   const svgW = padL+WEEKS*cellW+padR, svgH = padT+7*cellH+padB;
+  // Build lookup for fast access: "week,day" -> units
+  const lookup = {};
+  data.forEach(({week,day,units}) => { lookup[`${week},${day}`] = units||0; });
   let s = `<svg width="100%" viewBox="0 0 ${svgW} ${svgH}" style="overflow:visible;display:block">`;
   Array.from({length:WEEKS},(_,w) => { if(w%4===0||w===WEEKS-1) s+=`<text x="${padL+(w+.5)*cellW}" y="${padT-5}" text-anchor="middle" font-size="8" fill="${B.sub}">W${WEEKS-w}</text>`; });
   DAYS.forEach((d,i) => s+=`<text x="${padL-3}" y="${padT+(i+.5)*cellH+4}" text-anchor="end" font-size="9" fill="${B.sub}">${d}</text>`);
-  data.forEach(({week,day,units}) => {
-    const alpha = mx > 0 ? Math.max(0.07, Math.min(0.9, (units||0)/mx)).toFixed(2) : '0.07';
-    const c = day >= 5 ? B.o2 : B.b2;
-    s += `<rect x="${(padL+week*cellW+2).toFixed(1)}" y="${(padT+day*cellH+2).toFixed(1)}" width="${(cellW-4).toFixed(1)}" height="${(cellH-4).toFixed(1)}" rx="3" fill="${c}" fill-opacity="${alpha}"/>`;
-    if ((units||0)/mx > 0.68) s += `<text x="${(padL+(week+.5)*cellW).toFixed(1)}" y="${(padT+(day+.5)*cellH+3.5).toFixed(1)}" text-anchor="middle" font-size="7" fill="white" opacity=".85">${units}</text>`;
-  });
+  // Draw full 26×7 grid — background cells always visible, data cells scaled by max
+  for (let w=0; w<WEEKS; w++) {
+    for (let d=0; d<7; d++) {
+      const units = lookup[`${w},${d}`] || 0;
+      const alpha = mx > 0 ? Math.max(0.05, Math.min(0.9, units/mx)).toFixed(2) : '0.05';
+      const c = d >= 5 ? B.o2 : B.b2;
+      s += `<rect x="${(padL+w*cellW+2).toFixed(1)}" y="${(padT+d*cellH+2).toFixed(1)}" width="${(cellW-4).toFixed(1)}" height="${(cellH-4).toFixed(1)}" rx="3" fill="${c}" fill-opacity="${alpha}"/>`;
+      if (mx > 0 && units/mx > 0.68) s += `<text x="${(padL+(w+.5)*cellW).toFixed(1)}" y="${(padT+(d+.5)*cellH+3.5).toFixed(1)}" text-anchor="middle" font-size="7" fill="white" opacity=".85">${units}</text>`;
+    }
+  }
   return s + '</svg>';
 }
 

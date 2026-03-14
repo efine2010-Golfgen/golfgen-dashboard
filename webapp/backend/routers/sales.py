@@ -725,22 +725,29 @@ def sales_period_comparison(
             ly_sd = sd - timedelta(days=364)
             ly_ed = ed - timedelta(days=364)
             ly_sales, ly_units, ly_sessions, ly_gv = _daily_sales_sum(ly_sd, ly_ed, hp)
-            # True order count from orders table (always most current)
+            # True order count from orders table — use ISO datetime bounds (same as
+            # _orders_supplement) so VARCHAR purchase_date comparison works correctly.
+            def _iso_bounds(s, e):
+                s_iso = datetime(s.year, s.month, s.day, 0, 0, 0, tzinfo=CENTRAL).isoformat()
+                e_iso = datetime(e.year, e.month, e.day, 23, 59, 59, tzinfo=CENTRAL).isoformat()
+                return s_iso, e_iso
             try:
+                s_iso, e_iso = _iso_bounds(sd, ed)
                 o_row = con.execute(f"""
                     SELECT COUNT(DISTINCT order_id)
                     FROM orders
                     WHERE purchase_date >= ? AND purchase_date <= ? {hw}
-                """, [str(sd), str(ed)] + hp).fetchone()
+                """, [s_iso, e_iso] + hp).fetchone()
                 orders = int(o_row[0]) if o_row and o_row[0] else (units if units else 0)
             except Exception:
                 orders = units
             try:
+                ly_s_iso, ly_e_iso = _iso_bounds(ly_sd, ly_ed)
                 ly_o_row = con.execute(f"""
                     SELECT COUNT(DISTINCT order_id)
                     FROM orders
                     WHERE purchase_date >= ? AND purchase_date <= ? {hw}
-                """, [str(ly_sd), str(ly_ed)] + hp).fetchone()
+                """, [ly_s_iso, ly_e_iso] + hp).fetchone()
                 ly_orders = int(ly_o_row[0]) if ly_o_row and ly_o_row[0] else ly_units
             except Exception:
                 ly_orders = ly_units
@@ -958,21 +965,15 @@ def sales_heatmap(
         today = _today_central()
         start_date = today - timedelta(weeks=26)
 
+        # Use per-ASIN rows for comprehensive 26-week coverage.
+        # asin='ALL' aggregates only exist for the most recent ~14 days (S&T report lag),
+        # so using them would leave 24 of 26 weeks blank.
         rows = con.execute(f"""
             SELECT date, COALESCE(SUM(units_ordered), 0)
             FROM daily_sales
-            WHERE asin = 'ALL' AND date >= ? AND date <= ? {hw}
+            WHERE asin != 'ALL' AND date >= ? AND date <= ? {hw}
             GROUP BY date ORDER BY date
         """, [str(start_date), str(today)] + hp).fetchall()
-        # Fallback: if no ALL-aggregate rows, or all rows have 0 units, sum individual ASINs
-        if not rows or sum(int(r[1]) for r in rows) == 0:
-            rows = con.execute(f"""
-                SELECT date, COALESCE(SUM(units_ordered), 0)
-                FROM daily_sales
-                WHERE asin != 'ALL' AND units_ordered > 0
-                  AND date >= ? AND date <= ? {hw}
-                GROUP BY date ORDER BY date
-            """, [str(start_date), str(today)] + hp).fetchall()
         con.close()
 
         result = []
@@ -1284,6 +1285,65 @@ def sales_debug_today():
                 {"order_id": row[0], "purchase_date": str(row[1]),
                  "order_total": row[2], "status": row[3]}
                 for row in recent
+            ],
+        }
+    except Exception as e:
+        return {"error": str(e)}
+
+
+@router.get("/api/sales/debug-today-full")
+def sales_debug_today_full():
+    """Full Today pipeline trace — shows daily_sales AND orders results, no auth."""
+    try:
+        con = get_db()
+        today_c = _today_central()
+        sd = today_c
+        s_iso = datetime(sd.year, sd.month, sd.day, 0, 0, 0, tzinfo=CENTRAL).isoformat()
+        e_iso = datetime(sd.year, sd.month, sd.day, 23, 59, 59, tzinfo=CENTRAL).isoformat()
+
+        # Step 1: daily_sales asin='ALL' for today
+        ds_row = con.execute("""
+            SELECT COALESCE(SUM(ordered_product_sales),0),
+                   COALESCE(SUM(units_ordered),0),
+                   COUNT(*)
+            FROM daily_sales WHERE asin='ALL' AND date=?
+        """, [str(today_c)]).fetchone()
+
+        # Step 2: orders supplement
+        o_row = con.execute("""
+            SELECT COALESCE(SUM(order_total),0),
+                   COALESCE(SUM(number_of_items),0),
+                   COUNT(DISTINCT order_id)
+            FROM orders
+            WHERE purchase_date >= ? AND purchase_date <= ?
+              AND (order_status IS NULL OR order_status NOT IN ('Cancelled','Pending'))
+        """, [s_iso, e_iso]).fetchone()
+
+        # Step 3: all orders today (including pending)
+        all_today = con.execute("""
+            SELECT order_status, COUNT(*) AS cnt, COALESCE(SUM(order_total),0) AS rev
+            FROM orders
+            WHERE purchase_date >= ? AND purchase_date <= ?
+            GROUP BY order_status
+        """, [s_iso, e_iso]).fetchall()
+
+        con.close()
+        return {
+            "central_today": str(today_c),
+            "query_start": s_iso, "query_end": e_iso,
+            "daily_sales_ALL": {
+                "sales": float(ds_row[0]), "units": int(ds_row[1]), "rows": int(ds_row[2])
+            },
+            "orders_supplement": {
+                "sales": float(o_row[0]), "units": int(o_row[1]), "count": int(o_row[2])
+            },
+            "what_dashboard_shows": {
+                "sales": float(o_row[0]) if o_row[0] > 0 or o_row[2] > 0 else float(ds_row[0]),
+                "units": int(o_row[1]) if o_row[0] > 0 or o_row[2] > 0 else int(ds_row[1]),
+            },
+            "all_today_orders_by_status": [
+                {"status": r[0], "count": int(r[1]), "revenue": float(r[2])}
+                for r in all_today
             ],
         }
     except Exception as e:
