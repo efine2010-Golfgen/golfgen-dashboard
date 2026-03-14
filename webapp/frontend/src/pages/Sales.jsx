@@ -19,11 +19,11 @@ const PERIODS = {
 };
 const PERIOD_API_MAP = {
   'Today':'today','Yesterday':'yesterday','WTD':'wtd','MTD':'mtd','YTD':'ytd',
-  '2 Days Ago':'last_7d','3 Days Ago':'last_7d','4 Days Ago':'last_7d',
-  '5 Days Ago':'last_7d','6 Days Ago':'last_7d',
+  '2 Days Ago':'2_days_ago','3 Days Ago':'3_days_ago','4 Days Ago':'4_days_ago',
+  '5 Days Ago':'5_days_ago','6 Days Ago':'6_days_ago',
   'Last Week':'last_week','4 Weeks':'last_4w','8 Weeks':'last_8w',
   '13 Weeks':'last_13w','26 Weeks':'last_26w',
-  'Last Month':'last_month','2 Months Ago':'last_3m','3 Months Ago':'last_3m',
+  'Last Month':'last_month','2 Months Ago':'2_months_ago','3 Months Ago':'3_months_ago',
   'Last 12 Months':'last_12m',
   '2026 YTD':'2026_ytd','2025 YTD (Same Period)':'2025_ytd',
   '2025 Full Year':'2025_full','2024 Full Year':'2024_full',

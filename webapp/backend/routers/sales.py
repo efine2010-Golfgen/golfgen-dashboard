@@ -226,6 +226,21 @@ def _period_to_dates(period: str, start: str = None, end: str = None):
     elif period == 'yesterday':
         y = today - timedelta(days=1)
         return y, y
+    elif period == '2_days_ago':
+        d = today - timedelta(days=2)
+        return d, d
+    elif period == '3_days_ago':
+        d = today - timedelta(days=3)
+        return d, d
+    elif period == '4_days_ago':
+        d = today - timedelta(days=4)
+        return d, d
+    elif period == '5_days_ago':
+        d = today - timedelta(days=5)
+        return d, d
+    elif period == '6_days_ago':
+        d = today - timedelta(days=6)
+        return d, d
     elif period == 'wtd':
         dow = today.weekday()
         return today - timedelta(days=dow), today
@@ -259,6 +274,22 @@ def _period_to_dates(period: str, start: str = None, end: str = None):
         first = today.replace(day=1)
         last_m_end = first - timedelta(days=1)
         return last_m_end.replace(day=1), last_m_end
+    elif period == '2_months_ago':
+        # Full calendar month 2 months before current month
+        first_this = today.replace(day=1)
+        last_prev = first_this - timedelta(days=1)          # end of last month
+        first_prev = last_prev.replace(day=1)               # start of last month
+        end_2m = first_prev - timedelta(days=1)             # end of 2-months-ago month
+        return end_2m.replace(day=1), end_2m
+    elif period == '3_months_ago':
+        # Full calendar month 3 months before current month
+        first_this = today.replace(day=1)
+        last_prev = first_this - timedelta(days=1)
+        first_prev = last_prev.replace(day=1)
+        end_2m = first_prev - timedelta(days=1)
+        first_2m = end_2m.replace(day=1)
+        end_3m = first_2m - timedelta(days=1)
+        return end_3m.replace(day=1), end_3m
     elif period == 'last_3m':
         return today - timedelta(days=90), today
     elif period == 'last_12m':
@@ -361,8 +392,20 @@ def sales_summary(
         ly_aov = round(ly_sales / ly_orders, 2) if ly_orders else 0
         ty_conv = round(ty_units / ty_sessions, 4) if ty_sessions else 0
         ly_conv = round(ly_units / ly_sessions, 4) if ly_sessions else 0
-        ty_ctr = 0  # CTR not available from current data
-        ly_ctr = 0
+        # CTR from advertising table (clicks / impressions); 0 when ads data absent
+        def _ads_ctr(s, e, extra_params):
+            try:
+                r = con.execute(f"""
+                    SELECT COALESCE(SUM(clicks), 0), COALESCE(SUM(impressions), 0)
+                    FROM advertising
+                    WHERE date BETWEEN ? AND ? {hw}
+                """, [s, e] + extra_params).fetchone()
+                clicks, imps = int(r[0]), int(r[1])
+                return round(clicks / imps, 4) if imps else 0
+            except Exception:
+                return 0
+        ty_ctr = _ads_ctr(sd, ed, hp)
+        ly_ctr = _ads_ctr(ly_sd, ly_ed, hp)
 
         # Amazon fees from financial_events
         def _sum_fees(s, e, extra_params):
