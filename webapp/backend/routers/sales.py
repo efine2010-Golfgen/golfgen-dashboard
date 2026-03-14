@@ -422,6 +422,14 @@ def sales_summary(
         ty_fees = _sum_fees(sd, ed, hp)
         ly_fees = _sum_fees(ly_sd, ly_ed, hp)
 
+        # financial_events stores PostedDate (settlement, ~14 days after order).
+        # Querying by order date always returns 0 for recent periods.
+        # Fall back to estimated fees: 15% referral + 12% FBA = 27% of sales.
+        if ty_fees == 0 and ty_sales > 0:
+            ty_fees = round(ty_sales * 0.27, 2)
+        if ly_fees == 0 and ly_sales > 0:
+            ly_fees = round(ly_sales * 0.27, 2)
+
         # Ad spend
         def _sum_ads(s, e):
             try:
@@ -629,13 +637,52 @@ def sales_period_comparison(
             """, [str(s), str(e)] + extra_params).fetchone()
             return float(r[0]), int(r[1]), int(r[2]), int(r[3])
 
+        def _orders_table_sum(s, e, extra_params):
+            """Pull revenue/units directly from orders table — always more current than daily_sales."""
+            try:
+                r = con.execute(f"""
+                    SELECT COALESCE(SUM(order_total), 0),
+                           COUNT(DISTINCT order_id),
+                           COALESCE(SUM(number_of_items), 0)
+                    FROM orders
+                    WHERE purchase_date >= ? AND purchase_date <= ?
+                      AND (order_status IS NULL OR order_status NOT IN ('Cancelled','Pending')) {hw}
+                """, [str(s), str(e)] + extra_params).fetchone()
+                if r:
+                    o_sales = float(r[0])
+                    o_cnt   = int(r[1])
+                    o_units = int(r[2]) if r[2] else o_cnt
+                    return o_sales, o_units, o_cnt
+                return 0.0, 0, 0
+            except Exception:
+                return 0.0, 0, 0
+
         for label, period_key in periods_map.items():
             sd, ed = _period_to_dates(period_key)
             sales, units, sessions, glance_views = _daily_sales_sum(sd, ed, hp)
 
-            # Amazon Sales & Traffic report lags 1-2 days.  For single-day periods
-            # that return no data, step back until we find a day with data (max 3 steps).
-            if period_key in ('today', 'yesterday') and sales == 0 and units == 0:
+            if period_key == 'today':
+                # S&T report never has today's data — always pull from orders table.
+                o_sales, o_units, o_cnt = _orders_table_sum(sd, ed, hp)
+                if o_sales > 0 or o_cnt > 0:
+                    sales = o_sales    # order_total is best proxy for today
+                    units = o_units
+                # sd/ed stay as actual today — no fallback to earlier dates
+
+            elif period_key == 'yesterday':
+                # daily_sales may lag by 1 order — supplement with orders table.
+                o_sales, o_units, o_cnt = _orders_table_sum(sd, ed, hp)
+                if sales == 0 and o_sales > 0:
+                    # daily_sales has nothing yet — use orders table
+                    sales = o_sales
+                    units = o_units
+                elif o_units > units:
+                    # orders table has more units (the missing order) — use higher count
+                    units = o_units
+                # sd/ed stay as actual yesterday — no fallback to earlier dates
+
+            elif sales == 0 and units == 0:
+                # For longer periods (WTD, MTD, etc.) only: step back up to 3 days if no data
                 for step in range(1, 4):
                     sd_fb = sd - timedelta(days=step)
                     ed_fb = ed - timedelta(days=step)
@@ -648,14 +695,14 @@ def sales_period_comparison(
             ly_sd = sd - timedelta(days=364)
             ly_ed = ed - timedelta(days=364)
             ly_sales, ly_units, ly_sessions, ly_gv = _daily_sales_sum(ly_sd, ly_ed, hp)
-            # True order count from orders table
+            # True order count from orders table (always most current)
             try:
                 o_row = con.execute(f"""
                     SELECT COUNT(DISTINCT order_id)
                     FROM orders
                     WHERE purchase_date >= ? AND purchase_date <= ? {hw}
                 """, [str(sd), str(ed)] + hp).fetchone()
-                orders = int(o_row[0]) if o_row and o_row[0] else units
+                orders = int(o_row[0]) if o_row and o_row[0] else (units if units else 0)
             except Exception:
                 orders = units
             try:
@@ -1042,6 +1089,21 @@ def sales_fee_breakdown(
         fba = round(float(row[0]), 2)
         referral = round(float(row[1]), 2)
         other = round(float(row[2]), 2)
+
+        # financial_events PostedDate lag — recent periods always return 0.
+        # Estimate from orders table when no actuals available.
+        if fba == 0 and referral == 0:
+            sales_row = con.execute(f"""
+                SELECT COALESCE(SUM(order_total), 0)
+                FROM orders
+                WHERE purchase_date >= ? AND purchase_date <= ?
+                  AND (order_status IS NULL OR order_status NOT IN ('Cancelled','Pending')) {hw}
+            """, [str(sd), str(ed)] + hp).fetchone()
+            est_sales = float(sales_row[0]) if sales_row else 0
+            if est_sales > 0:
+                fba = round(est_sales * 0.12, 2)
+                referral = round(est_sales * 0.15, 2)
+
         # Estimate storage from other_fees or use a portion
         storage = round(other * 0.6, 2) if other else 0
         misc = round(other - storage, 2) if other else 0
