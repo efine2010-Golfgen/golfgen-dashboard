@@ -367,15 +367,24 @@ def sales_summary(
 
         ty_sales, ty_units, ty_sessions, ty_gv = _sum_sales(sd, ed, hp)
 
-        # Auto-fallback: if period is 'today' and no TY data, use yesterday
+        # For today/yesterday: supplement from orders table (no S&T report lag)
         fell_back = False
-        if period == 'today' and ty_sales == 0 and ty_units == 0 and ty_sessions == 0:
-            sd = sd - timedelta(days=1)
-            ed = ed - timedelta(days=1)
-            ly_sd = sd - timedelta(days=364)
-            ly_ed = ed - timedelta(days=364)
-            ty_sales, ty_units, ty_sessions, ty_gv = _sum_sales(sd, ed, hp)
-            fell_back = True
+        if period in ('today', 'yesterday'):
+            try:
+                r = con.execute(f"""
+                    SELECT COALESCE(SUM(order_total), 0),
+                           COALESCE(SUM(number_of_items), 0),
+                           COUNT(DISTINCT order_id)
+                    FROM orders
+                    WHERE purchase_date >= ? AND purchase_date <= ?
+                      AND (order_status IS NULL OR order_status NOT IN ('Cancelled','Pending')) {hw}
+                """, [str(sd), str(ed)] + hp).fetchone()
+                o_sales, o_units, o_cnt = float(r[0]), int(r[1]), int(r[2])
+                if o_sales > 0 or o_cnt > 0:
+                    ty_sales = o_sales
+                    ty_units = o_units
+            except Exception:
+                pass
 
         ly_sales, ly_units, ly_sessions, ly_gv = _sum_sales(ly_sd, ly_ed, hp)
 

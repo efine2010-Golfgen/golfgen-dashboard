@@ -225,8 +225,8 @@ function AppShell({ user, isAdmin, allowed, mfaProtected, userMfaEnabled, filter
               <div className="hdr-title">GolfGen / EGB Analytics</div>
               <div className="hdr-sub">Performance Dashboard</div>
               {user && (
-                <div style={{ display:'flex', alignItems:'center', gap:5, marginTop:2 }}>
-                  <span style={{ fontFamily:"'Sora',sans-serif", fontSize:10, fontWeight:600, color:'rgba(255,255,255,.6)' }}>{user.name}</span>
+                <div style={{ display:'flex', alignItems:'center', justifyContent:'center', gap:4, marginTop:1 }}>
+                  <span style={{ fontFamily:"'Sora',sans-serif", fontSize:8.5, fontWeight:600, color:'rgba(255,255,255,.5)' }}>{user.name}</span>
                   {isAdmin && <span className="admin-pill">ADMIN</span>}
                 </div>
               )}
@@ -273,7 +273,7 @@ function AppShell({ user, isAdmin, allowed, mfaProtected, userMfaEnabled, filter
       <main className="page">
         <Routes>
           {allowed["dashboard"] !== false && <Route path="/" element={<Dashboard filters={filters} />} />}
-          <Route path="/sales" element={<Sales />} />
+          <Route path="/sales" element={<Sales filters={filters} />} />
           {allowed["products"] !== false && <Route path="/products" element={<Products filters={filters} />} />}
           {allowed["profitability"] !== false && <Route path="/profitability" element={<Profitability filters={filters} />} />}
           {allowed["inventory"] !== false && <Route path="/inventory" element={<Inventory filters={filters} />} />}

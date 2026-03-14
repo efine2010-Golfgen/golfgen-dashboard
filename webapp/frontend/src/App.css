@@ -100,7 +100,7 @@ body.fresh {
 .hdr-div { width:1px; height:26px; background:rgba(255,255,255,.12); flex-shrink:0; }
 .user-badge { display:flex; align-items:center; gap:7px; white-space:nowrap; }
 .user-name-hdr { font-size:12px; font-weight:600; color:rgba(255,255,255,.85); }
-.admin-pill { padding:2px 7px; border-radius:99px; background:#E87830; color:#fff; font-size:9px; font-weight:800; letter-spacing:.06em; font-family:'Space Grotesk',monospace; }
+.admin-pill { padding:1px 5px; border-radius:99px; background:#E87830; color:#fff; font-size:7.5px; font-weight:800; letter-spacing:.06em; font-family:'Space Grotesk',monospace; }
 .hdr-btn-grid { display:grid; grid-template-columns:1fr 1fr; gap:3px; }
 .hnav { padding:3px 9px; border-radius:5px; font-size:9px; font-weight:600; font-family:'Sora',sans-serif; border:1px solid rgba(255,255,255,.15); background:transparent; color:rgba(255,255,255,.55); cursor:pointer; white-space:nowrap; transition:all .15s; text-align:center; text-decoration:none; display:inline-flex; align-items:center; justify-content:center; }
 .hnav:hover { border-color:#2ECFAA; color:#2ECFAA; }

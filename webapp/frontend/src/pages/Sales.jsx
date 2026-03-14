@@ -350,17 +350,17 @@ function PeriodBar({ value, onChange }) {
 }
 
 // ── MAIN COMPONENT ─────────────────────────────────────────────────
-export default function Sales() {
-  const [division,    setDivision]    = useState('Total');
-  const [customer,    setCustomer]    = useState('All Channels');
+export default function Sales({ filters = {} }) {
+  // Division/customer come from the global filter bar (App.jsx HierarchyFilter)
+  const divRaw  = filters.division  || '';   // 'golf' | 'housewares' | ''
+  const custRaw = filters.customer  || '';   // 'amazon' | '' etc.
+
   const [viewTab,     setViewTab]     = useState('Exec');
   const [activePeriod,setActivePeriod]= useState('MTD');
   const [cpSales,     setCpSales]     = useState('30D');
   const [cpTraffic,   setCpTraffic]   = useState('30D');
   const [customStart, setCustomStart] = useState('');
   const [customEnd,   setCustomEnd]   = useState('');
-  const [divOpen,     setDivOpen]     = useState(false);
-  const [custOpen,    setCustOpen]    = useState(false);
 
   // Data state
   const [metrics,     setMetrics]     = useState(null);
@@ -378,17 +378,13 @@ export default function Sales() {
   const [loading,     setLoading]     = useState({});
   const [errors,      setErrors]      = useState({});
 
-  const custOptions = division === 'Golf' ? GOLF_CUSTOMERS
-                    : division === 'Housewares' ? HW_CUSTOMERS
-                    : ['All Channels'];
-
   const periodApiKey = PERIOD_API_MAP[activePeriod] || 'last_30d';
   const chartSalesApi = CHART_PERIOD_API[cpSales];
   const chartTrafficApi = CHART_PERIOD_API[cpTraffic];
 
   const baseParams = {
-    division: division === 'Total' ? null : division.toLowerCase(),
-    customer: customer === 'All Channels' ? null : customer.toLowerCase().replace(/[' ]/g, '_'),
+    division: divRaw  || null,
+    customer: custRaw || null,
   };
 
   const setLoad = (key, val) => setLoading(l => ({...l, [key]: val}));
@@ -406,16 +402,6 @@ export default function Sales() {
     }
   }
 
-  // Click-outside handler for dropdowns (STEP 3)
-  useEffect(() => {
-    const handler = (e) => {
-      if (!e.target.closest('[data-dd="div"]'))  setDivOpen(false);
-      if (!e.target.closest('[data-dd="cust"]')) setCustOpen(false);
-    };
-    document.addEventListener('mousedown', handler);
-    return () => document.removeEventListener('mousedown', handler);
-  }, []);
-
   // Fetch metrics when period/division/customer changes
   useEffect(() => {
     const params = {...baseParams, period: periodApiKey};
@@ -428,7 +414,7 @@ export default function Sales() {
     load('adBreak',  setAdBreak,  'ad-breakdown',  params);
     load('funnel',   setFunnel,   'funnel',         params);
     load('adEff',    setAdEff,    'ad-efficiency',  params);
-  }, [division, customer, activePeriod, viewTab, customStart, customEnd]);
+  }, [divRaw, custRaw, activePeriod, viewTab, customStart, customEnd]);
 
   // Fetch sales chart data when cpSales changes
   useEffect(() => {
@@ -438,17 +424,15 @@ export default function Sales() {
     load('channel', setChannel, 'by-channel',params);
     load('heatmap', setHeatmap, 'heatmap',   baseParams);
     load('yoy',     setYoy,     'monthly-yoy',baseParams);
-  }, [division, customer, cpSales]);
+  }, [divRaw, custRaw, cpSales]);
 
   // Fetch traffic chart data when cpTraffic changes
   useEffect(() => {
     const params = {...baseParams, period: chartTrafficApi};
     load('trendTraffic', setTrendTraffic, 'trend', params);
-  }, [division, customer, cpTraffic]);
+  }, [divRaw, custRaw, cpTraffic]);
 
-  const handleDivision = d => { setDivision(d); setCustomer('All Channels'); setDivOpen(false); };
-  const handleCustomer = c => { setCustomer(c); setCustOpen(false); };
-  const handleViewTab  = v => { setViewTab(v); setActivePeriod(PERIODS[v]?.[0] || ''); };
+  const handleViewTab = v => { setViewTab(v); setActivePeriod(PERIODS[v]?.[0] || ''); };
 
   const m = metrics || {};
   const fellBack = m.fell_back;
@@ -460,52 +444,12 @@ export default function Sales() {
     <div style={{fontFamily:"'Sora',-apple-system,BlinkMacSystemFont,sans-serif",color:'var(--txt)'}}>
 
       {/* HEADER */}
-      <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',flexWrap:'wrap',gap:10,marginBottom:20}}>
-        <div>
-          <h2 style={{fontFamily:"'DM Serif Display',Georgia,serif",fontSize:22,fontWeight:400,margin:0,color:'var(--txt)'}}>Performance Snapshot</h2>
-          <div style={{fontSize:12,color:'var(--txt3)',marginTop:3,fontFamily:"'Space Grotesk',monospace"}}>
-            {division === 'Total' ? 'All Divisions' : division}
-            {customer !== 'All Channels' ? ` \u00B7 ${customer}` : ''}
-            {fellBack && <span style={{marginLeft:8,color:B.o3,fontStyle:'italic'}}>{m.period_label}</span>}
-          </div>
-        </div>
-        <div style={{display:'flex',gap:8,flexWrap:'wrap'}}>
-          {/* Division dropdown */}
-          <div style={{position:'relative'}} data-dd="div">
-            <button onClick={() => setDivOpen(o => !o)}
-              style={{display:'flex',alignItems:'center',gap:7,padding:'6px 14px',borderRadius:9,fontSize:13,fontWeight:600,border:'1px solid var(--brd2)',background:'var(--card)',color:'var(--txt)',cursor:'pointer'}}>
-              <span>{division}</span>
-              <svg width="11" height="11" viewBox="0 0 12 12" fill="none"><path d="M2 4l4 4 4-4" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" opacity=".5"/></svg>
-            </button>
-            {divOpen && (
-              <div style={{position:'absolute',top:'calc(100% + 4px)',left:0,background:'var(--card)',border:'1px solid var(--brd2)',borderRadius:12,zIndex:99,minWidth:160,overflow:'hidden',boxShadow:'var(--shad)'}}>
-                {['Total','Golf','Housewares'].map(d => (
-                  <button key={d} onClick={() => handleDivision(d)}
-                    style={{display:'block',width:'100%',textAlign:'left',padding:'9px 16px',fontSize:13,border:'none',background:division===d?'var(--atab)':'transparent',color:division===d?'#fff':'var(--txt2)',cursor:'pointer',fontWeight:division===d?600:400}}>
-                    {d}
-                  </button>
-                ))}
-              </div>
-            )}
-          </div>
-          {/* Customer dropdown */}
-          <div style={{position:'relative'}} data-dd="cust">
-            <button onClick={() => setCustOpen(o => !o)}
-              style={{display:'flex',alignItems:'center',gap:7,padding:'6px 14px',borderRadius:9,fontSize:13,fontWeight:600,border:'1px solid var(--brd2)',background:'var(--card)',color:'var(--txt)',cursor:'pointer'}}>
-              <span>{customer}</span>
-              <svg width="11" height="11" viewBox="0 0 12 12" fill="none"><path d="M2 4l4 4 4-4" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" opacity=".5"/></svg>
-            </button>
-            {custOpen && (
-              <div style={{position:'absolute',top:'calc(100% + 4px)',left:0,background:'var(--card)',border:'1px solid var(--brd2)',borderRadius:12,zIndex:99,minWidth:160,overflow:'hidden',boxShadow:'var(--shad)'}}>
-                {custOptions.map(c => (
-                  <button key={c} onClick={() => handleCustomer(c)}
-                    style={{display:'block',width:'100%',textAlign:'left',padding:'9px 16px',fontSize:13,border:'none',background:customer===c?'var(--atab)':'transparent',color:customer===c?'#fff':'var(--txt2)',cursor:'pointer',fontWeight:customer===c?600:400}}>
-                    {c}
-                  </button>
-                ))}
-              </div>
-            )}
-          </div>
+      <div style={{marginBottom:20}}>
+        <h2 style={{fontFamily:"'DM Serif Display',Georgia,serif",fontSize:22,fontWeight:400,margin:0,color:'var(--txt)'}}>Performance Snapshot</h2>
+        <div style={{fontSize:12,color:'var(--txt3)',marginTop:3,fontFamily:"'Space Grotesk',monospace"}}>
+          {!divRaw ? 'All Divisions' : divRaw === 'golf' ? 'Golf (PGAT)' : 'Housewares'}
+          {custRaw ? ` \u00B7 ${custRaw.replace(/_/g,' ').replace(/\b\w/g,l=>l.toUpperCase())}` : ''}
+          {fellBack && <span style={{marginLeft:8,color:B.o3,fontStyle:'italic'}}>{m.period_label}</span>}
         </div>
       </div>
 
@@ -633,8 +577,8 @@ export default function Sales() {
         {loading.yoy ? <Spinner/> : svgChart(yoyBarSVG(toArr(yoy)))}
       </ChartCard>
 
-      {/* Revenue by Channel (Total only) */}
-      {division === 'Total' && (
+      {/* Revenue by Channel (All Divisions only) */}
+      {!divRaw && (
         <ChartCard title="Revenue by Channel" badge={cpSales} error={errors.channel}>
           {loading.channel ? <Spinner/> : <>
             {svgChart(stackedBarSVG(toArr(channel)))}
