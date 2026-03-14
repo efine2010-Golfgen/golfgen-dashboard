@@ -294,12 +294,6 @@ async def _sync_loop():
     """
     global scheduler
 
-    # Skip sync jobs when using Postgres — the worker service handles them
-    from core.config import USE_POSTGRES
-    if USE_POSTGRES and not os.environ.get("WORKER_MODE"):
-        logger.info("Postgres mode: sync jobs handled by worker service, skipping scheduler in API")
-        return
-
     # FIRST: Restore latest Google Drive backup if available.
     # This prevents data loss on Railway redeploys (ephemeral filesystem).
     try:
