@@ -1395,7 +1395,8 @@ def sales_debug_today_full():
 @router.get("/api/debug/summary-today")
 def debug_summary_today():
     """Runs exact same logic as /api/sales/summary?period=today — no auth required.
-    Use this to verify the authenticated endpoint would return correct data."""
+    Calls the real _orders_supplement (includes Pending estimation) so you can see
+    shipped vs pending breakdown and verify the number matches Amazon Seller Central."""
     try:
         con = get_db()
         sd = _today_central()
@@ -1412,23 +1413,46 @@ def debug_summary_today():
         ty_sales = float(ds_row[0])
         ty_units = int(ds_row[1])
 
-        # Step 2: orders supplement (same as in sales_summary)
+        # Step 2: orders supplement — calls the REAL helper (includes Pending estimation)
+        o_sales, o_units, o_cnt = _orders_supplement(con, sd, ed, hw, hp)
+
+        # Shipped-only breakdown for transparency
         s_iso = datetime(sd.year, sd.month, sd.day, 0, 0, 0, tzinfo=CENTRAL).isoformat()
         e_iso = datetime(sd.year, sd.month, sd.day, 23, 59, 59, tzinfo=CENTRAL).isoformat()
-        o_row = con.execute("""
-            SELECT COALESCE(SUM(order_total), 0),
-                   COALESCE(SUM(number_of_items), 0),
-                   COUNT(DISTINCT order_id)
+        shipped_row = con.execute("""
+            SELECT COALESCE(SUM(order_total), 0), COUNT(DISTINCT order_id)
             FROM orders
             WHERE purchase_date >= ? AND purchase_date <= ?
               AND (order_status IS NULL OR order_status NOT IN ('Cancelled','Pending'))
         """, [s_iso, e_iso]).fetchone()
-        o_sales = float(o_row[0])
-        o_units = int(o_row[1])
-        o_cnt   = int(o_row[2])
+        shipped_sales = float(shipped_row[0]) if shipped_row else 0.0
+        shipped_cnt   = int(shipped_row[1]) if shipped_row else 0
+
+        pending_rows = con.execute("""
+            SELECT order_id, asin, order_status, order_total, number_of_items, purchase_date
+            FROM orders
+            WHERE purchase_date >= ? AND purchase_date <= ?
+              AND order_status = 'Pending'
+        """, [s_iso, e_iso]).fetchall()
+        pending_detail = [
+            {"order_id": r[0], "asin": r[1], "status": r[2],
+             "order_total": float(r[3] or 0), "qty": r[4], "purchase_date": str(r[5])}
+            for r in pending_rows
+        ]
+
+        # asin_prices availability check (same dict the sync uses)
+        try:
+            asin_prices_row = con.execute("""
+                SELECT COUNT(*), COUNT(DISTINCT asin)
+                FROM daily_sales
+                WHERE asin != 'ALL' AND units_ordered > 0
+                  AND date >= CURRENT_DATE - INTERVAL '90 days'
+            """).fetchone()
+            asin_prices_count = int(asin_prices_row[1]) if asin_prices_row else 0
+        except Exception:
+            asin_prices_count = -1
 
         # Supplement: use orders table if it has MORE revenue than daily_sales
-        # (Today Orders sync writes to asin='ALL' but S&T may overwrite with lower value)
         supplement_triggered = False
         if o_sales > ty_sales or (ty_sales == 0 and (o_sales > 0 or o_cnt > 0)):
             ty_sales = o_sales
@@ -1444,22 +1468,39 @@ def debug_summary_today():
                 WHERE date >= ? AND date <= ?
             """, [str(sd), str(ed)]).fetchone()
             ty_fees_raw = float(fee_row[0]) if fee_row else 0.0
-        except Exception as fe:
+        except Exception:
             pass
         ty_fees = ty_fees_raw if ty_fees_raw > 0 else round(ty_sales * 0.27, 2)
 
         con.close()
+        pending_est = round(o_sales - shipped_sales, 2)
         return {
             "period": "today",
             "central_date": str(sd),
+            "central_window": {"start": s_iso, "end": e_iso},
             "step1_daily_sales_ALL": {"sales": float(ds_row[0]), "units": int(ds_row[1])},
-            "step2_orders_supplement": {"sales": o_sales, "units": o_units, "count": o_cnt},
+            "step2_orders_supplement": {
+                "total_sales": round(o_sales, 2),
+                "total_units": o_units,
+                "total_orders": o_cnt,
+                "shipped_sales": round(shipped_sales, 2),
+                "shipped_orders": shipped_cnt,
+                "pending_estimated_revenue": pending_est,
+                "pending_orders": len(pending_detail),
+                "pending_detail": pending_detail,
+                "asin_prices_available_in_daily_sales": asin_prices_count,
+            },
             "supplement_triggered": supplement_triggered,
             "final_sales": round(ty_sales, 2),
             "final_units": ty_units,
-            "final_fees": ty_fees,
+            "final_fees_est": ty_fees,
             "gross_margin_est": round(ty_sales - ty_fees, 2),
-            "note": "This mirrors /api/sales/summary?period=today exactly. If this shows correct data but dashboard shows $0, the issue is in the authenticated route or frontend."
+            "note": (
+                "final_sales = MAX(daily_sales_ALL, shipped + pending_est). "
+                "Compare final_sales to Amazon Seller Central 'Today so far'. "
+                "If pending_estimated_revenue=0 but pending_orders>0, the asin_prices "
+                "lookup has no data — run a full sync to populate per-ASIN daily_sales rows."
+            )
         }
     except Exception as e:
         import traceback
