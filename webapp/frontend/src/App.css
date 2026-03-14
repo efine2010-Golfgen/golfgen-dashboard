@@ -92,8 +92,8 @@ body.fresh {
 
 /* ── HEADER — always navy #0E1F2D ───────────────────────── */
 .hdr { background:#0E1F2D; position:sticky; top:0; z-index:100; box-shadow:var(--shad); }
-.hdr-inner { display:flex; align-items:center; padding:20px 20px 20px; min-height:100px; gap:14px; }
-.hdr-mid { flex:1; display:flex; flex-direction:column; align-items:center; justify-content:center; gap:1px; }
+.hdr-inner { display:flex; align-items:center; padding:0 20px; height:76px; gap:14px; }
+.hdr-mid { flex:1; display:flex; flex-direction:column; align-items:center; justify-content:center; gap:2px; }
 .hdr-title { font-family:'Sora',sans-serif; font-size:14px; font-weight:700; color:rgba(255,255,255,.92); letter-spacing:.02em; }
 .hdr-sub { font-family:'Space Grotesk',monospace; font-size:9px; font-weight:500; letter-spacing:.16em; color:#2ECFAA; text-transform:uppercase; }
 .hdr-right { display:flex; align-items:center; gap:10px; flex-shrink:0; }
@@ -112,8 +112,8 @@ body.fresh {
 .filter-bar { background:var(--surf); border-bottom:1px solid var(--brd); padding:6px 20px; display:flex; align-items:center; gap:10px; transition:background .3s; }
 .filter-lbl { font-family:'Space Grotesk',monospace; font-size:10px; font-weight:600; text-transform:uppercase; letter-spacing:.08em; color:var(--txt3); white-space:nowrap; }
 
-/* ── THEME STRIP (below subnav) ─────────────────────────── */
-.theme-strip { background:var(--card); border-bottom:1px solid var(--brd); padding:5px 20px; display:flex; align-items:center; gap:10px; transition:background .3s; }
+/* ── THEME STRIP — now lives inside filter-bar, no longer a separate row ── */
+.theme-strip { display:none; }
 
 /* ── SUB-NAV ────────────────────────────────────────────── */
 .subnav { background:var(--surf); border-bottom:1px solid var(--brd); padding:0 20px; display:flex; align-items:center; height:40px; overflow-x:auto; transition:background .3s; }

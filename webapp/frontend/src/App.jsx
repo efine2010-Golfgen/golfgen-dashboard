@@ -92,39 +92,34 @@ function detectCategory(pathname) {
   return "exec-summary";
 }
 
-/* ── Theme Indicator (swatch + name — lives in filter bar) ── */
-function ThemeIndicator() {
-  const { theme, themes } = useTheme();
-  return (
-    <div style={{ display:'flex', alignItems:'center', gap:7, marginLeft:'auto', flexShrink:0 }}>
-      <div style={{ width:14, height:14, borderRadius:3, background:themes[theme].sw, border:'1px solid var(--btnbrd)', flexShrink:0 }} />
-      <span style={{ fontSize:11, fontWeight:600, color:'var(--txt2)', whiteSpace:'nowrap' }}>{themes[theme].name}</span>
-    </div>
-  );
-}
-
-/* ── Theme Buttons (selector strip — lives below subnav) ── */
-function ThemeButtons() {
+/* ── Theme Selector (swatch + name + all buttons — lives in filter bar right side) ── */
+function ThemeSelector() {
   const { theme, setTheme, themes } = useTheme();
+  const divStyle = { width:1, height:16, background:'var(--brd2)', flexShrink:0 };
+  const lblStyle = { fontFamily:"'Space Grotesk',monospace", fontSize:7, fontWeight:700, textTransform:'uppercase', letterSpacing:'.1em', color:'var(--txt3)', whiteSpace:'nowrap' };
   return (
-    <div className="theme-strip">
-      <div className="theme-group">
-        <span className="tg-label">Dark</span>
-        {['midnight', 'night', 'fairway'].map(t => (
-          <button key={t} className={`tbtn${theme === t ? ' active' : ''}`} onClick={() => setTheme(t)}>
-            {themes[t].name}
-          </button>
-        ))}
+    <div style={{ display:'flex', alignItems:'center', gap:6, marginLeft:'auto', flexShrink:0 }}>
+      {/* Current theme indicator pill */}
+      <div style={{ display:'flex', alignItems:'center', gap:5, padding:'3px 8px', borderRadius:6, border:'1px solid var(--brd2)', background:'var(--ibg)' }}>
+        <div style={{ width:10, height:10, borderRadius:3, background:themes[theme].sw, flexShrink:0 }} />
+        <span style={{ fontFamily:"'Space Grotesk',monospace", fontSize:10, fontWeight:700, color:'var(--txt2)', whiteSpace:'nowrap' }}>{themes[theme].name}</span>
       </div>
-      <div className="tg-divider" />
-      <div className="theme-group">
-        <span className="tg-label">Light</span>
-        {['slate', 'warm', 'fresh'].map(t => (
-          <button key={t} className={`tbtn${theme === t ? ' active' : ''}`} onClick={() => setTheme(t)}>
-            {themes[t].name}
-          </button>
-        ))}
-      </div>
+      <div style={divStyle} />
+      {/* Dark group */}
+      <span style={lblStyle}>Dark</span>
+      {['midnight', 'night', 'fairway'].map(t => (
+        <button key={t} className={`tbtn${theme === t ? ' active' : ''}`} onClick={() => setTheme(t)}>
+          {themes[t].name}
+        </button>
+      ))}
+      <div style={divStyle} />
+      {/* Light group */}
+      <span style={lblStyle}>Light</span>
+      {['slate', 'warm', 'fresh'].map(t => (
+        <button key={t} className={`tbtn${theme === t ? ' active' : ''}`} onClick={() => setTheme(t)}>
+          {themes[t].name}
+        </button>
+      ))}
     </div>
   );
 }
@@ -225,21 +220,20 @@ function AppShell({ user, isAdmin, allowed, mfaProtected, userMfaEnabled, filter
               <div className="brand-tagline">GOLF FOR EVERYONE. SERIOUSLY EVERYONE.</div>
             </div>
 
-            {/* CENTER: title block */}
+            {/* CENTER: title + subtitle + user badge */}
             <div className="hdr-mid">
               <div className="hdr-title">GolfGen / EGB Analytics</div>
               <div className="hdr-sub">Performance Dashboard</div>
-            </div>
-
-            {/* RIGHT: user badge | divider | 2×3 button grid */}
-            <div className="hdr-right">
               {user && (
-                <div className="user-badge">
-                  <span className="user-name-hdr">{user.name}</span>
+                <div style={{ display:'flex', alignItems:'center', gap:5, marginTop:2 }}>
+                  <span style={{ fontFamily:"'Sora',sans-serif", fontSize:10, fontWeight:600, color:'rgba(255,255,255,.6)' }}>{user.name}</span>
                   {isAdmin && <span className="admin-pill">ADMIN</span>}
                 </div>
               )}
-              <div className="hdr-div" />
+            </div>
+
+            {/* RIGHT: 2×3 button grid only */}
+            <div className="hdr-right">
               <div className="hdr-btn-grid">
                 <a href="/account/security/mfa-setup" className="hnav">MFA Setup</a>
                 {isAdmin
@@ -263,18 +257,15 @@ function AppShell({ user, isAdmin, allowed, mfaProtected, userMfaEnabled, filter
           <div className="stripe" />
         </div>
 
-        {/* ── Filter Bar (View filter + theme indicator) ── */}
+        {/* ── Filter Bar (View filter + theme selector) ── */}
         <div className="filter-bar">
           <span className="filter-lbl">View:</span>
           <HierarchyFilter division={division} customer={customer} onChange={handleFilterChange} compact />
-          <ThemeIndicator />
+          <ThemeSelector />
         </div>
 
         {/* ── Sub-nav ── */}
         <NavSystem permissions={allowed} mfaProtected={mfaProtected} userMfaEnabled={userMfaEnabled} />
-
-        {/* ── Theme button strip (below Exec Summary nav line) ── */}
-        <ThemeButtons />
 
       </div>
 
