@@ -189,28 +189,37 @@ export default function System() {
   const [gapFillRunning, setGapFillRunning] = useState(false);
   const [gapFillResult, setGapFillResult] = useState(null);
   const [logFilter, setLogFilter] = useState("all");
+  const [refreshing, setRefreshing] = useState(false);
+  const [refreshError, setRefreshError] = useState(null);
 
-  const load = useCallback(() => {
-    Promise.all([
-      api.syncLog(150).catch(() => ({ entries: [] })),
-      api.dataCoverage().catch(() => null),
-      api.health().catch(() => null),
-      api.backupStatus().catch(() => null),
-      api.githubBackupStatus().catch(() => null),
+  const load = useCallback((isManual = false) => {
+    if (isManual) setRefreshing(true);
+    setRefreshError(null);
+    return Promise.all([
+      api.syncLog(150).catch(e => { console.warn("syncLog failed:", e); return null; }),
+      api.dataCoverage().catch(e => { console.warn("dataCoverage failed:", e); return null; }),
+      api.health().catch(e => { console.warn("health failed:", e); return null; }),
+      api.backupStatus().catch(e => { console.warn("backupStatus failed:", e); return null; }),
+      api.githubBackupStatus().catch(e => { console.warn("githubStatus failed:", e); return null; }),
     ]).then(([log, cov, h, b, gb]) => {
-      setSyncLog(log.entries || []);
-      setCoverage(cov);
-      setHealth(h);
-      setBackup(b);
-      setGithubBackup(gb);
+      // Only update state if the fetch returned data — preserve stale data on error
+      if (log !== null) setSyncLog(log.entries || []);
+      if (cov !== null) setCoverage(cov);
+      if (h !== null) setHealth(h);
+      if (b !== null) setBackup(b);
+      if (gb !== null) setGithubBackup(gb);
+      const anyFailed = [log, cov, h, b, gb].some(x => x === null);
+      if (anyFailed && isManual) setRefreshError("Some data failed to load — showing last known values");
       setLoading(false);
       setLastRefresh(new Date());
+    }).finally(() => {
+      if (isManual) setRefreshing(false);
     });
   }, []);
 
   useEffect(() => {
-    load();
-    const interval = setInterval(load, 60_000);
+    load(false);
+    const interval = setInterval(() => load(false), 60_000);
     return () => clearInterval(interval);
   }, [load]);
 
@@ -484,10 +493,24 @@ export default function System() {
             {lastRefresh && (
               <span style={{ fontSize: 11, color: "#6B8090" }}>
                 Updated {lastRefresh.toLocaleTimeString("en-US", { timeZone: "America/Chicago", hour: "numeric", minute: "2-digit", hour12: true })} CT
+                {refreshing && <span style={{ marginLeft: 6, color: "#3E658C" }}>· refreshing...</span>}
               </span>
             )}
-            <button onClick={load} style={{ padding: "6px 14px", borderRadius: 6, border: "1px solid #e2e8f0", background: "#fff", cursor: "pointer", fontSize: 12, fontWeight: 500 }}>
-              Refresh
+            {refreshError && (
+              <span style={{ fontSize: 11, color: "#d97706" }}>⚠ {refreshError}</span>
+            )}
+            <button
+              onClick={() => load(true)}
+              disabled={refreshing}
+              style={{
+                padding: "6px 14px", borderRadius: 6, border: "1px solid #e2e8f0",
+                background: refreshing ? "#f8fafc" : "#fff",
+                cursor: refreshing ? "not-allowed" : "pointer",
+                fontSize: 12, fontWeight: 500, display: "flex", alignItems: "center", gap: 5,
+                color: refreshing ? "#94a3b8" : "#2A3D50",
+              }}
+            >
+              {refreshing ? <><Spinner2 /> Refreshing...</> : "↻ Refresh"}
             </button>
           </div>
         </div>
@@ -562,6 +585,9 @@ export default function System() {
 // ── Tiny shared components ───────────────────────────────────────────────────
 function Spinner() {
   return <span style={{ display: "inline-block", width: 12, height: 12, border: "2px solid #fff", borderTopColor: "transparent", borderRadius: "50%", animation: "spin 1s linear infinite" }} />;
+}
+function Spinner2() {
+  return <span style={{ display: "inline-block", width: 11, height: 11, border: "2px solid #94a3b8", borderTopColor: "transparent", borderRadius: "50%", animation: "spin 1s linear infinite" }} />;
 }
 function Warn({ children }) {
   return <div style={{ padding: "10px 14px", background: "#fef3c7", borderRadius: 8, fontSize: 12, color: "#92400e", marginBottom: 12 }}>{children}</div>;

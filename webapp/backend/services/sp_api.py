@@ -521,32 +521,41 @@ def _run_sp_api_sync():
     2. Financial Events (fast, ~5 seconds) — actual fees/refunds
     3. FBA Inventory (fast, ~5 seconds)
     4. Sales & Traffic Report (SLOW, 2-5 minutes) — historical data with sessions
+
+    Returns list of (section, error) tuples — empty = all sections succeeded.
     """
     global _sync_running
     if not _sync_lock.acquire(blocking=False):
         logger.warning(f"  Skipping full SP-API sync — '{_sync_running}' already running")
-        return
+        return []
     _sync_running = "sp_api_full"
     try:
-        _run_sp_api_sync_inner()
+        return _run_sp_api_sync_inner() or []
     finally:
         _sync_running = None
         _sync_lock.release()
 
 
 def _run_sp_api_sync_inner():
-    """Inner implementation of full SP-API sync (called under mutex)."""
+    """Inner implementation of full SP-API sync (called under mutex).
+
+    Returns a list of (section, error_message) tuples for any sections that
+    failed. Empty list means all sections succeeded. The wrapper uses this
+    to write SUCCESS / PARTIAL / FAILED to sync_log accurately.
+    """
+    _section_errors = []   # collect (section_name, error_str) for each failure
+
     try:
         from sp_api.api import Reports, Orders, Inventories, Finances
         from sp_api.base import Marketplaces, ReportType
     except ImportError:
         logger.warning("SP-API library not installed — skipping sync")
-        return
+        return _section_errors
 
     credentials = _load_sp_api_credentials()
     if not credentials:
         logger.warning("No SP-API credentials found (env vars or config file) — skipping sync")
-        return
+        return _section_errors
 
     logger.info("Starting SP-API background sync...")
     import time, gzip, requests as req
@@ -937,7 +946,7 @@ def _run_sp_api_sync_inner():
         logger.info(f"  Financial events sync done: {fin_records} records (shipments + refunds)")
     except Exception as e:
         logger.error(f"  Financial events sync error: {e}")
-        # Rollback on failure so partial data doesn't corrupt the table
+        _section_errors.append(("financial_events", str(e)))
         try:
             con.execute("ROLLBACK")
             con.close()
@@ -1006,6 +1015,7 @@ def _run_sp_api_sync_inner():
                 con.close()
     except Exception as e:
         logger.error(f"  Inventory sync error: {e}")
+        _section_errors.append(("inventory", str(e)))
 
     # ── 4. SALES & TRAFFIC REPORT (slow, 2-5 min polling) ──────
     try:
@@ -1115,6 +1125,12 @@ def _run_sp_api_sync_inner():
 
     except Exception as e:
         logger.error(f"  Sales sync error: {e}")
+        err_str = str(e)
+        # Tag quota errors explicitly so the scheduler can classify them
+        if any(k in err_str.lower() for k in ("quota", "quotaexceeded", "429")):
+            _section_errors.append(("sales_report", f"QuotaExceeded: {err_str[:120]}"))
+        else:
+            _section_errors.append(("sales_report", err_str[:120]))
         try:
             con.execute("ROLLBACK")
             con.close()
@@ -1122,7 +1138,8 @@ def _run_sp_api_sync_inner():
         except Exception:
             pass
 
-    logger.info("SP-API background sync complete.")
+    logger.info(f"SP-API background sync complete. Sections failed: {len(_section_errors)}")
+    return _section_errors
 
 
 def _backfill_orders(days: int = 90):

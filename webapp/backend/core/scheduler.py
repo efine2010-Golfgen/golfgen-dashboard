@@ -63,9 +63,20 @@ def _run_scheduled_sp_api_sync():
     try:
         started_at = datetime.now(ZoneInfo("America/Chicago"))
         try:
-            _run_sp_api_sync()
-            _write_sync_log("sp_api_sync", started_at, "SUCCESS")
-            logger.info(f"Scheduled SP-API sync completed")
+            section_errors = _run_sp_api_sync() or []
+            if not section_errors:
+                status = "SUCCESS"
+                error_str = None
+            elif len(section_errors) == 4:
+                # All 4 sections failed — complete failure
+                status = "FAILED"
+                error_str = "; ".join(f"{s}: {e[:60]}" for s, e in section_errors[:2])
+            else:
+                # Some sections failed — partial success
+                status = "PARTIAL"
+                error_str = "; ".join(f"{s}: {e[:60]}" for s, e in section_errors)
+            _write_sync_log("sp_api_sync", started_at, status, error=error_str)
+            logger.info(f"Scheduled SP-API sync {status} ({len(section_errors)} section failures)")
         except Exception as e:
             _write_sync_log("sp_api_sync", started_at, "FAILED", error=str(e))
             logger.error(f"Scheduled SP-API sync failed: {e}")
