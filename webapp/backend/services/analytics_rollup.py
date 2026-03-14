@@ -37,38 +37,68 @@ def populate_staging_orders(con, target_date: date = None):
     except Exception:
         return 0
 
+    has_order_items = 'order_items' in tables
+
     # Delete existing staging rows for this date (idempotent)
     con.execute("DELETE FROM staging_orders WHERE order_date = ?", [target_date])
 
-    # Insert from orders + order_items joined with item_master for division
-    inserted = con.execute("""
-        INSERT INTO staging_orders
-        (staging_id, source_order_id, division, customer, platform,
-         order_date, asin, product_name, units, gross_amount,
-         currency, marketplace, fulfillment_type, status, staged_at, is_processed)
-        SELECT
-            CONCAT(o.order_id, '_', COALESCE(oi.asin, 'unknown')) as staging_id,
-            o.order_id,
-            COALESCE(NULLIF(o.division, ''), NULLIF(o.division, 'unknown'),
-                     NULLIF(im.division, ''), NULLIF(im.division, 'unknown'), 'golf') as division,
-            COALESCE(NULLIF(o.customer, ''), 'amazon') as customer,
-            COALESCE(NULLIF(o.platform, ''), 'sp_api') as platform,
-            CAST(o.purchase_date AS DATE),
-            oi.asin,
-            COALESCE(im.product_name, oi.title, oi.asin),
-            CAST(COALESCE(oi.quantity, 1) AS INTEGER),
-            CAST(COALESCE(oi.item_price, 0) AS DECIMAL(12,2)),
-            'USD',
-            o.sales_channel,
-            o.fulfillment_channel,
-            o.order_status,
-            ?,
-            FALSE
-        FROM orders o
-        LEFT JOIN order_items oi ON o.order_id = oi.order_id
-        LEFT JOIN item_master im ON oi.asin = im.asin
-        WHERE CAST(o.purchase_date AS DATE) = ?
-    """, [now, target_date]).fetchone()
+    if has_order_items:
+        # Full path: orders + order_items + item_master
+        con.execute("""
+            INSERT INTO staging_orders
+            (staging_id, source_order_id, division, customer, platform,
+             order_date, asin, product_name, units, gross_amount,
+             currency, marketplace, fulfillment_type, status, staged_at, is_processed)
+            SELECT
+                CONCAT(o.order_id, '_', COALESCE(oi.asin, 'unknown')) as staging_id,
+                o.order_id,
+                COALESCE(NULLIF(o.division, ''), NULLIF(o.division, 'unknown'),
+                         NULLIF(im.division, ''), NULLIF(im.division, 'unknown'), 'golf') as division,
+                COALESCE(NULLIF(o.customer, ''), 'amazon') as customer,
+                COALESCE(NULLIF(o.platform, ''), 'sp_api') as platform,
+                CAST(o.purchase_date AS DATE),
+                oi.asin,
+                COALESCE(im.product_name, oi.title, oi.asin),
+                CAST(COALESCE(oi.quantity, 1) AS INTEGER),
+                CAST(COALESCE(oi.item_price, 0) AS DECIMAL(12,2)),
+                'USD',
+                o.sales_channel,
+                o.fulfillment_channel,
+                o.order_status,
+                ?,
+                FALSE
+            FROM orders o
+            LEFT JOIN order_items oi ON o.order_id = oi.order_id
+            LEFT JOIN item_master im ON oi.asin = im.asin
+            WHERE CAST(o.purchase_date AS DATE) = ?
+        """, [now, target_date])
+    else:
+        # Fallback: orders-only (no order_items table — e.g. PostgreSQL)
+        con.execute("""
+            INSERT INTO staging_orders
+            (staging_id, source_order_id, division, customer, platform,
+             order_date, asin, product_name, units, gross_amount,
+             currency, marketplace, fulfillment_type, status, staged_at, is_processed)
+            SELECT
+                CONCAT(o.order_id, '_', 'unknown') as staging_id,
+                o.order_id,
+                COALESCE(NULLIF(o.division, ''), NULLIF(o.division, 'unknown'), 'golf') as division,
+                COALESCE(NULLIF(o.customer, ''), 'amazon') as customer,
+                COALESCE(NULLIF(o.platform, ''), 'sp_api') as platform,
+                CAST(o.purchase_date AS DATE),
+                'unknown',
+                'unknown',
+                CAST(COALESCE(o.number_of_items, 1) AS INTEGER),
+                CAST(COALESCE(o.order_total, 0) AS DECIMAL(12,2)),
+                'USD',
+                o.sales_channel,
+                o.fulfillment_channel,
+                o.order_status,
+                ?,
+                FALSE
+            FROM orders o
+            WHERE CAST(o.purchase_date AS DATE) = ?
+        """, [now, target_date])
 
     count = con.execute(
         "SELECT COUNT(*) FROM staging_orders WHERE order_date = ?", [target_date]
