@@ -50,8 +50,11 @@ async function apiFetch(path, params = {}) {
   const url = `/api/sales/${path}${q ? '?' + q : ''}`;
   const res = await fetch(url);
   if (!res.ok) throw new Error(`${res.status} ${res.statusText}`);
-  return res.json();
+  const data = await res.json();
+  if (data && data.error) throw new Error(data.error);
+  return data;
 }
+const toArr = v => Array.isArray(v) ? v : [];
 
 // ── SVG CHART BUILDERS ─────────────────────────────────────────────
 function dualLineSVG(data, k1, k2, c1, c2, fmtFn, W=1100, H=130) {
@@ -566,7 +569,7 @@ export default function Sales() {
           <MetricCard label="AUR"           value={f$(m.aur)}            ly={f$(ly('aur'))}           delta={dp(m.aur,ly('aur'))}/>
           <MetricCard label="COGS"          value={f$(m.cogs)}           ly={f$(ly('cogs'))}          delta={dp(m.cogs,ly('cogs'))}/>
           <MetricCard label="Amazon Fees"   value={f$(m.amazon_fees)}    ly={f$(ly('amazon_fees'))}   delta={dp(m.amazon_fees,ly('amazon_fees'))}
-            expandContent={feeBreak && <div>{feeBreak.map(f=><div key={f.type} style={{display:'flex',justifyContent:'space-between',fontSize:10,marginBottom:5}}><span style={{color:B.sub}}>{f.type}</span><span style={{fontWeight:600,color:'#cbd5e1'}}>{f$(f.amount)}</span></div>)}</div>}/>
+            expandContent={feeBreak && Array.isArray(feeBreak) && <div>{feeBreak.map(f=><div key={f.type} style={{display:'flex',justifyContent:'space-between',fontSize:10,marginBottom:5}}><span style={{color:B.sub}}>{f.type}</span><span style={{fontWeight:600,color:'#cbd5e1'}}>{f$(f.amount)}</span></div>)}</div>}/>
           <MetricCard label="Gross Margin $"  value={f$(m.gross_margin)}     ly={f$(ly('gross_margin'))}     delta={dp(m.gross_margin,ly('gross_margin'))}/>
           <MetricCard label="Gross Margin %"  value={fP(m.gross_margin_pct)} ly={fP(ly('gross_margin_pct'))} delta={dp(m.gross_margin_pct,ly('gross_margin_pct'))}/>
         </>}
@@ -580,14 +583,14 @@ export default function Sales() {
 
       {/* Monthly YOY */}
       <ChartCard title="Monthly Revenue — 2024 / 2025 / 2026" badge="Year over Year">
-        {loading.yoy ? <Spinner/> : svgChart(yoyBarSVG(yoy || []))}
+        {loading.yoy ? <Spinner/> : svgChart(yoyBarSVG(toArr(yoy)))}
       </ChartCard>
 
       {/* Revenue by Channel (Total only) */}
       {division === 'Total' && (
         <ChartCard title="Revenue by Channel" badge={cpSales}>
           {loading.channel ? <Spinner/> : <>
-            {svgChart(stackedBarSVG(channel || []))}
+            {svgChart(stackedBarSVG(toArr(channel)))}
             <Legend items={[['Amazon',B.b2],['Walmart Mkt',B.o2],['Walmart Stores',B.o3],['Shopify',B.t2],['Stores',B.t3]]}/>
           </>}
         </ChartCard>
@@ -596,7 +599,7 @@ export default function Sales() {
       {/* Sales $ Trend */}
       <ChartCard title="Sales $ Trend" badge={cpSales}>
         {loading.trend ? <Spinner/> : <>
-          {svgChart(dualLineSVG(trend||[],'ty_sales','ly_sales',B.b2,B.sub,f$))}
+          {svgChart(dualLineSVG(toArr(trend),'ty_sales','ly_sales',B.b2,B.sub,f$))}
           <Legend items={[['This Year',B.b2],['Last Year',B.sub,true]]}/>
         </>}
       </ChartCard>
@@ -604,7 +607,7 @@ export default function Sales() {
       {/* AUR Trend */}
       <ChartCard title="AUR Trend" badge={cpSales}>
         {loading.trend ? <Spinner/> : <>
-          {svgChart(dualLineSVG(trend||[],'ty_aur','ly_aur',B.t2,B.sub,f$))}
+          {svgChart(dualLineSVG(toArr(trend),'ty_aur','ly_aur',B.t2,B.sub,f$))}
           <Legend items={[['AUR TY',B.t2],['AUR LY',B.sub,true]]}/>
         </>}
       </ChartCard>
@@ -612,14 +615,14 @@ export default function Sales() {
       {/* Rolling 4-Week */}
       <ChartCard title="Rolling 4-Week Revenue vs LY" badge={cpSales}>
         {loading.rolling ? <Spinner/> : <>
-          {svgChart(dualLineSVG(rolling||[],'ty_rolling','ly_rolling',B.b3,B.sub,f$))}
+          {svgChart(dualLineSVG(toArr(rolling),'ty_rolling','ly_rolling',B.b3,B.sub,f$))}
           <Legend items={[['This Year',B.b3],['Last Year',B.sub,true]]}/>
         </>}
       </ChartCard>
 
       {/* Units Heatmap */}
       <ChartCard title="Units Sold — 26 Weeks × Day of Week" noMargin>
-        {loading.heatmap ? <Spinner/> : svgChart(heatmapSVG(heatmap||[]))}
+        {loading.heatmap ? <Spinner/> : svgChart(heatmapSVG(toArr(heatmap)))}
       </ChartCard>
 
       {/* ══ TRAFFIC & CONVERSION ════════════════════════════════════ */}
@@ -638,12 +641,12 @@ export default function Sales() {
       </div>
       <ChartCard title="Traffic & Conversion" badge={cpTraffic}>
         {loading.trendTraffic ? <Spinner/> : <>
-          {svgChart(dualLineSVG(trendTraffic||[],'ty_sessions','ly_sessions',B.o2,B.sub,fN))}
+          {svgChart(dualLineSVG(toArr(trendTraffic),'ty_sessions','ly_sessions',B.o2,B.sub,fN))}
           <Legend items={[['Sessions TY',B.o2],['Sessions LY',B.sub,true]]}/>
         </>}
       </ChartCard>
       <ChartCard title="Conversion Funnel vs LY" noMargin>
-        {loading.funnel ? <Spinner/> : svgChart(funnelSVG(funnel||[]))}
+        {loading.funnel ? <Spinner/> : svgChart(funnelSVG(toArr(funnel)))}
       </ChartCard>
 
       {/* ══ ADVERTISING ═════════════════════════════════════════════ */}
@@ -651,7 +654,7 @@ export default function Sales() {
       <div style={{display:'flex',gap:8,marginBottom:14,overflowX:'auto',paddingBottom:2}}>
         {loading.metrics ? <Spinner/> : <>
           <MetricCard label="Ad Spend $" value={f$(m.ad_spend)} ly={f$(ly('ad_spend'))} delta={dp(m.ad_spend,ly('ad_spend'))} invert
-            expandContent={adBreak && <div>{adBreak.map(a=><div key={a.type} style={{marginBottom:6}}><div style={{display:'flex',justifyContent:'space-between',fontSize:10}}><span style={{color:B.sub}}>{a.type}</span><span style={{fontWeight:600,color:'#cbd5e1'}}>{f$(a.spend)}</span></div><div style={{display:'flex',justifyContent:'space-between',fontSize:10,marginTop:2}}><span style={{color:B.dim,paddingLeft:8}}>ROAS</span><span style={{fontWeight:600,color:'#4ade80'}}>{fX(a.roas)}</span></div></div>)}</div>}/>
+            expandContent={adBreak && Array.isArray(adBreak) && <div>{adBreak.map(a=><div key={a.type} style={{marginBottom:6}}><div style={{display:'flex',justifyContent:'space-between',fontSize:10}}><span style={{color:B.sub}}>{a.type}</span><span style={{fontWeight:600,color:'#cbd5e1'}}>{f$(a.spend)}</span></div><div style={{display:'flex',justifyContent:'space-between',fontSize:10,marginTop:2}}><span style={{color:B.dim,paddingLeft:8}}>ROAS</span><span style={{fontWeight:600,color:'#4ade80'}}>{fX(a.roas)}</span></div></div>)}</div>}/>
           <MetricCard label="ROAS"  value={fX(m.roas)}  ly={fX(ly('roas'))}  delta={dp(m.roas,ly('roas'))}/>
           <MetricCard label="TACOS" value={fP(m.tacos)} ly={fP(ly('tacos'))} delta={dp(m.tacos,ly('tacos'))} invert/>
         </>}
