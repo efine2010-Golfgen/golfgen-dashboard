@@ -484,8 +484,8 @@ def sales_trend(
             except Exception:
                 ly_d = None
             ly = ly_map.get(ly_d, {})
-            ty_aur = round(ty_s / ty_u, 2) if ty_u else 0
-            ty_conv = round(ty_u / ty_sess, 4) if ty_sess else 0
+            ty_aur = round(ty_s / ty_u, 2) if ty_u else None
+            ty_conv = round(ty_u / ty_sess, 4) if ty_sess else None
             ly_aur = round(ly.get("sales", 0) / ly.get("units", 1), 2) if ly.get("units") else None
             ly_conv = round(ly.get("units", 0) / ly.get("sessions", 1), 4) if ly.get("sessions") else None
             result.append({

@@ -126,7 +126,7 @@ function yoyBarSVG(data, W=1100, H=160) {
   for (let i=0;i<=3;i++) { const v=maxV*(i/3); s+=`<line x1="${pad.l}" y1="${(pad.t+ih*(1-i/3)).toFixed(1)}" x2="${W-pad.r}" y2="${(pad.t+ih*(1-i/3)).toFixed(1)}" stroke="#1a2f4a" stroke-width="0.5"/><text x="${pad.l-5}" y="${(pad.t+ih*(1-i/3)+4).toFixed(1)}" text-anchor="end" font-size="9" fill="#374f66">${f$(v)}</text>`; }
   data.forEach((d,mi) => {
     [[d.y2024,'y2024',0],[d.y2025,'y2025',1],[d.y2026,'y2026',2]].forEach(([v,k,yi]) => {
-      if (!v) return;
+      if (v == null) return;
       const hh = h(v);
       s += `<rect x="${x(mi,yi).toFixed(1)}" y="${(pad.t+ih-hh).toFixed(1)}" width="${bw.toFixed(1)}" height="${hh.toFixed(1)}" fill="${CC[k]}" rx="2" opacity="${k==='y2026'?1:.82}"/>`;
     });
@@ -338,7 +338,7 @@ export default function Sales() {
   const [division,    setDivision]    = useState('Total');
   const [customer,    setCustomer]    = useState('All Channels');
   const [viewTab,     setViewTab]     = useState('Exec');
-  const [activePeriod,setActivePeriod]= useState('Today');
+  const [activePeriod,setActivePeriod]= useState('MTD');
   const [cpSales,     setCpSales]     = useState('30D');
   const [cpTraffic,   setCpTraffic]   = useState('30D');
   const [customStart, setCustomStart] = useState('');
