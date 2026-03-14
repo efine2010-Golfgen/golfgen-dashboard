@@ -280,16 +280,44 @@ def _load_ads_credentials() -> dict | None:
       - New: AMAZON_ADS_CLIENT_ID, AMAZON_ADS_CLIENT_SECRET, AMAZON_ADS_REFRESH_TOKEN, AMAZON_ADS_PROFILE_ID
       - Legacy: ADS_CLIENT_ID, ADS_CLIENT_SECRET, ADS_REFRESH_TOKEN, ADS_PROFILE_ID
     """
-    env_client_id = os.environ.get("AMAZON_ADS_CLIENT_ID") or os.environ.get("ADS_CLIENT_ID", "")
+    # Support all three naming conventions used across deployments:
+    #   AMAZON_ADS_*   (new canonical)
+    #   ADS_API_*      (Railway env vars as documented in CLAUDE.md)
+    #   ADS_*          (legacy short form)
+    env_client_id = (
+        os.environ.get("AMAZON_ADS_CLIENT_ID")
+        or os.environ.get("ADS_API_CLIENT_ID")
+        or os.environ.get("ADS_CLIENT_ID", "")
+    )
     if env_client_id:
         creds = {
-            "refresh_token": os.environ.get("AMAZON_ADS_REFRESH_TOKEN") or os.environ.get("ADS_REFRESH_TOKEN", ""),
+            "refresh_token": (
+                os.environ.get("AMAZON_ADS_REFRESH_TOKEN")
+                or os.environ.get("ADS_API_REFRESH_TOKEN")
+                or os.environ.get("ADS_REFRESH_TOKEN", "")
+            ),
             "client_id": env_client_id,
-            "client_secret": os.environ.get("AMAZON_ADS_CLIENT_SECRET") or os.environ.get("ADS_CLIENT_SECRET", ""),
-            "profile_id": os.environ.get("AMAZON_ADS_PROFILE_ID") or os.environ.get("ADS_PROFILE_ID", ""),
+            "client_secret": (
+                os.environ.get("AMAZON_ADS_CLIENT_SECRET")
+                or os.environ.get("ADS_API_CLIENT_SECRET")
+                or os.environ.get("ADS_CLIENT_SECRET", "")
+            ),
+            "profile_id": (
+                os.environ.get("AMAZON_ADS_PROFILE_ID")
+                or os.environ.get("ADS_API_PROFILE_ID")
+                or os.environ.get("ADS_PROFILE_ID", "")
+            ),
         }
         if creds["refresh_token"] and creds["client_secret"]:
+            logger.info(
+                f"Ads creds loaded: client_id={env_client_id[:8]}... "
+                f"profile_id={creds['profile_id'] or '(will discover)'}"
+            )
             return creds
+        logger.warning(
+            f"Ads creds: client_id found ({env_client_id[:8]}...) "
+            f"but refresh_token or client_secret is missing"
+        )
         return None
 
     if CONFIG_PATH.exists():
