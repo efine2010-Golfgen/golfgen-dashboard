@@ -56,10 +56,8 @@ def _translate_sql_for_pg(sql: str) -> str:
     # ? → %s  (parameterised placeholders)
     sql = sql.replace("?", "%s")
 
-    # ── DOUBLE → DOUBLE PRECISION (PostgreSQL requires full name) ──
-    # Match 'DOUBLE' as a standalone type (not already 'DOUBLE PRECISION')
-    import re as _re
-    sql = _re.sub(r'\bDOUBLE\b(?!\s+PRECISION)', 'DOUBLE PRECISION', sql)
+    # DOUBLE → DOUBLE PRECISION (DuckDB type not valid in PostgreSQL)
+    sql = re.sub(r'\bDOUBLE\b(?!\s+PRECISION)', 'DOUBLE PRECISION', sql)
 
     # ── INSERT OR IGNORE → ON CONFLICT DO NOTHING ──────────
     if _RE_INSERT_OR_IGNORE.search(sql):
@@ -1241,7 +1239,7 @@ def auto_migrate_from_duckdb():
         logger.info(f"Auto-migrate: Postgres check failed ({e}), will attempt migration")
 
     logger.info("=" * 60)
-    logger.info("AUTO-MIGRATION: DuckDB → PostgreSQL starting")
+logger.info("AUTO-MIGRATION: DuckDB → PostgreSQL starting")
     logger.info(f"  DuckDB: {duckdb_path}")
     logger.info(f"  PostgreSQL: {DATABASE_URL[:40]}...")
     logger.info("=" * 60)
