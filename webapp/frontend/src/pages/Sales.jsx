@@ -168,7 +168,7 @@ function funnelSVG(data) {
   const n = data.length;
 
   // Layout constants — funnel LEFT, comparison table RIGHT
-  const W = 1100;
+  const W = 1010;
   const rowH = 56;
   const padT = 38;        // space above first row (header row)
   const padB = 44;        // legend below
@@ -177,14 +177,14 @@ function funnelSVG(data) {
   const H = padT + n * rowH + 14 + nDerived * derivedRowH + padB;
 
   // Funnel geometry (left side)
-  const funnelCX = 230;
-  const maxFW = 390;
+  const funnelCX = 280;
+  const maxFW = 480;
 
   // Table column x-positions (right side)
-  const labelX = 490;
-  const tyX    = 740;   // right-anchored
-  const lyX    = 900;   // right-anchored
-  const chgX   = 1082;  // right-anchored
+  const labelX = 560;
+  const tyX    = 720;   // right-anchored
+  const lyX    = 850;   // right-anchored
+  const chgX   = 980;  // right-anchored
 
   // Pre-compute derived metrics
   const sessIdx = data.findIndex(d => d.label === 'Sessions');
@@ -272,13 +272,13 @@ function funnelSVG(data) {
   derivedRows.forEach((dm, i) => {
     const ry = divY + 20 + i * derivedRowH;
     const chgColor = dm.chg != null ? (dm.chg >= 0 ? '#4ade80' : '#fb923c') : B.sub;
-    s += `<text x="${labelX}" y="${ry}" text-anchor="start" font-size="10"               fill="${B.sub}">${dm.label}</text>`;
-    s += `<text x="${tyX}"    y="${ry}" text-anchor="end"   font-size="11" font-weight="700" fill="#e2e8f0">${dm.ty}</text>`;
-    s += `<text x="${lyX}"    y="${ry}" text-anchor="end"   font-size="10"               fill="${B.sub}">${dm.ly}</text>`;
+    s += `<text x="${labelX}" y="${ry}" text-anchor="start" font-size="11" font-weight="600" fill="#e2e8f0">${dm.label}</text>`;
+    s += `<text x="${tyX}"    y="${ry}" text-anchor="end"   font-size="12" font-weight="700" fill="#e2e8f0">${dm.ty}</text>`;
+    s += `<text x="${lyX}"    y="${ry}" text-anchor="end"   font-size="11"               fill="${B.sub}">${dm.ly}</text>`;
     if (dm.chg != null) {
-      s += `<text x="${chgX}" y="${ry}" text-anchor="end" font-size="10" font-weight="700" fill="${chgColor}">${dm.chg >= 0 ? '\u25B2' : '\u25BC'} ${Math.abs(dm.chg).toFixed(1)}%</text>`;
+      s += `<text x="${chgX}" y="${ry}" text-anchor="end" font-size="11" font-weight="700" fill="${chgColor}">${dm.chg >= 0 ? '\u25B2' : '\u25BC'} ${Math.abs(dm.chg).toFixed(1)}%</text>`;
     } else {
-      s += `<text x="${chgX}" y="${ry}" text-anchor="end" font-size="10" fill="${B.sub}">\u2014</text>`;
+      s += `<text x="${chgX}" y="${ry}" text-anchor="end" font-size="11" fill="${B.sub}">\u2014</text>`;
     }
   });
 
