@@ -118,7 +118,7 @@ body.fresh {
 /* ── SUB-NAV — Tier 3 of unified header ────────────────── */
 .subnav { background:#081520; border-bottom:1px solid rgba(255,255,255,.07); padding:0 20px; display:flex; align-items:center; height:40px; overflow-x:auto; }
 .snbtn { display:flex; align-items:center; padding:0 13px; height:100%; font-size:12px; font-weight:600; font-family:'Sora',sans-serif; color:rgba(255,255,255,.55); border:none; background:transparent; cursor:pointer; border-bottom:2px solid transparent; transition:all .15s; white-space:nowrap; }
-.snbtn.active { color:#2ECFAA; border-bottom-color:#2ECFAA; }
+.snbtn.active { color:#2ECFAA; border-bottom-color:transparent; }
 .snbtn:hover:not(.active) { color:rgba(255,255,255,.85); }
 .sn-div { width:1px; height:16px; background:rgba(255,255,255,.12); flex-shrink:0; }
 .subnav-sub { height:34px; }
