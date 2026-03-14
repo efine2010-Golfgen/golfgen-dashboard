@@ -56,6 +56,11 @@ def _translate_sql_for_pg(sql: str) -> str:
     # ? → %s  (parameterised placeholders)
     sql = sql.replace("?", "%s")
 
+    # ── DOUBLE → DOUBLE PRECISION (PostgreSQL requires full name) ──
+    # Match 'DOUBLE' as a standalone type (not already 'DOUBLE PRECISION')
+    import re as _re
+    sql = _re.sub(r'\bDOUBLE\b(?!\s+PRECISION)', 'DOUBLE PRECISION', sql)
+
     # ── INSERT OR IGNORE → ON CONFLICT DO NOTHING ──────────
     if _RE_INSERT_OR_IGNORE.search(sql):
         sql = _RE_INSERT_OR_IGNORE.sub("INSERT INTO", sql)

@@ -113,7 +113,8 @@ def _build_product_list(con, cutoff: str) -> list:
 
     products = []
     for r in rows:
-        asin, revenue, units, sessions, orders = r
+        asin, revenue, units, sessions, glance_views = r
+        orders = units  # proxy until per-ASIN order count is available
         api_name = inv_names.get(asin, {}).get("product_name", "")
         if units == 0:
             continue
@@ -1132,6 +1133,23 @@ def summary(
         margin_pct = prod_net / prod_rev
         total_net = round(revenue * margin_pct, 2)
         margin = round(margin_pct * 100)
+    elif revenue > 0:
+        # Fallback: estimate costs from financial_events + defaults
+        try:
+            fee_row = con.execute(f"""
+                SELECT COALESCE(SUM(ABS(fba_fees)), 0),
+                       COALESCE(SUM(ABS(commission)), 0)
+                FROM financial_events
+                WHERE date >= ?{hf}
+            """, [cutoff] + hp).fetchone()
+            est_fba = float(fee_row[0]) if fee_row and fee_row[0] > 0 else revenue * 0.12
+            est_ref = float(fee_row[1]) if fee_row and fee_row[1] > 0 else revenue * 0.15
+        except Exception:
+            est_fba = revenue * 0.12
+            est_ref = revenue * 0.15
+        est_cogs = revenue * 0.35
+        total_net = round(revenue - est_cogs - est_fba - est_ref, 2)
+        margin = round(total_net / revenue * 100)
     else:
         total_net = 0
         margin = 0
@@ -1375,10 +1393,17 @@ def period_comparison(
     full_prod_fba = sum(pp["fbaTotal"] for pp in full_products)
     full_prod_referral = sum(pp["referralTotal"] for pp in full_products)
 
-    margin_pct = full_prod_net / full_prod_rev if full_prod_rev > 0 else 0
-    cogs_pct = full_prod_cogs / full_prod_rev if full_prod_rev > 0 else 0
-    fba_pct = full_prod_fba / full_prod_rev if full_prod_rev > 0 else 0
-    referral_pct = full_prod_referral / full_prod_rev if full_prod_rev > 0 else 0
+    if full_prod_rev > 0:
+        margin_pct = full_prod_net / full_prod_rev
+        cogs_pct = full_prod_cogs / full_prod_rev
+        fba_pct = full_prod_fba / full_prod_rev
+        referral_pct = full_prod_referral / full_prod_rev
+    else:
+        # Fallback estimates when no per-ASIN data is available
+        cogs_pct = 0.35   # 35% of revenue
+        fba_pct = 0.12    # 12% FBA fulfillment estimate
+        referral_pct = 0.15  # 15% referral fee estimate
+        margin_pct = 1.0 - cogs_pct - fba_pct - referral_pct  # ~38% margin
 
     results = []
     for p in periods:
@@ -1415,10 +1440,31 @@ def period_comparison(
             pass
 
         tacos = round(ad_spend / rev * 100, 1) if rev > 0 else 0
-        cogs = round(rev * cogs_pct, 2)
-        fba_fees = round(rev * fba_pct, 2)
-        referral_fees = round(rev * referral_pct, 2)
+
+        # Try actual fees from financial_events first, then fall back to ratio estimates
+        actual_fba, actual_referral = 0, 0
+        try:
+            fee_row = con.execute(f"""
+                SELECT COALESCE(SUM(ABS(fba_fees)), 0),
+                       COALESCE(SUM(ABS(commission)), 0)
+                FROM financial_events
+                WHERE date >= ? AND date < ?{hf}
+            """, [p["start"], p["end"]] + hp).fetchone()
+            if fee_row:
+                actual_fba = round(float(fee_row[0]), 2)
+                actual_referral = round(float(fee_row[1]), 2)
+        except Exception:
+            pass
+
+        # Use actual fees if available, otherwise use ratio-based estimates
+        if actual_fba > 0 or actual_referral > 0:
+            fba_fees = actual_fba
+            referral_fees = actual_referral
+        else:
+            fba_fees = round(rev * fba_pct, 2)
+            referral_fees = round(rev * referral_pct, 2)
         amazon_fees = round(fba_fees + referral_fees, 2)
+        cogs = round(rev * cogs_pct, 2)
         net = round(rev - cogs - amazon_fees - ad_spend, 2)
         margin_val = round(net / rev * 100, 1) if rev > 0 else 0
 

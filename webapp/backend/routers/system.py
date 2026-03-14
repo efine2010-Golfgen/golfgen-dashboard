@@ -841,7 +841,7 @@ def db_diagnostic():
         sync_entries = []
         try:
             sync_rows = con.execute("""
-                SELECT job_name, started_at, status, rows_inserted, error_message
+                SELECT job_name, started_at, status, records_processed, error_message
                 FROM sync_log
                 ORDER BY started_at DESC
                 LIMIT 10
@@ -859,11 +859,11 @@ def db_diagnostic():
         monthly_yoy_data = []
         try:
             yoy_rows = con.execute("""
-                SELECT YEAR(date) AS yr, MONTH(date) AS mo,
+                SELECT EXTRACT(YEAR FROM date) AS yr, EXTRACT(MONTH FROM date) AS mo,
                        COALESCE(SUM(ordered_product_sales), 0) AS revenue
                 FROM daily_sales
                 WHERE asin = 'ALL' AND date IS NOT NULL AND date >= '2024-01-01'
-                GROUP BY YEAR(date), MONTH(date)
+                GROUP BY EXTRACT(YEAR FROM date), EXTRACT(MONTH FROM date)
                 ORDER BY yr, mo
             """).fetchall()
             monthly_yoy_data = [{"year": int(r[0]), "month": int(r[1]), "revenue": round(float(r[2]), 2)} for r in yoy_rows]

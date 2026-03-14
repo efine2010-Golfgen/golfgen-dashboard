@@ -2,7 +2,8 @@
 Google Drive database backup service for GolfGen Dashboard.
 
 Provides:
-- run_backup: Export DuckDB → compress → upload to Google Drive → enforce retention
+- run_backup: Export database → compress → upload to Google Drive → enforce retention
+  (PostgreSQL: pg_dump-style CSV export; DuckDB: EXPORT DATABASE)
 - get_backup_status: Return latest backup info from Google Drive
 - _get_drive_service: Authenticate with Google Drive via service account
 - _enforce_retention: Delete backups older than 30 days
@@ -17,11 +18,11 @@ from datetime import datetime, timedelta
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
-from core.database import get_db_rw
+from core.database import get_db, get_db_rw
 from github import Github
 import base64
 
-from core.config import DB_PATH, DB_DIR
+from core.config import DB_PATH, DB_DIR, USE_POSTGRES
 
 logger = logging.getLogger("golfgen")
 
@@ -113,18 +114,45 @@ def run_backup() -> dict:
         export_dir.mkdir()
         archive_path = Path(tmpdir) / filename
 
-        # Step 1: Export DuckDB to Parquet
-        logger.info(f"Backup: Exporting DuckDB to Parquet in {export_dir}")
-        con = get_db_rw()
-        try:
-            con.execute(f"EXPORT DATABASE '{export_dir}' (FORMAT PARQUET)")
-        finally:
-            con.close()
-
-        # Also include the raw .duckdb file for completeness
+        # Step 1: Export database
         import shutil
-        raw_copy = export_dir / "golfgen_amazon.duckdb"
-        shutil.copy2(str(DB_PATH), str(raw_copy))
+        if USE_POSTGRES:
+            # PostgreSQL: export each table as CSV
+            logger.info(f"Backup: Exporting PostgreSQL tables to CSV in {export_dir}")
+            con = get_db()
+            try:
+                tables = con.execute("""
+                    SELECT tablename FROM pg_tables
+                    WHERE schemaname = 'public'
+                """).fetchall()
+                for (table_name,) in tables:
+                    try:
+                        rows = con.execute(f"SELECT * FROM {table_name}").fetchall()
+                        # Get column names
+                        cols = [desc[0] for desc in con._cursor.description]
+                        import csv
+                        csv_path = export_dir / f"{table_name}.csv"
+                        with open(csv_path, "w", newline="") as f:
+                            writer = csv.writer(f)
+                            writer.writerow(cols)
+                            writer.writerows(rows)
+                        logger.info(f"Backup: Exported {table_name}: {len(rows)} rows")
+                    except Exception as e:
+                        logger.warning(f"Backup: Failed to export {table_name}: {e}")
+            finally:
+                con.close()
+        else:
+            # DuckDB: native EXPORT DATABASE
+            logger.info(f"Backup: Exporting DuckDB to Parquet in {export_dir}")
+            con = get_db_rw()
+            try:
+                con.execute(f"EXPORT DATABASE '{export_dir}' (FORMAT PARQUET)")
+            finally:
+                con.close()
+            # Also include the raw .duckdb file for completeness
+            raw_copy = export_dir / "golfgen_amazon.duckdb"
+            if DB_PATH.exists():
+                shutil.copy2(str(DB_PATH), str(raw_copy))
 
         # Step 2: Compress into tar.gz
         logger.info(f"Backup: Compressing to {archive_path}")
@@ -330,10 +358,18 @@ def run_github_backup() -> dict:
         files_to_commit = {}
 
         # ── File 1: Database manifest ──
-        con = get_db_rw()
-        tables_raw = con.execute("SHOW TABLES").fetchall()
+        con = get_db()
+        if USE_POSTGRES:
+            tables_raw = con.execute("""
+                SELECT tablename FROM pg_tables
+                WHERE schemaname = 'public'
+                ORDER BY tablename
+            """).fetchall()
+        else:
+            tables_raw = con.execute("SHOW TABLES").fetchall()
         manifest = {
             "backup_time": now.isoformat(),
+            "db_engine": "postgresql" if USE_POSTGRES else "duckdb",
             "db_path": str(DB_PATH),
             "tables": {},
         }
@@ -575,7 +611,18 @@ def restore_from_latest_backup() -> dict:
             restored_size = duckdb_file.stat().st_size
             restored_size_mb = round(restored_size / (1024 * 1024), 2)
 
-            # Compare row counts, not file size — DuckDB compaction can make a richer DB smaller.
+            if USE_POSTGRES:
+                # PostgreSQL mode: skip DuckDB file restore. PostgreSQL data
+                # persists independently. If CSV backups exist in the archive,
+                # they could be restored, but for now we skip automatic restore
+                # since PostgreSQL data survives container redeploys.
+                logger.info("Restore: PostgreSQL mode — data persists independently, skipping DuckDB restore")
+                return {
+                    "status": "SKIPPED",
+                    "reason": "PostgreSQL mode — data persists independently of container deploys",
+                }
+
+            # DuckDB mode: compare row counts and restore if backup is newer
             current_size = DB_PATH.stat().st_size if DB_PATH.exists() else 0
             current_size_mb = round(current_size / (1024 * 1024), 2)
 
@@ -600,7 +647,7 @@ def restore_from_latest_backup() -> dict:
             if bak_rows <= cur_rows and cur_rows > 0:
                 logger.info(f"Restore: Backup DB ({bak_rows} rows, {restored_size_mb} MB) <= current ({cur_rows} rows, {current_size_mb} MB) — keeping current")
                 return {"status": "SKIPPED", "reason": f"Backup ({bak_rows} rows) not larger than current ({cur_rows} rows)"}
-            
+
             logger.info(f"Restore: Backup has more data ({bak_rows} rows vs {cur_rows} rows)")
 
             # Replace the database file

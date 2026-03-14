@@ -124,13 +124,16 @@ webapp/
 ```
 
 ## Database
-- Engine: DuckDB (PostgreSQL migration CODE COMPLETE — awaiting provisioning)
+- Engine: PostgreSQL (LIVE on Railway as of March 14, 2026)
+- Previous engine: DuckDB (file still on Railway volume as fallback at /app/data/golfgen_amazon.duckdb)
 - Dual-mode wrapper: core/database.py DbConnection class auto-detects DuckDB vs PostgreSQL
 - When DATABASE_URL env var is set → uses PostgreSQL; otherwise → uses DuckDB
-- Live path on Railway (current): /app/data/golfgen_amazon.duckdb
-- DB_PATH env var controls DuckDB path
+- DATABASE_URL is set on Railway via `${{Postgres.DATABASE_URL}}` reference
+- Railway Postgres service: b6075866-2c10-484c-ba4f-3c50182c65d0
 - Access via get_db() (read-only) and get_db_rw() (read-write) from core.database
-- SQL translator: _translate_sql_for_pg() converts ? → %s, INSERT OR IGNORE → ON CONFLICT DO NOTHING, etc.
+- SQL translator: _translate_sql_for_pg() converts ? → %s, INSERT OR IGNORE → ON CONFLICT DO NOTHING, DOUBLE → DOUBLE PRECISION, etc.
+- Auto-migration: auto_migrate_from_duckdb() in database.py runs on startup if Postgres is empty and DuckDB file exists — copies all 26 tables
+- Health endpoint (/api/health) still shows DB_PATH in "path" field even in Postgres mode — this is cosmetic only, queries go to PostgreSQL
 ### All Tables (27 total)
 Transactional (all have division + customer + platform):
   orders, daily_sales, financial_events, fba_inventory, advertising,
@@ -159,13 +162,12 @@ System:
 - sync_log uses `execution_time_seconds` NOT `duration_seconds`
 - orders table has `asin` NOT `sku`
 
-### Current Data Counts (as of March 13, 2026)
-- orders: 200 (recent window)
-- daily_sales: 1,072 (through March 13)
-- financial_events: 1,357 (1,280 nonzero)
+### Current Data Counts (as of March 14, 2026 — now in PostgreSQL)
+- orders: 136 (recent window)
+- daily_sales: 937+ (migrated from DuckDB + new sync data)
+- financial_events: 1,353 (1,276 nonzero)
 - fba_inventory: 70
-- Refunds: 182 rows / $26,377
-- Shipments: 1,175 rows / $173,003 in charges
+- All 29 tables confirmed in PostgreSQL
 ## Sync Architecture
 
 ### Sync Mutex
@@ -211,7 +213,7 @@ GOOGLE_SERVICE_ACCOUNT_JSON, BACKUP_DRIVE_FOLDER_ID,
 GOOGLE_OAUTH_CLIENT_ID, GOOGLE_OAUTH_CLIENT_SECRET,
 GITHUB_TOKEN, BACKUP_GITHUB_REPO (efine2010-Golfgen/golfgen-backups),
 DB_PATH (/app/data/golfgen_amazon.duckdb),
-DATABASE_URL (not yet set — set this to PostgreSQL connection string to activate PG mode)
+DATABASE_URL (${{Postgres.DATABASE_URL}} — LIVE, references Railway Postgres service)
 
 ## Users
 - Eric (eric@egbrands.com) — Admin, full access
@@ -252,13 +254,14 @@ DATABASE_URL (not yet set — set this to PostgreSQL connection string to activa
 All 10 items done: returns bug, YOY bug, SKU bug, ads sync, sync mutex,
 transaction rollback, retry/backoff, Google SSO, session timeout, audit log.
 
-### Phase 2 — Data Layer + Division Hierarchy: CODE COMPLETE ✓
+### Phase 2 — Data Layer + Division Hierarchy + PostgreSQL Migration: COMPLETE ✓
 Done: division/customer/platform columns on all tables, item_master seeded,
 SP-API auto-tagging, hierarchy filter on all routers (shared helper),
 HierarchyFilter.jsx in header, staging tables created, analytics tables created,
 nightly analytics rollup at 2:30am, PostgreSQL dual-mode wrapper (DbConnection),
-SQL translator for DuckDB↔PostgreSQL, all 56+ duckdb.connect() calls eliminated.
-**Next step:** Eric provisions PostgreSQL on Railway + sets DATABASE_URL env var.
+SQL translator for DuckDB↔PostgreSQL (including DOUBLE→DOUBLE PRECISION),
+all 56+ duckdb.connect() calls eliminated, PostgreSQL provisioned on Railway,
+DATABASE_URL set, auto-migration from DuckDB completed, all 29 tables live in Postgres.
 ### Phase 3 — Redundancy + Backup Hardening: PARTIAL
 Done: Nightly Google Drive backup (2am), nightly GitHub backup.
 Remaining: Hot standby, weekly backup verification, 6-hour snapshots.
@@ -285,7 +288,11 @@ Custom date ranges, daily email summary, anomaly alerts, forecast tab, exec dash
   Or: POST /api/backup/restore (empty body = most recent)
 
 ## Crash Recovery
+With PostgreSQL, data persists independently of container deploys — no restore needed
+for routine redeploys. DuckDB file still on volume as emergency fallback.
+If Postgres data is lost: remove DATABASE_URL env var to fall back to DuckDB,
+then re-add it to trigger auto-migration again.
+Legacy DuckDB restore (if needed):
 Option A: Dashboard → System tab → Backup → Restore from Drive
 Option B: POST /api/backup/restore with body {}
-Option C: Tell Cowork to call POST /api/backup/restore
 After restore verify: GET /api/health → non-zero row counts

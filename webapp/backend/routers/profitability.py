@@ -225,21 +225,47 @@ def pnl_waterfall(days: int = Query(365), division: Optional[str] = None, custom
 
     # Cost breakdown from per-ASIN data
     products = _build_product_list(con, cutoff, division, customer, platform)
-    con.close()
 
     prod_rev = sum(p["rev"] for p in products)
     prod_cogs = sum(p["cogsTotal"] for p in products)
     prod_fba = sum(p["fbaTotal"] for p in products)
     prod_referral = sum(p["referralTotal"] for p in products)
     prod_ad = sum(p["adSpend"] for p in products)
-    prod_net = sum(p["net"] for p in products)
 
-    # Scale cost ratios to actual revenue
-    scale = actual_rev / prod_rev if prod_rev > 0 else 1
-    cogs = round(prod_cogs * scale, 2)
-    fba = round(prod_fba * scale, 2)
-    referral = round(prod_referral * scale, 2)
-    ad_spend = round(prod_ad * scale, 2)
+    if prod_rev > 0:
+        # Scale cost ratios to actual revenue
+        scale = actual_rev / prod_rev
+        cogs = round(prod_cogs * scale, 2)
+        fba = round(prod_fba * scale, 2)
+        referral = round(prod_referral * scale, 2)
+        ad_spend = round(prod_ad * scale, 2)
+    else:
+        # Fallback: query financial_events directly for actual fees
+        try:
+            fee_row = con.execute(f"""
+                SELECT COALESCE(SUM(ABS(fba_fees)), 0),
+                       COALESCE(SUM(ABS(commission)), 0)
+                FROM financial_events
+                {rev_filter}
+            """, rev_params).fetchone()
+            fba = round(float(fee_row[0]), 2) if fee_row and fee_row[0] > 0 else round(actual_rev * 0.12, 2)
+            referral = round(float(fee_row[1]), 2) if fee_row and fee_row[1] > 0 else round(actual_rev * 0.15, 2)
+        except Exception:
+            fba = round(actual_rev * 0.12, 2)
+            referral = round(actual_rev * 0.15, 2)
+        cogs = round(actual_rev * 0.35, 2)  # 35% COGS estimate
+        # Ad spend from advertising table
+        try:
+            ad_row = con.execute(f"""
+                SELECT COALESCE(SUM(spend), 0)
+                FROM advertising
+                {rev_filter.replace("asin = 'ALL' AND ", "")}
+            """, rev_params).fetchone()
+            ad_spend = round(float(ad_row[0]), 2) if ad_row else 0
+        except Exception:
+            ad_spend = 0
+
+    con.close()
     net = round(actual_rev - cogs - fba - referral - ad_spend, 2)
 
     return {
