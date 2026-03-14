@@ -20,6 +20,23 @@ from core.config import DB_PATH, DB_DIR, CONFIG_PATH, TIMEZONE, COGS_PATH
 
 logger = logging.getLogger("golfgen")
 
+# In-memory ring buffer for recent log messages (accessible via /api/debug/logs)
+import collections
+_log_buffer = collections.deque(maxlen=200)
+
+class _BufferHandler(logging.Handler):
+    def emit(self, record):
+        try:
+            msg = self.format(record)
+            _log_buffer.append(msg)
+        except Exception:
+            pass
+
+_buf_handler = _BufferHandler()
+_buf_handler.setLevel(logging.DEBUG)
+_buf_handler.setFormatter(logging.Formatter('%(asctime)s %(levelname)s %(message)s', datefmt='%H:%M:%S'))
+logger.addHandler(_buf_handler)
+
 # ── Sync mutex — prevents overlapping sync operations ──────────
 _sync_lock = threading.Lock()
 _sync_running: str | None = None  # name of currently-running sync, or None
@@ -154,6 +171,8 @@ def _sync_today_orders():
     Strategy: Use getOrderItems for EVERY order to get accurate item-level
     prices.  OrderTotal is unreliable (missing for Pending, sometimes $0
     for FBA orders).  Item-level prices are the ground truth.
+
+    Hard timeout of 120 seconds to prevent blocking other syncs.
     """
     global _sync_running
     if not _sync_lock.acquire(blocking=False):
@@ -161,7 +180,14 @@ def _sync_today_orders():
         return False
     _sync_running = "today_orders"
     try:
-        return _sync_today_orders_inner()
+        import concurrent.futures
+        with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
+            future = executor.submit(_sync_today_orders_inner)
+            try:
+                return future.result(timeout=120)  # 2-minute hard timeout
+            except concurrent.futures.TimeoutError:
+                logger.error("  Today sync TIMED OUT after 120s — releasing lock for other syncs")
+                return False
     finally:
         _sync_running = None
         _sync_lock.release()
@@ -183,15 +209,19 @@ def _sync_today_orders_inner():
     logger.info("  Syncing today's orders (real-time)...")
     try:
         import time as _t
+        _sync_start = _t.time()
         # Get orders from last 7 days to catch delayed/pending orders
         now_utc = datetime.now(ZoneInfo("UTC"))
         after_date = (now_utc - timedelta(days=7)).strftime("%Y-%m-%dT%H:%M:%SZ")
+        logger.info(f"  Creating Orders API client...")
         orders_api = OrdersAPI(credentials=credentials, marketplace=Marketplaces.US)
+        logger.info(f"  Calling get_orders(CreatedAfter={after_date})...")
         response = orders_api.get_orders(
             CreatedAfter=after_date,
             MarketplaceIds=["ATVPDKIKX0DER"],
             MaxResultsPerPage=100
         )
+        logger.info(f"  get_orders returned in {_t.time()-_sync_start:.1f}s")
 
         order_list = response.payload.get("Orders", [])
 

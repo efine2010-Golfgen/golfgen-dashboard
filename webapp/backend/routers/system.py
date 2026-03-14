@@ -970,3 +970,16 @@ def test_financial_parse():
     except Exception as e:
         import traceback
         return {"error": str(e), "traceback": traceback.format_exc()}
+
+
+@router.get("/api/debug/logs")
+def debug_logs(n: int = Query(100, ge=1, le=200)):
+    """Return recent in-memory log messages from the sync engine."""
+    try:
+        from services.sp_api import _log_buffer
+        entries = list(_log_buffer)
+        return {"count": len(entries), "logs": entries[-n:]}
+    except ImportError:
+        return {"error": "_log_buffer not available"}
+    except Exception as e:
+        return {"error": str(e)}
