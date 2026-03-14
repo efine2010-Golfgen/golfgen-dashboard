@@ -1066,12 +1066,43 @@ def _run_sp_api_sync_inner():
             con.execute("BEGIN TRANSACTION")
             records = 0
 
+            today_str = datetime.now(ZoneInfo("America/Chicago")).strftime("%Y-%m-%d")
+            yesterday_str = (datetime.now(ZoneInfo("America/Chicago")) - timedelta(days=1)).strftime("%Y-%m-%d")
+
             for day_entry in report_data.get("salesAndTrafficByDate", []):
                 entry_date = day_entry.get("date", "")
                 traffic = day_entry.get("trafficByDate", {})
                 sales_info = day_entry.get("salesByDate", {})
                 ordered_sales = sales_info.get("orderedProductSales", {})
                 sales_amount = float(ordered_sales.get("amount", 0)) if isinstance(ordered_sales, dict) else float(ordered_sales or 0)
+
+                # For today and yesterday: S&T report may return partial/stale data.
+                # Preserve the higher revenue value already in the database (which may
+                # come from the Today Orders sync or a previous more-complete report run).
+                if entry_date in (today_str, yesterday_str):
+                    existing = con.execute(
+                        "SELECT ordered_product_sales FROM daily_sales WHERE date = ? AND asin = 'ALL'",
+                        [entry_date]
+                    ).fetchone()
+                    existing_rev = float(existing[0]) if existing and existing[0] else 0.0
+                    if sales_amount < existing_rev:
+                        # S&T report has lower value — keep existing revenue, only update traffic
+                        con.execute("""
+                            UPDATE daily_sales
+                            SET sessions=?, session_percentage=?, page_views=?,
+                                buy_box_percentage=?, unit_session_percentage=?
+                            WHERE date=? AND asin='ALL'
+                        """, [
+                            int(traffic.get("sessions", 0)),
+                            float(traffic.get("sessionPercentage", 0)),
+                            int(traffic.get("pageViews", 0)),
+                            float(traffic.get("buyBoxPercentage", 0)),
+                            float(traffic.get("unitSessionPercentage", 0)),
+                            entry_date
+                        ])
+                        records += 1
+                        logger.info(f"  S&T {entry_date}: kept existing ${existing_rev:.2f} (S&T returned ${sales_amount:.2f})")
+                        continue
 
                 con.execute("""
                     INSERT OR REPLACE INTO daily_sales
