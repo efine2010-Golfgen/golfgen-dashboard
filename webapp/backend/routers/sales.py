@@ -1294,6 +1294,7 @@ def sales_debug_today():
 @router.get("/api/debug/today-full")
 def sales_debug_today_full():
     """Full Today pipeline trace — shows daily_sales AND orders results, no auth."""
+    from core.config import DATABASE_URL, USE_POSTGRES
     try:
         con = get_db()
         today_c = _today_central()
@@ -1329,6 +1330,8 @@ def sales_debug_today_full():
 
         con.close()
         return {
+            "db_mode": "postgres" if USE_POSTGRES else "duckdb",
+            "db_url_set": bool(DATABASE_URL),
             "central_today": str(today_c),
             "query_start": s_iso, "query_end": e_iso,
             "daily_sales_ALL": {
