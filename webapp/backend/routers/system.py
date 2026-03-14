@@ -17,16 +17,9 @@ router = APIRouter()
 
 
 def _load_sp_api_credentials():
-    """Load SP-API credentials from environment."""
-    refresh_token = os.environ.get("SP_API_REFRESH_TOKEN")
-    if not refresh_token:
-        return None
-    return {
-        "refresh_token": refresh_token,
-        "client_id": os.environ.get("LWA_APP_ID"),
-        "client_secret": os.environ.get("LWA_CLIENT_SECRET"),
-        "marketplace_id": os.environ.get("MARKETPLACE_ID", "ATVPDKIKX0DER"),
-    }
+    """Load SP-API credentials from environment (matches sp_api.py logic)."""
+    from services.sp_api import _load_sp_api_credentials as _load_creds
+    return _load_creds()
 
 
 @router.get("/api/health")
@@ -805,3 +798,73 @@ def pg_ready():
             "manifest_exists": False,
             "error": str(e),
         }
+
+
+@router.get("/api/debug/db-diagnostic")
+def db_diagnostic():
+    """Return recent daily_sales and financial_events data for debugging (no SP-API call needed)."""
+    try:
+        con = get_db()
+        # Recent daily_sales (ALL aggregates)
+        daily_rows = con.execute("""
+            SELECT date, units_ordered, ordered_product_sales
+            FROM daily_sales
+            WHERE asin = 'ALL'
+            ORDER BY date DESC
+            LIMIT 14
+        """).fetchall()
+
+        # Financial events summary
+        fe_total = con.execute("SELECT COUNT(*) FROM financial_events").fetchone()[0]
+        fe_nonzero = con.execute("""
+            SELECT COUNT(*) FROM financial_events
+            WHERE product_charges != 0 OR fba_fees != 0 OR commission != 0
+        """).fetchone()[0]
+        fe_sample = con.execute("""
+            SELECT date, asin, event_type, product_charges, fba_fees, commission, net_proceeds, order_id
+            FROM financial_events
+            ORDER BY date DESC
+            LIMIT 5
+        """).fetchall()
+
+        # Sync log (last 10 entries)
+        sync_entries = []
+        try:
+            sync_rows = con.execute("""
+                SELECT job_name, started_at, status, rows_inserted, error_message
+                FROM sync_log
+                ORDER BY started_at DESC
+                LIMIT 10
+            """).fetchall()
+            for sr in sync_rows:
+                sync_entries.append({
+                    "job": sr[0], "started": str(sr[1])[:19],
+                    "status": sr[2], "rows": sr[3],
+                    "error": (sr[4] or "")[:200]
+                })
+        except Exception:
+            sync_entries = [{"error": "sync_log table not found"}]
+
+        con.close()
+
+        return {
+            "daily_sales_recent": [
+                {"date": str(r[0]), "units": r[1], "revenue": float(r[2]) if r[2] else 0}
+                for r in daily_rows
+            ],
+            "financial_events": {
+                "total_rows": fe_total,
+                "nonzero_rows": fe_nonzero,
+                "samples": [
+                    {"date": str(r[0]), "asin": r[1], "type": r[2],
+                     "charges": float(r[3]) if r[3] else 0, "fees": float(r[4]) if r[4] else 0,
+                     "commission": float(r[5]) if r[5] else 0, "net": float(r[6]) if r[6] else 0,
+                     "order": r[7]}
+                    for r in fe_sample
+                ]
+            },
+            "sync_log": sync_entries,
+        }
+    except Exception as e:
+        import traceback
+        return {"error": str(e), "traceback": traceback.format_exc()}
