@@ -565,12 +565,14 @@ function ContainerView({ containers, itemsByContainer, expandedRows, setExpanded
                 {exp && items.length > 0 && (
                   <ExpandPanel key={key+'-exp'} title={`Item Breakdown — ${c.container_number}`}>
                     <MiniTable
-                      headers={['Invoice #','SKU','Description','Units']}
+                      headers={['PO #','Invoice #','SKU','Description','Units','Status']}
                       rows={items.map(item => [
+                        { content: c.po_number || '—', style: { fontWeight: 700, color: 'var(--txt)' } },
                         { content: c.invoice_number || '—', style: { fontFamily: "'Space Grotesk',monospace", color: 'var(--txt2)' } },
                         { content: item.sku, style: { fontFamily: "'Space Grotesk',monospace", color: 'var(--acc3)' } },
-                        item.description,
+                        { content: item.description, style: { maxWidth: 260, overflow: 'hidden', textOverflow: 'ellipsis' } },
                         { content: fmtNum(item.units), style: { textAlign: 'right', fontWeight: 700, color: 'var(--txt)' } },
+                        { content: <StatusBadge status={normStatus(c.status)} />, style: {} },
                       ])}
                     />
                   </ExpandPanel>
@@ -667,10 +669,10 @@ function POView({ containers, itemsByContainer, expandedRows, setExpandedRows, s
                   <td style={TD0}><StatusBadge status={status} /></td>
                   <td style={TD0}>
                     <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
-                      {['container','invoice','items'].map(tab => (
+                      {[['container','Containers'],['invoice','Invoices'],['items','Items']].map(([tab, label]) => (
                         <ToggleBtn
                           key={tab}
-                          label={tab.charAt(0).toUpperCase() + tab.slice(1)}
+                          label={label}
                           open={exp === tab}
                           onClick={() => setExpandedRows(p2 => ({ ...p2, [key]: exp === tab ? null : tab }))}
                         />
@@ -689,10 +691,11 @@ function POView({ containers, itemsByContainer, expandedRows, setExpandedRows, s
                     </div>
                     {expTab === 'container' && (
                       <MiniTable
-                        headers={['Container #','Type','ETD','ETA','ETA Port','Status','Units','CBM']}
+                        headers={['Container #','Invoice #','Vessel','ETD','ETA','Port','Status','Units','CBM']}
                         rows={p.containers.map(c => [
                           { content: c.container_number, style: { fontFamily: "'Space Grotesk',monospace", color: 'var(--acc3)' } },
-                          c.container_type || '—',
+                          { content: c.invoice_number || '—', style: { fontFamily: "'Space Grotesk',monospace", color: 'var(--txt2)' } },
+                          { content: c.vessel || '—', style: { color: 'var(--txt2)' } },
                           fmtDate(c.etd),
                           { content: fmtDate(c.container_eta), style: { fontWeight: 700, color: 'var(--txt)' } },
                           (c.eta_port || '—').split(',')[0],
@@ -785,10 +788,11 @@ function InvoiceView({ containers, itemsByContainer, expandedRows, setExpandedRo
       <table style={{ width: '100%', borderCollapse: 'collapse' }}>
         <thead>
           <tr>
-            <SortTh label="Invoice #" col="invoice" view="invoice" sortState={sortState} onSort={onSort} />
-            <SortTh label="PO #"      col="po"      view="invoice" sortState={sortState} onSort={onSort} />
-            <SortTh label="ETA"       col="eta"     view="invoice" sortState={sortState} onSort={onSort} />
-            <SortTh label="Units"     col="units"   view="invoice" sortState={sortState} onSort={onSort} align="right" />
+            <SortTh label="Invoice #"   col="invoice" view="invoice" sortState={sortState} onSort={onSort} />
+            <SortTh label="PO #"        col="po"      view="invoice" sortState={sortState} onSort={onSort} />
+            <th style={TH0}>Container(s)</th>
+            <SortTh label="ETA"         col="eta"     view="invoice" sortState={sortState} onSort={onSort} />
+            <SortTh label="Units"       col="units"   view="invoice" sortState={sortState} onSort={onSort} align="right" />
             <th style={{ ...TH0, textAlign: 'right' }}>CBM</th>
             <th style={TH0}>Status</th>
             <th style={TH0}>Details</th>
@@ -804,16 +808,19 @@ function InvoiceView({ containers, itemsByContainer, expandedRows, setExpandedRo
                 <DataRow key={key}>
                   <td style={{ ...TD0, fontFamily: "'Space Grotesk',monospace", fontWeight: 700, color: 'var(--txt)' }}>{g.invoice}</td>
                   <td style={{ ...TD0, color: 'var(--acc3)', fontWeight: 600 }}>{g.po}</td>
+                  <td style={{ ...TD0, fontFamily: "'Space Grotesk',monospace", fontSize: 9, color: 'var(--txt3)' }}>
+                    {g.containers.map(c => c.container_number === '—' ? '(unbooked)' : c.container_number.slice(0,11)).join(', ')}
+                  </td>
                   <td style={{ ...TD0, fontWeight: 600, color: 'var(--txt)' }}>{fmtDate(g.eta)}</td>
                   <td style={{ ...TD0, fontWeight: 700, textAlign: 'right' }}>{fmtNum(g.units)}</td>
                   <td style={{ ...TD0, color: 'var(--txt3)', textAlign: 'right' }}>{g.cbm.toFixed(1)}</td>
                   <td style={TD0}><StatusBadge status={g.status} /></td>
                   <td style={TD0}>
                     <div style={{ display: 'flex', gap: 4 }}>
-                      {['container','po','items'].map(tab => (
+                      {[['container','Containers'],['po','By PO'],['items','Items']].map(([tab, label]) => (
                         <ToggleBtn
                           key={tab}
-                          label={tab.charAt(0).toUpperCase() + tab.slice(1)}
+                          label={label}
                           open={exp === tab}
                           onClick={() => setExpandedRows(p => ({ ...p, [key]: exp === tab ? null : tab }))}
                         />
@@ -882,7 +889,7 @@ function InvoiceView({ containers, itemsByContainer, expandedRows, setExpandedRo
               </>
             );
           })}
-          <TotalRow label={`TOTAL — ${filtered.length} invoices`} units={tu} cbm={tc} colSpan={4} />
+          <TotalRow label={`TOTAL — ${filtered.length} invoices`} units={tu} cbm={tc} colSpan={5} />
         </tbody>
       </table>
     </Card>
@@ -950,15 +957,31 @@ function ItemsView({ itemPivot, containers, expandedRows, setExpandedRows, sortS
               const expTab = exp || 'po';
               const ctrList = Object.entries(item.containers || {});
               const ctrObjects = ctrList.map(([cid]) => containers.find(c => c.container_number === cid)).filter(Boolean);
-              // Group by PO
-              const byPO = {};
+              // Group by PO, Container, Invoice
+              const byPO = {}, byCtr2 = {}, byInv2 = {};
               ctrList.forEach(([cid, units]) => {
                 const c = containers.find(ct => ct.container_number === cid);
                 if (!c) return;
                 const po = c.po_number || '—';
-                if (!byPO[po]) byPO[po] = { po, units: 0, containers: [] };
+                const inv = c.invoice_number || '—';
+                const st = normStatus(c.status);
+                // byPO
+                if (!byPO[po]) byPO[po] = { po, units: 0, containers: [], invoices: [], status: st };
                 byPO[po].units += units;
-                byPO[po].containers.push(cid);
+                if (!byPO[po].containers.includes(cid)) byPO[po].containers.push(cid);
+                if (inv !== '—' && !byPO[po].invoices.includes(inv)) byPO[po].invoices.push(inv);
+                if (st === 'transit') byPO[po].status = 'transit';
+                else if (st === 'open' && byPO[po].status === 'delivered') byPO[po].status = 'open';
+                // byCtr
+                if (!byCtr2[cid]) byCtr2[cid] = { cid, units: 0, pos: [], invoices: [], status: st, eta: c.container_eta };
+                byCtr2[cid].units += units;
+                if (!byCtr2[cid].pos.includes(po)) byCtr2[cid].pos.push(po);
+                if (inv !== '—' && !byCtr2[cid].invoices.includes(inv)) byCtr2[cid].invoices.push(inv);
+                // byInv
+                if (!byInv2[inv]) byInv2[inv] = { inv, units: 0, pos: [], containers: [], status: st, eta: c.container_eta };
+                byInv2[inv].units += units;
+                if (!byInv2[inv].pos.includes(po)) byInv2[inv].pos.push(po);
+                if (!byInv2[inv].containers.includes(cid)) byInv2[inv].containers.push(cid);
               });
               return (
                 <>
@@ -970,10 +993,10 @@ function ItemsView({ itemPivot, containers, expandedRows, setExpandedRows, sortS
                     <td style={{ ...TD0, fontWeight: 700, color: 'var(--txt)', textAlign: 'right' }}>{fmtNum(item.total)}</td>
                     <td style={TD0}>
                       <div style={{ display: 'flex', gap: 4 }}>
-                        {['po','container','invoice'].map(tab => (
+                        {[['po','By PO'],['container','By Container'],['invoice','By Invoice']].map(([tab, label]) => (
                           <ToggleBtn
                             key={tab}
-                            label={tab.charAt(0).toUpperCase() + tab.slice(1)}
+                            label={label}
                             open={exp === tab}
                             onClick={() => setExpandedRows(p => ({ ...p, [key]: exp === tab ? null : tab }))}
                           />
@@ -992,38 +1015,40 @@ function ItemsView({ itemPivot, containers, expandedRows, setExpandedRows, sortS
                       </div>
                       {expTab === 'po' && (
                         <MiniTable
-                          headers={['PO #','Units']}
+                          headers={['PO #','Containers','Invoices','Status','Units']}
                           rows={Object.values(byPO).map(p => [
                             { content: p.po, style: { fontWeight: 700, color: 'var(--acc3)' } },
-                            { content: fmtNum(p.units), style: { textAlign: 'right', fontWeight: 700 } },
+                            { content: p.containers.map(c => c === '—' ? '(unbooked)' : c.slice(0,11)).join(', '), style: { fontFamily: "'Space Grotesk',monospace", fontSize: 9, color: 'var(--txt3)' } },
+                            { content: p.invoices.length ? p.invoices.join(', ') : '—', style: { fontFamily: "'Space Grotesk',monospace", fontSize: 9, color: 'var(--txt2)' } },
+                            { content: <StatusBadge status={p.status} />, style: {} },
+                            { content: fmtNum(p.units), style: { textAlign: 'right', fontWeight: 700, color: 'var(--txt)' } },
                           ])}
                         />
                       )}
                       {expTab === 'container' && (
                         <MiniTable
-                          headers={['Container #','ETA','Status','Units']}
-                          rows={ctrList.map(([cid, units]) => {
-                            const c = containers.find(ct => ct.container_number === cid);
-                            return [
-                              { content: cid, style: { fontFamily: "'Space Grotesk',monospace", color: 'var(--acc3)' } },
-                              fmtDate(c?.container_eta),
-                              { content: <StatusBadge status={normStatus(c?.status)} />, style: {} },
-                              { content: fmtNum(units), style: { textAlign: 'right', fontWeight: 700 } },
-                            ];
-                          })}
+                          headers={['Container #','PO(s)','Invoice(s)','ETA','Status','Units']}
+                          rows={Object.entries(byCtr2).map(([cid, d]) => [
+                            { content: cid === '—' ? '(unbooked)' : cid, style: { fontFamily: "'Space Grotesk',monospace", color: 'var(--acc3)' } },
+                            { content: d.pos.join(', '), style: { fontWeight: 700, color: 'var(--txt)' } },
+                            { content: d.invoices.length ? d.invoices.join(', ') : '—', style: { fontFamily: "'Space Grotesk',monospace", fontSize: 9, color: 'var(--txt2)' } },
+                            { content: fmtDate(d.eta), style: { fontWeight: 600, color: 'var(--txt)' } },
+                            { content: <StatusBadge status={d.status} />, style: {} },
+                            { content: fmtNum(d.units), style: { textAlign: 'right', fontWeight: 700, color: 'var(--txt)' } },
+                          ])}
                         />
                       )}
                       {expTab === 'invoice' && (
                         <MiniTable
-                          headers={['Invoice #','Container #','Units']}
-                          rows={ctrList.map(([cid, units]) => {
-                            const c = containers.find(ct => ct.container_number === cid);
-                            return [
-                              { content: c?.invoice_number || '—', style: { fontFamily: "'Space Grotesk',monospace" } },
-                              { content: cid, style: { fontFamily: "'Space Grotesk',monospace", fontSize: 9, color: 'var(--acc3)' } },
-                              { content: fmtNum(units), style: { textAlign: 'right', fontWeight: 700 } },
-                            ];
-                          })}
+                          headers={['Invoice #','PO(s)','Container(s)','ETA','Status','Units']}
+                          rows={Object.entries(byInv2).map(([inv, d]) => [
+                            { content: inv, style: { fontFamily: "'Space Grotesk',monospace", color: 'var(--acc3)' } },
+                            { content: d.pos.join(', '), style: { fontWeight: 700, color: 'var(--txt)' } },
+                            { content: d.containers.map(c => c === '—' ? '(unbooked)' : c.slice(0,11)).join(', '), style: { fontFamily: "'Space Grotesk',monospace", fontSize: 9, color: 'var(--txt3)' } },
+                            { content: fmtDate(d.eta), style: { fontWeight: 600, color: 'var(--txt)' } },
+                            { content: <StatusBadge status={d.status} />, style: {} },
+                            { content: fmtNum(d.units), style: { textAlign: 'right', fontWeight: 700, color: 'var(--txt)' } },
+                          ])}
                         />
                       )}
                     </ExpandPanel>
