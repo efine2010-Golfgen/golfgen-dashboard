@@ -89,6 +89,9 @@ _RE_INSERT_OR_REPLACE = re.compile(
 
 def _translate_sql_for_pg(sql: str) -> str:
     """Convert DuckDB SQL idioms to PostgreSQL equivalents."""
+    # Escape existing % characters first (e.g. ILIKE '%refund%')
+    # so psycopg2 doesn't interpret them as format specifiers.
+    sql = sql.replace("%", "%%")
     # ? → %s  (parameterised placeholders)
     sql = sql.replace("?", "%s")
 
