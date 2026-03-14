@@ -288,24 +288,28 @@ function MetricCard({ label, value, ly, delta, expandContent, invert }) {
   const [expanded, setExpanded] = useState(false);
   const isPos = invert ? delta < 0 : delta > 0;
   const deltaEl = delta != null ? (
-    <span style={{fontSize:9,fontWeight:700,padding:'2px 6px',borderRadius:99,
+    <span style={{fontSize:9,fontWeight:700,padding:'2px 5px',borderRadius:6,
       color:isPos?'#4ade80':'#fb923c',
       background:isPos?'rgba(74,222,128,.1)':'rgba(251,146,60,.12)',whiteSpace:'nowrap'}}>
-      {delta > 0 ? '\u25B2' : '\u25BC'} {Math.abs(delta).toFixed(1)}%
+      {delta > 0 ? '\u25B2' : '\u25BC'}&nbsp;{Math.abs(delta).toFixed(1)}%
     </span>
   ) : null;
   return (
-    <div style={{flex:'1 1 0',minWidth:140,background:'linear-gradient(145deg,var(--card),var(--card2))',borderRadius:12,padding:'12px 12px 10px',border:'1px solid var(--brd)',transition:'background .3s'}}>
-      <div style={{fontSize:9,color:'var(--txt3)',textTransform:'uppercase',letterSpacing:'.07em',marginBottom:6,whiteSpace:'nowrap'}}>{label}</div>
-      {/* TY value — big, on its own line */}
-      <div style={{fontSize:18,fontWeight:800,letterSpacing:'-.02em',color:'var(--txt)',lineHeight:1,marginBottom:5}}>{value}</div>
-      {/* LY + delta — smaller row below */}
-      <div style={{display:'flex',alignItems:'center',gap:8,flexWrap:'wrap'}}>
-        {ly && <span style={{fontSize:10,color:'var(--txt3)',whiteSpace:'nowrap'}}>LY&nbsp;{ly}</span>}
-        {deltaEl}
+    <div style={{flex:'1 1 0',minWidth:148,background:'linear-gradient(145deg,var(--card),var(--card2))',borderRadius:12,padding:'11px 12px 10px',border:'1px solid var(--brd)',transition:'background .3s'}}>
+      {/* Label */}
+      <div style={{fontSize:9,color:'var(--txt3)',textTransform:'uppercase',letterSpacing:'.07em',marginBottom:7,whiteSpace:'nowrap'}}>{label}</div>
+      {/* TY left, LY + delta stacked right */}
+      <div style={{display:'flex',alignItems:'flex-start',justifyContent:'space-between',gap:6}}>
+        <div style={{fontSize:17,fontWeight:800,letterSpacing:'-.02em',color:'var(--txt)',lineHeight:1,flexShrink:0}}>{value}</div>
+        {(ly || delta != null) && (
+          <div style={{display:'flex',flexDirection:'column',alignItems:'flex-end',gap:4,paddingTop:1,flexShrink:0}}>
+            {ly && <span style={{fontSize:10,color:'var(--txt3)',whiteSpace:'nowrap',letterSpacing:'-.01em'}}>LY&nbsp;{ly}</span>}
+            {deltaEl}
+          </div>
+        )}
       </div>
       {expandContent && (
-        <div style={{marginTop:7}}>
+        <div style={{marginTop:8}}>
           <button onClick={() => setExpanded(e => !e)}
             style={{fontSize:9,padding:'2px 7px',borderRadius:99,border:'1px solid var(--brd)',background:'transparent',color:'var(--txt3)',cursor:'pointer',fontWeight:600,whiteSpace:'nowrap'}}>
             {expanded ? '\u25B2 hide' : '\u25BC detail'}

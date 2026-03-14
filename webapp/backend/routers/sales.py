@@ -697,12 +697,12 @@ def sales_monthly_yoy(
         month_names = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec']
 
         rows = con.execute(f"""
-            SELECT EXTRACT(YEAR FROM date) AS yr,
-                   EXTRACT(MONTH FROM date) AS mo,
+            SELECT EXTRACT(YEAR FROM CAST(date AS DATE)) AS yr,
+                   EXTRACT(MONTH FROM CAST(date AS DATE)) AS mo,
                    COALESCE(SUM(ordered_product_sales), 0) AS revenue
             FROM daily_sales
             WHERE asin = 'ALL' AND date IS NOT NULL AND date >= '2024-01-01' {hw}
-            GROUP BY EXTRACT(YEAR FROM date), EXTRACT(MONTH FROM date)
+            GROUP BY EXTRACT(YEAR FROM CAST(date AS DATE)), EXTRACT(MONTH FROM CAST(date AS DATE))
             ORDER BY yr, mo
         """, hp).fetchall()
         con.close()
@@ -1604,11 +1604,11 @@ def monthly_yoy(
 
     try:
         analytics_rows = con.execute(f"""
-            SELECT EXTRACT(YEAR FROM date) AS yr, EXTRACT(MONTH FROM date) AS mo,
+            SELECT EXTRACT(YEAR FROM CAST(date AS DATE)) AS yr, EXTRACT(MONTH FROM CAST(date AS DATE)) AS mo,
                    COALESCE(SUM(gross_revenue), 0) AS revenue
             FROM analytics_daily
             WHERE date >= '2024-01-01'{hf}
-            GROUP BY EXTRACT(YEAR FROM date), EXTRACT(MONTH FROM date)
+            GROUP BY EXTRACT(YEAR FROM CAST(date AS DATE)), EXTRACT(MONTH FROM CAST(date AS DATE))
             ORDER BY yr, mo
         """, hp).fetchall()
         if analytics_rows and len(analytics_rows) > 0 and any(r[2] > 0 for r in analytics_rows):
@@ -1619,11 +1619,11 @@ def monthly_yoy(
     if rows is None:
         try:
             rows = con.execute(f"""
-                SELECT EXTRACT(YEAR FROM date) AS yr, EXTRACT(MONTH FROM date) AS mo,
+                SELECT EXTRACT(YEAR FROM CAST(date AS DATE)) AS yr, EXTRACT(MONTH FROM CAST(date AS DATE)) AS mo,
                        COALESCE(SUM(ordered_product_sales), 0) AS revenue
                 FROM daily_sales
                 WHERE asin = 'ALL' AND date IS NOT NULL AND date >= '2024-01-01'{hf}
-                GROUP BY EXTRACT(YEAR FROM date), EXTRACT(MONTH FROM date)
+                GROUP BY EXTRACT(YEAR FROM CAST(date AS DATE)), EXTRACT(MONTH FROM CAST(date AS DATE))
                 ORDER BY yr, mo
             """, hp).fetchall()
         except Exception as e:
