@@ -432,16 +432,27 @@ def _sync_today_orders_inner():
             # Sales & Traffic Report data is more accurate for historical days,
             # Orders API may undercount (missing item prices on Pending orders).
             # Only overwrite if new revenue is >= existing — never lose data.
+            # CRITICAL: Preserve existing session/traffic data — Orders API doesn't have it.
             if agg["revenue"] >= existing_rev:
+                existing_full = con.execute(
+                    "SELECT sessions, session_percentage, page_views, buy_box_percentage, unit_session_percentage FROM daily_sales WHERE date = ? AND asin = 'ALL'",
+                    [day_str]
+                ).fetchone()
+                ex_sess = int(existing_full[0]) if existing_full and existing_full[0] else 0
+                ex_sess_pct = float(existing_full[1]) if existing_full and existing_full[1] else 0
+                ex_pv = int(existing_full[2]) if existing_full and existing_full[2] else 0
+                ex_bb = float(existing_full[3]) if existing_full and existing_full[3] else 0
+                ex_usp = float(existing_full[4]) if existing_full and existing_full[4] else 0
                 con.execute("""
                     INSERT OR REPLACE INTO daily_sales
                     (date, asin, units_ordered, ordered_product_sales,
                      sessions, session_percentage, page_views,
                      buy_box_percentage, unit_session_percentage,
                      division, customer, platform)
-                    VALUES (?, 'ALL', ?, ?, 0, 0, 0, 0, 0, 'golf', 'amazon', 'sp_api')
-                """, [day_str, agg["units"], agg["revenue"]])
-                logger.info(f"  {day_str}: ${agg['revenue']:.2f} rev, {agg['units']} units, {agg['orders']} orders (was ${existing_rev:.2f})")
+                    VALUES (?, 'ALL', ?, ?, ?, ?, ?, ?, ?, 'golf', 'amazon', 'sp_api')
+                """, [day_str, agg["units"], agg["revenue"],
+                      ex_sess, ex_sess_pct, ex_pv, ex_bb, ex_usp])
+                logger.info(f"  {day_str}: ${agg['revenue']:.2f} rev, {agg['units']} units, {agg['orders']} orders (was ${existing_rev:.2f}, preserved sessions={ex_sess})")
 
         con.execute("COMMIT")
         con.close()
@@ -746,13 +757,17 @@ def _run_sp_api_sync_inner():
             # sp_api model object — try attribute access
             return getattr(obj, key, default)
 
-        # Clear old financial events for re-sync (avoids duplicates without needing PK)
-        try:
-            cutoff_date = (datetime.utcnow() - timedelta(days=90)).strftime("%Y-%m-%d")
-            con.execute("DELETE FROM financial_events WHERE date >= ?", [cutoff_date])
-            logger.info(f"  Cleared financial_events from {cutoff_date} for re-sync")
-        except Exception as e:
-            logger.warning(f"  Could not clear old financial_events: {e}")
+        # Only clear old financial events if we actually got new data to replace them.
+        # This prevents data loss when the API returns empty results.
+        if all_shipment_events or all_refund_events:
+            try:
+                cutoff_date = (datetime.utcnow() - timedelta(days=90)).strftime("%Y-%m-%d")
+                con.execute("DELETE FROM financial_events WHERE date >= ?", [cutoff_date])
+                logger.info(f"  Cleared financial_events from {cutoff_date} for re-sync ({len(all_shipment_events)} shipments + {len(all_refund_events)} refunds to insert)")
+            except Exception as e:
+                logger.warning(f"  Could not clear old financial_events: {e}")
+        else:
+            logger.warning("  Financial events: API returned NO data — keeping existing records to prevent data loss")
 
         # Process shipment events (sales fees)
         first_shipment_logged = False
@@ -1290,14 +1305,25 @@ def _backfill_orders_inner(days: int = 90):
             existing_rev = float(existing[0]) if existing and existing[0] else 0.0
     
             if agg["revenue"] >= existing_rev:
+                # Preserve existing session/traffic data — Orders API doesn't have it
+                existing_full = con.execute(
+                    "SELECT sessions, session_percentage, page_views, buy_box_percentage, unit_session_percentage FROM daily_sales WHERE date = ? AND asin = 'ALL'",
+                    [day_str]
+                ).fetchone()
+                ex_sess = int(existing_full[0]) if existing_full and existing_full[0] else 0
+                ex_sess_pct = float(existing_full[1]) if existing_full and existing_full[1] else 0
+                ex_pv = int(existing_full[2]) if existing_full and existing_full[2] else 0
+                ex_bb = float(existing_full[3]) if existing_full and existing_full[3] else 0
+                ex_usp = float(existing_full[4]) if existing_full and existing_full[4] else 0
                 con.execute("""
                     INSERT OR REPLACE INTO daily_sales
                     (date, asin, units_ordered, ordered_product_sales,
                      sessions, session_percentage, page_views,
                      buy_box_percentage, unit_session_percentage,
                      division, customer, platform)
-                    VALUES (?, 'ALL', ?, ?, 0, 0, 0, 0, 0, 'golf', 'amazon', 'sp_api')
-                """, [day_str, agg["units"], agg["revenue"]])
+                    VALUES (?, 'ALL', ?, ?, ?, ?, ?, ?, ?, 'golf', 'amazon', 'sp_api')
+                """, [day_str, agg["units"], agg["revenue"],
+                      ex_sess, ex_sess_pct, ex_pv, ex_bb, ex_usp])
                 days_updated += 1
 
         con.execute("COMMIT")

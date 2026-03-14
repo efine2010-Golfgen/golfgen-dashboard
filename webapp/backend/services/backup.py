@@ -575,13 +575,33 @@ def restore_from_latest_backup() -> dict:
             restored_size = duckdb_file.stat().st_size
             restored_size_mb = round(restored_size / (1024 * 1024), 2)
 
-            # Compare: only replace if backup DB is larger (has more data)
+            # Compare row counts, not file size — DuckDB compaction can make a richer DB smaller.
             current_size = DB_PATH.stat().st_size if DB_PATH.exists() else 0
             current_size_mb = round(current_size / (1024 * 1024), 2)
 
-            if restored_size <= current_size:
-                logger.info(f"Restore: Backup DB ({restored_size_mb} MB) <= current ({current_size_mb} MB) — keeping current")
-                return {"status": "SKIPPED", "reason": f"Backup ({restored_size_mb}MB) not larger than current ({current_size_mb}MB)"}
+            # Count rows in current DB
+            try:
+                import duckdb
+                cur_con = duckdb.connect(str(DB_PATH), read_only=True)
+                cur_rows = cur_con.execute("SELECT COUNT(*) FROM daily_sales").fetchone()[0]
+                cur_con.close()
+            except Exception:
+                cur_rows = 0
+
+            # Count rows in backup DB
+            try:
+                import duckdb
+                bak_con = duckdb.connect(str(duckdb_file), read_only=True)
+                bak_rows = bak_con.execute("SELECT COUNT(*) FROM daily_sales").fetchone()[0]
+                bak_con.close()
+            except Exception:
+                bak_rows = 0
+
+            if bak_rows <= cur_rows and cur_rows > 0:
+                logger.info(f"Restore: Backup DB ({bak_rows} rows, {restored_size_mb} MB) <= current ({cur_rows} rows, {current_size_mb} MB) — keeping current")
+                return {"status": "SKIPPED", "reason": f"Backup ({bak_rows} rows) not larger than current ({cur_rows} rows)"}
+            
+            logger.info(f"Restore: Backup has more data ({bak_rows} rows vs {cur_rows} rows)")
 
             # Replace the database file
             logger.info(f"Restore: Replacing DB ({current_size_mb} MB → {restored_size_mb} MB)")

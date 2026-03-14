@@ -258,13 +258,9 @@ async def _sync_loop():
     except Exception as e:
         logger.error(f"Startup DB restore error (continuing with seed): {e}")
 
-    # Immediately pull today's orders — no delay
-    try:
-        loop = asyncio.get_event_loop()
-        await loop.run_in_executor(None, _sync_today_orders)
-        logger.info("Startup: today's orders synced")
-    except Exception as e:
-        logger.error(f"Startup today-sync error: {e}")
+    # NOTE: _run_sp_api_sync already calls _sync_today_orders internally as step 1.
+    # No need to call it separately — that was causing a double-sync where the second
+    # run (inside _run_sp_api_sync) could overwrite data from the first.
 
     # Run full SP-API sync on startup (includes financial events with refunds).
     # This is critical because Railway's ephemeral filesystem means every deploy
