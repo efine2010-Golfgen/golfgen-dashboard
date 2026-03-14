@@ -899,39 +899,47 @@ function InvoiceView({ containers, itemsByContainer, expandedRows, setExpandedRo
 // ─────────────────────────────────────────────────────────────────────────────
 // VIEW 5: ITEMS
 // ─────────────────────────────────────────────────────────────────────────────
-function ItemsView({ itemPivot, containers, expandedRows, setExpandedRows, sortState, onSort, search }) {
+function ItemsView({ itemPivot, containers, expandedRows, setExpandedRows, sortState, onSort, statusFilter, search }) {
   // Build flat item list from itemPivot (SKU-level aggregates)
   const items = useMemo(() => {
     if (!itemPivot?.length) return [];
     return itemPivot.map(item => {
-      const ctrList = Object.keys(item.containers || {});
-      // Determine overall status from containers
-      const ctrObjects = ctrList.map(cid => containers.find(c => c.container_number === cid)).filter(Boolean);
-      const status = ctrObjects.every(c => normStatus(c.status) === 'delivered') ? 'delivered'
+      const ctrEntries = Object.entries(item.containers || {});
+      // Determine overall status from matching containers
+      const ctrObjects = ctrEntries.map(([cid]) => containers.find(c => c.container_number === cid)).filter(Boolean);
+      const status = ctrObjects.length === 0 ? 'open'
+                   : ctrObjects.every(c => normStatus(c.status) === 'delivered') ? 'delivered'
                    : ctrObjects.some(c  => normStatus(c.status) === 'transit')   ? 'transit'
                    : 'open';
       const eta = ctrObjects.reduce((best, c) => {
         if (!c.container_eta || c.container_eta === '—') return best;
         return !best ? c.container_eta : (c.container_eta < best ? c.container_eta : best);
       }, null) || '—';
-      return { ...item, status, eta, cbm: 0 }; // CBM not readily available from itemPivot
+      // Estimate CBM proportionally from container-level CBM
+      const cbm = Math.round(ctrEntries.reduce((sum, [cid, skuUnits]) => {
+        const c = containers.find(ct => ct.container_number === cid);
+        if (!c || !c.units || !c.cbm) return sum;
+        return sum + (skuUnits / c.units) * c.cbm;
+      }, 0) * 10) / 10;
+      return { ...item, status, eta, cbm };
     });
   }, [itemPivot, containers]);
 
   const filtered = useMemo(() => {
     let r = items;
+    if (statusFilter && statusFilter !== 'all') r = r.filter(item => item.status === statusFilter);
     if (search) {
       const q = search.toLowerCase();
       r = r.filter(item => `${item.sku} ${item.description}`.toLowerCase().includes(q));
     }
     return sortRows(r, sortState.item?.key || 'sku', sortState.item?.dir || 1);
-  }, [items, search, sortState]);
+  }, [items, statusFilter, search, sortState]);
 
   const tu = filtered.reduce((s, r) => s + (r.total || 0), 0);
 
   return (
     <Card
-      title="Items"
+      title="All Items — Aggregated by SKU"
       stats={[{ val: filtered.length, label: 'SKUs' }, { val: fmtNum(tu), label: 'total units' }]}
     >
       {filtered.length === 0 ? (
@@ -945,8 +953,8 @@ function ItemsView({ itemPivot, containers, expandedRows, setExpandedRows, sortS
               <SortTh label="SKU"         col="sku"   view="item" sortState={sortState} onSort={onSort} />
               <SortTh label="Description" col="description" view="item" sortState={sortState} onSort={onSort} />
               <th style={TH0}>Status</th>
-              <th style={TH0}>ETA</th>
               <SortTh label="Total Units" col="total" view="item" sortState={sortState} onSort={onSort} align="right" />
+              <th style={{ ...TH0, textAlign: 'right' }}>Total CBM</th>
               <th style={TH0}>Details</th>
             </tr>
           </thead>
@@ -989,8 +997,8 @@ function ItemsView({ itemPivot, containers, expandedRows, setExpandedRows, sortS
                     <td style={{ ...TD0, fontFamily: "'Space Grotesk',monospace", color: 'var(--acc3)', fontWeight: 700 }}>{item.sku}</td>
                     <td style={{ ...TD0, maxWidth: 280, overflow: 'hidden', textOverflow: 'ellipsis' }}>{item.description}</td>
                     <td style={TD0}><StatusBadge status={item.status} /></td>
-                    <td style={{ ...TD0, fontWeight: 600, color: 'var(--txt)' }}>{fmtDate(item.eta)}</td>
-                    <td style={{ ...TD0, fontWeight: 700, color: 'var(--txt)', textAlign: 'right' }}>{fmtNum(item.total)}</td>
+                    <td style={{ ...TD0, fontWeight: 800, fontSize: 13, color: 'var(--txt)', textAlign: 'right' }}>{fmtNum(item.total)}</td>
+                    <td style={{ ...TD0, textAlign: 'right', color: 'var(--txt2)' }}>{item.cbm > 0 ? item.cbm.toFixed(1) : '—'}</td>
                     <td style={TD0}>
                       <div style={{ display: 'flex', gap: 4 }}>
                         {[['po','By PO'],['container','By Container'],['invoice','By Invoice']].map(([tab, label]) => (
@@ -1057,8 +1065,9 @@ function ItemsView({ itemPivot, containers, expandedRows, setExpandedRows, sortS
               );
             })}
             <tr style={{ background: 'var(--card2)', fontFamily: "'Space Grotesk',monospace", fontSize: 11, fontWeight: 800, color: 'var(--txt)' }}>
-              <td colSpan={4} style={{ padding: '10px 12px', borderTop: '1px solid var(--brd2)' }}>TOTAL — {filtered.length} SKUs</td>
+              <td colSpan={3} style={{ padding: '10px 12px', borderTop: '1px solid var(--brd2)' }}>TOTAL — {filtered.length} SKUs</td>
               <td style={{ padding: '10px 12px', borderTop: '1px solid var(--brd2)', textAlign: 'right' }}>{fmtNum(tu)}</td>
+              <td style={{ padding: '10px 12px', borderTop: '1px solid var(--brd2)' }}/>
               <td style={{ padding: '10px 12px', borderTop: '1px solid var(--brd2)' }}/>
             </tr>
           </tbody>
@@ -1458,6 +1467,7 @@ export default function SupplyChain() {
           setExpandedRows={setExpandedRows}
           sortState={sortState}
           onSort={handleSort}
+          statusFilter={statusFilter}
           search={search}
         />
       )}
