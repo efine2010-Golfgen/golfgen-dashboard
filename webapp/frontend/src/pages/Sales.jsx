@@ -120,10 +120,11 @@ function yoyBarSVG(data, W=1100, H=180) {
   const maxV = Math.max(...data.flatMap(d => [d.y2024||0, d.y2025||0, d.y2026||0]), 1);
   const iw = W-pad.l-pad.r, ih = H-pad.t-pad.b;
   const slotW = iw / data.length;
-  const gap = 2;
-  const bw = Math.max((slotW - gap * 4) / 3, 4);
-  const groupW = bw * 3 + gap * 2;
-  const x = (mi,yi) => pad.l + mi * slotW + (slotW - groupW) / 2 + yi * (bw + gap);
+  // Group occupies 62% of the slot — remaining 38% becomes inter-month breathing room
+  const groupW = slotW * 0.62;
+  const innerGap = Math.max(2, groupW * 0.05); // ~5% of group as inner gap
+  const bw = Math.max((groupW - innerGap * 2) / 3, 3);
+  const x = (mi,yi) => pad.l + mi * slotW + (slotW - groupW) / 2 + yi * (bw + innerGap);
   const h = v => Math.max((v/maxV)*ih, v > 0 ? 4 : 0);
   let s = `<svg width="100%" viewBox="0 0 ${W} ${H}" style="overflow:visible;display:block">`;
   for (let i=0;i<=3;i++) { const v=maxV*(i/3); s+=`<line x1="${pad.l}" y1="${(pad.t+ih*(1-i/3)).toFixed(1)}" x2="${W-pad.r}" y2="${(pad.t+ih*(1-i/3)).toFixed(1)}" stroke="#1a2f4a" stroke-width="0.5"/><text x="${pad.l-5}" y="${(pad.t+ih*(1-i/3)+4).toFixed(1)}" text-anchor="end" font-size="9" fill="#374f66">${f$(v)}</text>`; }
@@ -176,19 +177,28 @@ function funnelSVG(data) {
     const nextTyW = i<n-1 ? stageW(data[i+1].ty) : tyW*.55;
     const nextLyW = i<n-1 ? stageW(data[i+1].ly) : lyW*.55;
     const cy = padT+i*rowH, cx = W/2, segH = rowH-4;
+    // Pre-compute this stage's YOY pass-through change for the right-side label
+    let stageChg = null;
+    if (i < n-1) {
+      const convTY = f.ty > 0 ? data[i+1].ty/f.ty : 0;
+      const convLY = f.ly > 0 ? data[i+1].ly/f.ly : 0;
+      stageChg = convLY > 0 ? dp(convTY, convLY) : null;
+    }
     s += `<path d="M${cx-lyW/2},${cy} L${cx+lyW/2},${cy} L${cx+nextLyW/2},${cy+segH} L${cx-nextLyW/2},${cy+segH} Z" fill="${B.dim}" opacity=".32"/>`;
     s += `<path d="M${cx-tyW/2},${cy+2} L${cx+tyW/2},${cy+2} L${cx+nextTyW/2},${cy+segH-1} L${cx-nextTyW/2},${cy+segH-1} Z" fill="url(#fg${i})" opacity=".92"/>`;
     s += `<text x="${padL-10}" y="${cy+rowH/2+4}" text-anchor="end" font-size="11" font-weight="600" fill="#e2e8f0">${f.label}</text>`;
     s += `<text x="${cx}" y="${cy+rowH/2+4}" text-anchor="middle" font-size="13" font-weight="700" fill="#fff">${fN(f.ty)}</text>`;
-    s += `<text x="${cx+tyW/2+10}" y="${cy+rowH/2-4}" text-anchor="start" font-size="9" fill="${B.sub}">LY ${fN(f.ly)}</text>`;
+    // Right-side: LY value on first line, YOY chg% directly below it
+    const rxBase = cx + Math.max(tyW, lyW) / 2 + 14;
+    s += `<text x="${rxBase}" y="${cy+rowH/2-2}" text-anchor="start" font-size="9" fill="${B.sub}">LY ${fN(f.ly)}</text>`;
+    if (stageChg != null) {
+      const chgColor = stageChg >= 0 ? '#4ade80' : '#fb923c';
+      s += `<text x="${rxBase}" y="${cy+rowH/2+11}" text-anchor="start" font-size="9" font-weight="700" fill="${chgColor}">${stageChg>=0?'\u25B2':'\u25BC'}${Math.abs(stageChg).toFixed(1)}% vs LY</text>`;
+    }
     if (i < n-1) {
       const passThru = f.ty > 0 ? ((data[i+1].ty/f.ty)*100).toFixed(1) : '0.0';
-      const convTY = f.ty > 0 ? data[i+1].ty/f.ty : 0;
-      const convLY = f.ly > 0 ? data[i+1].ly/f.ly : 0;
-      const chg = convLY > 0 ? dp(convTY, convLY) : null;
-      const chgColor = chg >= 0 ? '#4ade80' : '#fb923c';
+      // Pass-through label stays in center — chg% is now on the right side above
       s += `<text x="${cx}" y="${cy+segH+12}" text-anchor="middle" font-size="9" fill="${B.dim}">\u25BC ${passThru}% pass through</text>`;
-      if (chg != null) s += `<text x="${cx+82}" y="${cy+segH+12}" text-anchor="start" font-size="9" fill="${chgColor}" font-weight="600">${chg>=0?'\u25B2':'\u25BC'}${Math.abs(chg).toFixed(1)}% vs LY</text>`;
     }
   });
   s += `<g transform="translate(${padL},${H-padB+2})"><rect width="10" height="10" y="-1" rx="2" fill="${B.b2}" opacity=".9"/><text x="14" y="8" font-size="9" fill="${B.sub}">This Year</text><rect x="85" width="10" height="10" y="-1" rx="2" fill="${B.dim}" opacity=".5"/><text x="99" y="8" font-size="9" fill="${B.sub}">Last Year</text></g>`;
@@ -297,17 +307,16 @@ function MetricCard({ label, value, ly, delta, expandContent, invert }) {
   return (
     <div style={{flex:'1 1 0',minWidth:148,background:'linear-gradient(145deg,var(--card),var(--card2))',borderRadius:12,padding:'11px 12px 10px',border:'1px solid var(--brd)',transition:'background .3s'}}>
       {/* Label */}
-      <div style={{fontSize:9,color:'var(--txt3)',textTransform:'uppercase',letterSpacing:'.07em',marginBottom:7,whiteSpace:'nowrap'}}>{label}</div>
-      {/* TY left, LY + delta stacked right */}
-      <div style={{display:'flex',alignItems:'flex-start',justifyContent:'space-between',gap:6}}>
-        <div style={{fontSize:17,fontWeight:800,letterSpacing:'-.02em',color:'var(--txt)',lineHeight:1,flexShrink:0}}>{value}</div>
-        {(ly || delta != null) && (
-          <div style={{display:'flex',flexDirection:'column',alignItems:'flex-end',gap:4,paddingTop:1,flexShrink:0}}>
-            {ly && <span style={{fontSize:10,color:'var(--txt3)',whiteSpace:'nowrap',letterSpacing:'-.01em'}}>LY&nbsp;{ly}</span>}
-            {deltaEl}
-          </div>
-        )}
-      </div>
+      <div style={{fontSize:9,color:'var(--txt3)',textTransform:'uppercase',letterSpacing:'.07em',marginBottom:6,whiteSpace:'nowrap'}}>{label}</div>
+      {/* TY value — big and bold */}
+      <div style={{fontSize:17,fontWeight:800,letterSpacing:'-.02em',color:'var(--txt)',lineHeight:1,marginBottom:5}}>{value}</div>
+      {/* LY + delta on the same row below TY */}
+      {(ly || delta != null) && (
+        <div style={{display:'flex',alignItems:'center',gap:6,flexWrap:'wrap'}}>
+          {ly && <span style={{fontSize:10,color:'var(--txt3)',whiteSpace:'nowrap',letterSpacing:'-.01em'}}>LY&nbsp;{ly}</span>}
+          {deltaEl}
+        </div>
+      )}
       {expandContent && (
         <div style={{marginTop:8}}>
           <button onClick={() => setExpanded(e => !e)}
@@ -528,20 +537,20 @@ export default function Sales({ filters = {} }) {
               ['Conv %',       fP(d.conversion),     fP(d.ly_conversion),    pct(d.conversion, d.ly_conversion), false],
             ];
             return (
-              <div key={p} style={{flex:'1 1 160px',minWidth:160,background:'var(--card2)',border:'1px solid var(--brd)',borderRadius:12,padding:12,transition:'background .3s'}}>
-                <div style={{fontSize:9,fontWeight:700,textTransform:'uppercase',letterSpacing:'.12em',color:B.b2,paddingBottom:8,borderBottom:'1px solid var(--brd)',marginBottom:8}}>{p}</div>
+              <div key={p} style={{flex:'1 1 185px',minWidth:185,background:'var(--card2)',border:'1px solid var(--brd)',borderRadius:12,padding:'12px 14px',transition:'background .3s'}}>
+                <div style={{fontSize:10,fontWeight:700,textTransform:'uppercase',letterSpacing:'.12em',color:B.b2,paddingBottom:9,borderBottom:'1px solid var(--brd)',marginBottom:9}}>{p}</div>
                 {/* Single flat grid — all header + data cells share the same column tracks */}
-                <div style={{display:'grid',gridTemplateColumns:'auto 1fr 1fr auto',columnGap:6,rowGap:5,alignItems:'center'}}>
+                <div style={{display:'grid',gridTemplateColumns:'auto 1fr 1fr auto',columnGap:7,rowGap:6,alignItems:'center'}}>
                   {/* header row */}
                   <span/>
-                  <span style={{fontSize:8,fontWeight:700,color:'var(--txt3)',textTransform:'uppercase',letterSpacing:'.06em'}}>TY</span>
-                  <span style={{fontSize:8,fontWeight:700,color:'var(--txt3)',textTransform:'uppercase',letterSpacing:'.06em'}}>LY</span>
-                  <span style={{fontSize:8,fontWeight:700,color:'var(--txt3)',textTransform:'uppercase',letterSpacing:'.06em',textAlign:'right'}}>Chg</span>
+                  <span style={{fontSize:9,fontWeight:700,color:'var(--txt3)',textTransform:'uppercase',letterSpacing:'.06em'}}>TY</span>
+                  <span style={{fontSize:9,fontWeight:700,color:'var(--txt3)',textTransform:'uppercase',letterSpacing:'.06em'}}>LY</span>
+                  <span style={{fontSize:9,fontWeight:700,color:'var(--txt3)',textTransform:'uppercase',letterSpacing:'.06em',textAlign:'right'}}>Chg</span>
                   {/* data rows — flat children so all share same column sizing */}
                   {rows.flatMap(([l, ty, lyv, delta, inv]) => [
-                    <span key={l+'-l'} style={{fontSize:9,color:'var(--txt3)',whiteSpace:'nowrap',paddingRight:2}}>{l}</span>,
-                    <span key={l+'-ty'} style={{fontSize:10,fontWeight:700,color:'var(--txt)'}}>{ty}</span>,
-                    <span key={l+'-ly'} style={{fontSize:9,color:'var(--txt3)'}}>{lyv}</span>,
+                    <span key={l+'-l'} style={{fontSize:10,color:'var(--txt3)',whiteSpace:'nowrap',paddingRight:3}}>{l}</span>,
+                    <span key={l+'-ty'} style={{fontSize:12,fontWeight:700,color:'var(--txt)'}}>{ty}</span>,
+                    <span key={l+'-ly'} style={{fontSize:10,color:'var(--txt2)'}}>{lyv}</span>,
                     pctEl(delta, inv, l+'-chg'),
                   ])}
                 </div>

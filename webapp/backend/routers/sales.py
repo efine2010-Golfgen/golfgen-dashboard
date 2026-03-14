@@ -477,15 +477,28 @@ def sales_summary(
             """).fetchone()
             stock_units = int(inv_row[0]) if inv_row else 0
             # Avg daily units last 30 days for DOS
+            # Uses ALL-aggregate rows; falls back to per-ASIN sum if none exist
             avg_row = con.execute(f"""
                 SELECT COALESCE(AVG(daily_units), 0) FROM (
                     SELECT date, SUM(units_ordered) AS daily_units
                     FROM daily_sales
                     WHERE asin = 'ALL' AND date >= ? AND date <= ? {hw}
                     GROUP BY date
-                )
+                ) AS dsub
             """, [str(ed - timedelta(days=30)), str(ed)] + hp).fetchone()
             avg_daily = float(avg_row[0]) if avg_row else 0
+            # Fallback: if no ALL-aggregate rows, sum individual ASINs
+            if avg_daily == 0:
+                avg_row2 = con.execute(f"""
+                    SELECT COALESCE(AVG(daily_units), 0) FROM (
+                        SELECT date, SUM(units_ordered) AS daily_units
+                        FROM daily_sales
+                        WHERE asin != 'ALL' AND units_ordered > 0
+                          AND date >= ? AND date <= ? {hw}
+                        GROUP BY date
+                    ) AS dsub2
+                """, [str(ed - timedelta(days=30)), str(ed)] + hp).fetchone()
+                avg_daily = float(avg_row2[0]) if avg_row2 else 0
             dos = round(stock_units / avg_daily) if avg_daily > 0 else 0
         except Exception:
             stock_units = 0
@@ -942,6 +955,15 @@ def sales_heatmap(
             WHERE asin = 'ALL' AND date >= ? AND date <= ? {hw}
             GROUP BY date ORDER BY date
         """, [str(start_date), str(today)] + hp).fetchall()
+        # Fallback: if no ALL-aggregate rows, sum individual ASINs
+        if not rows:
+            rows = con.execute(f"""
+                SELECT date, COALESCE(SUM(units_ordered), 0)
+                FROM daily_sales
+                WHERE asin != 'ALL' AND units_ordered > 0
+                  AND date >= ? AND date <= ? {hw}
+                GROUP BY date ORDER BY date
+            """, [str(start_date), str(today)] + hp).fetchall()
         con.close()
 
         result = []
