@@ -369,6 +369,7 @@ def sales_summary(
 
         # For today/yesterday: supplement from orders table (no S&T report lag)
         # Use Central-time datetime bounds to avoid UTC date boundary mis-match on Railway
+        fell_back = False  # restored — referenced in return payload
         _CENTRAL = ZoneInfo("America/Chicago")
         if period in ('today', 'yesterday'):
             try:
