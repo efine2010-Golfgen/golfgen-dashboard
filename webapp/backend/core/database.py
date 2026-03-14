@@ -1239,7 +1239,7 @@ def auto_migrate_from_duckdb():
         logger.info(f"Auto-migrate: Postgres check failed ({e}), will attempt migration")
 
     logger.info("=" * 60)
-logger.info("AUTO-MIGRATION: DuckDB → PostgreSQL starting")
+    logger.info("AUTO-MIGRATION: DuckDB → PostgreSQL starting")
     logger.info(f"  DuckDB: {duckdb_path}")
     logger.info(f"  PostgreSQL: {DATABASE_URL[:40]}...")
     logger.info("=" * 60)
