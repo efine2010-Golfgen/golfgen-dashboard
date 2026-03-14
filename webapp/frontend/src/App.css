@@ -92,7 +92,7 @@ body.fresh {
 
 /* ── HEADER — always navy #0E1F2D ───────────────────────── */
 .hdr { background:#0E1F2D; position:sticky; top:0; z-index:100; box-shadow:var(--shad); }
-.hdr-inner { display:flex; align-items:center; padding:0 20px; height:64px; gap:14px; }
+.hdr-inner { display:flex; align-items:center; padding:14px 20px 14px; min-height:80px; gap:14px; }
 .hdr-mid { flex:1; display:flex; flex-direction:column; align-items:center; justify-content:center; gap:1px; }
 .hdr-title { font-family:'Sora',sans-serif; font-size:14px; font-weight:700; color:rgba(255,255,255,.92); letter-spacing:.02em; }
 .hdr-sub { font-family:'Space Grotesk',monospace; font-size:9px; font-weight:500; letter-spacing:.16em; color:#2ECFAA; text-transform:uppercase; }
@@ -121,7 +121,7 @@ body.fresh {
 .subnav-sub { height:34px; }
 
 /* ── PAGE & THEME BANNER ────────────────────────────────── */
-.page { padding:20px 24px; max-width:1440px; margin:0 auto; }
+.page { padding:16px 20px; }
 .theme-banner { display:flex; align-items:center; gap:14px; padding:7px 14px; background:var(--card); border:1px solid var(--brd); border-radius:10px; margin-bottom:16px; transition:background .3s; flex-wrap:wrap; }
 .theme-swatch { width:22px; height:22px; border-radius:5px; flex-shrink:0; border:1px solid var(--brd2); }
 .theme-info { flex:0 0 auto; min-width:180px; }
