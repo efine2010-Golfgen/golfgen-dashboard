@@ -255,10 +255,11 @@ def get_backup_status() -> dict:
     }
     """
     settings = _get_settings()
+    logger.info(f"Backup status check: has_credentials={settings['has_credentials']}, has_folder_id={settings['has_folder_id']}")
     if not settings["has_credentials"] or not settings["has_folder_id"]:
         return {
             "configured": False,
-            "error": "Google Drive backup not configured (missing credentials or folder ID)",
+            "error": f"Google Drive backup not configured (creds={settings['has_credentials']}, folder={settings['has_folder_id']})",
             "last_backup": None,
             "total_backups": 0,
             "backups": [],
