@@ -199,20 +199,8 @@ def _write_sync_log(job_name, started_at, status, inserted=0, error=None):
         logger.error(f"Failed to write sync log: {e}")
 
 
-def _log_sync(job_name: str, status: str = "in_progress", records_processed: int = 0, error_message: str = None, execution_time: float = None) -> int:
-    """Legacy sync log helper. Returns the log ID."""
-    try:
-        con = get_db()
-        result = con.execute("""
-            INSERT INTO sync_log (job_name, status, records_pulled, error_message, duration_seconds, completed_at)
-            VALUES (?, ?, ?, ?, ?, CASE WHEN ? = 'completed' OR ? = 'failed' THEN CURRENT_TIMESTAMP ELSE NULL END)
-            RETURNING id
-        """, [job_name, status, records_processed, error_message, execution_time, status, status]).fetchone()
-        con.close()
-        return result[0] if result else None
-    except Exception as e:
-        logger.error(f"Failed to log sync: {e}")
-        return None
+# NOTE: _log_sync() was dead code using wrong column names (records_pulled,
+# duration_seconds). Removed. Use _write_sync_log() for all sync logging.
 
 
 def _log_docs_update(status: str = "in_progress", documents_updated: str = None, error_message: str = None, execution_time: float = None) -> int:

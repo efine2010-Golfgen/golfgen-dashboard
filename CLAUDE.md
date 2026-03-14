@@ -287,12 +287,30 @@ Custom date ranges, daily email summary, anomaly alerts, forecast tab, exec dash
 - Restore: Dashboard → System tab → Restore from Drive
   Or: POST /api/backup/restore (empty body = most recent)
 
+## Dev-Safety Guard (DO NOT BYPASS)
+`DbConnection.execute()` intercepts any `DROP TABLE` or `TRUNCATE TABLE` against
+the 20 protected data tables and raises `RuntimeError` immediately. This prevents
+accidental data loss during development.
+- Protected tables defined in `_PROTECTED_TABLES` in `core/database.py`
+- Backup restore bypasses this intentionally via `con._conn.cursor()` (raw psycopg2)
+- If you genuinely need to reset a table during schema work:
+  1. Temporarily add it to SKIP_TABLES in the restore path OR
+  2. Remove it from `_PROTECTED_TABLES`, make your change, then add it back
+  3. NEVER remove tables from `_PROTECTED_TABLES` in a commit that also modifies data
+
 ## Crash Recovery
 With PostgreSQL, data persists independently of container deploys — no restore needed
 for routine redeploys. DuckDB file still on volume as emergency fallback.
-If Postgres data is lost: remove DATABASE_URL env var to fall back to DuckDB,
-then re-add it to trigger auto-migration again.
-Legacy DuckDB restore (if needed):
+
+### PostgreSQL DR (data lost from Railway Postgres service):
+- POST /api/backup/restore — auto-downloads latest Google Drive backup, compares
+  row counts table-by-table, TRUNCATE+COPY any table where backup > current
+- Sessions, audit_log, user_permissions are always skipped during restore
+- Verify: GET /api/health → non-zero row counts
+
+### DuckDB fallback (last resort):
+Remove DATABASE_URL env var → Railway redeploys using DuckDB file.
+Re-add DATABASE_URL → auto-migration from DuckDB back to Postgres runs on startup.
 Option A: Dashboard → System tab → Backup → Restore from Drive
 Option B: POST /api/backup/restore with body {}
 After restore verify: GET /api/health → non-zero row counts

@@ -42,6 +42,42 @@ _TABLE_PKS: dict[str, list[str]] = {
     "docs_update_log": ["id"],
 }
 
+# ── Dev-safety guard: tables that must never be DROPped or TRUNCATEd ────────
+# Any DbConnection.execute() call containing DROP TABLE or TRUNCATE TABLE on
+# one of these tables will raise immediately, preventing accidental data loss
+# during development sessions.  The backup restore bypasses this guard by using
+# the raw psycopg2 cursor directly (con._conn.cursor()) — that's intentional.
+_PROTECTED_TABLES = {
+    "orders", "daily_sales", "financial_events", "fba_inventory",
+    "advertising", "ads_campaigns", "ads_keywords", "ads_search_terms",
+    "ads_negative_keywords", "item_master", "monthly_sales_history",
+    "staging_orders", "staging_financial_events",
+    "analytics_daily", "analytics_sku", "analytics_ads",
+    "item_plan_overrides", "item_plan_curve_selection",
+    "item_plan_factory_orders", "item_plan_factory_order_items",
+    "item_plan_settings",
+}
+
+_RE_DESTRUCTIVE_SQL = re.compile(
+    r"\b(DROP\s+TABLE|TRUNCATE(?:\s+TABLE)?)\s+(?:IF\s+EXISTS\s+)?(['\"`]?(\w+)['\"`]?)",
+    re.IGNORECASE,
+)
+
+
+def _check_sql_safety(sql: str) -> None:
+    """Raise RuntimeError if SQL would DROP or TRUNCATE a protected data table."""
+    m = _RE_DESTRUCTIVE_SQL.search(sql)
+    if m:
+        table = m.group(3).lower()
+        if table in _PROTECTED_TABLES:
+            raise RuntimeError(
+                f"SAFETY GUARD: Refusing to execute '{m.group(1).upper()}' on "
+                f"protected table '{table}'. If this is intentional (e.g. a "
+                f"migration), temporarily remove the table from _PROTECTED_TABLES "
+                f"in core/database.py."
+            )
+
+
 _RE_INSERT_OR_IGNORE = re.compile(
     r"\bINSERT\s+OR\s+IGNORE\s+INTO\b", re.IGNORECASE
 )
@@ -132,6 +168,7 @@ class DbConnection:
 
     # -- query interface ------------------------------------------------
     def execute(self, sql: str, params=None):
+        _check_sql_safety(sql)  # raises on DROP/TRUNCATE of protected tables
         if self._is_postgres:
             sql = _translate_sql_for_pg(sql)
             if params:

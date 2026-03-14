@@ -127,9 +127,10 @@ def run_backup() -> dict:
                 """).fetchall()
                 for (table_name,) in tables:
                     try:
-                        rows = con.execute(f"SELECT * FROM {table_name}").fetchall()
-                        # Get column names
+                        result = con.execute(f"SELECT * FROM {table_name}")
+                        # Get column names from cursor description (before fetchall)
                         cols = [desc[0] for desc in con._cursor.description]
+                        rows = result.fetchall()
                         import csv
                         csv_path = export_dir / f"{table_name}.csv"
                         with open(csv_path, "w", newline="") as f:
@@ -612,15 +613,108 @@ def restore_from_latest_backup() -> dict:
             restored_size_mb = round(restored_size / (1024 * 1024), 2)
 
             if USE_POSTGRES:
-                # PostgreSQL mode: skip DuckDB file restore. PostgreSQL data
-                # persists independently. If CSV backups exist in the archive,
-                # they could be restored, but for now we skip automatic restore
-                # since PostgreSQL data survives container redeploys.
-                logger.info("Restore: PostgreSQL mode — data persists independently, skipping DuckDB restore")
-                return {
-                    "status": "SKIPPED",
-                    "reason": "PostgreSQL mode — data persists independently of container deploys",
-                }
+                # PostgreSQL mode: look for CSV files in the archive and
+                # restore any table whose backup has more rows than current.
+                # This handles disaster recovery (empty DB after a Postgres
+                # service reset) while safely no-oping on routine redeploys.
+                export_dir_path = Path(tmpdir) / "golfgen_export"
+                csv_files = sorted(export_dir_path.glob("*.csv")) if export_dir_path.exists() else []
+
+                if not csv_files:
+                    logger.info(
+                        "Restore: PostgreSQL mode — no CSV files in archive "
+                        "(likely an older DuckDB-format backup). Skipping."
+                    )
+                    return {
+                        "status": "SKIPPED",
+                        "reason": "PostgreSQL mode — no CSV files in backup archive (older backup format)",
+                    }
+
+                # Tables that must never be overwritten during restore
+                SKIP_TABLES = {"sessions", "audit_log", "user_permissions"}
+
+                restored_tables: list[str] = []
+                skipped_tables: list[str] = []
+
+                con = get_db_rw()
+                try:
+                    raw_conn = con._conn  # raw psycopg2 connection
+
+                    for csv_file in csv_files:
+                        table_name = csv_file.stem  # strip .csv
+
+                        if table_name in SKIP_TABLES:
+                            skipped_tables.append(f"{table_name} (security — always skipped)")
+                            continue
+
+                        try:
+                            # Count rows in backup CSV (subtract 1 for header)
+                            with open(csv_file, "r") as f:
+                                csv_row_count = sum(1 for _ in f) - 1
+
+                            # Count rows in live PostgreSQL table
+                            try:
+                                current_count = con.execute(
+                                    f"SELECT COUNT(*) FROM {table_name}"
+                                ).fetchone()[0]
+                            except Exception:
+                                current_count = 0  # table may not exist yet
+
+                            if csv_row_count <= current_count and current_count > 0:
+                                skipped_tables.append(
+                                    f"{table_name} (backup {csv_row_count} ≤ current {current_count})"
+                                )
+                                continue
+
+                            logger.info(
+                                f"Restore: {table_name}: backup={csv_row_count} rows, "
+                                f"current={current_count} rows — restoring"
+                            )
+
+                            # Disable autocommit so TRUNCATE + COPY are one unit
+                            raw_conn.autocommit = False
+                            cursor = raw_conn.cursor()
+                            try:
+                                cursor.execute(f"TRUNCATE TABLE {table_name}")
+                                with open(csv_file, "r") as f:
+                                    cursor.copy_expert(
+                                        f"COPY {table_name} FROM STDIN CSV HEADER",
+                                        f,
+                                    )
+                                raw_conn.commit()
+                                restored_tables.append(f"{table_name} ({csv_row_count} rows)")
+                                logger.info(f"Restore: {table_name} — OK ({csv_row_count} rows loaded)")
+                            except Exception as e:
+                                raw_conn.rollback()
+                                skipped_tables.append(f"{table_name} (error: {e})")
+                                logger.warning(f"Restore: {table_name} — FAILED: {e}")
+                            finally:
+                                raw_conn.autocommit = True
+
+                        except Exception as e:
+                            skipped_tables.append(f"{table_name} (outer error: {e})")
+                            logger.warning(f"Restore: {table_name} outer error — {e}")
+                finally:
+                    con.close()
+
+                if restored_tables:
+                    logger.info(
+                        f"Restore: SUCCESS — {len(restored_tables)} tables restored from {backup_name}"
+                    )
+                    return {
+                        "status": "SUCCESS",
+                        "backup_name": backup_name,
+                        "backup_size_mb": backup_size_mb,
+                        "restored_tables": restored_tables,
+                        "skipped_tables": skipped_tables,
+                    }
+                else:
+                    logger.info("Restore: SKIPPED — PostgreSQL already has equal or more data than backup")
+                    return {
+                        "status": "SKIPPED",
+                        "reason": "PostgreSQL already up-to-date (all tables have ≥ backup row counts)",
+                        "skipped_tables": skipped_tables,
+                    }
 
             # DuckDB mode: compare row counts and restore if backup is newer
             current_size = DB_PATH.stat().st_size if DB_PATH.exists() else 0
