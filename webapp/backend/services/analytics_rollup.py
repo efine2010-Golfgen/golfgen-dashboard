@@ -56,7 +56,7 @@ def populate_staging_orders(con, target_date: date = None):
             CAST(o.purchase_date AS DATE),
             oi.asin,
             COALESCE(im.product_name, oi.title, oi.asin),
-            CAST(COALESCE(oi.quantity_ordered, 1) AS INTEGER),
+            CAST(COALESCE(oi.quantity, 1) AS INTEGER),
             CAST(COALESCE(oi.item_price, 0) AS DECIMAL(12,2)),
             'USD',
             o.marketplace_id,

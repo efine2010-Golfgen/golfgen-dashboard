@@ -325,11 +325,19 @@ async def _sync_loop():
     except Exception as e:
         logger.error(f"Auto-backfill error: {e}")
 
-    # Backfill historical orders (quota-safe, fills orders table + today's revenue)
+    # Backfill historical orders — only when table is thin (fresh deploy / first run)
+    # Skipped if we already have a healthy order history, to protect Orders API quota.
     try:
-        loop = asyncio.get_event_loop()
-        await loop.run_in_executor(None, lambda: _backfill_orders(days=90))
-        logger.info("Startup: order backfill completed (90 days)")
+        from core.database import get_db as _get_db
+        _con = _get_db()
+        _order_count = _con.execute("SELECT COUNT(*) FROM orders").fetchone()[0]
+        _con.close()
+        if _order_count < 50:
+            loop = asyncio.get_event_loop()
+            await loop.run_in_executor(None, lambda: _backfill_orders(days=90))
+            logger.info("Startup: order backfill completed (90 days)")
+        else:
+            logger.info(f"Startup: skipping order backfill — {_order_count} orders already in table")
     except Exception as e:
         logger.error(f"Order backfill error: {e}")
 
