@@ -699,11 +699,15 @@ def warehouse_unified(division: str = Query("golf", description="golf or housewa
         im_info = im_lookup.get(base, {})
         asin = im_info.get("asin", "")
         im_name = im_info.get("productName", "")
+        c_len = round(float(im_info.get("cartonLength", 0) or 0), 1)
+        c_wid = round(float(im_info.get("cartonWidth", 0) or 0), 1)
+        c_hgt = round(float(im_info.get("cartonHeight", 0) or 0), 1)
 
         masters.append({
             "baseSku": base,
             "itemNumber": master.get("itemNumber", base),
             "asin": asin,
+            "walmartItemNumber": im_info.get("walmartItemNumber", ""),
             "description": im_name if im_name else master.get("description", ""),
             "whDescription": master.get("description", ""),
             "pack": master.get("pack", 1),
@@ -713,6 +717,9 @@ def warehouse_unified(division: str = Query("golf", description="golf or housewa
             "totalAvailable": total_avail,
             "totalDamage": total_dmg,
             "totalQcHold": total_qc,
+            "cartonL": c_len,
+            "cartonW": c_wid,
+            "cartonH": c_hgt,
             "subCount": len(subs),
             "subs": subs,
         })
