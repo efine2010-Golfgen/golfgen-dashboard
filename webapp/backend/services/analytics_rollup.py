@@ -59,7 +59,7 @@ def populate_staging_orders(con, target_date: date = None):
             CAST(COALESCE(oi.quantity, 1) AS INTEGER),
             CAST(COALESCE(oi.item_price, 0) AS DECIMAL(12,2)),
             'USD',
-            o.marketplace_id,
+            o.sales_channel,
             o.fulfillment_channel,
             o.order_status,
             ?,

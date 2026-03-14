@@ -56,7 +56,7 @@ def _sync_pricing_data():
     Falls back gracefully if SP-API is not configured.
     """
     try:
-        from sp_api.api import Products as ProductsAPI
+        from sp_api.api import ProductPricing as ProductsAPI
         from sp_api.base import Marketplaces
     except ImportError:
         logger.info("Pricing sync: sp_api not installed, skipping")

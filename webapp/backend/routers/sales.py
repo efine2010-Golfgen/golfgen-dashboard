@@ -196,7 +196,7 @@ def _build_product_list(con, cutoff: str) -> list:
             continue
         if not orders:
             orders = units
-        aur = round(revenue / units, 2)
+        aur = round(float(revenue) / units, 2)
 
         cogs_info = cogs_data.get(asin) or {}
         cogs_per_unit = cogs_info.get("cogs", 0)
@@ -216,11 +216,11 @@ def _build_product_list(con, cutoff: str) -> list:
 
         fin = fin_by_asin.get(asin, {})
         actual_fba = fin.get("fba_fees", 0)
-        est_fba_total = round(revenue * 0.12, 2)
-        fba_total = actual_fba if actual_fba > 0 else est_fba_total
+        est_fba_total = round(float(revenue) * 0.12, 2)
+        fba_total = float(actual_fba) if actual_fba > 0 else est_fba_total
 
-        actual_commission = fin.get("commission", 0)
-        referral_total = round(actual_commission, 2) if actual_commission > 0 else round(revenue * 0.15, 2)
+        actual_commission = float(fin.get("commission", 0))
+        referral_total = round(actual_commission, 2) if actual_commission > 0 else round(float(revenue) * 0.15, 2)
 
         ad_spend = 0
         try:
@@ -234,10 +234,10 @@ def _build_product_list(con, cutoff: str) -> list:
         except Exception:
             pass
 
-        cogs_total = units * cogs_per_unit
-        net = round(revenue - cogs_total - fba_total - referral_total - ad_spend, 2)
-        margin = round(net / revenue * 100) if revenue else 0
-        conv_rate = round(units / sessions * 100, 1) if sessions else 0
+        cogs_total = units * float(cogs_per_unit)
+        net = round(float(revenue) - cogs_total - float(fba_total) - float(referral_total) - float(ad_spend), 2)
+        margin = round(net / float(revenue) * 100) if revenue else 0
+        conv_rate = round(float(units) / sessions * 100, 1) if sessions else 0
 
         products.append({
             "asin": asin,
@@ -283,8 +283,8 @@ def _aggregate_weekly(daily_data: list) -> list:
             "units": w["units"],
             "orders": w["orders"],
             "sessions": sessions,
-            "aur": round(w["revenue"] / units, 2),
-            "convRate": round(w["orders"] / sessions * 100, 1) if sessions else 0,
+            "aur": round(float(w["revenue"]) / units, 2),
+            "convRate": round(float(w["orders"]) / sessions * 100, 1) if sessions else 0,
         })
     return result
 
@@ -790,13 +790,13 @@ def sales_period_comparison(
                 ly_orders = int(ly_o_row[0]) if ly_o_row and ly_o_row[0] else ly_units
             except Exception:
                 ly_orders = ly_units
-            aur = round(sales / units, 2) if units else 0
-            aov = round(sales / orders, 2) if orders else 0
-            conv = round(units / sessions, 4) if sessions else 0
+            aur = round(float(sales) / units, 2) if units else 0
+            aov = round(float(sales) / orders, 2) if orders else 0
+            conv = round(float(units) / sessions, 4) if sessions else 0
             ctr = 0
-            ly_aur = round(ly_sales / ly_units, 2) if ly_units else 0
-            ly_aov = round(ly_sales / ly_orders, 2) if ly_orders else 0
-            ly_conv = round(ly_units / ly_sessions, 4) if ly_sessions else 0
+            ly_aur = round(float(ly_sales) / ly_units, 2) if ly_units else 0
+            ly_aov = round(float(ly_sales) / ly_orders, 2) if ly_orders else 0
+            ly_conv = round(float(ly_units) / ly_sessions, 4) if ly_sessions else 0
             result[label] = {
                 "sales": round(sales, 2), "units": units, "aur": aur,
                 "orders": orders, "aov": aov,
@@ -1569,16 +1569,16 @@ def summary(
         orders = int(o_row[0]) if o_row and o_row[0] else units
     except Exception:
         orders = units
-    aur = round(revenue / units, 2) if units else 0
-    conv_rate = round(units / sessions * 100, 1) if sessions else 0
+    aur = round(float(revenue) / units, 2) if units else 0
+    conv_rate = round(float(units) / sessions * 100, 1) if sessions else 0
 
     products = _build_product_list(con, cutoff)
     prod_rev = sum(p["rev"] for p in products)
     prod_net = sum(p["net"] for p in products)
 
     if prod_rev > 0 and revenue > 0:
-        margin_pct = prod_net / prod_rev
-        total_net = round(revenue * margin_pct, 2)
+        margin_pct = float(prod_net) / float(prod_rev)
+        total_net = round(float(revenue) * margin_pct, 2)
         margin = round(margin_pct * 100)
     elif revenue > 0:
         # Fallback: estimate costs from financial_events + defaults
@@ -1589,14 +1589,14 @@ def summary(
                 FROM financial_events
                 WHERE date >= ?{hf}
             """, [cutoff] + hp).fetchone()
-            est_fba = float(fee_row[0]) if fee_row and fee_row[0] > 0 else revenue * 0.12
-            est_ref = float(fee_row[1]) if fee_row and fee_row[1] > 0 else revenue * 0.15
+            est_fba = float(fee_row[0]) if fee_row and fee_row[0] > 0 else float(revenue) * 0.12
+            est_ref = float(fee_row[1]) if fee_row and fee_row[1] > 0 else float(revenue) * 0.15
         except Exception:
-            est_fba = revenue * 0.12
-            est_ref = revenue * 0.15
-        est_cogs = revenue * 0.35
-        total_net = round(revenue - est_cogs - est_fba - est_ref, 2)
-        margin = round(total_net / revenue * 100)
+            est_fba = float(revenue) * 0.12
+            est_ref = float(revenue) * 0.15
+        est_cogs = float(revenue) * 0.35
+        total_net = round(float(revenue) - est_cogs - est_fba - est_ref, 2)
+        margin = round(total_net / float(revenue) * 100)
     else:
         total_net = 0
         margin = 0
@@ -1670,8 +1670,8 @@ def get_daily_sales(
             "units": units_val,
             "orders": units_val,
             "sessions": sessions_val,
-            "aur": round(revenue_val / units_val, 2) if units_val else 0,
-            "convRate": round(units_val / sessions_val * 100, 1) if sessions_val else 0,
+            "aur": round(float(revenue_val) / units_val, 2) if units_val else 0,
+            "convRate": round(float(units_val) / sessions_val * 100, 1) if sessions_val else 0,
         })
 
     if granularity == "weekly" and data:
@@ -1873,8 +1873,8 @@ def period_comparison(
             orders = int(o_row[0]) if o_row and o_row[0] else units
         except Exception:
             orders = units
-        aur = round(rev / units, 2) if units else 0
-        conv = round(units / sessions * 100, 1) if sessions else 0
+        aur = round(float(rev) / units, 2) if units else 0
+        conv = round(float(units) / sessions * 100, 1) if sessions else 0
 
         ad_spend = 0
         try:
