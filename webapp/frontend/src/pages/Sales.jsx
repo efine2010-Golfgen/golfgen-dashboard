@@ -256,14 +256,17 @@ function Spinner() {
   );
 }
 
-function ChartCard({ title, badge, children, noMargin }) {
+function ChartCard({ title, badge, children, noMargin, error }) {
   return (
     <div style={{background:'var(--surf)',border:'1px solid var(--brd)',borderRadius:14,padding:16,marginBottom:noMargin?0:12,transition:'background .3s'}}>
       <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:14}}>
         <span style={{fontSize:13,fontWeight:700,color:'var(--txt)'}}>{title}</span>
         {badge && <span style={{fontSize:10,padding:'2px 9px',borderRadius:99,background:'rgba(46,111,187,.15)',color:B.b3,border:'1px solid rgba(46,111,187,.2)'}}>{badge}</span>}
       </div>
-      {children}
+      {error
+        ? <div style={{padding:'12px 14px',color:'#fb923c',fontSize:11,background:'rgba(251,146,60,.08)',border:'1px solid rgba(251,146,60,.18)',borderRadius:8}}>⚠ {error}</div>
+        : children
+      }
     </div>
   );
 }
@@ -285,22 +288,24 @@ function MetricCard({ label, value, ly, delta, expandContent, invert }) {
   const [expanded, setExpanded] = useState(false);
   const isPos = invert ? delta < 0 : delta > 0;
   const deltaEl = delta != null ? (
-    <span style={{fontSize:9,fontWeight:700,padding:'1px 5px',borderRadius:99,
+    <span style={{fontSize:9,fontWeight:700,padding:'2px 6px',borderRadius:99,
       color:isPos?'#4ade80':'#fb923c',
-      background:isPos?'rgba(74,222,128,.1)':'rgba(251,146,60,.12)',whiteSpace:'nowrap',flexShrink:0}}>
+      background:isPos?'rgba(74,222,128,.1)':'rgba(251,146,60,.12)',whiteSpace:'nowrap'}}>
       {delta > 0 ? '\u25B2' : '\u25BC'} {Math.abs(delta).toFixed(1)}%
     </span>
   ) : null;
   return (
-    <div style={{flex:'1 1 0',minWidth:130,background:'linear-gradient(145deg,var(--card),var(--card2))',borderRadius:12,padding:'12px 10px',border:'1px solid var(--brd)',position:'relative',overflow:'hidden',transition:'background .3s'}}>
-      <div style={{fontSize:9,color:'var(--txt3)',textTransform:'uppercase',letterSpacing:'.07em',marginBottom:5,whiteSpace:'nowrap'}}>{label}</div>
-      <div style={{display:'flex',alignItems:'baseline',gap:6,flexWrap:'wrap'}}>
-        <span style={{fontSize:18,fontWeight:800,letterSpacing:'-.02em',color:'var(--txt)',lineHeight:1}}>{value}</span>
-        {ly && <span style={{fontSize:10,color:'var(--txt3)',whiteSpace:'nowrap'}}>LY {ly}</span>}
+    <div style={{flex:'1 1 0',minWidth:140,background:'linear-gradient(145deg,var(--card),var(--card2))',borderRadius:12,padding:'12px 12px 10px',border:'1px solid var(--brd)',transition:'background .3s'}}>
+      <div style={{fontSize:9,color:'var(--txt3)',textTransform:'uppercase',letterSpacing:'.07em',marginBottom:6,whiteSpace:'nowrap'}}>{label}</div>
+      {/* TY value — big, on its own line */}
+      <div style={{fontSize:18,fontWeight:800,letterSpacing:'-.02em',color:'var(--txt)',lineHeight:1,marginBottom:5}}>{value}</div>
+      {/* LY + delta — smaller row below */}
+      <div style={{display:'flex',alignItems:'center',gap:8,flexWrap:'wrap'}}>
+        {ly && <span style={{fontSize:10,color:'var(--txt3)',whiteSpace:'nowrap'}}>LY&nbsp;{ly}</span>}
         {deltaEl}
       </div>
       {expandContent && (
-        <div style={{marginTop:6}}>
+        <div style={{marginTop:7}}>
           <button onClick={() => setExpanded(e => !e)}
             style={{fontSize:9,padding:'2px 7px',borderRadius:99,border:'1px solid var(--brd)',background:'transparent',color:'var(--txt3)',cursor:'pointer',fontWeight:600,whiteSpace:'nowrap'}}>
             {expanded ? '\u25B2 hide' : '\u25BC detail'}
@@ -554,43 +559,44 @@ export default function Sales() {
         <div style={{display:'flex',gap:8,overflowX:'auto',paddingBottom:6,marginBottom:24}}>
           {periods.slice(0,5).map(p => {
             const d = periodCols[p] || {};
-            const pct = (ty, ly) => {
-              if (!ly || !ty) return null;
-              return ((ty - ly) / ly * 100);
-            };
-            const pctEl = (delta, inv) => {
-              if (delta == null) return <span style={{fontSize:9,color:'var(--txt3)'}}>—</span>;
+            const pct = (ty, lyv) => (!lyv || !ty) ? null : ((ty - lyv) / lyv * 100);
+            const pctEl = (delta, inv, key) => {
+              if (delta == null) return <span key={key} style={{fontSize:9,color:'var(--txt3)',textAlign:'right'}}>—</span>;
               const pos = inv ? delta < 0 : delta > 0;
-              return <span style={{fontSize:9,fontWeight:700,color:pos?'#4ade80':'#fb923c',whiteSpace:'nowrap'}}>{delta>0?'▲':'▼'} {Math.abs(delta).toFixed(1)}%</span>;
+              return (
+                <span key={key} style={{fontSize:9,fontWeight:700,color:pos?'#4ade80':'#fb923c',whiteSpace:'nowrap',textAlign:'right'}}>
+                  {delta>0?'▲':'▼'} {Math.abs(delta).toFixed(1)}%
+                </span>
+              );
             };
             const rows = [
-              ['Sales $',   f$(d.sales),        f$(d.ly_sales),        pct(d.sales, d.ly_sales),        false],
-              ['Units',     fN(d.units),         fN(d.ly_units),        pct(d.units, d.ly_units),         false],
-              ['AUR',       f$(d.aur),           f$(d.ly_aur),          pct(d.aur, d.ly_aur),             false],
-              ['Orders',    fN(d.orders),        fN(d.ly_orders),       pct(d.orders, d.ly_orders),       false],
-              ['AOV',       f$(d.aov),           f$(d.ly_aov),          pct(d.aov, d.ly_aov),             false],
-              ['Sessions',  fN(d.sessions),      fN(d.ly_sessions),     pct(d.sessions, d.ly_sessions),   false],
-              ['Glance Views',fN(d.glance_views),fN(d.ly_glance_views), pct(d.glance_views, d.ly_glance_views), false],
-              ['Conv %',    fP(d.conversion),    fP(d.ly_conversion),   pct(d.conversion, d.ly_conversion),false],
+              ['Sales $',      f$(d.sales),         f$(d.ly_sales),         pct(d.sales, d.ly_sales),         false],
+              ['Units',        fN(d.units),          fN(d.ly_units),         pct(d.units, d.ly_units),          false],
+              ['AUR',          f$(d.aur),            f$(d.ly_aur),           pct(d.aur, d.ly_aur),              false],
+              ['Orders',       fN(d.orders),         fN(d.ly_orders),        pct(d.orders, d.ly_orders),        false],
+              ['AOV',          f$(d.aov),            f$(d.ly_aov),           pct(d.aov, d.ly_aov),              false],
+              ['Sessions',     fN(d.sessions),       fN(d.ly_sessions),      pct(d.sessions, d.ly_sessions),    false],
+              ['Glance Views', fN(d.glance_views),   fN(d.ly_glance_views),  pct(d.glance_views, d.ly_glance_views), false],
+              ['Conv %',       fP(d.conversion),     fP(d.ly_conversion),    pct(d.conversion, d.ly_conversion), false],
             ];
             return (
               <div key={p} style={{flex:'1 1 160px',minWidth:160,background:'var(--card2)',border:'1px solid var(--brd)',borderRadius:12,padding:12,transition:'background .3s'}}>
                 <div style={{fontSize:9,fontWeight:700,textTransform:'uppercase',letterSpacing:'.12em',color:B.b2,paddingBottom:8,borderBottom:'1px solid var(--brd)',marginBottom:8}}>{p}</div>
-                {/* column headers */}
-                <div style={{display:'grid',gridTemplateColumns:'auto 1fr 1fr 1fr',gap:'0 6px',marginBottom:6,alignItems:'center'}}>
-                  <span style={{fontSize:8,color:'var(--txt3)'}}/>
+                {/* Single flat grid — all header + data cells share the same column tracks */}
+                <div style={{display:'grid',gridTemplateColumns:'auto 1fr 1fr auto',columnGap:6,rowGap:5,alignItems:'center'}}>
+                  {/* header row */}
+                  <span/>
                   <span style={{fontSize:8,fontWeight:700,color:'var(--txt3)',textTransform:'uppercase',letterSpacing:'.06em'}}>TY</span>
                   <span style={{fontSize:8,fontWeight:700,color:'var(--txt3)',textTransform:'uppercase',letterSpacing:'.06em'}}>LY</span>
-                  <span style={{fontSize:8,fontWeight:700,color:'var(--txt3)',textTransform:'uppercase',letterSpacing:'.06em'}}>Chg</span>
+                  <span style={{fontSize:8,fontWeight:700,color:'var(--txt3)',textTransform:'uppercase',letterSpacing:'.06em',textAlign:'right'}}>Chg</span>
+                  {/* data rows — flat children so all share same column sizing */}
+                  {rows.flatMap(([l, ty, lyv, delta, inv]) => [
+                    <span key={l+'-l'} style={{fontSize:9,color:'var(--txt3)',whiteSpace:'nowrap',paddingRight:2}}>{l}</span>,
+                    <span key={l+'-ty'} style={{fontSize:10,fontWeight:700,color:'var(--txt)'}}>{ty}</span>,
+                    <span key={l+'-ly'} style={{fontSize:9,color:'var(--txt3)'}}>{lyv}</span>,
+                    pctEl(delta, inv, l+'-chg'),
+                  ])}
                 </div>
-                {rows.map(([l, ty, lyv, delta, inv]) => (
-                  <div key={l} style={{display:'grid',gridTemplateColumns:'auto 1fr 1fr 1fr',gap:'0 6px',marginBottom:5,alignItems:'center'}}>
-                    <span style={{fontSize:9,color:'var(--txt3)',whiteSpace:'nowrap',paddingRight:4}}>{l}</span>
-                    <span style={{fontSize:10,fontWeight:600,color:'var(--txt)'}}>{ty}</span>
-                    <span style={{fontSize:9,color:'var(--txt3)'}}>{lyv}</span>
-                    {pctEl(delta, inv)}
-                  </div>
-                ))}
               </div>
             );
           })}
@@ -619,13 +625,13 @@ export default function Sales() {
       </div>
 
       {/* Monthly YOY */}
-      <ChartCard title="Monthly Revenue — 2024 / 2025 / 2026" badge="Year over Year">
+      <ChartCard title="Monthly Revenue — 2024 / 2025 / 2026" badge="Year over Year" error={errors.yoy}>
         {loading.yoy ? <Spinner/> : svgChart(yoyBarSVG(toArr(yoy)))}
       </ChartCard>
 
       {/* Revenue by Channel (Total only) */}
       {division === 'Total' && (
-        <ChartCard title="Revenue by Channel" badge={cpSales}>
+        <ChartCard title="Revenue by Channel" badge={cpSales} error={errors.channel}>
           {loading.channel ? <Spinner/> : <>
             {svgChart(stackedBarSVG(toArr(channel)))}
             <Legend items={[['Amazon',B.b2],['Walmart Mkt',B.o2],['Walmart Stores',B.o3],['Shopify',B.t2],['Stores',B.t3]]}/>
@@ -634,7 +640,7 @@ export default function Sales() {
       )}
 
       {/* Sales $ Trend */}
-      <ChartCard title="Sales $ Trend" badge={cpSales}>
+      <ChartCard title="Sales $ Trend" badge={cpSales} error={errors.trend}>
         {loading.trend ? <Spinner/> : <>
           {svgChart(dualLineSVG(toArr(trend),'ty_sales','ly_sales',B.b2,B.sub,f$))}
           <Legend items={[['This Year',B.b2],['Last Year',B.sub,true]]}/>
@@ -642,7 +648,7 @@ export default function Sales() {
       </ChartCard>
 
       {/* AUR Trend */}
-      <ChartCard title="AUR Trend" badge={cpSales}>
+      <ChartCard title="AUR Trend" badge={cpSales} error={errors.trend}>
         {loading.trend ? <Spinner/> : <>
           {svgChart(dualLineSVG(toArr(trend),'ty_aur','ly_aur',B.t2,B.sub,f$))}
           <Legend items={[['AUR TY',B.t2],['AUR LY',B.sub,true]]}/>
@@ -650,7 +656,7 @@ export default function Sales() {
       </ChartCard>
 
       {/* Rolling 4-Week */}
-      <ChartCard title="Rolling 4-Week Revenue vs LY" badge={cpSales}>
+      <ChartCard title="Rolling 4-Week Revenue vs LY" badge={cpSales} error={errors.rolling}>
         {loading.rolling ? <Spinner/> : <>
           {svgChart(dualLineSVG(toArr(rolling),'ty_rolling','ly_rolling',B.b3,B.sub,f$))}
           <Legend items={[['This Year',B.b3],['Last Year',B.sub,true]]}/>
@@ -658,7 +664,7 @@ export default function Sales() {
       </ChartCard>
 
       {/* Units Heatmap */}
-      <ChartCard title="Units Sold — 26 Weeks × Day of Week" noMargin>
+      <ChartCard title="Units Sold — 26 Weeks × Day of Week" noMargin error={errors.heatmap}>
         {loading.heatmap ? <Spinner/> : svgChart(heatmapSVG(toArr(heatmap)))}
       </ChartCard>
 
@@ -676,13 +682,13 @@ export default function Sales() {
         <div style={{fontSize:10,color:'var(--txt3)',fontWeight:600,textTransform:'uppercase',letterSpacing:'.08em'}}>Charts</div>
         <PeriodBar value={cpTraffic} onChange={setCpTraffic}/>
       </div>
-      <ChartCard title="Traffic & Conversion" badge={cpTraffic}>
+      <ChartCard title="Traffic & Conversion" badge={cpTraffic} error={errors.trendTraffic}>
         {loading.trendTraffic ? <Spinner/> : <>
           {svgChart(dualLineSVG(toArr(trendTraffic),'ty_sessions','ly_sessions',B.o2,B.sub,fN))}
           <Legend items={[['Sessions TY',B.o2],['Sessions LY',B.sub,true]]}/>
         </>}
       </ChartCard>
-      <ChartCard title="Conversion Funnel vs LY" noMargin>
+      <ChartCard title="Conversion Funnel vs LY" noMargin error={errors.funnel}>
         {loading.funnel ? <Spinner/> : svgChart(funnelSVG(toArr(funnel)))}
       </ChartCard>
 
@@ -696,7 +702,7 @@ export default function Sales() {
           <MetricCard label="TACOS" value={fP(m.tacos)} ly={fP(ly('tacos'))} delta={dp(m.tacos,ly('tacos'))} invert/>
         </>}
       </div>
-      <ChartCard title="Ad Efficiency — ACOS vs ROAS Quadrant" badge="TY vs LY" noMargin>
+      <ChartCard title="Ad Efficiency — ACOS vs ROAS Quadrant" badge="TY vs LY" noMargin error={errors.adEff}>
         {loading.adEff ? <Spinner/> : svgChart(adQuadrantSVG(adEff))}
       </ChartCard>
 
