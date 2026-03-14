@@ -1353,6 +1353,81 @@ def sales_debug_today_full():
         return {"error": str(e)}
 
 
+@router.get("/api/debug/summary-today")
+def debug_summary_today():
+    """Runs exact same logic as /api/sales/summary?period=today — no auth required.
+    Use this to verify the authenticated endpoint would return correct data."""
+    try:
+        con = get_db()
+        sd = _today_central()
+        ed = sd
+        hw, hp = "", []
+
+        # Step 1: daily_sales asin='ALL'
+        ds_row = con.execute(f"""
+            SELECT COALESCE(SUM(ordered_product_sales), 0),
+                   COALESCE(SUM(units_ordered), 0),
+                   COALESCE(SUM(sessions), 0),
+                   COALESCE(SUM(page_views), 0)
+            FROM daily_sales
+            WHERE asin = 'ALL' AND date >= ? AND date <= ?
+        """, [str(sd), str(ed)]).fetchone()
+        ty_sales = float(ds_row[0])
+        ty_units = int(ds_row[1])
+
+        # Step 2: orders supplement (same as in sales_summary)
+        s_iso = datetime(sd.year, sd.month, sd.day, 0, 0, 0, tzinfo=CENTRAL).isoformat()
+        e_iso = datetime(sd.year, sd.month, sd.day, 23, 59, 59, tzinfo=CENTRAL).isoformat()
+        o_row = con.execute("""
+            SELECT COALESCE(SUM(order_total), 0),
+                   COALESCE(SUM(number_of_items), 0),
+                   COUNT(DISTINCT order_id)
+            FROM orders
+            WHERE purchase_date >= ? AND purchase_date <= ?
+              AND (order_status IS NULL OR order_status NOT IN ('Cancelled','Pending'))
+        """, [s_iso, e_iso]).fetchone()
+        o_sales = float(o_row[0])
+        o_units = int(o_row[1])
+        o_cnt   = int(o_row[2])
+
+        # Supplement logic (mirrors sales_summary exactly)
+        supplement_triggered = False
+        if o_sales > 0 or o_cnt > 0:
+            ty_sales = o_sales
+            ty_units = o_units
+            supplement_triggered = True
+
+        # Step 3: fees estimate
+        ty_fees_raw = 0.0
+        try:
+            fee_row = con.execute("""
+                SELECT COALESCE(SUM(ABS(fba_fees)) + SUM(ABS(commission)), 0)
+                FROM financial_events
+                WHERE date >= ? AND date <= ?
+            """, [str(sd), str(ed)]).fetchone()
+            ty_fees_raw = float(fee_row[0]) if fee_row else 0.0
+        except Exception as fe:
+            pass
+        ty_fees = ty_fees_raw if ty_fees_raw > 0 else round(ty_sales * 0.27, 2)
+
+        con.close()
+        return {
+            "period": "today",
+            "central_date": str(sd),
+            "step1_daily_sales_ALL": {"sales": float(ds_row[0]), "units": int(ds_row[1])},
+            "step2_orders_supplement": {"sales": o_sales, "units": o_units, "count": o_cnt},
+            "supplement_triggered": supplement_triggered,
+            "final_sales": round(ty_sales, 2),
+            "final_units": ty_units,
+            "final_fees": ty_fees,
+            "gross_margin_est": round(ty_sales - ty_fees, 2),
+            "note": "This mirrors /api/sales/summary?period=today exactly. If this shows correct data but dashboard shows $0, the issue is in the authenticated route or frontend."
+        }
+    except Exception as e:
+        import traceback
+        return {"error": str(e), "traceback": traceback.format_exc()}
+
+
 # ══════════════════════════════════════════════════════════════
 # LEGACY ENDPOINTS — used by Dashboard.jsx and other pages
 # ══════════════════════════════════════════════════════════════
