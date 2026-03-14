@@ -260,7 +260,7 @@ export default function System() {
   const budgetPct = Math.round(budget.used / budget.cap * 100);
 
   return (
-    <div style={{ maxWidth: 1280, margin: "0 auto", padding: "24px 16px" }}>
+    <div>
 
       {/* ── Data Coverage ─────────────────────────────────────────────────── */}
       {coverage && (
