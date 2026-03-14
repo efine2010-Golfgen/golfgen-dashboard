@@ -739,6 +739,7 @@ async def trigger_backup(request: Request):
 @router.get("/api/backup/status")
 async def backup_status(request: Request):
     """Get Google Drive backup status — last backup, total count, recent list."""
+    import os as _os
     from core.auth import get_session
     from services.backup import get_backup_status as _get_backup_status
 
@@ -748,7 +749,17 @@ async def backup_status(request: Request):
         from fastapi import HTTPException
         raise HTTPException(status_code=401, detail="Not authenticated")
 
-    return _get_backup_status()
+    result = _get_backup_status()
+    # Debug: if backup reports not configured, check env vars directly
+    if not result.get("configured"):
+        sa = _os.environ.get("GOOGLE_SERVICE_ACCOUNT_JSON", "")
+        ot = _os.environ.get("GOOGLE_OAUTH_REFRESH_TOKEN", "")
+        fi = _os.environ.get("BACKUP_DRIVE_FOLDER_ID", "")
+        result["_debug_env"] = {
+            "sa_len": len(sa), "oauth_len": len(ot), "folder_len": len(fi),
+            "sa_bool": bool(sa), "oauth_bool": bool(ot), "folder_bool": bool(fi),
+        }
+    return result
 
 
 @router.post("/api/backup/github-trigger")
