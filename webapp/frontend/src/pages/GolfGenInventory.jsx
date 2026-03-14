@@ -6,8 +6,7 @@ import {
 import { api } from "../lib/api";
 import { CHART_COLORS as COLORS, TOOLTIP_STYLE } from "../lib/constants";
 
-const DIVISIONS    = ["Golf", "HW"];
-const GOLF_CHANNELS = ["All", "Amazon", "Walmart"];
+const DIVISIONS = ["Golf", "HW"];
 
 /* ── Suffix badge colors — semi-transparent, work on light & dark themes ── */
 const SBCOLS = {
@@ -95,7 +94,6 @@ function SortTH({ label, field, sortKey, sortDir, onClick, style }) {
 /* ── Main page component ── */
 export default function GolfGenInventory({ filters = {} }) {
   const [division,     setDivision]    = useState("Golf");
-  const [channel,      setChannel]     = useState("All");
   const [data,         setData]        = useState(null);
   const [overviewData, setOverviewData]= useState(null);
   const [loading,      setLoading]     = useState(true);
@@ -113,14 +111,23 @@ export default function GolfGenInventory({ filters = {} }) {
     api.uploadMeta().then(d => setUploadMeta(d || {})).catch(() => {});
   }, []);
 
+  // Derive channel from global HierarchyFilter customer selection
+  const derivedChannel = (() => {
+    const c = (filters.customer || "").toLowerCase();
+    if (c === "amazon") return "Amazon";
+    if (c.startsWith("walmart")) return "Walmart";
+    return "All";
+  })();
+
   useEffect(() => {
     setLoading(true);
     setExpandedSku(null);
     const div = division === "Golf" ? "golf" : "housewares";
-    api.warehouseUnified(div, division === "Golf" ? channel : null)
+    const ch  = division === "Golf" ? (derivedChannel !== "All" ? derivedChannel : null) : null;
+    api.warehouseUnified(div, ch)
       .then(d => { setData(d); setLoading(false); })
       .catch(() => setLoading(false));
-  }, [division, channel]);
+  }, [division, filters.customer]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const handleUpload = async (e, div) => {
     const file = e.target.files[0];
@@ -134,8 +141,8 @@ export default function GolfGenInventory({ filters = {} }) {
         api.uploadMeta().then(d => setUploadMeta(d || {})).catch(() => {});
         api.warehouseSummary().then(d => setOverviewData(d)).catch(() => null);
         const curDiv = division === "Golf" ? "golf" : "housewares";
-        api.warehouseUnified(curDiv, division === "Golf" ? channel : null)
-          .then(d => setData(d)).catch(() => {});
+        const curCh  = division === "Golf" ? (derivedChannel !== "All" ? derivedChannel : null) : null;
+        api.warehouseUnified(curDiv, curCh).then(d => setData(d)).catch(() => {});
       } else {
         setUploadMsg({ type: "error", text: result.detail || "Upload failed" });
       }
@@ -192,7 +199,6 @@ export default function GolfGenInventory({ filters = {} }) {
   const summary          = data?.summary || {};
   const suffixBreakdown  = data?.suffixBreakdown || {};
   const channelBreakdown = data?.channelBreakdown || {};
-  const showChannel      = division === "Golf";
   const divLabel         = division === "Golf" ? "Golf" : "HW";
 
   const suffixChartData = Object.entries(suffixBreakdown)
@@ -206,71 +212,57 @@ export default function GolfGenInventory({ filters = {} }) {
 
   return (
     <>
-      {/* ══ ROW 1: Division + upload icons + Channel filter ══ */}
-      <div style={{ display: "flex", gap: 10, alignItems: "center", marginBottom: 8, flexWrap: "wrap" }}>
+      {/* ══ ROW 1: Division tabs (left) + Upload buttons (right) ══ */}
+      <div style={{ display: "flex", gap: 8, alignItems: "center", marginBottom: 8, flexWrap: "wrap" }}>
 
-        {/* Division tabs — each with an attached upload icon button */}
-        <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+        {/* Division tabs */}
+        <div className="range-tabs">
           {DIVISIONS.map(d => {
-            const divKey   = d === "Golf" ? "golf" : "housewares";
             const isActive = division === d;
             return (
-              <div key={d} style={{ display: "flex", alignItems: "stretch", borderRadius: 7, overflow: "hidden",
-                border: `1px solid ${isActive ? "var(--acc1)" : "var(--brd)"}`,
-                background: isActive ? "rgba(46,207,170,.12)" : "var(--ibg)",
-              }}>
-                {/* Division select button */}
-                <button
-                  onClick={() => { setDivision(d); setChannel("All"); setSearch(""); setSuffixFilter("All"); }}
-                  style={{
-                    padding: "5px 12px 5px 10px", border: "none", cursor: "pointer",
-                    background: "transparent", fontSize: 12, fontWeight: 700,
-                    color: isActive ? "var(--acc1)" : "var(--txt3)", whiteSpace: "nowrap",
-                  }}>
-                  {d === "Golf" ? "⛳ Golf" : "🏠 HW"}
-                </button>
-                {/* Upload trigger — thin separator + up-arrow icon */}
-                <label
-                  title={`Upload ${d} inventory Excel`}
-                  style={{
-                    display: "inline-flex", alignItems: "center", justifyContent: "center",
-                    padding: "0 8px", cursor: "pointer",
-                    borderLeft: `1px solid ${isActive ? "rgba(46,207,170,.3)" : "var(--brd)"}`,
-                    color: uploading === divKey ? "var(--txt3)" : (isActive ? "var(--acc1)" : "var(--txt3)"),
-                    fontSize: 12, transition: "color .15s",
-                    opacity: uploading !== null ? 0.5 : 1,
-                  }}>
-                  {uploading === divKey ? "…" : "⬆"}
-                  <input type="file" accept=".xlsx,.xls"
-                    onChange={e => handleUpload(e, divKey)}
-                    style={{ display: "none" }} disabled={uploading !== null} />
-                </label>
-              </div>
+              <button key={d}
+                className={`range-tab ${isActive ? "active" : ""}`}
+                onClick={() => { setDivision(d); setSearch(""); setSuffixFilter("All"); }}>
+                {d === "Golf" ? "⛳ Golf" : "🏠 Housewares"}
+              </button>
             );
           })}
-          {/* Last upload date hint */}
-          <span style={{ fontSize: 10, color: "var(--txt3)", whiteSpace: "nowrap" }}>
-            Last upload: {formatDate(uploadMeta[division === "Golf" ? "golf" : "housewares"]?.lastUpload)}
-          </span>
         </div>
 
-        {/* Divider */}
-        <div style={{ width: 1, height: 22, background: "var(--brd2)", flexShrink: 0 }} />
+        {/* Spacer */}
+        <div style={{ flex: 1 }} />
 
-        {/* Channel filter — Golf only */}
-        {showChannel && (
-          <div className="range-tabs">
-            {GOLF_CHANNELS.map(ch => (
-              <button key={ch} className={`range-tab ${channel === ch ? "active" : ""}`}
-                onClick={() => setChannel(ch)}>
-                {ch}
-                {ch !== "All" && channelBreakdown[ch] != null && (
-                  <span style={{ opacity: 0.6, marginLeft: 4, fontSize: 10 }}>({channelBreakdown[ch]})</span>
-                )}
-              </button>
-            ))}
-          </div>
-        )}
+        {/* Last upload date */}
+        <span style={{ fontSize: 10, color: "var(--txt3)", whiteSpace: "nowrap" }}>
+          Last upload: {formatDate(uploadMeta[division === "Golf" ? "golf" : "housewares"]?.lastUpload)}
+        </span>
+
+        {/* Divider */}
+        <div style={{ width: 1, height: 20, background: "var(--brd2)", flexShrink: 0 }} />
+
+        {/* Upload buttons — one per division, clearly labelled */}
+        {DIVISIONS.map(d => {
+          const divKey  = d === "Golf" ? "golf" : "housewares";
+          const isThisDiv = division === d;
+          return (
+            <label key={d} title={`Upload ${d} warehouse inventory Excel`}
+              style={{
+                display: "inline-flex", alignItems: "center", gap: 5, padding: "5px 13px",
+                borderRadius: 7, cursor: uploading !== null ? "not-allowed" : "pointer",
+                border: `1px solid ${isThisDiv ? "var(--acc1)" : "var(--brd)"}`,
+                background: isThisDiv ? "rgba(46,207,170,.10)" : "var(--ibg)",
+                fontSize: 11, fontWeight: 700, whiteSpace: "nowrap",
+                color: isThisDiv ? "var(--acc1)" : "var(--txt3)",
+                opacity: uploading !== null ? 0.5 : 1,
+                transition: "all .15s",
+              }}>
+              {uploading === divKey ? "⏳" : "⬆"} Upload {d}
+              <input type="file" accept=".xlsx,.xls"
+                onChange={e => handleUpload(e, divKey)}
+                style={{ display: "none" }} disabled={uploading !== null} />
+            </label>
+          );
+        })}
       </div>
 
       {/* ══ ROW 2: Type / suffix filter pills + search + count ══ */}
