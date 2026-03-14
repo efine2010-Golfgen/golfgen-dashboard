@@ -350,6 +350,7 @@ export default function Sales() {
   const [channel,     setChannel]     = useState(null);
   const [rolling,     setRolling]     = useState(null);
   const [heatmap,     setHeatmap]     = useState(null);
+  const [trendTraffic, setTrendTraffic] = useState(null);
   const [funnel,      setFunnel]      = useState(null);
   const [adEff,       setAdEff]       = useState(null);
   const [feeBreak,    setFeeBreak]    = useState(null);
@@ -422,7 +423,7 @@ export default function Sales() {
   // Fetch traffic chart data when cpTraffic changes
   useEffect(() => {
     const params = {...baseParams, period: chartTrafficApi};
-    load('trendTraffic', d => setTrend(prev => ({...prev, traffic: d})), 'trend', params);
+    load('trendTraffic', setTrendTraffic, 'trend', params);
   }, [division, customer, cpTraffic]);
 
   const handleDivision = d => { setDivision(d); setCustomer('All Channels'); setDivOpen(false); };
@@ -636,8 +637,8 @@ export default function Sales() {
         <PeriodBar value={cpTraffic} onChange={setCpTraffic}/>
       </div>
       <ChartCard title="Traffic & Conversion" badge={cpTraffic}>
-        {loading.trend ? <Spinner/> : <>
-          {svgChart(dualLineSVG(trend||[],'ty_sessions','ly_sessions',B.o2,B.sub,fN))}
+        {loading.trendTraffic ? <Spinner/> : <>
+          {svgChart(dualLineSVG(trendTraffic||[],'ty_sessions','ly_sessions',B.o2,B.sub,fN))}
           <Legend items={[['Sessions TY',B.o2],['Sessions LY',B.sub,true]]}/>
         </>}
       </ChartCard>
