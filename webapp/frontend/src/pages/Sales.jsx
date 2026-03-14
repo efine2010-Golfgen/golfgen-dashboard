@@ -113,22 +113,27 @@ function stackedBarSVG(data, W=1100, H=130) {
   return s + '</svg>';
 }
 
-function yoyBarSVG(data, W=1100, H=160) {
+function yoyBarSVG(data, W=1100, H=180) {
   if (!data || data.length === 0) return '<div style="color:#374f66;padding:20px;text-align:center;font-size:12px">No YOY data</div>';
   const CC = {y2024:B.dim, y2025:B.b2, y2026:B.o2};
   const pad = {t:28,r:16,b:26,l:58};
-  const maxV = Math.max(...data.flatMap(d => [d.y2024||0, d.y2025||0, d.y2026||0]));
+  const maxV = Math.max(...data.flatMap(d => [d.y2024||0, d.y2025||0, d.y2026||0]), 1);
   const iw = W-pad.l-pad.r, ih = H-pad.t-pad.b;
-  const bw = (iw/data.length)/4.2;
-  const x = (mi,yi) => pad.l+(mi/data.length)*iw+(yi-.5)*bw*3.4;
-  const h = v => (v/maxV)*ih;
+  const slotW = iw / data.length;
+  const gap = 2;
+  const bw = Math.max((slotW - gap * 4) / 3, 4);
+  const groupW = bw * 3 + gap * 2;
+  const x = (mi,yi) => pad.l + mi * slotW + (slotW - groupW) / 2 + yi * (bw + gap);
+  const h = v => Math.max((v/maxV)*ih, v > 0 ? 4 : 0);
   let s = `<svg width="100%" viewBox="0 0 ${W} ${H}" style="overflow:visible;display:block">`;
   for (let i=0;i<=3;i++) { const v=maxV*(i/3); s+=`<line x1="${pad.l}" y1="${(pad.t+ih*(1-i/3)).toFixed(1)}" x2="${W-pad.r}" y2="${(pad.t+ih*(1-i/3)).toFixed(1)}" stroke="#1a2f4a" stroke-width="0.5"/><text x="${pad.l-5}" y="${(pad.t+ih*(1-i/3)+4).toFixed(1)}" text-anchor="end" font-size="9" fill="#374f66">${f$(v)}</text>`; }
   data.forEach((d,mi) => {
     [[d.y2024,'y2024',0],[d.y2025,'y2025',1],[d.y2026,'y2026',2]].forEach(([v,k,yi]) => {
       if (v == null) return;
       const hh = h(v);
-      s += `<rect x="${x(mi,yi).toFixed(1)}" y="${(pad.t+ih-hh).toFixed(1)}" width="${bw.toFixed(1)}" height="${hh.toFixed(1)}" fill="${CC[k]}" rx="2" opacity="${k==='y2026'?1:.82}"/>`;
+      const bx = x(mi,yi);
+      s += `<rect x="${bx.toFixed(1)}" y="${(pad.t+ih-hh).toFixed(1)}" width="${bw.toFixed(1)}" height="${hh.toFixed(1)}" fill="${CC[k]}" rx="2" opacity="${k==='y2026'?1:.82}"/>`;
+      if (v > 0 && k === 'y2026') s += `<text x="${(bx+bw/2).toFixed(1)}" y="${(pad.t+ih-hh-3).toFixed(1)}" text-anchor="middle" font-size="7" fill="${B.o3}">${f$(v)}</text>`;
     });
     s += `<text x="${(pad.l+(mi+.5)/data.length*iw).toFixed(1)}" y="${H-6}" text-anchor="middle" font-size="9" fill="#374f66">${d.month}</text>`;
   });
@@ -435,6 +440,7 @@ export default function Sales() {
   const handleViewTab  = v => { setViewTab(v); setActivePeriod(PERIODS[v]?.[0] || ''); };
 
   const m = metrics || {};
+  const fellBack = m.fell_back;
   const ly = k => m[`ly_${k}`];
   const svgChart = html => <div dangerouslySetInnerHTML={{__html: html}}/>;
   const periods = viewTab === 'Custom' ? [] : PERIODS[viewTab] || [];
@@ -449,6 +455,7 @@ export default function Sales() {
           <div style={{fontSize:12,color:B.sub,marginTop:3}}>
             {division === 'Total' ? 'All Divisions' : division}
             {customer !== 'All Channels' ? ` \u00B7 ${customer}` : ''}
+            {fellBack && <span style={{marginLeft:8,color:B.o3,fontStyle:'italic'}}>{m.period_label}</span>}
           </div>
         </div>
         <div style={{display:'flex',gap:8,flexWrap:'wrap'}}>

@@ -321,6 +321,17 @@ def sales_summary(
             return float(row[0]), int(row[1]), int(row[2])
 
         ty_sales, ty_units, ty_sessions = _sum_sales(sd, ed, hp)
+
+        # Auto-fallback: if period is 'today' and no TY data, use yesterday
+        fell_back = False
+        if period == 'today' and ty_sales == 0 and ty_units == 0 and ty_sessions == 0:
+            sd = sd - timedelta(days=1)
+            ed = ed - timedelta(days=1)
+            ly_sd = sd - timedelta(days=364)
+            ly_ed = ed - timedelta(days=364)
+            ty_sales, ty_units, ty_sessions = _sum_sales(sd, ed, hp)
+            fell_back = True
+
         ly_sales, ly_units, ly_sessions = _sum_sales(ly_sd, ly_ed, hp)
 
         ty_aur = round(ty_sales / ty_units, 2) if ty_units else 0
@@ -421,6 +432,8 @@ def sales_summary(
             "ly_orders": ly_orders, "ly_aov": ly_aov,
             "ly_ad_spend": round(ly_ad_spend, 2), "ly_roas": ly_roas, "ly_tacos": ly_tacos,
             "dos": dos, "stock_units": stock_units,
+            "fell_back": fell_back,
+            "period_label": f"Yesterday ({sd.strftime('%b %d')})" if fell_back else None,
         }
     except Exception as e:
         logger.error(f"sales/summary error: {e}")
