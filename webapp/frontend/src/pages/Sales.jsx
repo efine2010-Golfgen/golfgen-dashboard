@@ -165,14 +165,13 @@ function heatmapSVG(data, W=1100) {
 
 function funnelSVG(data) {
   if (!data || data.length === 0) return '<div style="color:#374f66;padding:20px;text-align:center;font-size:12px">No funnel data</div>';
-  // Extra height for metric summary row at bottom
   const W=1100, H=380, padL=90, padR=260, padT=30, padB=60;
   const iw=W-padL-padR, ih=H-padT-padB;
   const n=data.length, rowH=ih/n;
   const maxVal=Math.max(data[0].ty, data[0].ly, 1);
   const stageW = val => Math.max(iw*.13, (val/maxVal)*(iw*.88));
 
-  // Pre-compute key derived metrics
+  // Pre-compute derived metrics
   const sessIdx = data.findIndex(d => d.label === 'Sessions');
   const atcIdx  = data.findIndex(d => d.label === 'Add to Cart');
   const ordIdx  = data.findIndex(d => d.label === 'Orders');
@@ -182,10 +181,10 @@ function funnelSVG(data) {
   const atc_ly  = atcIdx  >= 0 ? data[atcIdx].ly  : 0;
   const ord_ty  = ordIdx  >= 0 ? data[ordIdx].ty  : 0;
   const ord_ly  = ordIdx  >= 0 ? data[ordIdx].ly  : 0;
-  const atcPct_ty  = sess_ty > 0 ? (atc_ty  / sess_ty * 100).toFixed(1) : null;
-  const atcPct_ly  = sess_ly > 0 ? (atc_ly  / sess_ly * 100).toFixed(1) : null;
-  const conv_ty    = sess_ty > 0 ? (ord_ty  / sess_ty * 100).toFixed(2) : null;
-  const conv_ly    = sess_ly > 0 ? (ord_ly  / sess_ly * 100).toFixed(2) : null;
+  const atcPct_ty = sess_ty > 0 ? (atc_ty / sess_ty * 100).toFixed(1) : null;
+  const atcPct_ly = sess_ly > 0 ? (atc_ly / sess_ly * 100).toFixed(1) : null;
+  const conv_ty   = sess_ty > 0 ? (ord_ty / sess_ty * 100).toFixed(2) : null;
+  const conv_ly   = sess_ly > 0 ? (ord_ly / sess_ly * 100).toFixed(2) : null;
 
   let s = `<svg width="100%" viewBox="0 0 ${W} ${H}" style="overflow:visible;display:block">`;
   s += `<defs>${data.map((_,i)=>`<linearGradient id="fg${i}" x1="0" y1="0" x2="1" y2="0"><stop offset="0%" stop-color="${B.b1}" stop-opacity=".92"/><stop offset="100%" stop-color="${B.b3}" stop-opacity=".92"/></linearGradient>`).join('')}</defs>`;
@@ -198,17 +197,17 @@ function funnelSVG(data) {
     const nextLyW = i<n-1 ? stageW(data[i+1].ly) : lyW*.55;
     const cy = padT+i*rowH, segH = rowH-4;
 
-    // LY shape: semi-transparent fill + dashed stroke outline so it shows around TY
-    s += `<path d="M${cx-lyW/2},${cy} L${cx+lyW/2},${cy} L${cx+nextLyW/2},${cy+segH} L${cx-nextLyW/2},${cy+segH} Z" fill="${B.dim}" fill-opacity=".18" stroke="${B.sub}" stroke-width="1.2" stroke-dasharray="5 3" opacity=".7"/>`;
-    // TY shape
+    // TY fill drawn FIRST so LY outline appears on top and is always visible
     s += `<path d="M${cx-tyW/2},${cy+2} L${cx+tyW/2},${cy+2} L${cx+nextTyW/2},${cy+segH-1} L${cx-nextTyW/2},${cy+segH-1} Z" fill="url(#fg${i})" opacity=".92"/>`;
+    // LY dashed outline drawn ON TOP — always visible regardless of size vs TY
+    s += `<path d="M${cx-lyW/2},${cy} L${cx+lyW/2},${cy} L${cx+nextLyW/2},${cy+segH} L${cx-nextLyW/2},${cy+segH} Z" fill="none" stroke="${B.sub}" stroke-width="1.5" stroke-dasharray="5 3" opacity=".75"/>`;
 
-    // Stage label (left side)
+    // Stage label (left)
     s += `<text x="${padL-12}" y="${cy+rowH/2+4}" text-anchor="end" font-size="11" font-weight="600" fill="#e2e8f0">${f.label}</text>`;
-    // TY value (center of TY bar)
+    // TY value (center)
     s += `<text x="${cx}" y="${cy+rowH/2+4}" text-anchor="middle" font-size="13" font-weight="700" fill="#fff">${fN(f.ty)}</text>`;
 
-    // Right panel: TY value, LY value, YOY delta — all stacked neatly
+    // Right comparison panel: TY / vs LY / YOY delta
     const rx = W - padR + 16;
     const rowMid = cy + rowH/2;
     const lyDelta = f.ly > 0 ? dp(f.ty, f.ly) : null;
@@ -218,51 +217,37 @@ function funnelSVG(data) {
     if (lyDelta != null) {
       s += `<text x="${rx}" y="${rowMid+8}" text-anchor="start" font-size="10" font-weight="700" fill="${deltaColor}">${lyDelta>=0?'\u25B2':'\u25BC'} ${Math.abs(lyDelta).toFixed(1)}% YOY</text>`;
     }
-
-    // Pass-through % between stages (center, small)
-    if (i < n-1) {
-      // Only show pass-through when values differ enough to be meaningful
-      const pct = f.ty > 0 ? (data[i+1].ty/f.ty*100) : 0;
-      const lyPct = f.ly > 0 ? (data[i+1].ly/f.ly*100) : 0;
-      const pctChg = lyPct > 0 ? dp(pct, lyPct) : null;
-      const ptColor = pctChg != null ? (pctChg >= 0 ? '#4ade80' : '#fb923c') : B.dim;
-      s += `<text x="${cx}" y="${cy+segH+11}" text-anchor="middle" font-size="9" fill="${B.dim}">\u25BC ${pct.toFixed(1)}% pass through`;
-      if (pctChg != null) s += ` <tspan font-weight="700" fill="${ptColor}">(${pctChg>=0?'+':''}${pctChg.toFixed(1)}% vs LY)</tspan>`;
-      s += `</text>`;
-    }
   });
 
-  // ── Derived metric summary row at bottom ──
-  const sumY = padT + n*rowH + 18;
-  const metrics = [];
+  // ── Derived metrics in right panel below last stage ──
+  const rx = W - padR + 16;
+  const divY = padT + n*rowH + 8;
+  s += `<line x1="${W-padR+8}" y1="${divY}" x2="${W-6}" y2="${divY}" stroke="${B.brd}" stroke-width="0.5" opacity=".6"/>`;
+
   if (atcPct_ty != null) {
     const atcChg = atcPct_ly != null ? dp(parseFloat(atcPct_ty), parseFloat(atcPct_ly)) : null;
     const atcColor = atcChg != null ? (atcChg >= 0 ? '#4ade80' : '#fb923c') : B.sub;
-    metrics.push([`ATC % of Sessions`, `${atcPct_ty}%`, atcPct_ly != null ? `LY ${atcPct_ly}%` : null, atcChg, atcColor]);
+    const ry = divY + 16;
+    s += `<text x="${rx}" y="${ry}" text-anchor="start" font-size="9" fill="${B.sub}">ATC % of Sessions</text>`;
+    s += `<text x="${rx+120}" y="${ry}" text-anchor="start" font-size="11" font-weight="800" fill="#e2e8f0">${atcPct_ty}%</text>`;
+    if (atcPct_ly != null) s += `<text x="${rx+158}" y="${ry}" text-anchor="start" font-size="9" fill="${B.sub}">LY ${atcPct_ly}%</text>`;
+    if (atcChg != null) s += `<text x="${rx+204}" y="${ry}" text-anchor="start" font-size="9" font-weight="700" fill="${atcColor}">${atcChg>=0?'\u25B2':'\u25BC'}${Math.abs(atcChg).toFixed(1)}%</text>`;
   }
+
   if (conv_ty != null) {
     const convChg = conv_ly != null ? dp(parseFloat(conv_ty), parseFloat(conv_ly)) : null;
     const convColor = convChg != null ? (convChg >= 0 ? '#4ade80' : '#fb923c') : B.sub;
-    metrics.push([`Conversion %`, `${conv_ty}%`, conv_ly != null ? `LY ${conv_ly}%` : null, convChg, convColor]);
-  }
-  if (metrics.length > 0) {
-    const mw = (W - padL - 20) / metrics.length;
-    s += `<line x1="${padL}" y1="${sumY-6}" x2="${W-20}" y2="${sumY-6}" stroke="${B.brd}" stroke-width="0.5"/>`;
-    metrics.forEach(([label, tyVal, lyVal, chg, chgColor], mi) => {
-      const mx = padL + mi * mw + mw/2;
-      s += `<text x="${mx}" y="${sumY+6}" text-anchor="middle" font-size="9" font-weight="700" fill="${B.sub}" text-transform="uppercase">${label}</text>`;
-      s += `<text x="${mx}" y="${sumY+22}" text-anchor="middle" font-size="14" font-weight="800" fill="#e2e8f0">${tyVal}</text>`;
-      if (lyVal) s += `<text x="${mx-20}" y="${sumY+36}" text-anchor="middle" font-size="9" fill="${B.sub}">${lyVal}</text>`;
-      if (chg != null) {
-        s += `<text x="${mx+22}" y="${sumY+36}" text-anchor="middle" font-size="9" font-weight="700" fill="${chgColor}">${chg>=0?'\u25B2':'\u25BC'}${Math.abs(chg).toFixed(1)}%</text>`;
-      }
-    });
+    const ry = divY + 34;
+    s += `<text x="${rx}" y="${ry}" text-anchor="start" font-size="9" fill="${B.sub}">Conversion %</text>`;
+    s += `<text x="${rx+120}" y="${ry}" text-anchor="start" font-size="11" font-weight="800" fill="#e2e8f0">${conv_ty}%</text>`;
+    if (conv_ly != null) s += `<text x="${rx+158}" y="${ry}" text-anchor="start" font-size="9" fill="${B.sub}">LY ${conv_ly}%</text>`;
+    if (convChg != null) s += `<text x="${rx+204}" y="${ry}" text-anchor="start" font-size="9" font-weight="700" fill="${convColor}">${convChg>=0?'\u25B2':'\u25BC'}${Math.abs(convChg).toFixed(1)}%</text>`;
   }
 
   // Legend
   s += `<g transform="translate(${padL},${H-14})">`;
   s += `<rect width="10" height="10" y="-1" rx="2" fill="${B.b2}" opacity=".9"/><text x="14" y="8" font-size="9" fill="${B.sub}">This Year</text>`;
-  s += `<rect x="90" width="10" height="8" y="0" rx="2" fill="${B.dim}" fill-opacity=".3" stroke="${B.sub}" stroke-width="1" stroke-dasharray="4 2"/><text x="104" y="8" font-size="9" fill="${B.sub}">Last Year outline</text>`;
+  s += `<rect x="90" width="10" height="8" y="0" rx="2" fill="none" stroke="${B.sub}" stroke-width="1" stroke-dasharray="4 2"/><text x="104" y="8" font-size="9" fill="${B.sub}">Last Year outline</text>`;
   s += `</g>`;
 
   // Right panel header

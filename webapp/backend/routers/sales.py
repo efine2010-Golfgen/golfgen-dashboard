@@ -220,7 +220,7 @@ def _aggregate_weekly(daily_data: list) -> list:
 
 def _period_to_dates(period: str, start: str = None, end: str = None):
     """Convert period label to (start_date, end_date) tuple."""
-    today = date.today()
+    today = datetime.now(ZoneInfo("America/Chicago")).date()  # Use Central time — Railway runs UTC
     if period == 'today':
         return today, today
     elif period == 'yesterday':
@@ -368,9 +368,12 @@ def sales_summary(
         ty_sales, ty_units, ty_sessions, ty_gv = _sum_sales(sd, ed, hp)
 
         # For today/yesterday: supplement from orders table (no S&T report lag)
-        fell_back = False
+        # Use Central-time datetime bounds to avoid UTC date boundary mis-match on Railway
+        _CENTRAL = ZoneInfo("America/Chicago")
         if period in ('today', 'yesterday'):
             try:
+                ty_start = datetime(sd.year, sd.month, sd.day, 0, 0, 0, tzinfo=_CENTRAL).isoformat()
+                ty_end   = datetime(ed.year, ed.month, ed.day, 23, 59, 59, tzinfo=_CENTRAL).isoformat()
                 r = con.execute(f"""
                     SELECT COALESCE(SUM(order_total), 0),
                            COALESCE(SUM(number_of_items), 0),
@@ -378,7 +381,7 @@ def sales_summary(
                     FROM orders
                     WHERE purchase_date >= ? AND purchase_date <= ?
                       AND (order_status IS NULL OR order_status NOT IN ('Cancelled','Pending')) {hw}
-                """, [str(sd), str(ed)] + hp).fetchone()
+                """, [ty_start, ty_end] + hp).fetchone()
                 o_sales, o_units, o_cnt = float(r[0]), int(r[1]), int(r[2])
                 if o_sales > 0 or o_cnt > 0:
                     ty_sales = o_sales
@@ -387,6 +390,27 @@ def sales_summary(
                 pass
 
         ly_sales, ly_units, ly_sessions, ly_gv = _sum_sales(ly_sd, ly_ed, hp)
+
+        # For today/yesterday: supplement LY from orders table too (S&T report lags for recent LY dates)
+        if period in ('today', 'yesterday'):
+            try:
+                _CENTRAL = ZoneInfo("America/Chicago")
+                ly_start = datetime(ly_sd.year, ly_sd.month, ly_sd.day, 0, 0, 0, tzinfo=_CENTRAL).isoformat()
+                ly_end   = datetime(ly_ed.year, ly_ed.month, ly_ed.day, 23, 59, 59, tzinfo=_CENTRAL).isoformat()
+                r = con.execute(f"""
+                    SELECT COALESCE(SUM(order_total), 0),
+                           COALESCE(SUM(number_of_items), 0),
+                           COUNT(DISTINCT order_id)
+                    FROM orders
+                    WHERE purchase_date >= ? AND purchase_date <= ?
+                      AND (order_status IS NULL OR order_status NOT IN ('Cancelled','Pending')) {hw}
+                """, [ly_start, ly_end] + hp).fetchone()
+                lo_sales, lo_units, lo_cnt = float(r[0]), int(r[1]), int(r[2])
+                if lo_sales > 0 or lo_cnt > 0:
+                    ly_sales = lo_sales
+                    ly_units = lo_units
+            except Exception:
+                pass
 
         ty_aur = round(ty_sales / ty_units, 2) if ty_units else 0
         ly_aur = round(ly_sales / ly_units, 2) if ly_units else 0
