@@ -92,42 +92,38 @@ function detectCategory(pathname) {
   return "exec-summary";
 }
 
-/* ── Theme Banner ── */
-function ThemeBanner() {
+/* ── Theme Indicator (swatch + name — lives in filter bar) ── */
+function ThemeIndicator() {
+  const { theme, themes } = useTheme();
+  return (
+    <div style={{ display:'flex', alignItems:'center', gap:7, marginLeft:'auto', flexShrink:0 }}>
+      <div style={{ width:14, height:14, borderRadius:3, background:themes[theme].sw, border:'1px solid var(--btnbrd)', flexShrink:0 }} />
+      <span style={{ fontSize:11, fontWeight:600, color:'var(--txt2)', whiteSpace:'nowrap' }}>{themes[theme].name}</span>
+    </div>
+  );
+}
+
+/* ── Theme Buttons (selector strip — lives below subnav) ── */
+function ThemeButtons() {
   const { theme, setTheme, themes } = useTheme();
   return (
-    <div className="theme-banner">
-      <div className="theme-swatch" style={{ background: themes[theme].sw }} />
-      <div className="theme-info">
-        <div className="theme-name">{themes[theme].name}</div>
-        <div className="theme-desc">{themes[theme].desc}</div>
+    <div className="theme-strip">
+      <div className="theme-group">
+        <span className="tg-label">Dark</span>
+        {['midnight', 'night', 'fairway'].map(t => (
+          <button key={t} className={`tbtn${theme === t ? ' active' : ''}`} onClick={() => setTheme(t)}>
+            {themes[t].name}
+          </button>
+        ))}
       </div>
-      <div className="theme-groups">
-        <div className="theme-group">
-          <span className="tg-label">Dark</span>
-          {['midnight', 'night', 'fairway'].map(t => (
-            <button
-              key={t}
-              className={`tbtn${theme === t ? ' active' : ''}`}
-              onClick={() => setTheme(t)}
-            >
-              {themes[t].name}
-            </button>
-          ))}
-        </div>
-        <div className="tg-divider" />
-        <div className="theme-group">
-          <span className="tg-label">Light</span>
-          {['slate', 'warm', 'fresh'].map(t => (
-            <button
-              key={t}
-              className={`tbtn${theme === t ? ' active' : ''}`}
-              onClick={() => setTheme(t)}
-            >
-              {themes[t].name}
-            </button>
-          ))}
-        </div>
+      <div className="tg-divider" />
+      <div className="theme-group">
+        <span className="tg-label">Light</span>
+        {['slate', 'warm', 'fresh'].map(t => (
+          <button key={t} className={`tbtn${theme === t ? ' active' : ''}`} onClick={() => setTheme(t)}>
+            {themes[t].name}
+          </button>
+        ))}
       </div>
     </div>
   );
@@ -267,20 +263,23 @@ function AppShell({ user, isAdmin, allowed, mfaProtected, userMfaEnabled, filter
           <div className="stripe" />
         </div>
 
-        {/* ── Filter Bar ── */}
+        {/* ── Filter Bar (View filter + theme indicator) ── */}
         <div className="filter-bar">
           <span className="filter-lbl">View:</span>
           <HierarchyFilter division={division} customer={customer} onChange={handleFilterChange} compact />
+          <ThemeIndicator />
         </div>
 
         {/* ── Sub-nav ── */}
         <NavSystem permissions={allowed} mfaProtected={mfaProtected} userMfaEnabled={userMfaEnabled} />
 
+        {/* ── Theme button strip (below Exec Summary nav line) ── */}
+        <ThemeButtons />
+
       </div>
 
       {/* ── Main Content ── */}
       <main className="page">
-        <ThemeBanner />
         <Routes>
           {allowed["dashboard"] !== false && <Route path="/" element={<Dashboard filters={filters} />} />}
           <Route path="/sales" element={<Sales />} />

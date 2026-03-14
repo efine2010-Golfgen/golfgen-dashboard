@@ -285,26 +285,28 @@ function MetricCard({ label, value, ly, delta, expandContent, invert }) {
   const [expanded, setExpanded] = useState(false);
   const isPos = invert ? delta < 0 : delta > 0;
   const deltaEl = delta != null ? (
-    <span style={{fontSize:9,fontWeight:700,padding:'1px 6px',borderRadius:99,
+    <span style={{fontSize:9,fontWeight:700,padding:'1px 5px',borderRadius:99,
       color:isPos?'#4ade80':'#fb923c',
-      background:isPos?'rgba(74,222,128,.1)':'rgba(251,146,60,.12)',whiteSpace:'nowrap'}}>
+      background:isPos?'rgba(74,222,128,.1)':'rgba(251,146,60,.12)',whiteSpace:'nowrap',flexShrink:0}}>
       {delta > 0 ? '\u25B2' : '\u25BC'} {Math.abs(delta).toFixed(1)}%
     </span>
   ) : null;
   return (
-    <div style={{flex:'1 1 0',minWidth:115,background:'linear-gradient(145deg,var(--card),var(--card2))',borderRadius:12,padding:'12px 10px',border:'1px solid var(--brd)',position:'relative',overflow:'hidden',transition:'background .3s'}}>
+    <div style={{flex:'1 1 0',minWidth:130,background:'linear-gradient(145deg,var(--card),var(--card2))',borderRadius:12,padding:'12px 10px',border:'1px solid var(--brd)',position:'relative',overflow:'hidden',transition:'background .3s'}}>
       <div style={{fontSize:9,color:'var(--txt3)',textTransform:'uppercase',letterSpacing:'.07em',marginBottom:5,whiteSpace:'nowrap'}}>{label}</div>
-      <div style={{fontSize:18,fontWeight:800,letterSpacing:'-.02em',color:'var(--txt)',lineHeight:1}}>{value}</div>
-      {ly && <div style={{fontSize:9,color:'var(--txt3)',marginTop:3}}>LY: {ly}</div>}
-      <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',marginTop:6,minHeight:20,gap:4}}>
+      <div style={{display:'flex',alignItems:'baseline',gap:6,flexWrap:'wrap'}}>
+        <span style={{fontSize:18,fontWeight:800,letterSpacing:'-.02em',color:'var(--txt)',lineHeight:1}}>{value}</span>
+        {ly && <span style={{fontSize:10,color:'var(--txt3)',whiteSpace:'nowrap'}}>LY {ly}</span>}
         {deltaEl}
-        {expandContent && (
-          <button onClick={() => setExpanded(e => !e)}
-            style={{fontSize:9,padding:'2px 7px',borderRadius:99,border:'1px solid var(--brd)',background:'transparent',color:'var(--txt3)',cursor:'pointer',fontWeight:600,whiteSpace:'nowrap',flexShrink:0}}>
-            {expanded ? '\u25B2' : '\u25BC'}
-          </button>
-        )}
       </div>
+      {expandContent && (
+        <div style={{marginTop:6}}>
+          <button onClick={() => setExpanded(e => !e)}
+            style={{fontSize:9,padding:'2px 7px',borderRadius:99,border:'1px solid var(--brd)',background:'transparent',color:'var(--txt3)',cursor:'pointer',fontWeight:600,whiteSpace:'nowrap'}}>
+            {expanded ? '\u25B2 hide' : '\u25BC detail'}
+          </button>
+        </div>
+      )}
       {expanded && expandContent && (
         <div style={{marginTop:10,paddingTop:10,borderTop:'1px solid var(--brd)'}}>
           {expandContent}
@@ -552,14 +554,41 @@ export default function Sales() {
         <div style={{display:'flex',gap:8,overflowX:'auto',paddingBottom:6,marginBottom:24}}>
           {periods.slice(0,5).map(p => {
             const d = periodCols[p] || {};
-            const rows = [['Sales $',f$(d.sales)],['Units',fN(d.units)],['AUR',f$(d.aur)],['Orders',fN(d.orders)],['AOV',f$(d.aov)],['Sessions',fN(d.sessions)],['Glance Views',fN(d.glance_views)],['CTR',fP(d.ctr)],['Conv %',fP(d.conversion)]];
+            const pct = (ty, ly) => {
+              if (!ly || !ty) return null;
+              return ((ty - ly) / ly * 100);
+            };
+            const pctEl = (delta, inv) => {
+              if (delta == null) return <span style={{fontSize:9,color:'var(--txt3)'}}>—</span>;
+              const pos = inv ? delta < 0 : delta > 0;
+              return <span style={{fontSize:9,fontWeight:700,color:pos?'#4ade80':'#fb923c',whiteSpace:'nowrap'}}>{delta>0?'▲':'▼'} {Math.abs(delta).toFixed(1)}%</span>;
+            };
+            const rows = [
+              ['Sales $',   f$(d.sales),        f$(d.ly_sales),        pct(d.sales, d.ly_sales),        false],
+              ['Units',     fN(d.units),         fN(d.ly_units),        pct(d.units, d.ly_units),         false],
+              ['AUR',       f$(d.aur),           f$(d.ly_aur),          pct(d.aur, d.ly_aur),             false],
+              ['Orders',    fN(d.orders),        fN(d.ly_orders),       pct(d.orders, d.ly_orders),       false],
+              ['AOV',       f$(d.aov),           f$(d.ly_aov),          pct(d.aov, d.ly_aov),             false],
+              ['Sessions',  fN(d.sessions),      fN(d.ly_sessions),     pct(d.sessions, d.ly_sessions),   false],
+              ['Glance Views',fN(d.glance_views),fN(d.ly_glance_views), pct(d.glance_views, d.ly_glance_views), false],
+              ['Conv %',    fP(d.conversion),    fP(d.ly_conversion),   pct(d.conversion, d.ly_conversion),false],
+            ];
             return (
-              <div key={p} style={{flex:'1 1 120px',minWidth:110,background:'var(--card2)',border:'1px solid var(--brd)',borderRadius:12,padding:12,transition:'background .3s'}}>
+              <div key={p} style={{flex:'1 1 160px',minWidth:160,background:'var(--card2)',border:'1px solid var(--brd)',borderRadius:12,padding:12,transition:'background .3s'}}>
                 <div style={{fontSize:9,fontWeight:700,textTransform:'uppercase',letterSpacing:'.12em',color:B.b2,paddingBottom:8,borderBottom:'1px solid var(--brd)',marginBottom:8}}>{p}</div>
-                {rows.map(([l,v]) => (
-                  <div key={l} style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:5}}>
-                    <span style={{fontSize:10,color:'var(--txt3)'}}>{l}</span>
-                    <span style={{fontSize:10,fontWeight:600,color:'var(--txt)'}}>{v}</span>
+                {/* column headers */}
+                <div style={{display:'grid',gridTemplateColumns:'auto 1fr 1fr 1fr',gap:'0 6px',marginBottom:6,alignItems:'center'}}>
+                  <span style={{fontSize:8,color:'var(--txt3)'}}/>
+                  <span style={{fontSize:8,fontWeight:700,color:'var(--txt3)',textTransform:'uppercase',letterSpacing:'.06em'}}>TY</span>
+                  <span style={{fontSize:8,fontWeight:700,color:'var(--txt3)',textTransform:'uppercase',letterSpacing:'.06em'}}>LY</span>
+                  <span style={{fontSize:8,fontWeight:700,color:'var(--txt3)',textTransform:'uppercase',letterSpacing:'.06em'}}>Chg</span>
+                </div>
+                {rows.map(([l, ty, lyv, delta, inv]) => (
+                  <div key={l} style={{display:'grid',gridTemplateColumns:'auto 1fr 1fr 1fr',gap:'0 6px',marginBottom:5,alignItems:'center'}}>
+                    <span style={{fontSize:9,color:'var(--txt3)',whiteSpace:'nowrap',paddingRight:4}}>{l}</span>
+                    <span style={{fontSize:10,fontWeight:600,color:'var(--txt)'}}>{ty}</span>
+                    <span style={{fontSize:9,color:'var(--txt3)'}}>{lyv}</span>
+                    {pctEl(delta, inv)}
                   </div>
                 ))}
               </div>

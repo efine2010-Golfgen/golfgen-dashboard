@@ -620,6 +620,8 @@ def sales_period_comparison(
 
         for label, period_key in periods_map.items():
             sd, ed = _period_to_dates(period_key)
+            ly_sd = sd - timedelta(days=364)
+            ly_ed = ed - timedelta(days=364)
             row = con.execute(f"""
                 SELECT COALESCE(SUM(ordered_product_sales), 0),
                        COALESCE(SUM(units_ordered), 0),
@@ -629,6 +631,15 @@ def sales_period_comparison(
                 WHERE asin = 'ALL' AND date >= ? AND date <= ? {hw}
             """, [str(sd), str(ed)] + hp).fetchone()
             sales, units, sessions, glance_views = float(row[0]), int(row[1]), int(row[2]), int(row[3])
+            ly_row = con.execute(f"""
+                SELECT COALESCE(SUM(ordered_product_sales), 0),
+                       COALESCE(SUM(units_ordered), 0),
+                       COALESCE(SUM(sessions), 0),
+                       COALESCE(SUM(page_views), 0)
+                FROM daily_sales
+                WHERE asin = 'ALL' AND date >= ? AND date <= ? {hw}
+            """, [str(ly_sd), str(ly_ed)] + hp).fetchone()
+            ly_sales, ly_units, ly_sessions, ly_gv = float(ly_row[0]), int(ly_row[1]), int(ly_row[2]), int(ly_row[3])
             # True order count from orders table
             try:
                 o_row = con.execute(f"""
@@ -639,15 +650,31 @@ def sales_period_comparison(
                 orders = int(o_row[0]) if o_row and o_row[0] else units
             except Exception:
                 orders = units
+            try:
+                ly_o_row = con.execute(f"""
+                    SELECT COUNT(DISTINCT order_id)
+                    FROM orders
+                    WHERE purchase_date >= ? AND purchase_date <= ? {hw}
+                """, [str(ly_sd), str(ly_ed)] + hp).fetchone()
+                ly_orders = int(ly_o_row[0]) if ly_o_row and ly_o_row[0] else ly_units
+            except Exception:
+                ly_orders = ly_units
             aur = round(sales / units, 2) if units else 0
             aov = round(sales / orders, 2) if orders else 0
             conv = round(units / sessions, 4) if sessions else 0
             ctr = 0
+            ly_aur = round(ly_sales / ly_units, 2) if ly_units else 0
+            ly_aov = round(ly_sales / ly_orders, 2) if ly_orders else 0
+            ly_conv = round(ly_units / ly_sessions, 4) if ly_sessions else 0
             result[label] = {
                 "sales": round(sales, 2), "units": units, "aur": aur,
                 "orders": orders, "aov": aov,
                 "sessions": sessions, "glance_views": glance_views,
                 "ctr": ctr, "conversion": conv,
+                "ly_sales": round(ly_sales, 2), "ly_units": ly_units,
+                "ly_aur": ly_aur, "ly_orders": ly_orders, "ly_aov": ly_aov,
+                "ly_sessions": ly_sessions, "ly_glance_views": ly_gv,
+                "ly_conversion": ly_conv,
             }
 
         con.close()

@@ -112,6 +112,9 @@ body.fresh {
 .filter-bar { background:var(--surf); border-bottom:1px solid var(--brd); padding:6px 20px; display:flex; align-items:center; gap:10px; transition:background .3s; }
 .filter-lbl { font-family:'Space Grotesk',monospace; font-size:10px; font-weight:600; text-transform:uppercase; letter-spacing:.08em; color:var(--txt3); white-space:nowrap; }
 
+/* ── THEME STRIP (below subnav) ─────────────────────────── */
+.theme-strip { background:var(--card); border-bottom:1px solid var(--brd); padding:5px 20px; display:flex; align-items:center; gap:10px; transition:background .3s; }
+
 /* ── SUB-NAV ────────────────────────────────────────────── */
 .subnav { background:var(--surf); border-bottom:1px solid var(--brd); padding:0 20px; display:flex; align-items:center; height:40px; overflow-x:auto; transition:background .3s; }
 .snbtn { display:flex; align-items:center; padding:0 13px; height:100%; font-size:12px; font-weight:600; font-family:'Sora',sans-serif; color:var(--txt2); border:none; background:transparent; cursor:pointer; border-bottom:2px solid transparent; transition:all .15s; white-space:nowrap; }
