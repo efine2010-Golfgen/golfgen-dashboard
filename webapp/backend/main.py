@@ -26,7 +26,17 @@ from core.config import (
 from core.database import init_all_tables, auto_migrate_from_duckdb, get_db, get_db_rw
 from core.config import USE_POSTGRES, DATABASE_URL
 
+# ── Logging Setup ────────────────────────────────────────
+# Configure the "golfgen" logger so all sync/service log messages
+# actually appear in Railway logs (stdout). Without this, logger.info()
+# calls throughout the codebase are silently dropped.
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(levelname)s %(name)s: %(message)s",
+    handlers=[logging.StreamHandler()],
+)
 logger = logging.getLogger("golfgen")
+logger.setLevel(logging.INFO)
 
 # ── Startup Diagnostics ──────────────────────────────────
 _env_keys = [

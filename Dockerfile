@@ -51,6 +51,7 @@ RUN chmod +x /app/docker-entrypoint.sh
 # Environment
 ENV DB_DIR=/app/data
 ENV PORT=8000
+ENV PYTHONUNBUFFERED=1
 
 EXPOSE 8000
 
