@@ -604,7 +604,10 @@ def _run_sp_api_sync_inner():
         # sp_api may return model objects, dicts, Decimals, or strings
         # The python-amazon-sp-api library may use PascalCase OR snake_case
         # attributes depending on version, so we check both patterns.
+        _money_debug_logged = False
+
         def _money(amt_obj):
+            nonlocal _money_debug_logged
             if amt_obj is None:
                 return 0.0
             # Plain dict — check multiple key conventions
@@ -616,6 +619,18 @@ def _run_sp_api_sync_inner():
                             return float(v)
                         except (ValueError, TypeError):
                             continue
+                # Dict but no known keys — log once for diagnosis
+                if not _money_debug_logged:
+                    logger.warning(f"  _money: unknown dict keys: {list(amt_obj.keys())}, values: {list(amt_obj.values())[:3]}")
+                    _money_debug_logged = True
+                # Last resort: try first numeric value in dict
+                for v in amt_obj.values():
+                    try:
+                        fv = float(v)
+                        if fv != 0:
+                            return fv
+                    except (ValueError, TypeError):
+                        continue
                 return 0.0
             # Try converting model object to dict first (most reliable)
             if hasattr(amt_obj, "to_dict"):
@@ -629,6 +644,17 @@ def _run_sp_api_sync_inner():
                                     return float(v)
                                 except (ValueError, TypeError):
                                     continue
+                        # to_dict worked but no matching key — log and try any numeric
+                        if not _money_debug_logged:
+                            logger.warning(f"  _money: to_dict keys: {list(d.keys())}")
+                            _money_debug_logged = True
+                        for v in d.values():
+                            try:
+                                fv = float(v)
+                                if fv != 0:
+                                    return fv
+                            except (ValueError, TypeError):
+                                continue
                 except Exception:
                     pass
             # sp_api model object — check PascalCase then snake_case attributes
@@ -651,10 +677,18 @@ def _run_sp_api_sync_inner():
                             return float(v)
                         except (ValueError, TypeError):
                             continue
+                # Log unknown model attrs once
+                if not _money_debug_logged:
+                    non_private = {k: v for k, v in d.items() if not k.startswith("__")}
+                    logger.warning(f"  _money: model __dict__ keys: {list(non_private.keys())}")
+                    _money_debug_logged = True
             # Already a number (Decimal, float, int)
             try:
                 return float(amt_obj)
             except Exception:
+                if not _money_debug_logged:
+                    logger.warning(f"  _money: could not parse type={type(amt_obj).__name__}, repr={repr(amt_obj)[:200]}")
+                    _money_debug_logged = True
                 return 0.0
 
         # Helper: extract string date from PostedDate (may be str or datetime)
@@ -711,25 +745,32 @@ def _run_sp_api_sync_inner():
                 if not first_shipment_logged and charge_list:
                     first_c = charge_list[0]
                     ca = _safe_get(first_c, "ChargeAmount")
-                    # Deep introspection for diagnosis
-                    ca_dict = None
-                    if hasattr(ca, "to_dict"):
-                        try:
-                            ca_dict = ca.to_dict()
-                        except Exception:
-                            pass
-                    ca_attrs = None
-                    if hasattr(ca, "__dict__"):
-                        ca_attrs = {k: v for k, v in ca.__dict__.items() if not k.startswith("__")}
-                    logger.info(f"  DEBUG charge obj type={type(first_c).__name__}, "
-                               f"ChargeAmount type={type(ca).__name__}, "
-                               f"ChargeAmount repr={repr(ca)}, "
-                               f"to_dict={ca_dict}, "
-                               f"__dict__={ca_attrs}, "
-                               f"parsed_val={_money(ca)}")
-                    # Also log the item-level structure
-                    item_keys = list(first_c.keys()) if isinstance(first_c, dict) else dir(first_c)
-                    logger.info(f"  DEBUG charge item keys={item_keys}")
+                    # Log the raw charge item completely
+                    if isinstance(first_c, dict):
+                        logger.info(f"  DEBUG charge item (dict): {first_c}")
+                    else:
+                        logger.info(f"  DEBUG charge item type={type(first_c).__name__}, repr={repr(first_c)[:500]}")
+                        if hasattr(first_c, "to_dict"):
+                            try:
+                                logger.info(f"  DEBUG charge item to_dict={first_c.to_dict()}")
+                            except Exception:
+                                pass
+                        if hasattr(first_c, "__dict__"):
+                            logger.info(f"  DEBUG charge item __dict__={first_c.__dict__}")
+                    # Log ChargeAmount specifically
+                    logger.info(f"  DEBUG ChargeAmount type={type(ca).__name__}, repr={repr(ca)[:300]}, parsed={_money(ca)}")
+                    # Also log the ShipmentItem itself
+                    first_item = (_safe_get(event, "ShipmentItemList") or [None])[0]
+                    if first_item:
+                        if isinstance(first_item, dict):
+                            logger.info(f"  DEBUG ShipmentItem keys={list(first_item.keys())}")
+                        else:
+                            logger.info(f"  DEBUG ShipmentItem type={type(first_item).__name__}")
+                            if hasattr(first_item, "to_dict"):
+                                try:
+                                    logger.info(f"  DEBUG ShipmentItem to_dict={first_item.to_dict()}")
+                                except Exception:
+                                    pass
                     first_shipment_logged = True
 
                 fba_fees_val = 0.0
