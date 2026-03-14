@@ -98,6 +98,14 @@ def _translate_sql_for_pg(sql: str) -> str:
     # DOUBLE → DOUBLE PRECISION (DuckDB type not valid in PostgreSQL)
     sql = re.sub(r'\bDOUBLE\b(?!\s+PRECISION)', 'DOUBLE PRECISION', sql)
 
+    # CURRENT_DATE - N  →  CURRENT_DATE - INTERVAL 'N days'
+    # DuckDB allows `CURRENT_DATE - 90` but PostgreSQL does not.
+    sql = re.sub(
+        r'\bCURRENT_DATE\s*-\s*(\d+)\b',
+        r"CURRENT_DATE - INTERVAL '\1 days'",
+        sql,
+    )
+
     # ── INSERT OR IGNORE → ON CONFLICT DO NOTHING ──────────
     if _RE_INSERT_OR_IGNORE.search(sql):
         sql = _RE_INSERT_OR_IGNORE.sub("INSERT INTO", sql)
@@ -173,6 +181,22 @@ class DbConnection:
     def execute(self, sql: str, params=None):
         _check_sql_safety(sql)  # raises on DROP/TRUNCATE of protected tables
         if self._is_postgres:
+            stripped = sql.strip().upper()
+            # Handle explicit transaction control for PostgreSQL.
+            # psycopg2 with autocommit=True needs autocommit toggled off
+            # for explicit transaction blocks.
+            if stripped.startswith("BEGIN"):
+                self._conn.autocommit = False
+                return _PgResult(self._cursor)
+            if stripped.startswith("COMMIT"):
+                self._conn.commit()
+                self._conn.autocommit = True
+                return _PgResult(self._cursor)
+            if stripped.startswith("ROLLBACK"):
+                self._conn.rollback()
+                self._conn.autocommit = True
+                return _PgResult(self._cursor)
+
             sql = _translate_sql_for_pg(sql)
             if params:
                 self._cursor.execute(sql, params)
