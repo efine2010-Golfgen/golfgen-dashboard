@@ -2036,7 +2036,10 @@ def period_comparison(
             fba_fees = round(rev * fba_pct, 2)
             referral_fees = round(rev * referral_pct, 2)
         amazon_fees = round(fba_fees + referral_fees, 2)
-        cogs = round(rev * cogs_pct, 2)
+        # Use compute_cogs_for_range for accurate per-ASIN COGS
+        cogs = compute_cogs_for_range(con, p["start"], p["end"], hf, hp)
+        if cogs == 0 and rev > 0:
+            cogs = round(rev * cogs_pct, 2)  # fallback to ratio estimate
         net = round(rev - cogs - amazon_fees - ad_spend, 2)
         margin_val = round(net / rev * 100, 1) if rev > 0 else 0
 
