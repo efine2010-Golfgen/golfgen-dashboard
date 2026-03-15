@@ -57,6 +57,7 @@ export const api = {
     fetchJSON(`/api/daily?days=${days}&granularity=${granularity}${_hq(h)}`),
   products: (days = 365, h = {}) => fetchJSON(`/api/products?days=${days}${_hq(h)}`),
   inventory: (h = {}) => fetchJSON(`/api/inventory${_hq(h) ? '?' + _hq(h).slice(1) : ''}`),
+  inventoryCommandCenter: (h = {}) => fetchJSON(`/api/inventory/command-center${_hq(h) ? '?' + _hq(h).slice(1) : ''}`),
   productDetail: (asin, days = 365) =>
     fetchJSON(`/api/product/${asin}?days=${days}`),
   pnl: (days = 365, h = {}) => fetchJSON(`/api/pnl?days=${days}${_hq(h)}`),

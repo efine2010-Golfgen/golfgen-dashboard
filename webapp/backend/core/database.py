@@ -40,6 +40,10 @@ _TABLE_PKS: dict[str, list[str]] = {
     "monthly_sales_history": ["sku", "year", "month"],
     "sync_log": ["id"],
     "docs_update_log": ["id"],
+    "fba_inventory_aging": ["snapshot_date", "asin"],
+    "fba_stranded_inventory": ["snapshot_date", "asin"],
+    "fba_reimbursements": ["reimbursement_id"],
+    "fba_fc_inventory": ["snapshot_date", "fulfillment_center", "asin"],
 }
 
 # ── Dev-safety guard: tables that must never be DROPped or TRUNCATEd ────────
@@ -56,6 +60,7 @@ _PROTECTED_TABLES = {
     "item_plan_overrides", "item_plan_curve_selection",
     "item_plan_factory_orders", "item_plan_factory_order_items",
     "item_plan_settings",
+    "fba_inventory_aging", "fba_stranded_inventory", "fba_reimbursements", "fba_fc_inventory",
 }
 
 _RE_DESTRUCTIVE_SQL = re.compile(
@@ -1124,6 +1129,86 @@ def _init_inventory_snapshot_table():
     con.close()
 
 
+def _init_inventory_extended_tables():
+    """Create extended inventory tables for aging, stranded, reimbursements, and FC distribution."""
+    con = get_db_rw()
+
+    # Inventory aging data from GET_FBA_INVENTORY_AGED_DATA report
+    con.execute("""
+        CREATE TABLE IF NOT EXISTS fba_inventory_aging (
+            snapshot_date    DATE NOT NULL,
+            asin             VARCHAR NOT NULL,
+            sku              VARCHAR,
+            product_name     VARCHAR,
+            qty_0_90         INTEGER DEFAULT 0,
+            qty_91_180       INTEGER DEFAULT 0,
+            qty_181_270      INTEGER DEFAULT 0,
+            qty_271_365      INTEGER DEFAULT 0,
+            qty_365_plus     INTEGER DEFAULT 0,
+            total_qty        INTEGER DEFAULT 0,
+            estimated_ltsf   DOUBLE DEFAULT 0,
+            division         VARCHAR DEFAULT 'unknown',
+            customer         VARCHAR DEFAULT 'amazon',
+            platform         VARCHAR DEFAULT 'sp_api',
+            PRIMARY KEY (snapshot_date, asin)
+        )
+    """)
+
+    # Stranded inventory from GET_STRANDED_INVENTORY_UI_DATA report
+    con.execute("""
+        CREATE TABLE IF NOT EXISTS fba_stranded_inventory (
+            snapshot_date       DATE NOT NULL,
+            asin                VARCHAR NOT NULL,
+            sku                 VARCHAR,
+            product_name        VARCHAR,
+            stranded_qty        INTEGER DEFAULT 0,
+            stranded_reason     VARCHAR,
+            estimated_value     DOUBLE DEFAULT 0,
+            date_stranded       DATE,
+            division            VARCHAR DEFAULT 'unknown',
+            customer            VARCHAR DEFAULT 'amazon',
+            platform            VARCHAR DEFAULT 'sp_api',
+            PRIMARY KEY (snapshot_date, asin)
+        )
+    """)
+
+    # Reimbursements from GET_REIMBURSEMENTS_DATA report
+    con.execute("""
+        CREATE TABLE IF NOT EXISTS fba_reimbursements (
+            reimbursement_id    VARCHAR PRIMARY KEY,
+            reimbursement_date  DATE,
+            asin                VARCHAR,
+            sku                 VARCHAR,
+            product_name        VARCHAR,
+            reason              VARCHAR,
+            quantity             INTEGER DEFAULT 0,
+            amount              DOUBLE DEFAULT 0,
+            currency            VARCHAR DEFAULT 'USD',
+            division            VARCHAR DEFAULT 'unknown',
+            customer            VARCHAR DEFAULT 'amazon',
+            platform            VARCHAR DEFAULT 'sp_api'
+        )
+    """)
+
+    # FC-level inventory (from Inventories API with granularityType=FulfillmentCenter)
+    con.execute("""
+        CREATE TABLE IF NOT EXISTS fba_fc_inventory (
+            snapshot_date       DATE NOT NULL,
+            fulfillment_center  VARCHAR NOT NULL,
+            asin                VARCHAR NOT NULL,
+            sku                 VARCHAR,
+            fulfillable_quantity INTEGER DEFAULT 0,
+            total_quantity      INTEGER DEFAULT 0,
+            division            VARCHAR DEFAULT 'unknown',
+            customer            VARCHAR DEFAULT 'amazon',
+            platform            VARCHAR DEFAULT 'sp_api',
+            PRIMARY KEY (snapshot_date, fulfillment_center, asin)
+        )
+    """)
+
+    con.close()
+
+
 def _fix_pg_sequences():
     """Reset PostgreSQL sequences to match the current max IDs in their tables.
 
@@ -1216,6 +1301,12 @@ def init_all_tables():
         logger.info("Inventory snapshot table initialized")
     except Exception as e:
         logger.error(f"Inventory snapshot table init error: {e}")
+
+    try:
+        _init_inventory_extended_tables()
+        logger.info("Inventory extended tables initialized")
+    except Exception as e:
+        logger.error(f"Inventory extended tables init error: {e}")
 
     # ── Fix PostgreSQL sequences after migration ──
     try:

@@ -161,14 +161,14 @@ function heatmapSVG(data, W=1100) {
   // Sort unique unit values to build a percentile map, then map each cell
   // to an alpha between 0.18 (lowest rank) and 0.92 (highest rank).
   const allUnits = [];
-  for (let w=0;w<WEEKS;w++) for (let d=0;d<7;d++) allUnits.push(lookup[`${w},${d}`]||0);
+  for (let w=0;w<WEEKS;w++) for (let d=0;d<7;d++) allUnits.push(lookup[`${WEEKS-1-w},${d}`]||0);
   const sorted = [...allUnits].filter(v=>v>0).sort((a,b)=>a-b);
   const rankMap = {};
   sorted.forEach((v,i) => { if(!(v in rankMap)) rankMap[v] = i; });
   const maxRank = sorted.length - 1 || 1;
   for (let w=0; w<WEEKS; w++) {
     for (let d=0; d<7; d++) {
-      const units = lookup[`${w},${d}`] || 0;
+      const units = lookup[`${WEEKS-1-w},${d}`] || 0;
       const pct = units > 0 ? (rankMap[units] || 0) / maxRank : 0;
       const alpha = units > 0 ? (0.18 + pct * 0.74).toFixed(2) : '0.05';
       const c = d >= 5 ? B.o2 : B.b2;

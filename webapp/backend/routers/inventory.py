@@ -1224,3 +1224,407 @@ async def get_fba_shipment_items(request: Request, shipment_id: str):
     require_auth(request)
     items = _enrich_shipment_items(shipment_id)
     return {"shipmentId": shipment_id, "items": items, "totalItems": len(items)}
+
+
+@router.get("/api/inventory/command-center")
+def inventory_command_center(
+    division: Optional[str] = None,
+    customer: Optional[str] = None,
+    platform: Optional[str] = None,
+):
+    """Comprehensive inventory command center data — serves all mockup sections.
+
+    Returns: KPIs, pipeline, aging, velocity trends, buy-box trends,
+    replenishment forecast, reorder timeline, SKU table, stranded, reimbursements,
+    FC distribution, and health metrics.
+    """
+    con = get_db()
+    cogs_data = load_cogs()
+    hf, hp = hierarchy_filter(division, customer, platform)
+    inv_where = (" WHERE " + hf.lstrip(" AND ")) if hf else ""
+
+    # ── 1. Current FBA Inventory (base data) ──────────────────────────────────
+    inv_rows = con.execute(f"""
+        SELECT asin, sku, product_name,
+               COALESCE(fulfillable_quantity, 0) AS fulfillable,
+               COALESCE(inbound_working_quantity, 0) AS inbound_working,
+               COALESCE(inbound_shipped_quantity, 0) AS inbound_shipped,
+               COALESCE(inbound_receiving_quantity, 0) AS inbound_receiving,
+               COALESCE(reserved_quantity, 0) AS reserved,
+               COALESCE(unfulfillable_quantity, 0) AS unfulfillable,
+               COALESCE(total_quantity, 0) AS total
+        FROM fba_inventory{inv_where}
+    """, hp).fetchall()
+
+    inv_map = {}
+    total_fulfillable = 0
+    total_inbound = 0
+    total_reserved = 0
+    total_unfulfillable = 0
+    total_units = 0
+
+    for r in inv_rows:
+        asin = r[0]
+        fulfillable = r[3]
+        inbound = r[4] + r[5] + r[6]
+        reserved = r[7]
+        unfulfillable = r[8]
+        total = r[9] or (fulfillable + inbound + reserved + unfulfillable)
+
+        cogs_name = cogs_data.get(asin, {}).get("product_name", "")
+        if cogs_name and cogs_name.strip().upper() == asin.upper():
+            cogs_name = ""
+        name = cogs_name or r[2] or asin
+
+        inv_map[asin] = {
+            "sku": r[1] or "",
+            "name": name,
+            "fulfillable": fulfillable,
+            "inbound": inbound,
+            "inbound_working": r[4],
+            "inbound_shipped": r[5],
+            "inbound_receiving": r[6],
+            "reserved": reserved,
+            "unfulfillable": unfulfillable,
+            "total": total,
+        }
+        total_fulfillable += fulfillable
+        total_inbound += inbound
+        total_reserved += reserved
+        total_unfulfillable += unfulfillable
+        total_units += total
+
+    # ── 2. Sales Velocity (7d, 30d, 90d) ─────────────────────────────────────
+    vel_filter = "WHERE asin != 'ALL' AND date >= CURRENT_DATE - 90" + hf
+    vel_rows = con.execute(f"""
+        SELECT asin,
+               SUM(CASE WHEN date >= CURRENT_DATE - 7 THEN units_ordered ELSE 0 END) AS u7,
+               SUM(CASE WHEN date >= CURRENT_DATE - 30 THEN units_ordered ELSE 0 END) AS u30,
+               SUM(units_ordered) AS u90,
+               SUM(CASE WHEN date >= CURRENT_DATE - 30 THEN ordered_product_sales ELSE 0 END) AS rev30
+        FROM daily_sales
+        {vel_filter}
+        GROUP BY asin
+    """, hp).fetchall()
+
+    vel_map = {}
+    for r in vel_rows:
+        vel_map[r[0]] = {
+            "u7": r[1] or 0, "u30": r[2] or 0, "u90": r[3] or 0,
+            "avg7": round((r[1] or 0) / 7.0, 2),
+            "avg30": round((r[2] or 0) / 30.0, 2),
+            "rev30": round(r[4] or 0, 2),
+        }
+
+    # ── 3. Buy Box % data (last 30 days, daily) ──────────────────────────────
+    bb_filter = "WHERE asin != 'ALL' AND date >= CURRENT_DATE - 30" + hf
+    bb_rows = con.execute(f"""
+        SELECT date,
+               SUM(buy_box_percentage * sessions) / NULLIF(SUM(sessions), 0) AS weighted_bb,
+               SUM(sessions) AS total_sessions
+        FROM daily_sales
+        {bb_filter}
+        GROUP BY date
+        ORDER BY date
+    """, hp).fetchall()
+
+    bb_trend = [{"date": str(r[0]), "bb": round(r[1] or 0, 1), "sessions": r[2] or 0} for r in bb_rows]
+
+    # Per-ASIN buy box for the table
+    bb_asin_rows = con.execute(f"""
+        SELECT asin,
+               SUM(buy_box_percentage * sessions) / NULLIF(SUM(sessions), 0) AS weighted_bb,
+               SUM(sessions) AS total_sessions,
+               SUM(CASE WHEN date >= CURRENT_DATE - 7 THEN unit_session_percentage * sessions ELSE 0 END)
+                 / NULLIF(SUM(CASE WHEN date >= CURRENT_DATE - 7 THEN sessions ELSE 0 END), 0) AS conv_pct
+        FROM daily_sales
+        {bb_filter}
+        GROUP BY asin
+    """, hp).fetchall()
+    bb_map = {r[0]: {"bb": round(r[1] or 0, 1), "sessions": r[2] or 0, "conv": round(r[3] or 0, 1)} for r in bb_asin_rows}
+
+    # ── 4. Daily velocity trend (30 days) ─────────────────────────────────────
+    vel_trend_rows = con.execute(f"""
+        SELECT date, SUM(units_ordered) AS units
+        FROM daily_sales
+        WHERE asin = 'ALL' AND date >= CURRENT_DATE - 30
+        GROUP BY date
+        ORDER BY date
+    """).fetchall()
+    vel_trend = [{"date": str(r[0]), "units": r[1] or 0} for r in vel_trend_rows]
+
+    # ── 5. Inventory value (fba_inventory × COGS) ─────────────────────────────
+    total_inv_value = 0.0
+    for asin, inv in inv_map.items():
+        cogs_info = cogs_data.get(asin, {})
+        unit_cost = cogs_info.get("cogs", 0)
+        if unit_cost > 0:
+            total_inv_value += inv["fulfillable"] * unit_cost
+
+    # ── 6. Aging data ─────────────────────────────────────────────────────────
+    aging_data = {"brackets": [], "total_ltsf": 0, "aged_180_plus": 0}
+    try:
+        aging_rows = con.execute("""
+            SELECT SUM(qty_0_90), SUM(qty_91_180), SUM(qty_181_270),
+                   SUM(qty_271_365), SUM(qty_365_plus), SUM(estimated_ltsf)
+            FROM fba_inventory_aging
+            WHERE snapshot_date = (SELECT MAX(snapshot_date) FROM fba_inventory_aging)
+        """).fetchone()
+        if aging_rows and aging_rows[0] is not None:
+            labels = ["0–90 days", "91–180 days", "181–270 days", "271–365 days", "365+ days"]
+            colors = ["#2ECFAA", "#7BAED0", "#F5B731", "#E87830", "#f87171"]
+            vals = [int(aging_rows[i] or 0) for i in range(5)]
+            total_aged = sum(vals) or 1
+            for i, (lbl, clr, val) in enumerate(zip(labels, colors, vals)):
+                aging_data["brackets"].append({
+                    "label": lbl, "units": val, "pct": round(val / total_aged * 100, 1), "color": clr
+                })
+            aging_data["total_ltsf"] = round(aging_rows[5] or 0, 2)
+            aging_data["aged_180_plus"] = vals[2] + vals[3] + vals[4]
+    except Exception:
+        pass
+
+    # ── 7. Stranded inventory ─────────────────────────────────────────────────
+    stranded_items = []
+    try:
+        stranded_rows = con.execute("""
+            SELECT asin, sku, product_name, stranded_qty, stranded_reason, estimated_value
+            FROM fba_stranded_inventory
+            WHERE snapshot_date = (SELECT MAX(snapshot_date) FROM fba_stranded_inventory)
+            ORDER BY estimated_value DESC
+        """).fetchall()
+        for r in stranded_rows:
+            stranded_items.append({
+                "asin": r[0], "sku": r[1] or "", "name": r[2] or r[0],
+                "qty": r[3] or 0, "reason": r[4] or "Unknown",
+                "value": round(r[5] or 0, 2),
+            })
+    except Exception:
+        pass
+
+    # ── 8. Reimbursements (recent, last 90 days) ──────────────────────────────
+    reimbursements = []
+    try:
+        reimb_rows = con.execute("""
+            SELECT reimbursement_id, reimbursement_date, asin, sku, product_name,
+                   reason, quantity, amount
+            FROM fba_reimbursements
+            ORDER BY reimbursement_date DESC
+            LIMIT 10
+        """).fetchall()
+        for r in reimb_rows:
+            reimbursements.append({
+                "id": r[0], "date": str(r[1]) if r[1] else "", "asin": r[2] or "",
+                "sku": r[3] or "", "name": r[4] or "", "reason": r[5] or "",
+                "qty": r[6] or 0, "amount": round(r[7] or 0, 2),
+            })
+    except Exception:
+        pass
+
+    # ── 9. Return rates from financial_events ─────────────────────────────────
+    refund_map = {}
+    total_units_map = {}
+    try:
+        refund_rows = con.execute("""
+            SELECT asin, COUNT(*) AS cnt
+            FROM financial_events
+            WHERE event_type ILIKE '%%refund%%'
+              AND date >= CURRENT_DATE - 90
+            GROUP BY asin
+        """).fetchall()
+        refund_map = {r[0]: r[1] or 0 for r in refund_rows}
+
+        tu_rows = con.execute(f"""
+            SELECT asin, SUM(units_ordered) FROM daily_sales
+            WHERE asin != 'ALL' AND date >= CURRENT_DATE - 90
+            GROUP BY asin
+        """).fetchall()
+        total_units_map = {r[0]: r[1] or 0 for r in tu_rows}
+    except Exception:
+        pass
+
+    # ── 10. 90-day inventory snapshots for trend chart ─────────────────────────
+    inv_trend = []
+    try:
+        trend_rows = con.execute("""
+            SELECT snapshot_date,
+                   SUM(fulfillable_quantity) AS sellable,
+                   SUM(inbound_working_quantity + inbound_shipped_quantity + inbound_receiving_quantity) AS inbound
+            FROM fba_inventory_snapshots
+            GROUP BY snapshot_date
+            ORDER BY snapshot_date
+            LIMIT 90
+        """).fetchall()
+        inv_trend = [{"date": str(r[0]), "sellable": r[1] or 0, "inbound": r[2] or 0} for r in trend_rows]
+    except Exception:
+        pass
+
+    con.close()
+
+    # ── Build KPIs ────────────────────────────────────────────────────────────
+    total_vel_7d = sum(v["u7"] for v in vel_map.values())
+    total_vel_30d = sum(v["u30"] for v in vel_map.values())
+    avg_daily_30d = round(total_vel_30d / 30.0, 1) if total_vel_30d else 0
+    avg_daily_7d = round(total_vel_7d / 7.0, 1) if total_vel_7d else 0
+    weeks_cover = round(total_fulfillable / (avg_daily_7d * 7), 1) if avg_daily_7d > 0 else 0
+
+    # Weighted buy box %
+    total_bb_sessions = sum(b["sessions"] for b in bb_map.values())
+    avg_bb = round(
+        sum(b["bb"] * b["sessions"] for b in bb_map.values()) / total_bb_sessions, 1
+    ) if total_bb_sessions > 0 else 0
+
+    # Sell-through rate (90d units / avg inventory)
+    total_90d_units = sum(v["u90"] for v in vel_map.values())
+    sell_through = round(total_90d_units / total_fulfillable, 2) if total_fulfillable > 0 else 0
+
+    kpis = {
+        "totalUnits": total_units,
+        "sellable": total_fulfillable,
+        "inbound": total_inbound,
+        "weeksCover": weeks_cover,
+        "aged180Plus": aging_data["aged_180_plus"],
+        "sellThrough": sell_through,
+        "inventoryValue": round(total_inv_value, 2),
+        "avgBuyBox": avg_bb,
+        "avgDaily7d": avg_daily_7d,
+        "avgDaily30d": avg_daily_30d,
+        "totalAsins": len(inv_map),
+    }
+
+    # ── Pipeline ──────────────────────────────────────────────────────────────
+    pipeline = {
+        "sellable": total_fulfillable,
+        "inbound": total_inbound,
+        "reserved": total_reserved,
+        "fcTransfer": 0,  # Placeholder until FC-level data is available
+        "unfulfillable": total_unfulfillable,
+        "total": total_fulfillable + total_inbound + total_reserved + total_unfulfillable,
+    }
+
+    # ── Build SKU table ───────────────────────────────────────────────────────
+    DEFAULT_LEAD_TIME_DAYS = 45
+    DEFAULT_SAFETY_STOCK_DAYS = 14
+    skus = []
+    alerts_critical = []
+    alerts_warn = []
+
+    for asin, inv in inv_map.items():
+        vel = vel_map.get(asin, {"u7": 0, "u30": 0, "u90": 0, "avg7": 0, "avg30": 0, "rev30": 0})
+        bb = bb_map.get(asin, {"bb": 0, "sessions": 0, "conv": 0})
+
+        avg_daily = vel["avg7"]
+        fulfillable = inv["fulfillable"]
+        days_cover = round(fulfillable / avg_daily, 1) if avg_daily > 0 else None
+        weeks_cover_sku = round(days_cover / 7.0, 1) if days_cover is not None else None
+
+        reorder_point = round(avg_daily * DEFAULT_LEAD_TIME_DAYS) + round(avg_daily * DEFAULT_SAFETY_STOCK_DAYS)
+        stockout_risk = (days_cover is not None and days_cover < DEFAULT_LEAD_TIME_DAYS)
+
+        sell_thru_sku = round(vel["u90"] / fulfillable, 2) if fulfillable > 0 else None
+
+        refund_count = refund_map.get(asin, 0)
+        total_u = total_units_map.get(asin, 0)
+        return_rate = round(refund_count / total_u * 100, 1) if total_u > 0 else None
+
+        # Risk scoring
+        risk = "low"
+        if stockout_risk:
+            risk = "critical"
+        elif days_cover is not None and days_cover < 60:
+            risk = "watch"
+
+        # Alerts
+        if stockout_risk and days_cover is not None and days_cover < 21:
+            alerts_critical.append({"sku": inv["sku"], "daysCover": days_cover})
+        if bb["bb"] > 0 and bb["bb"] < 80:
+            alerts_warn.append({"type": "buybox", "sku": inv["sku"], "bb": bb["bb"]})
+
+        skus.append({
+            "asin": asin,
+            "sku": inv["sku"],
+            "name": inv["name"],
+            "onHand": fulfillable,
+            "inbound": inv["inbound"],
+            "daysCover": days_cover,
+            "weeksCover": weeks_cover_sku,
+            "dailyVel": avg_daily,
+            "buyBox": bb["bb"],
+            "convPct": bb["conv"],
+            "sellThru": sell_thru_sku,
+            "aged180": 0,  # Will be filled from aging data when available
+            "returnRate": return_rate,
+            "risk": risk,
+            "reorderPt": reorder_point,
+        })
+
+    # Sort by risk (critical first), then days cover ascending
+    risk_order = {"critical": 0, "watch": 1, "low": 2}
+    skus.sort(key=lambda x: (risk_order.get(x["risk"], 2), x["daysCover"] if x["daysCover"] is not None else 9999))
+
+    # ── Replenishment forecast (top SKUs by risk) ─────────────────────────────
+    repl_forecast = skus[:15]  # Top 15 by risk
+
+    # ── Reorder timeline ──────────────────────────────────────────────────────
+    reorder_timeline = []
+    for s in skus:
+        if s["daysCover"] is not None and s["dailyVel"] > 0:
+            days_to_reorder = max(0, (s["daysCover"] or 0) - DEFAULT_LEAD_TIME_DAYS)
+            reorder_date = (datetime.now(ZoneInfo("America/Chicago")) + timedelta(days=days_to_reorder)).strftime("%Y-%m-%d") if days_to_reorder < 365 else None
+            reorder_timeline.append({
+                "sku": s["sku"], "name": s["name"],
+                "daysCover": s["daysCover"],
+                "daysToReorder": days_to_reorder,
+                "reorderBy": reorder_date,
+                "urgency": "critical" if days_to_reorder < 7 else "watch" if days_to_reorder < 30 else "ok",
+            })
+    reorder_timeline.sort(key=lambda x: x["daysToReorder"])
+    reorder_timeline = reorder_timeline[:12]
+
+    # ── Health metrics ────────────────────────────────────────────────────────
+    total_stranded = sum(s["qty"] for s in stranded_items)
+    total_stranded_value = sum(s["value"] for s in stranded_items)
+    reserved_pct = round(total_reserved / total_units * 100, 1) if total_units > 0 else 0
+    turnover = round(total_90d_units * 4 / total_fulfillable, 1) if total_fulfillable > 0 else 0
+
+    # Health score (0-100)
+    health_score = 100
+    if weeks_cover < 2:
+        health_score -= 30
+    elif weeks_cover < 4:
+        health_score -= 10
+    if aging_data["aged_180_plus"] > total_fulfillable * 0.15:
+        health_score -= 20
+    if total_stranded > 0:
+        health_score -= 5
+    if avg_bb < 85:
+        health_score -= 15
+    health_score = max(0, min(100, health_score))
+
+    health = {
+        "score": health_score,
+        "turnover": turnover,
+        "strandedUnits": total_stranded,
+        "strandedValue": round(total_stranded_value, 2),
+        "strandedSkus": len(stranded_items),
+        "reservedPct": reserved_pct,
+    }
+
+    return {
+        "kpis": kpis,
+        "pipeline": pipeline,
+        "aging": aging_data,
+        "velTrend": vel_trend,
+        "bbTrend": bb_trend,
+        "invTrend": inv_trend,
+        "replForecast": repl_forecast,
+        "reorderTimeline": reorder_timeline,
+        "skus": skus,
+        "stranded": stranded_items,
+        "reimbursements": reimbursements,
+        "health": health,
+        "alerts": {
+            "critical": alerts_critical,
+            "warn": alerts_warn,
+        },
+    }
