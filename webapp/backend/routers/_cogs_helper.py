@@ -17,14 +17,29 @@ def load_unit_costs() -> dict:
     """Load per-ASIN unit cost.
 
     Priority:
-    1. item_master.csv → unit_cost column (primary, editable via Item Master page)
-    2. cogs.csv → cogs column (legacy fallback)
+    1. item_master DB table → unit_cost column (primary, auto-populated from cogs.csv)
+    2. cogs.csv → cogs column (legacy fallback if DB has no costs)
 
     Returns {asin: float} where float is the COGS per unit.
     """
     costs = {}
 
-    # ── Legacy cogs.csv (loaded first, item_master overwrites) ──
+    # ── Source 1: item_master database table (preferred) ──
+    try:
+        from core.database import get_db
+        con = get_db()
+        rows = con.execute("SELECT asin, unit_cost FROM item_master WHERE unit_cost > 0").fetchall()
+        for r in rows:
+            asin = (r[0] or "").strip()
+            if asin:
+                costs[asin] = float(r[1])
+        con.close()
+        if costs:
+            return costs  # DB had data, use it
+    except Exception as e:
+        logger.warning(f"load_unit_costs: DB query error (falling back to CSV): {e}")
+
+    # ── Fallback: Legacy cogs.csv ──
     if COGS_PATH.exists():
         try:
             with open(COGS_PATH, newline="", encoding="utf-8-sig") as f:
@@ -40,23 +55,6 @@ def load_unit_costs() -> dict:
                         costs[asin] = val
         except Exception as e:
             logger.warning(f"load_unit_costs: cogs.csv error: {e}")
-
-    # ── item_master.csv (overwrites cogs.csv values) ──
-    if ITEM_MASTER_PATH.exists():
-        try:
-            with open(ITEM_MASTER_PATH, newline="", encoding="utf-8-sig") as f:
-                for row in csv.DictReader(f):
-                    asin = (row.get("asin") or "").strip()
-                    if not asin:
-                        continue
-                    try:
-                        val = float(row.get("unit_cost") or 0)
-                    except (ValueError, TypeError):
-                        val = 0
-                    if val > 0:
-                        costs[asin] = val
-        except Exception as e:
-            logger.warning(f"load_unit_costs: item_master.csv error: {e}")
 
     return costs
 

@@ -1250,28 +1250,29 @@ def inventory_command_center(
     hf, hp = hierarchy_filter(division, customer, platform)
     inv_where = (" WHERE " + hf.lstrip(" AND ")) if hf else ""
 
-    # ── 1. Current FBA Inventory (base data) ──────────────────────────────────
-    inv_rows = con.execute(f"""
-        SELECT asin, sku, product_name,
-               COALESCE(fulfillable_quantity, 0) AS fulfillable,
-               COALESCE(inbound_working_quantity, 0) AS inbound_working,
-               COALESCE(inbound_shipped_quantity, 0) AS inbound_shipped,
-               COALESCE(inbound_receiving_quantity, 0) AS inbound_receiving,
-               COALESCE(reserved_quantity, 0) AS reserved,
-               COALESCE(unfulfillable_quantity, 0) AS unfulfillable,
-               COALESCE(total_quantity, 0) AS total
-        FROM fba_inventory{inv_where}
-    """, hp).fetchall()
+    # ── 1. Current FBA Inventory (latest snapshot date only) ─────────────────
+    # Filter to most recent date to avoid summing across historical snapshots
+    latest_date_row = con.execute("SELECT MAX(date) FROM fba_inventory").fetchone()
+    latest_inv_date = latest_date_row[0] if latest_date_row and latest_date_row[0] else None
+    date_filter = f" AND date = '{latest_inv_date}'" if latest_inv_date else ""
+    if inv_where:
+        inv_sql = f"SELECT asin, sku, product_name, COALESCE(fulfillable_quantity, 0), COALESCE(inbound_working_quantity, 0), COALESCE(inbound_shipped_quantity, 0), COALESCE(inbound_receiving_quantity, 0), COALESCE(reserved_quantity, 0), COALESCE(unfulfillable_quantity, 0), COALESCE(total_quantity, 0) FROM fba_inventory{inv_where}{date_filter}"
+    else:
+        inv_sql = f"SELECT asin, sku, product_name, COALESCE(fulfillable_quantity, 0), COALESCE(inbound_working_quantity, 0), COALESCE(inbound_shipped_quantity, 0), COALESCE(inbound_receiving_quantity, 0), COALESCE(reserved_quantity, 0), COALESCE(unfulfillable_quantity, 0), COALESCE(total_quantity, 0) FROM fba_inventory WHERE 1=1{date_filter}"
+    inv_rows = con.execute(inv_sql, hp).fetchall()
 
     inv_map = {}
+    fbm_map = {}  # Separate FBM items
     total_fulfillable = 0
     total_inbound = 0
     total_reserved = 0
     total_unfulfillable = 0
     total_units = 0
+    fbm_total_units = 0
 
     for r in inv_rows:
         asin = r[0]
+        sku = r[1] or ""
         fulfillable = _n(r[3])
         inbound = _n(r[4]) + _n(r[5]) + _n(r[6])
         reserved = _n(r[7])
@@ -1283,8 +1284,11 @@ def inventory_command_center(
             cogs_name = ""
         name = cogs_name or r[2] or asin
 
-        inv_map[asin] = {
-            "sku": r[1] or "",
+        # Detect FBM items by SKU suffix
+        is_fbm = "-FBM" in sku.upper() if sku else False
+
+        item_data = {
+            "sku": sku,
             "name": name,
             "fulfillable": fulfillable,
             "inbound": inbound,
@@ -1294,12 +1298,19 @@ def inventory_command_center(
             "reserved": reserved,
             "unfulfillable": unfulfillable,
             "total": total,
+            "channel": "FBM" if is_fbm else "FBA",
         }
-        total_fulfillable += fulfillable
-        total_inbound += inbound
-        total_reserved += reserved
-        total_unfulfillable += unfulfillable
-        total_units += total
+
+        if is_fbm:
+            fbm_map[asin] = item_data
+            fbm_total_units += total
+        else:
+            inv_map[asin] = item_data
+            total_fulfillable += fulfillable
+            total_inbound += inbound
+            total_reserved += reserved
+            total_unfulfillable += unfulfillable
+            total_units += total
 
     # ── 2. Sales Velocity (7d, 30d, 90d) ─────────────────────────────────────
     vel_filter = "WHERE asin != 'ALL' AND date >= CURRENT_DATE - 90" + hf
@@ -1469,23 +1480,47 @@ def inventory_command_center(
     # ── 10b. FC Distribution (estimated from inventory patterns) ─────────────
     fc_distribution = []
     if total_fulfillable > 0:
-        # Common Amazon FC codes – distribute inventory proportionally
-        fc_names = ["PHX3", "LAS2", "ONT8", "DFW7", "MDW6", "BDL1", "SDF8", "Other"]
-        fc_pcts = [28, 20, 15, 12, 10, 6, 5, 4]
-        fc_colors = ["#2ECFAA", "#3E658C", "#7BAED0", "#F5B731", "#E87830", "#22A387", "#6B8090", "#2a4060"]
-        for name, pct, color in zip(fc_names, fc_pcts, fc_colors):
-            units = round(total_fulfillable * pct / 100)
-            fc_distribution.append({"name": name, "units": units, "pct": pct, "color": color})
+        # Amazon FC codes with geographic labels for readability
+        fc_data = [
+            {"code": "PHX3", "location": "Phoenix, AZ",  "pct": 28, "color": "#2ECFAA"},
+            {"code": "LAS2", "location": "Las Vegas, NV", "pct": 20, "color": "#3E658C"},
+            {"code": "ONT8", "location": "Ontario, CA",   "pct": 15, "color": "#7BAED0"},
+            {"code": "DFW7", "location": "Dallas, TX",    "pct": 12, "color": "#F5B731"},
+            {"code": "MDW6", "location": "Chicago, IL",   "pct": 10, "color": "#E87830"},
+            {"code": "BDL1", "location": "Windsor, CT",   "pct":  6, "color": "#22A387"},
+            {"code": "SDF8", "location": "Louisville, KY", "pct": 5, "color": "#6B8090"},
+            {"code": "Other", "location": "Various",      "pct":  4, "color": "#2a4060"},
+        ]
+        for fc in fc_data:
+            units = round(total_fulfillable * fc["pct"] / 100)
+            fc_distribution.append({
+                "name": fc["code"], "location": fc["location"],
+                "units": units, "pct": fc["pct"], "color": fc["color"],
+            })
 
     # ── 10c. Return rate by SKU table ────────────────────────────────────────
     return_rate_table = []
     for asin, inv in inv_map.items():
         refund_count = _n(refund_map.get(asin, 0))
         total_u = _n(total_units_map.get(asin, 0))
-        if total_u > 20:  # Only include SKUs with meaningful sales
+        if total_u > 3:  # Lower threshold — include SKUs with at least a few sales
             rate = round(refund_count / total_u * 100, 1) if total_u > 0 else 0
             return_rate_table.append({
                 "sku": inv["sku"] or asin,
+                "name": inv.get("name", asin),
+                "sold": int(total_u),
+                "returned": int(refund_count),
+                "rate": rate,
+            })
+    # Also include FBM items in return rate
+    for asin, inv in fbm_map.items():
+        refund_count = _n(refund_map.get(asin, 0))
+        total_u = _n(total_units_map.get(asin, 0))
+        if total_u > 3:
+            rate = round(refund_count / total_u * 100, 1) if total_u > 0 else 0
+            return_rate_table.append({
+                "sku": inv["sku"] or asin,
+                "name": inv.get("name", asin),
                 "sold": int(total_u),
                 "returned": int(refund_count),
                 "rate": rate,
@@ -1690,6 +1725,17 @@ def inventory_command_center(
         "researching": 0,  # Lost/researching units
     }
 
+    # ── FBM summary ─────────────────────────────────────────────────────────
+    fbm_summary = {
+        "totalUnits": fbm_total_units,
+        "asinCount": len(fbm_map),
+        "items": [
+            {"asin": asin, "sku": inv["sku"], "name": inv["name"],
+             "units": int(inv["total"])}
+            for asin, inv in fbm_map.items()
+        ],
+    }
+
     return {
         "kpis": kpis,
         "pipeline": pipeline,
@@ -1710,4 +1756,6 @@ def inventory_command_center(
         "fcDistribution": fc_distribution,
         "returnRateTable": return_rate_table,
         "storageForecast": storage_months,
+        "fbm": fbm_summary,
+        "latestInventoryDate": str(latest_inv_date) if latest_inv_date else None,
     }

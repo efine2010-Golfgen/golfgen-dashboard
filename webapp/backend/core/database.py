@@ -932,9 +932,47 @@ def _init_item_master_table():
             customer      VARCHAR,
             platform      VARCHAR DEFAULT 'sp_api',
             category      VARCHAR,
-            brand         VARCHAR
+            brand         VARCHAR,
+            unit_cost     DOUBLE PRECISION DEFAULT 0
         )
     """)
+
+    # ── Migrate: add unit_cost column if missing (Phase 2b addition) ──
+    try:
+        con.execute("SELECT unit_cost FROM item_master LIMIT 1")
+    except Exception:
+        try:
+            con.execute("ALTER TABLE item_master ADD COLUMN unit_cost DOUBLE PRECISION DEFAULT 0")
+            logger.info("item_master: added unit_cost column")
+        except Exception as e:
+            logger.warning(f"item_master: could not add unit_cost column: {e}")
+
+    # ── Populate unit_cost from cogs.csv if all zeros ──
+    try:
+        has_costs = con.execute("SELECT COUNT(*) FROM item_master WHERE unit_cost > 0").fetchone()[0]
+        if has_costs == 0:
+            import csv
+            from core.config import DB_DIR
+            cogs_path = DB_DIR / "cogs.csv"
+            if cogs_path.exists():
+                updated = 0
+                with open(cogs_path, newline="", encoding="utf-8-sig") as f:
+                    for row in csv.DictReader(f):
+                        asin = (row.get("asin") or "").strip()
+                        try:
+                            cost = float(row.get("cogs") or 0)
+                        except (ValueError, TypeError):
+                            cost = 0
+                        if asin and cost > 0:
+                            con.execute(
+                                "UPDATE item_master SET unit_cost = ? WHERE asin = ?",
+                                [cost, asin]
+                            )
+                            updated += 1
+                if updated > 0:
+                    logger.info(f"item_master: populated unit_cost for {updated} ASINs from cogs.csv")
+    except Exception as e:
+        logger.warning(f"item_master: unit_cost population error: {e}")
 
     # Auto-seed: if item_master is empty, populate from order data
     try:

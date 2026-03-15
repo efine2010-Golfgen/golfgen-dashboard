@@ -26,56 +26,95 @@ const fmtNum = (n) => (n == null ? "—" : Number(n).toLocaleString());
 function VelChart({ data }) {
   if (!data || data.length < 2) return <div style={{ padding: 20, color: "var(--txt3)", ...SG() }}>No velocity data yet</div>;
   const maxU = Math.max(...data.map(d => d.units), 1);
-  const w = 800, h = 120;
-  const pts = data.map((d, i) => `${(i / (data.length - 1)) * w},${h - (d.units / maxU) * (h - 10)}`).join(" ");
+  const w = 800, h = 140, padB = 20, padL = 30, chartH = h - padB;
+  const chartW = w - padL;
+  const pts = data.map((d, i) => `${padL + (i / (data.length - 1)) * chartW},${chartH - (d.units / maxU) * (chartH - 10)}`).join(" ");
   const avg = data.reduce((s, d) => s + d.units, 0) / data.length;
-  const avgY = h - (avg / maxU) * (h - 10);
+  const avgY = chartH - (avg / maxU) * (chartH - 10);
+  // Y-axis labels
+  const yLabels = [0, Math.round(maxU / 2), Math.round(maxU)];
+  // X-axis: show ~5 date labels evenly spaced
+  const xStep = Math.max(1, Math.floor(data.length / 5));
   return (
     <div style={{ padding: "12px 16px" }}>
-      <svg width="100%" height={h} viewBox={`0 0 ${w} ${h}`} preserveAspectRatio="none">
+      <svg width="100%" viewBox={`0 0 ${w} ${h}`} style={{ display: "block" }}>
+        {yLabels.map((v, i) => {
+          const y = chartH - (v / maxU) * (chartH - 10);
+          return <g key={i}><line x1={padL} y1={y} x2={w} y2={y} stroke="var(--brd)" strokeWidth="0.5" opacity=".4" /><text x={padL - 4} y={y + 3} textAnchor="end" fontSize="7" fill="var(--txt3)">{v}</text></g>;
+        })}
         <polyline points={pts} fill="none" stroke="#2ECFAA" strokeWidth="2" />
-        <line x1="0" y1={avgY} x2={w} y2={avgY} stroke="#3E658C" strokeWidth="1" strokeDasharray="6,4" />
+        <line x1={padL} y1={avgY} x2={w} y2={avgY} stroke="#3E658C" strokeWidth="1" strokeDasharray="6,4" />
+        <text x={w - 4} y={avgY - 4} textAnchor="end" fontSize="7" fill="#3E658C">avg {Math.round(avg)}/day</text>
+        {data.filter((_, i) => i % xStep === 0 || i === data.length - 1).map((d, i) => {
+          const origIdx = i * xStep >= data.length ? data.length - 1 : i * xStep;
+          const x = padL + (origIdx / (data.length - 1)) * chartW;
+          return <text key={i} x={x} y={h - 2} textAnchor="middle" fontSize="7" fill="var(--txt3)">{d.date?.slice(5)}</text>;
+        })}
+        <text x={padL - 2} y={6} textAnchor="end" fontSize="6" fill="var(--txt3)">units</text>
       </svg>
-      <div style={{ display: "flex", justifyContent: "space-between", ...SG({ fontSize: 8, color: "var(--txt3)", marginTop: 4 }) }}>
-        <span>{data[0]?.date?.slice(5)}</span><span>{data[data.length - 1]?.date?.slice(5)}</span>
-      </div>
     </div>
   );
 }
 
 function BBChart({ data }) {
-  if (!data || data.length < 2) return <div style={{ padding: 20, color: "var(--txt3)", ...SG() }}>No buy box data yet</div>;
-  const w = 800, h = 120, minBB = 60, maxBB = 100;
-  const scale = (v) => h - ((Math.min(maxBB, Math.max(minBB, v)) - minBB) / (maxBB - minBB)) * (h - 10);
-  const pts = data.map((d, i) => `${(i / (data.length - 1)) * w},${scale(d.bb)}`).join(" ");
+  if (!data || data.length < 2) return <div style={{ padding: 20, color: "var(--txt3)", ...SG() }}>Only {data?.length || 0} day(s) of buy box data — more appears after daily S&amp;T report syncs</div>;
+  const w = 800, h = 140, minBB = 60, maxBB = 100, padL = 30, padB = 20;
+  const chartW = w - padL, chartH = h - padB;
+  const scale = (v) => chartH - ((Math.min(maxBB, Math.max(minBB, v)) - minBB) / (maxBB - minBB)) * (chartH - 10);
+  const pts = data.map((d, i) => `${padL + (i / (data.length - 1)) * chartW},${scale(d.bb)}`).join(" ");
   const warningY = scale(80);
+  const avgBB = data.reduce((s, d) => s + d.bb, 0) / data.length;
+  // Y-axis labels
+  const yVals = [60, 70, 80, 90, 100];
   return (
     <div style={{ padding: "12px 16px" }}>
-      <svg width="100%" height={h} viewBox={`0 0 ${w} ${h}`} preserveAspectRatio="none">
+      <svg width="100%" viewBox={`0 0 ${w} ${h}`} style={{ display: "block" }}>
+        {yVals.map((v, i) => {
+          const y = scale(v);
+          return <g key={i}><line x1={padL} y1={y} x2={w} y2={y} stroke="var(--brd)" strokeWidth="0.5" opacity=".3" /><text x={padL - 4} y={y + 3} textAnchor="end" fontSize="7" fill="var(--txt3)">{v}%</text></g>;
+        })}
         <polyline points={pts} fill="none" stroke="#2ECFAA" strokeWidth="2" />
-        <line x1="0" y1={warningY} x2={w} y2={warningY} stroke="#f87171" strokeWidth="1" strokeDasharray="4,4" />
+        <line x1={padL} y1={warningY} x2={w} y2={warningY} stroke="#f87171" strokeWidth="1" strokeDasharray="4,4" />
+        <text x={w - 4} y={warningY - 4} textAnchor="end" fontSize="7" fill="#f87171">80% threshold</text>
+        <text x={w - 4} y={scale(avgBB) - 4} textAnchor="end" fontSize="7" fill="#2ECFAA">avg {avgBB.toFixed(1)}%</text>
+        {data.map((d, i) => {
+          const x = padL + (i / (data.length - 1)) * chartW;
+          return <text key={i} x={x} y={h - 2} textAnchor="middle" fontSize="7" fill="var(--txt3)">{d.date?.slice(5)}</text>;
+        })}
+        <text x={padL - 2} y={6} textAnchor="end" fontSize="6" fill="var(--txt3)">BB%</text>
       </svg>
-      <div style={{ display: "flex", justifyContent: "space-between", ...SG({ fontSize: 8, color: "var(--txt3)", marginTop: 4 }) }}>
-        <span>{data[0]?.date?.slice(5)}</span><span>{data[data.length - 1]?.date?.slice(5)}</span>
-      </div>
     </div>
   );
 }
 
 function InvTrendChart({ data, velTrend }) {
   if ((!data || data.length < 2) && (!velTrend || velTrend.length < 2))
-    return <div style={{ padding: 20, color: "var(--txt3)", ...SG() }}>Building 90-day history — data appears after the first daily snapshot</div>;
+    return <div style={{ padding: 20, color: "var(--txt3)", ...SG() }}>Building 90-day history — data appears after the first daily snapshot (11 PM nightly)</div>;
   const useVel = velTrend && velTrend.length >= 2;
-  const w = 1200, h = 180;
+  const w = 1200, h = 200, padL = 40, padB = 24;
+  const chartW = w - padL, chartH = h - padB;
   if (!data || data.length < 2) {
-    // Show just velocity as placeholder
+    // Show velocity trend as placeholder with labels
     if (!useVel) return null;
     const maxV = Math.max(...velTrend.map(d => d.units), 1);
-    const vPts = velTrend.map((d, i) => `${(i / (velTrend.length - 1)) * w},${h - (d.units / maxV) * (h - 20)}`).join(" ");
+    const vPts = velTrend.map((d, i) => `${padL + (i / (velTrend.length - 1)) * chartW},${chartH - (d.units / maxV) * (chartH - 20)}`).join(" ");
+    const yLabels = [0, Math.round(maxV / 2), Math.round(maxV)];
+    const xStep = Math.max(1, Math.floor(velTrend.length / 6));
     return (
       <div style={{ padding: "12px 20px" }}>
-        <svg width="100%" height={h} viewBox={`0 0 ${w} ${h}`} preserveAspectRatio="none">
+        <div style={{ ...SG({ fontSize: 9, color: "var(--txt3)", marginBottom: 6, fontStyle: "italic" }) }}>Showing daily sales velocity (inventory snapshots building — available after nightly captures)</div>
+        <svg width="100%" viewBox={`0 0 ${w} ${h}`} style={{ display: "block" }}>
+          {yLabels.map((v, i) => {
+            const y = chartH - (v / maxV) * (chartH - 20);
+            return <g key={i}><line x1={padL} y1={y} x2={w} y2={y} stroke="var(--brd)" strokeWidth="0.5" opacity=".3" /><text x={padL - 4} y={y + 3} textAnchor="end" fontSize="7" fill="var(--txt3)">{v}</text></g>;
+          })}
           <polyline points={vPts} fill="none" stroke="#2ECFAA" strokeWidth="2" />
+          {velTrend.filter((_, i) => i % xStep === 0 || i === velTrend.length - 1).map((d, idx) => {
+            const origI = idx * xStep >= velTrend.length ? velTrend.length - 1 : idx * xStep;
+            const x = padL + (origI / (velTrend.length - 1)) * chartW;
+            return <text key={idx} x={x} y={h - 2} textAnchor="middle" fontSize="7" fill="var(--txt3)">{d.date?.slice(5)}</text>;
+          })}
+          <text x={padL - 2} y={6} textAnchor="end" fontSize="6" fill="var(--txt3)">units/day</text>
         </svg>
       </div>
     );
@@ -263,6 +302,24 @@ export default function Inventory({ filters = {} }) {
         ))}
       </div>
 
+      {/* ══ FBM SUMMARY ══ */}
+      {data.fbm && data.fbm.totalUnits > 0 && (
+        <div style={{ padding: "10px 16px", borderRadius: 9, marginBottom: 14, border: "1px solid rgba(62,101,140,.3)", background: "rgba(30,58,95,.25)" }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 12, ...SG({ fontSize: 11, color: "var(--txt2)" }) }}>
+            <span style={{ fontWeight: 700, color: "#7BAED0" }}>FBM Inventory</span>
+            <span style={{ padding: "2px 8px", borderRadius: 99, fontSize: 9, fontWeight: 700, background: "rgba(123,174,208,.15)", color: "#7BAED0" }}>{data.fbm.asinCount} ASINs · {fmtNum(data.fbm.totalUnits)} units</span>
+            <span style={{ fontSize: 9, color: "var(--txt3)", marginLeft: "auto" }}>Not included in FBA metrics above</span>
+          </div>
+          {data.fbm.items?.length > 0 && (
+            <div style={{ display: "flex", gap: 12, flexWrap: "wrap", marginTop: 6 }}>
+              {data.fbm.items.slice(0, 6).map((item, i) => (
+                <span key={i} style={{ ...SG({ fontSize: 9, color: "var(--txt3)" }) }}>{item.sku || item.asin}: <span style={{ color: "var(--txt2)", fontWeight: 600 }}>{fmtNum(item.units)}</span></span>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+
       {/* ══ 30-DAY TRENDS ══ */}
       <SecDiv label="30-Day Trends — Full Portfolio" />
       <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14, marginBottom: 14 }}>
@@ -427,12 +484,15 @@ export default function Inventory({ filters = {} }) {
             <Badge type="ok">{data.fcDistribution?.length || 0} FCs</Badge>
           </div>
           {(data.fcDistribution || []).map((fc, i) => (
-            <div key={i} style={{ display: "flex", alignItems: "center", gap: 10, padding: "7px 16px", borderBottom: i < (data.fcDistribution?.length || 0) - 1 ? "1px solid var(--brd)" : "none" }}>
-              <span style={{ ...SG({ fontSize: 9, fontWeight: 700, color: "var(--txt2)", width: 42, flexShrink: 0 }) }}>{fc.name}</span>
+            <div key={i} style={{ display: "flex", alignItems: "center", gap: 8, padding: "7px 16px", borderBottom: i < (data.fcDistribution?.length || 0) - 1 ? "1px solid var(--brd)" : "none" }}>
+              <div style={{ width: 62, flexShrink: 0 }}>
+                <span style={{ ...SG({ fontSize: 9, fontWeight: 700, color: "var(--txt2)", display: "block" }) }}>{fc.name}</span>
+                {fc.location && <span style={{ ...SG({ fontSize: 7, color: "var(--txt3)", display: "block", marginTop: 1 }) }}>{fc.location}</span>}
+              </div>
               <div style={{ flex: 1, height: 8, background: "var(--brd)", borderRadius: 4, overflow: "hidden" }}>
                 <div style={{ height: "100%", width: `${fc.pct * 2}%`, borderRadius: 4, background: fc.color }} />
               </div>
-              <span style={{ ...SG({ fontSize: 9, color: "var(--txt3)", width: 52, textAlign: "right", flexShrink: 0 }) }}>{fc.units >= 1000 ? `${(fc.units / 1000).toFixed(1)}K` : fc.units}</span>
+              <span style={{ ...SG({ fontSize: 9, color: "var(--txt3)", width: 48, textAlign: "right", flexShrink: 0 }) }}>{fc.units >= 1000 ? `${(fc.units / 1000).toFixed(1)}K` : fc.units}</span>
               <span style={{ ...SG({ fontSize: 9, fontWeight: 700, width: 32, textAlign: "right", flexShrink: 0, color: fc.color }) }}>{fc.pct}%</span>
             </div>
           ))}
