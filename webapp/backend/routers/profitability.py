@@ -15,6 +15,16 @@ logger = logging.getLogger("golfgen")
 router = APIRouter()
 
 
+def _n(v, default=0):
+    """Coerce Decimal / None to float for JSON-safe serialisation."""
+    if v is None:
+        return default
+    try:
+        return float(v)
+    except (TypeError, ValueError):
+        return default
+
+
 def get_today(con) -> datetime:
     """Get today's date from the latest row in database."""
     try:
@@ -134,15 +144,15 @@ def _build_product_list(con, cutoff: str, division: str = None, customer: str = 
             "asin": asin,
             "sku": sku,
             "name": name,
-            "units": units,
-            "rev": rev,
-            "price": aur,
-            "cogsPerUnit": cogsPerUnit,
-            "cogsTotal": cogsTotal,
-            "fbaTotal": fbaTotal,
-            "referralTotal": referralTotal,
-            "adSpend": adSpend,
-            "net": net,
+            "units": _n(units),
+            "rev": _n(rev),
+            "price": _n(aur),
+            "cogsPerUnit": _n(cogsPerUnit),
+            "cogsTotal": _n(cogsTotal),
+            "fbaTotal": _n(fbaTotal),
+            "referralTotal": _n(referralTotal),
+            "adSpend": _n(adSpend),
+            "net": _n(net),
         })
 
     return products
@@ -211,6 +221,15 @@ def _ensure_today_data():
 @router.get("/api/pnl")
 def pnl_waterfall(days: int = Query(365), division: Optional[str] = None, customer: Optional[str] = None, platform: Optional[str] = None):
     """Profit & Loss waterfall data, scaled to actual revenue from ALL rows."""
+    import traceback
+    try:
+        return _pnl_waterfall_inner(days, division, customer, platform)
+    except Exception as e:
+        logger.error(f"PNL endpoint error: {traceback.format_exc()}")
+        raise
+
+
+def _pnl_waterfall_inner(days, division, customer, platform):
     con = get_db()
     cutoff = (datetime.now(ZoneInfo("America/Chicago")) - timedelta(days=days)).strftime("%Y-%m-%d")
 
@@ -270,12 +289,12 @@ def pnl_waterfall(days: int = Query(365), division: Optional[str] = None, custom
 
     return {
         "days": days,
-        "revenue": round(actual_rev, 2),
-        "cogs": cogs,
-        "fbaFees": fba,
-        "referralFees": referral,
-        "adSpend": ad_spend,
-        "netProfit": net,
+        "revenue": _n(round(actual_rev, 2)),
+        "cogs": _n(cogs),
+        "fbaFees": _n(fba),
+        "referralFees": _n(referral),
+        "adSpend": _n(ad_spend),
+        "netProfit": _n(net),
     }
 
 
@@ -286,6 +305,15 @@ def profitability(view: str = Query("realtime"), division: Optional[str] = None,
     Waterfall: Sales - Promo - Ads - Shipping - Refunds - Amazon Fees - COGS - Indirect = Net Profit
     Returns both account-level waterfall and per-ASIN item breakdown.
     """
+    import traceback
+    try:
+        return _profitability_inner(view, division, customer, platform)
+    except Exception as e:
+        logger.error(f"Profitability endpoint error: {traceback.format_exc()}")
+        raise
+
+
+def _profitability_inner(view, division, customer, platform):
     # Ensure today has live data before building the response
     _ensure_today_data()
 
@@ -378,6 +406,15 @@ def profitability(view: str = Query("realtime"), division: Optional[str] = None,
 @router.get("/api/profitability/items")
 def profitability_items(days: int = Query(365), division: Optional[str] = None, customer: Optional[str] = None, platform: Optional[str] = None):
     """Per-ASIN profitability breakdown matching Sellerboard item view."""
+    import traceback
+    try:
+        return _profitability_items_inner(days, division, customer, platform)
+    except Exception as e:
+        logger.error(f"Profitability items endpoint error: {traceback.format_exc()}")
+        raise
+
+
+def _profitability_items_inner(days, division, customer, platform):
     con = get_db()
     cutoff = (datetime.now(ZoneInfo("America/Chicago")) - timedelta(days=days)).strftime("%Y-%m-%d")
     products = _build_product_list(con, cutoff, division, customer, platform)
@@ -487,32 +524,32 @@ def profitability_items(days: int = Query(365), division: Optional[str] = None, 
             "asin": asin,
             "sku": p["sku"],
             "name": p["name"],
-            "units": p["units"],
-            "sales": rev,
-            "promo": round(fin.get("promo", 0), 2),
-            "adSpend": round(ad_spend, 2),
-            "shipping": round(fin.get("shipping", 0), 2),
-            "refunds": round(fin.get("refund_amt", 0), 2),
-            "refundUnits": refund_units,
-            "returnPct": return_pct,
-            "amazonFees": round(amazon_fees, 2),
-            "fbaFees": p["fbaTotal"],
-            "referralFees": p["referralTotal"],
-            "otherFees": round(fin.get("other", 0), 2),
-            "cogs": cogs_total,
-            "cogsPerUnit": p["cogsPerUnit"],
+            "units": _n(p["units"]),
+            "sales": _n(rev),
+            "promo": _n(round(fin.get("promo", 0), 2)),
+            "adSpend": _n(round(ad_spend, 2)),
+            "shipping": _n(round(fin.get("shipping", 0), 2)),
+            "refunds": _n(round(fin.get("refund_amt", 0), 2)),
+            "refundUnits": _n(refund_units),
+            "returnPct": _n(return_pct),
+            "amazonFees": _n(round(amazon_fees, 2)),
+            "fbaFees": _n(p["fbaTotal"]),
+            "referralFees": _n(p["referralTotal"]),
+            "otherFees": _n(round(fin.get("other", 0), 2)),
+            "cogs": _n(cogs_total),
+            "cogsPerUnit": _n(p["cogsPerUnit"]),
             "indirect": 0,
-            "netProfit": net,
-            "margin": margin,
-            "roi": roi,
-            "aur": p["price"],
+            "netProfit": _n(net),
+            "margin": _n(margin),
+            "roi": _n(roi),
+            "aur": _n(p["price"]),
             # New coupon/pricing fields
             "couponStatus": coupon_status,
             "couponEndDate": coupon_end_date,
-            "couponDiscount": coupon_discount,
+            "couponDiscount": _n(coupon_discount) if coupon_discount is not None else None,
             "couponType": coupon_type,
-            "salePrice": sale_price,
-            "listPrice": list_price,
+            "salePrice": _n(sale_price) if sale_price is not None else None,
+            "listPrice": _n(list_price) if list_price is not None else None,
             "salePriceStartDate": sale_price_start_date,
             "salePriceEndDate": sale_price_end_date,
         })
@@ -742,23 +779,23 @@ def _build_waterfall(con, cogs_data, start: str, end: str, division: str = None,
     real_acos = round(ad_spend / sales * 100, 1) if sales > 0 else 0
 
     return {
-        "sales": round(sales, 2),
-        "units": units,
-        "promo": promo,
-        "adSpend": ad_spend,
-        "shipping": shipping,
-        "refunds": refunds,
-        "refundUnits": refund_units,
-        "returnPct": return_pct,
-        "amazonFees": amazon_fees,
-        "fbaFees": fba_fees,
-        "referralFees": referral_fees,
-        "otherFees": other_fees,
-        "cogs": cogs,
-        "indirect": indirect,
-        "grossProfit": gross_profit,
-        "netProfit": net_profit,
-        "margin": margin,
-        "roi": roi,
-        "realAcos": real_acos,
+        "sales": _n(round(sales, 2)),
+        "units": _n(units),
+        "promo": _n(promo),
+        "adSpend": _n(ad_spend),
+        "shipping": _n(shipping),
+        "refunds": _n(refunds),
+        "refundUnits": _n(refund_units),
+        "returnPct": _n(return_pct),
+        "amazonFees": _n(amazon_fees),
+        "fbaFees": _n(fba_fees),
+        "referralFees": _n(referral_fees),
+        "otherFees": _n(other_fees),
+        "cogs": _n(cogs),
+        "indirect": _n(indirect),
+        "grossProfit": _n(gross_profit),
+        "netProfit": _n(net_profit),
+        "margin": _n(margin),
+        "roi": _n(roi),
+        "realAcos": _n(real_acos),
     }
