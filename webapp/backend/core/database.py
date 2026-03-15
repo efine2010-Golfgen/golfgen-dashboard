@@ -1330,6 +1330,246 @@ def _init_pricing_tables():
     con.close()
 
 
+def _init_retail_tables():
+    """Create tables for Walmart/retail POS data from Scintilla reports."""
+    con = get_db_rw()
+
+    # Sequences for all retail tables
+    for seq in ["walmart_store_weekly_seq", "walmart_item_weekly_seq",
+                "walmart_scorecard_seq", "walmart_ecomm_weekly_seq",
+                "walmart_order_forecast_seq", "retail_upload_log_seq"]:
+        try:
+            con.execute(f"CREATE SEQUENCE IF NOT EXISTS {seq} START 1")
+        except Exception:
+            try:
+                con.execute(f"CREATE SEQUENCE {seq}")
+            except Exception:
+                pass
+
+    # Table 1: Store-level weekly POS & inventory
+    con.execute("""
+        CREATE TABLE IF NOT EXISTS walmart_store_weekly (
+            id                  SERIAL PRIMARY KEY,
+            walmart_week        VARCHAR(10)   NOT NULL,
+            walmart_year        VARCHAR(4)    NOT NULL,
+            store_name          VARCHAR(120),
+            store_number        VARCHAR(10)   NOT NULL,
+            vendor_dept_number  VARCHAR(10),
+            pos_qty_ty          DOUBLE PRECISION DEFAULT 0,
+            pos_qty_ly          DOUBLE PRECISION DEFAULT 0,
+            pos_sales_ty        DOUBLE PRECISION DEFAULT 0,
+            pos_sales_ly        DOUBLE PRECISION DEFAULT 0,
+            gross_receipt_qty_ty    DOUBLE PRECISION DEFAULT 0,
+            gross_receipt_qty_ly    DOUBLE PRECISION DEFAULT 0,
+            net_receipt_qty_ty      DOUBLE PRECISION DEFAULT 0,
+            net_receipt_qty_ly      DOUBLE PRECISION DEFAULT 0,
+            returns_qty_ty          DOUBLE PRECISION DEFAULT 0,
+            returns_qty_ly          DOUBLE PRECISION DEFAULT 0,
+            returns_defective_qty_ty DOUBLE PRECISION DEFAULT 0,
+            returns_defective_qty_ly DOUBLE PRECISION DEFAULT 0,
+            on_hand_qty_ty          DOUBLE PRECISION DEFAULT 0,
+            on_hand_qty_ly          DOUBLE PRECISION DEFAULT 0,
+            clearance_on_hand_qty_ty DOUBLE PRECISION DEFAULT 0,
+            clearance_on_hand_qty_ly DOUBLE PRECISION DEFAULT 0,
+            in_transit_qty_ty       DOUBLE PRECISION DEFAULT 0,
+            in_transit_qty_ly       DOUBLE PRECISION DEFAULT 0,
+            in_warehouse_qty_ty     DOUBLE PRECISION DEFAULT 0,
+            in_warehouse_qty_ly     DOUBLE PRECISION DEFAULT 0,
+            instock_pct_ty          DOUBLE PRECISION,
+            instock_pct_ly          DOUBLE PRECISION,
+            repl_instock_pct_ty     DOUBLE PRECISION,
+            repl_instock_pct_ly     DOUBLE PRECISION,
+            returns_to_vendor_qty_ty    DOUBLE PRECISION DEFAULT 0,
+            returns_to_vendor_qty_ly    DOUBLE PRECISION DEFAULT 0,
+            returns_to_return_center_qty_ty DOUBLE PRECISION DEFAULT 0,
+            returns_to_return_center_qty_ly DOUBLE PRECISION DEFAULT 0,
+            returns_to_dc_qty_ty        DOUBLE PRECISION DEFAULT 0,
+            returns_to_dc_qty_ly        DOUBLE PRECISION DEFAULT 0,
+            returns_recall_qty_ty       DOUBLE PRECISION DEFAULT 0,
+            returns_recall_qty_ly       DOUBLE PRECISION DEFAULT 0,
+            inv_adjustment_qty_ty       DOUBLE PRECISION DEFAULT 0,
+            inv_adjustment_qty_ly       DOUBLE PRECISION DEFAULT 0,
+            traited_store_count_ty      INTEGER DEFAULT 0,
+            traited_store_count_ly      INTEGER DEFAULT 0,
+            division    VARCHAR(20) DEFAULT 'golf',
+            customer    VARCHAR(30) DEFAULT 'walmart_stores',
+            platform    VARCHAR(20) DEFAULT 'scintilla',
+            UNIQUE(walmart_week, store_number, vendor_dept_number)
+        )
+    """)
+
+    # Table 2: Item-level weekly POS & inventory
+    con.execute("""
+        CREATE TABLE IF NOT EXISTS walmart_item_weekly (
+            id                  SERIAL PRIMARY KEY,
+            walmart_week        VARCHAR(10)   NOT NULL,
+            period_type         VARCHAR(10)   NOT NULL DEFAULT 'weekly',
+            brand_name          VARCHAR(60),
+            brand_owner_id      VARCHAR(20),
+            prime_item_number   VARCHAR(20)   NOT NULL,
+            prime_item_desc     VARCHAR(120),
+            walmart_upc         VARCHAR(20),
+            warehouse_pack_upc  VARCHAR(20),
+            product_description VARCHAR(120),
+            sales_type          VARCHAR(20),
+            vendor_name         VARCHAR(80),
+            vendor_number       VARCHAR(10),
+            vendor_pack_qty         DOUBLE PRECISION,
+            vendor_pack_length      DOUBLE PRECISION,
+            vendor_pack_height      DOUBLE PRECISION,
+            vendor_pack_width       DOUBLE PRECISION,
+            pos_sales_ty            DOUBLE PRECISION DEFAULT 0,
+            pos_sales_ly            DOUBLE PRECISION DEFAULT 0,
+            pos_qty_ty              DOUBLE PRECISION DEFAULT 0,
+            pos_qty_ly              DOUBLE PRECISION DEFAULT 0,
+            pos_store_count_ty      INTEGER DEFAULT 0,
+            pos_store_count_ly      INTEGER DEFAULT 0,
+            units_per_store_ty      DOUBLE PRECISION DEFAULT 0,
+            units_per_store_ly      DOUBLE PRECISION DEFAULT 0,
+            dollars_per_store_ty    DOUBLE PRECISION DEFAULT 0,
+            dollars_per_store_ly    DOUBLE PRECISION DEFAULT 0,
+            gross_receipt_qty_ty    DOUBLE PRECISION DEFAULT 0,
+            gross_receipt_qty_ly    DOUBLE PRECISION DEFAULT 0,
+            net_receipt_qty_ty      DOUBLE PRECISION DEFAULT 0,
+            net_receipt_qty_ly      DOUBLE PRECISION DEFAULT 0,
+            net_receipt_cost_ty     DOUBLE PRECISION DEFAULT 0,
+            net_receipt_cost_ly     DOUBLE PRECISION DEFAULT 0,
+            net_receipt_retail_ty   DOUBLE PRECISION DEFAULT 0,
+            net_receipt_retail_ly   DOUBLE PRECISION DEFAULT 0,
+            returns_qty_ty          DOUBLE PRECISION DEFAULT 0,
+            returns_qty_ly          DOUBLE PRECISION DEFAULT 0,
+            returns_amt_ty          DOUBLE PRECISION DEFAULT 0,
+            returns_amt_ly          DOUBLE PRECISION DEFAULT 0,
+            returns_defective_qty_ty DOUBLE PRECISION DEFAULT 0,
+            returns_defective_qty_ly DOUBLE PRECISION DEFAULT 0,
+            returns_defective_amt_ty DOUBLE PRECISION DEFAULT 0,
+            returns_defective_amt_ly DOUBLE PRECISION DEFAULT 0,
+            on_hand_qty_ty          DOUBLE PRECISION DEFAULT 0,
+            on_hand_qty_ly          DOUBLE PRECISION DEFAULT 0,
+            on_order_qty_ty         DOUBLE PRECISION DEFAULT 0,
+            on_order_qty_ly         DOUBLE PRECISION DEFAULT 0,
+            in_transit_qty_ty       DOUBLE PRECISION DEFAULT 0,
+            in_transit_qty_ly       DOUBLE PRECISION DEFAULT 0,
+            in_warehouse_qty_ty     DOUBLE PRECISION DEFAULT 0,
+            in_warehouse_qty_ly     DOUBLE PRECISION DEFAULT 0,
+            clearance_on_hand_qty_ty DOUBLE PRECISION DEFAULT 0,
+            clearance_on_hand_qty_ly DOUBLE PRECISION DEFAULT 0,
+            clearance_on_hand_eop_ty DOUBLE PRECISION DEFAULT 0,
+            clearance_on_hand_eop_ly DOUBLE PRECISION DEFAULT 0,
+            instock_pct_ty          DOUBLE PRECISION,
+            instock_pct_ly          DOUBLE PRECISION,
+            repl_instock_pct_ty     DOUBLE PRECISION,
+            repl_instock_pct_ly     DOUBLE PRECISION,
+            traited_store_count_ty  INTEGER DEFAULT 0,
+            traited_store_count_ly  INTEGER DEFAULT 0,
+            valid_store_count_ty    INTEGER DEFAULT 0,
+            valid_store_count_ly    INTEGER DEFAULT 0,
+            inv_adjustment_qty_ty   DOUBLE PRECISION DEFAULT 0,
+            inv_adjustment_qty_ly   DOUBLE PRECISION DEFAULT 0,
+            backroom_adj_qty        DOUBLE PRECISION DEFAULT 0,
+            backroom_adj_type_code  VARCHAR(10),
+            backroom_adj_type_desc  VARCHAR(60),
+            division    VARCHAR(20) DEFAULT 'golf',
+            customer    VARCHAR(30) DEFAULT 'walmart_stores',
+            platform    VARCHAR(20) DEFAULT 'scintilla',
+            UNIQUE(walmart_week, period_type, prime_item_number, sales_type, backroom_adj_type_code)
+        )
+    """)
+
+    # Table 3: Vendor scorecard KPIs (pivoted)
+    con.execute("""
+        CREATE TABLE IF NOT EXISTS walmart_scorecard (
+            id              SERIAL PRIMARY KEY,
+            vendor_section  VARCHAR(120) NOT NULL,
+            metric_group    VARCHAR(40)  NOT NULL,
+            metric_name     VARCHAR(60)  NOT NULL,
+            period          VARCHAR(20)  NOT NULL,
+            period_range    VARCHAR(60),
+            value_ty        DOUBLE PRECISION,
+            value_ly        DOUBLE PRECISION,
+            value_diff      DOUBLE PRECISION,
+            report_date     DATE,
+            upload_id       VARCHAR(40),
+            division    VARCHAR(20) DEFAULT 'golf',
+            customer    VARCHAR(30) DEFAULT 'walmart_stores',
+            platform    VARCHAR(20) DEFAULT 'scintilla',
+            UNIQUE(vendor_section, metric_name, period, upload_id)
+        )
+    """)
+
+    # Table 4: Walmart.com eComm item-level sales
+    con.execute("""
+        CREATE TABLE IF NOT EXISTS walmart_ecomm_weekly (
+            id                      SERIAL PRIMARY KEY,
+            walmart_week            VARCHAR(10)   NOT NULL,
+            all_links_item_number   VARCHAR(20)   NOT NULL,
+            product_name            VARCHAR(200),
+            base_unit_retail_amount DOUBLE PRECISION,
+            vendor_number           VARCHAR(20),
+            vendor_name             VARCHAR(80),
+            item_description        VARCHAR(120),
+            fineline_description    VARCHAR(60),
+            walmart_upc             VARCHAR(20),
+            ecomm_upc               VARCHAR(20),
+            omni_category           VARCHAR(60),
+            omni_subcategory        VARCHAR(60),
+            brand_name              VARCHAR(60),
+            dept_description        VARCHAR(60),
+            dept_number             VARCHAR(10),
+            auth_based_qty_ty           DOUBLE PRECISION DEFAULT 0,
+            auth_based_qty_ly           DOUBLE PRECISION DEFAULT 0,
+            auth_based_net_sales_ty     DOUBLE PRECISION DEFAULT 0,
+            auth_based_net_sales_ly     DOUBLE PRECISION DEFAULT 0,
+            shipped_based_qty_ty        DOUBLE PRECISION DEFAULT 0,
+            shipped_based_qty_ly        DOUBLE PRECISION DEFAULT 0,
+            shipped_based_net_sales_ty  DOUBLE PRECISION DEFAULT 0,
+            shipped_based_net_sales_ly  DOUBLE PRECISION DEFAULT 0,
+            vendor_pack_cost        DOUBLE PRECISION,
+            vendor_stock_id         VARCHAR(20),
+            season_code             VARCHAR(10),
+            season_description      VARCHAR(40),
+            item_status_code        VARCHAR(10),
+            division    VARCHAR(20) DEFAULT 'golf',
+            customer    VARCHAR(30) DEFAULT 'walmart_stores',
+            platform    VARCHAR(20) DEFAULT 'scintilla',
+            UNIQUE(walmart_week, all_links_item_number, vendor_number)
+        )
+    """)
+
+    # Table 5: DC order forecast snapshots
+    con.execute("""
+        CREATE TABLE IF NOT EXISTS walmart_order_forecast (
+            id              SERIAL PRIMARY KEY,
+            snapshot_date   DATE NOT NULL,
+            store_dc_nbr    VARCHAR(10) NOT NULL,
+            store_dc_type   VARCHAR(10),
+            vendor_dept_number VARCHAR(10),
+            division    VARCHAR(20) DEFAULT 'golf',
+            customer    VARCHAR(30) DEFAULT 'walmart_stores',
+            platform    VARCHAR(20) DEFAULT 'scintilla',
+            UNIQUE(snapshot_date, store_dc_nbr, vendor_dept_number)
+        )
+    """)
+
+    # Table 6: Upload tracking for all retail report uploads
+    con.execute("""
+        CREATE TABLE IF NOT EXISTS retail_upload_log (
+            id          SERIAL PRIMARY KEY,
+            upload_id   VARCHAR(40) NOT NULL,
+            filename    VARCHAR(200),
+            report_type VARCHAR(40) NOT NULL,
+            channel     VARCHAR(30) NOT NULL,
+            rows_loaded INTEGER DEFAULT 0,
+            uploaded_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            uploaded_by VARCHAR(60),
+            status      VARCHAR(20) DEFAULT 'SUCCESS',
+            error       TEXT
+        )
+    """)
+
+    con.close()
+
+
 def _fix_pg_sequences():
     """Reset PostgreSQL sequences to match the current max IDs in their tables.
 
@@ -1344,6 +1584,12 @@ def _fix_pg_sequences():
         "docs_update_log_seq": "docs_update_log",
         "sale_prices_seq": "sale_prices",
         "coupons_seq": "coupons",
+        "walmart_store_weekly_seq": "walmart_store_weekly",
+        "walmart_item_weekly_seq": "walmart_item_weekly",
+        "walmart_scorecard_seq": "walmart_scorecard",
+        "walmart_ecomm_weekly_seq": "walmart_ecomm_weekly",
+        "walmart_order_forecast_seq": "walmart_order_forecast",
+        "retail_upload_log_seq": "retail_upload_log",
     }
     try:
         con = get_db_rw()
@@ -1436,6 +1682,12 @@ def init_all_tables():
         logger.info("Pricing tables initialized (sale_prices, coupons, coupon_items)")
     except Exception as e:
         logger.error(f"Pricing table init error: {e}")
+
+    try:
+        _init_retail_tables()
+        logger.info("Retail tables initialized (walmart_store_weekly, walmart_item_weekly, walmart_scorecard, walmart_ecomm_weekly, walmart_order_forecast, retail_upload_log)")
+    except Exception as e:
+        logger.error(f"Retail table init error: {e}")
 
     # ── Fix PostgreSQL sequences after migration ──
     try:

@@ -316,6 +316,24 @@ export const api = {
       return r.json();
     }),
   drStatus: () => fetchJSON(`/api/backup/dr-status`),
+
+  // Retail Reporting
+  retailSummary: (h = {}) => fetchJSON(`/api/retail/summary${_hq(h) ? '?' + _hq(h).slice(1) : ''}`),
+  retailScorecard: (h = {}) => fetchJSON(`/api/retail/scorecard${_hq(h) ? '?' + _hq(h).slice(1) : ''}`),
+  retailStorePerformance: (h = {}, week = "", limit = 100, offset = 0, sortBy = "pos_sales_ty", sortDir = "desc") =>
+    fetchJSON(`/api/retail/store-performance?limit=${limit}&offset=${offset}&sort_by=${sortBy}&sort_dir=${sortDir}${week ? '&week=' + week : ''}${_hq(h)}`),
+  retailItemPerformance: (h = {}, periodType = "weekly", week = "", limit = 100, offset = 0) =>
+    fetchJSON(`/api/retail/item-performance?period_type=${periodType}&limit=${limit}&offset=${offset}${week ? '&week=' + week : ''}${_hq(h)}`),
+  retailEcomm: (h = {}, week = "", limit = 100, offset = 0) =>
+    fetchJSON(`/api/retail/ecomm?limit=${limit}&offset=${offset}${week ? '&week=' + week : ''}${_hq(h)}`),
+  retailOrderForecast: (h = {}) => fetchJSON(`/api/retail/order-forecast${_hq(h) ? '?' + _hq(h).slice(1) : ''}`),
+  retailUpload: (file) => {
+    const fd = new FormData();
+    fd.append("file", file);
+    return fetch(`${API_BASE}/api/retail/upload`, {
+      method: "POST", credentials: "include", body: fd,
+    }).then(r => { if (!r.ok) throw new Error(`Upload failed: ${r.status}`); return r.json(); });
+  },
 };
 
 export function fmt$(n) {
