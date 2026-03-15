@@ -801,6 +801,184 @@ async def github_backup_status(request: Request):
     return _get_gh_status()
 
 
+@router.post("/api/backup/verify")
+async def trigger_backup_verification(request: Request):
+    """Manually trigger a backup verification (download + compare to live DB)."""
+    from core.auth import get_session
+    from core.scheduler import _run_scheduled_backup_verification
+
+    token = request.cookies.get("golfgen_session")
+    sess = get_session(token)
+    if not sess:
+        from fastapi import HTTPException
+        raise HTTPException(status_code=401, detail="Not authenticated")
+
+    loop = asyncio.get_event_loop()
+    await loop.run_in_executor(None, _run_scheduled_backup_verification)
+    # Return the latest verification result from sync_log
+    con = get_db_rw()
+    row = con.execute("""
+        SELECT started_at, completed_at, status, records_processed, error_message
+        FROM sync_log WHERE job_name = 'backup_verification'
+        ORDER BY started_at DESC LIMIT 1
+    """).fetchone()
+    con.close()
+    if row:
+        return {
+            "status": row[2],
+            "tables_ok": row[3] or 0,
+            "verified_at": str(row[0]),
+            "warnings": row[4] if row[4] else None,
+        }
+    return {"status": "UNKNOWN", "message": "Verification completed but no log entry found"}
+
+
+@router.get("/api/backup/verification-status")
+async def backup_verification_status(request: Request):
+    """Get the latest backup verification result from sync_log."""
+    from core.auth import get_session
+
+    token = request.cookies.get("golfgen_session")
+    sess = get_session(token)
+    if not sess:
+        from fastapi import HTTPException
+        raise HTTPException(status_code=401, detail="Not authenticated")
+
+    con = get_db_rw()
+    row = con.execute("""
+        SELECT started_at, completed_at, status, records_processed,
+               error_message, execution_time_seconds
+        FROM sync_log WHERE job_name = 'backup_verification'
+        ORDER BY started_at DESC LIMIT 1
+    """).fetchone()
+    con.close()
+
+    if not row:
+        return {"status": "NEVER_RUN", "message": "No backup verification has been run yet"}
+
+    return {
+        "status": row[2],
+        "tables_ok": row[3] or 0,
+        "verified_at": str(row[0]),
+        "completed_at": str(row[1]),
+        "execution_time_seconds": row[5],
+        "warnings": row[4] if row[4] else None,
+    }
+
+
+@router.get("/api/backup/dr-status")
+async def disaster_recovery_status(request: Request):
+    """Comprehensive DR readiness check — backup recency, verification status, failover readiness."""
+    from core.auth import get_session
+    from services.backup import get_backup_status as _get_backup_status
+
+    token = request.cookies.get("golfgen_session")
+    sess = get_session(token)
+    if not sess:
+        from fastapi import HTTPException
+        raise HTTPException(status_code=401, detail="Not authenticated")
+
+    chicago = ZoneInfo("America/Chicago")
+    now = datetime.now(chicago)
+    issues = []
+    checks = {}
+
+    # Check 1: Latest Google Drive backup age
+    try:
+        backup_info = _get_backup_status()
+        if backup_info.get("last_backup"):
+            last_created = backup_info["last_backup"].get("created")
+            if last_created:
+                from datetime import timezone
+                backup_time = datetime.fromisoformat(last_created.replace("Z", "+00:00")).astimezone(chicago)
+                age_hours = (now - backup_time).total_seconds() / 3600
+                checks["backup_age_hours"] = round(age_hours, 1)
+                checks["backup_name"] = backup_info["last_backup"].get("name")
+                checks["backup_size_mb"] = backup_info["last_backup"].get("size_mb")
+                checks["total_backups"] = backup_info.get("total_backups", 0)
+                if age_hours > 8:
+                    issues.append(f"Latest backup is {age_hours:.1f}h old (expected <8h)")
+            else:
+                issues.append("Cannot determine backup age")
+        else:
+            issues.append("No Google Drive backups found")
+            checks["backup_age_hours"] = None
+    except Exception as e:
+        issues.append(f"Backup check failed: {e}")
+
+    # Check 2: Latest verification result
+    try:
+        con = get_db_rw()
+        vrow = con.execute("""
+            SELECT started_at, status, records_processed, error_message
+            FROM sync_log WHERE job_name = 'backup_verification'
+            ORDER BY started_at DESC LIMIT 1
+        """).fetchone()
+        if vrow:
+            v_time = vrow[0]
+            if v_time and hasattr(v_time, 'tzinfo') and v_time.tzinfo is None:
+                v_time = v_time.replace(tzinfo=chicago)
+            v_age_days = (now - v_time).total_seconds() / 86400 if v_time else None
+            checks["verification_status"] = vrow[1]
+            checks["verification_tables_ok"] = vrow[2]
+            checks["verification_age_days"] = round(v_age_days, 1) if v_age_days else None
+            checks["verification_warnings"] = vrow[3]
+            if v_age_days and v_age_days > 8:
+                issues.append(f"Last backup verification was {v_age_days:.0f} days ago (expected weekly)")
+            if vrow[1] == "FAILED":
+                issues.append("Last backup verification FAILED")
+        else:
+            checks["verification_status"] = "NEVER_RUN"
+            issues.append("Backup verification has never been run")
+        con.close()
+    except Exception as e:
+        issues.append(f"Verification check failed: {e}")
+
+    # Check 3: PostgreSQL health
+    try:
+        con = get_db()
+        critical_tables = ["orders", "daily_sales", "financial_events", "fba_inventory"]
+        table_counts = {}
+        for tbl in critical_tables:
+            try:
+                cnt = con.execute(f"SELECT COUNT(*) FROM {tbl}").fetchone()[0]
+                table_counts[tbl] = cnt
+                if cnt == 0:
+                    issues.append(f"Critical table '{tbl}' is empty")
+            except Exception:
+                table_counts[tbl] = -1
+                issues.append(f"Critical table '{tbl}' query failed")
+        checks["live_table_counts"] = table_counts
+        con.close()
+    except Exception as e:
+        issues.append(f"Database health check failed: {e}")
+
+    # Check 4: DuckDB fallback file exists on Railway volume
+    duckdb_exists = DB_PATH.exists()
+    checks["duckdb_fallback_exists"] = duckdb_exists
+    if not duckdb_exists:
+        issues.append("DuckDB fallback file not found (expected at /app/data/golfgen_amazon.duckdb)")
+
+    # Overall DR readiness
+    if not issues:
+        dr_status = "READY"
+        dr_message = "All DR checks passed — backup fresh, verified, and failover available"
+    elif len(issues) <= 2 and not any("FAILED" in i or "empty" in i for i in issues):
+        dr_status = "DEGRADED"
+        dr_message = f"{len(issues)} minor issue(s) detected"
+    else:
+        dr_status = "AT_RISK"
+        dr_message = f"{len(issues)} issue(s) detected — review recommended"
+
+    return {
+        "dr_status": dr_status,
+        "dr_message": dr_message,
+        "issues": issues,
+        "checks": checks,
+        "checked_at": now.isoformat(),
+    }
+
+
 @router.post("/api/docs/update")
 async def trigger_docs_update(request: Request):
     """Manually trigger a docs update."""

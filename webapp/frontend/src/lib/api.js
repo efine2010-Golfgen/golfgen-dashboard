@@ -307,6 +307,15 @@ export const api = {
       if (!r.ok) throw new Error(`GitHub backup failed: ${r.status}`);
       return r.json();
     }),
+
+  // Backup Verification & DR
+  backupVerificationStatus: () => fetchJSON(`/api/backup/verification-status`),
+  triggerBackupVerification: () =>
+    fetch(`${API_BASE}/api/backup/verify`, { method: "POST", credentials: "include" }).then(r => {
+      if (!r.ok) throw new Error(`Verification failed: ${r.status}`);
+      return r.json();
+    }),
+  drStatus: () => fetchJSON(`/api/backup/dr-status`),
 };
 
 export function fmt$(n) {

@@ -255,6 +255,184 @@ def _enforce_retention(drive) -> int:
         return 0
 
 
+def verify_latest_backup() -> dict:
+    """Download the latest Google Drive backup and verify its integrity.
+
+    Checks:
+    1. Archive can be downloaded and extracted
+    2. CSV files are present for all expected tables
+    3. Row counts in backup match or exceed live PostgreSQL row counts (within 10% tolerance)
+    4. No empty CSV files (except system tables)
+
+    Returns a dict with verification status, table-by-table comparison, and any warnings.
+    Logged to sync_log as 'backup_verification'.
+    """
+    settings = _get_settings()
+    if not settings["has_credentials"] or not settings["has_folder_id"]:
+        return {"status": "SKIPPED", "reason": "Google Drive not configured"}
+
+    chicago = ZoneInfo("America/Chicago")
+    started_at = datetime.now(chicago)
+    warnings = []
+    table_results = {}
+
+    try:
+        drive = _get_drive_service()
+        folder_id = settings["folder_id"]
+
+        # Find latest backup
+        query = (
+            f"'{folder_id}' in parents "
+            f"and name contains 'golfgen_backup_' "
+            f"and trashed = false"
+        )
+        results = drive.files().list(
+            q=query, fields="files(id,name,size,createdTime)",
+            orderBy="createdTime desc", pageSize=1,
+        ).execute()
+        files = results.get("files", [])
+
+        if not files:
+            return {"status": "FAILED", "reason": "No backups found on Google Drive"}
+
+        latest = files[0]
+        backup_name = latest["name"]
+        backup_age_hours = (datetime.now(chicago) - datetime.fromisoformat(
+            latest["createdTime"].replace("Z", "+00:00")
+        ).astimezone(chicago)).total_seconds() / 3600
+
+        if backup_age_hours > 8:
+            warnings.append(f"Latest backup is {backup_age_hours:.1f}h old (expected <8h with 6-hour schedule)")
+
+        logger.info(f"Backup verification: downloading {backup_name} ({latest.get('size', 0)} bytes)")
+
+        # Download
+        from googleapiclient.http import MediaIoBaseDownload
+        import io
+        request = drive.files().get_media(fileId=latest["id"])
+        buffer = io.BytesIO()
+        downloader = MediaIoBaseDownload(buffer, request)
+        done = False
+        while not done:
+            _, done = downloader.next_chunk()
+        buffer.seek(0)
+
+        # Extract
+        with tempfile.TemporaryDirectory() as tmpdir:
+            archive_path = Path(tmpdir) / "backup.tar.gz"
+            with open(archive_path, "wb") as f:
+                f.write(buffer.read())
+
+            try:
+                with tarfile.open(str(archive_path), "r:gz") as tar:
+                    tar.extractall(path=tmpdir)
+            except Exception as e:
+                return {"status": "FAILED", "reason": f"Archive extraction failed: {e}",
+                        "backup_name": backup_name}
+
+            export_dir = Path(tmpdir) / "golfgen_export"
+            csv_files = sorted(export_dir.glob("*.csv")) if export_dir.exists() else []
+
+            if not csv_files:
+                return {"status": "FAILED", "reason": "No CSV files found in backup archive",
+                        "backup_name": backup_name}
+
+            # Get live row counts from PostgreSQL
+            live_counts = {}
+            try:
+                con = get_db()
+                if USE_POSTGRES:
+                    tables_raw = con.execute("""
+                        SELECT tablename FROM pg_tables
+                        WHERE schemaname = 'public' ORDER BY tablename
+                    """).fetchall()
+                else:
+                    tables_raw = con.execute("SHOW TABLES").fetchall()
+                for (tbl,) in tables_raw:
+                    try:
+                        cnt = con.execute(f"SELECT COUNT(*) FROM {tbl}").fetchone()[0]
+                        live_counts[tbl] = cnt
+                    except Exception:
+                        live_counts[tbl] = -1
+                con.close()
+            except Exception as e:
+                warnings.append(f"Could not query live DB: {e}")
+
+            # Compare backup CSV row counts to live
+            backup_tables = set()
+            for csv_file in csv_files:
+                tbl = csv_file.stem
+                backup_tables.add(tbl)
+                try:
+                    with open(csv_file, "r") as f:
+                        csv_rows = sum(1 for _ in f) - 1  # subtract header
+                except Exception:
+                    csv_rows = -1
+
+                live_cnt = live_counts.get(tbl, -1)
+                # Allow 10% tolerance (backup may be slightly behind live)
+                if csv_rows < 0:
+                    status = "ERROR"
+                    note = "Could not read CSV"
+                elif live_cnt < 0:
+                    status = "WARN"
+                    note = "Table not in live DB"
+                elif csv_rows == 0 and tbl not in ("sessions", "audit_log", "user_permissions", "docs_update_log"):
+                    status = "WARN"
+                    note = "Empty backup (0 rows)"
+                    warnings.append(f"{tbl}: backup has 0 rows but live has {live_cnt}")
+                elif live_cnt > 0 and csv_rows < live_cnt * 0.9:
+                    status = "WARN"
+                    note = f"Backup {csv_rows} < 90% of live {live_cnt}"
+                    warnings.append(f"{tbl}: backup ({csv_rows}) significantly behind live ({live_cnt})")
+                else:
+                    status = "OK"
+                    note = None
+
+                table_results[tbl] = {
+                    "backup_rows": csv_rows,
+                    "live_rows": live_cnt,
+                    "status": status,
+                    "note": note,
+                }
+
+            # Check for missing tables
+            for tbl in live_counts:
+                if tbl not in backup_tables:
+                    table_results[tbl] = {
+                        "backup_rows": -1, "live_rows": live_counts[tbl],
+                        "status": "MISSING", "note": "Not in backup archive",
+                    }
+                    if live_counts[tbl] > 0:
+                        warnings.append(f"{tbl}: missing from backup but has {live_counts[tbl]} live rows")
+
+        ok_count = sum(1 for t in table_results.values() if t["status"] == "OK")
+        total = len(table_results)
+        elapsed = round((datetime.now(chicago) - started_at).total_seconds(), 1)
+
+        overall_status = "SUCCESS" if not warnings else "PARTIAL"
+        logger.info(f"Backup verification: {overall_status} — {ok_count}/{total} tables OK, "
+                     f"{len(warnings)} warnings, {elapsed}s")
+
+        return {
+            "status": overall_status,
+            "backup_name": backup_name,
+            "backup_age_hours": round(backup_age_hours, 1),
+            "tables_ok": ok_count,
+            "tables_total": total,
+            "warnings": warnings,
+            "tables": table_results,
+            "elapsed_seconds": elapsed,
+            "verified_at": datetime.now(chicago).isoformat(),
+        }
+
+    except Exception as e:
+        logger.error(f"Backup verification failed: {e}")
+        import traceback
+        logger.error(traceback.format_exc())
+        return {"status": "FAILED", "reason": str(e)}
+
+
 def get_backup_status() -> dict:
     """Query Google Drive for recent backup files and return status summary.
 

@@ -104,7 +104,8 @@ const JOB_LABELS = {
   nightly_deep_sync:   { label: "Nightly Deep", icon: "🌙", desc: "3am CT" },
   auto_backfill:       { label: "Startup Backfill", icon: "🚀", desc: "On deploy (4h throttle)" },
   pricing_sync:        { label: "Pricing Sync", icon: "💲", desc: "Hourly at :30" },
-  nightly_backup_gdrive: { label: "Drive Backup", icon: "💾", desc: "2am CT" },
+  nightly_backup_gdrive: { label: "Drive Backup", icon: "💾", desc: "Every 6h (2,8,2,8)" },
+  backup_verification:   { label: "Backup Verify", icon: "✅", desc: "Weekly Sun 4am CT" },
 };
 
 function JobCard({ jobKey, info }) {
@@ -174,6 +175,7 @@ const JOB_FILTER_OPTIONS = [
   { key: "nightly_deep_sync", label: "Nightly" },
   { key: "auto_backfill", label: "Backfill" },
   { key: "nightly_backup_gdrive", label: "Backup" },
+  { key: "backup_verification", label: "Verify" },
 ];
 
 export default function System() {
@@ -182,6 +184,9 @@ export default function System() {
   const [health, setHealth] = useState(null);
   const [backup, setBackup] = useState(null);
   const [githubBackup, setGithubBackup] = useState(null);
+  const [drStatus, setDrStatus] = useState(null);
+  const [verifyRunning, setVerifyRunning] = useState(false);
+  const [verifyResult, setVerifyResult] = useState(null);
   const [loading, setLoading] = useState(true);
   const [lastRefresh, setLastRefresh] = useState(null);
   const [backupRunning, setBackupRunning] = useState(false);
@@ -201,14 +206,16 @@ export default function System() {
       api.health().catch(e => { console.warn("health failed:", e); return null; }),
       api.backupStatus().catch(e => { console.warn("backupStatus failed:", e); return null; }),
       api.githubBackupStatus().catch(e => { console.warn("githubStatus failed:", e); return null; }),
-    ]).then(([log, cov, h, b, gb]) => {
+      api.drStatus().catch(e => { console.warn("drStatus failed:", e); return null; }),
+    ]).then(([log, cov, h, b, gb, dr]) => {
       // Only update state if the fetch returned data — preserve stale data on error
       if (log !== null) setSyncLog(log.entries || []);
       if (cov !== null) setCoverage(cov);
       if (h !== null) setHealth(h);
       if (b !== null) setBackup(b);
       if (gb !== null) setGithubBackup(gb);
-      const anyFailed = [log, cov, h, b, gb].some(x => x === null);
+      if (dr !== null) setDrStatus(dr);
+      const anyFailed = [log, cov, h, b, gb, dr].some(x => x === null);
       if (anyFailed && isManual) setRefreshError("Some data failed to load — showing last known values");
       setLoading(false);
       setLastRefresh(new Date());
@@ -250,6 +257,18 @@ export default function System() {
     finally { setGapFillRunning(false); }
   };
 
+  const handleVerifyBackup = async () => {
+    setVerifyRunning(true);
+    setVerifyResult(null);
+    try {
+      const result = await api.triggerBackupVerification();
+      setVerifyResult(result);
+      setTimeout(load, 3000);
+    } catch (e) {
+      setVerifyResult({ status: "FAILED", warnings: e.message });
+    } finally { setVerifyRunning(false); }
+  };
+
   const filteredLog = logFilter === "all"
     ? syncLog
     : syncLog.filter(r => r.job_name === logFilter);
@@ -261,6 +280,68 @@ export default function System() {
 
   return (
     <div>
+
+      {/* ── DR Readiness ──────────────────────────────────────────────────── */}
+      {drStatus && (
+        <div style={{
+          background: "#fff", borderRadius: 12, padding: 20, marginBottom: 20,
+          boxShadow: "0 1px 3px rgba(0,0,0,0.08)",
+          borderLeft: `4px solid ${drStatus.dr_status === "READY" ? "#16a34a" : drStatus.dr_status === "DEGRADED" ? "#d97706" : "#dc2626"}`,
+        }}>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 14, flexWrap: "wrap", gap: 10 }}>
+            <div>
+              <h3 style={{ margin: "0 0 2px", fontSize: 15, fontWeight: 700 }}>
+                {drStatus.dr_status === "READY" ? "🟢" : drStatus.dr_status === "DEGRADED" ? "🟡" : "🔴"} Disaster Recovery Readiness
+              </h3>
+              <div style={{ fontSize: 12, color: "#6B8090" }}>{drStatus.dr_message}</div>
+            </div>
+            <div style={{ display: "flex", gap: 8 }}>
+              <button onClick={handleVerifyBackup} disabled={verifyRunning} style={btnStyle(verifyRunning, "#6366f1")}>
+                {verifyRunning ? <><Spinner /> Verifying...</> : "🔍 Verify Backup Now"}
+              </button>
+            </div>
+          </div>
+
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(160px, 1fr))", gap: 10, marginBottom: 14 }}>
+            <StatBox label="Backup Age" value={drStatus.checks?.backup_age_hours != null ? `${drStatus.checks.backup_age_hours}h` : "—"} mono
+              color={drStatus.checks?.backup_age_hours != null && drStatus.checks.backup_age_hours <= 8 ? "#16a34a" : "#dc2626"} />
+            <StatBox label="Total Backups" value={drStatus.checks?.total_backups ?? "—"} mono />
+            <StatBox label="Last Verification"
+              value={drStatus.checks?.verification_age_days != null ? `${drStatus.checks.verification_age_days}d ago` : drStatus.checks?.verification_status === "NEVER_RUN" ? "Never" : "—"} />
+            <StatBox label="Verification Status"
+              value={drStatus.checks?.verification_status ? <Badge status={drStatus.checks.verification_status} /> : "—"} />
+            <StatBox label="DuckDB Fallback"
+              value={drStatus.checks?.duckdb_fallback_exists ? "Available ✓" : "Missing ✗"}
+              color={drStatus.checks?.duckdb_fallback_exists ? "#16a34a" : "#dc2626"} />
+            <StatBox label="Backup Schedule" value="Every 6h" />
+          </div>
+
+          {drStatus.issues?.length > 0 && (
+            <div style={{ padding: "10px 14px", background: "#fef3c7", borderRadius: 8, fontSize: 12, color: "#92400e" }}>
+              <div style={{ fontWeight: 600, marginBottom: 4 }}>Issues detected:</div>
+              {drStatus.issues.map((issue, i) => (
+                <div key={i} style={{ marginBottom: 2 }}>• {issue}</div>
+              ))}
+            </div>
+          )}
+
+          {verifyResult && (
+            <div style={{
+              marginTop: 12, padding: "10px 14px", borderRadius: 8,
+              background: verifyResult.status === "SUCCESS" ? "#dcfce7" : verifyResult.status === "PARTIAL" ? "#fef9c3" : "#fee2e2",
+              color: verifyResult.status === "SUCCESS" ? "#166534" : verifyResult.status === "PARTIAL" ? "#854d0e" : "#991b1b",
+              fontSize: 12,
+            }}>
+              {verifyResult.status === "SUCCESS"
+                ? `✓ Backup verified — ${verifyResult.tables_ok} tables OK, no issues`
+                : verifyResult.status === "PARTIAL"
+                ? `⚠ Backup verified with warnings — ${verifyResult.tables_ok} tables OK. ${verifyResult.warnings || ""}`
+                : `✗ Verification failed: ${verifyResult.warnings || verifyResult.reason || "Unknown error"}`
+              }
+            </div>
+          )}
+        </div>
+      )}
 
       {/* ── Data Coverage ─────────────────────────────────────────────────── */}
       {coverage && (
@@ -430,7 +511,7 @@ export default function System() {
       {/* ── Google Drive Backup ───────────────────────────────────────────── */}
       <div style={{ background: "#fff", borderRadius: 12, padding: 20, marginBottom: 16, boxShadow: "0 1px 3px rgba(0,0,0,0.08)" }}>
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 14 }}>
-          <h3 style={{ margin: 0, fontSize: 15, fontWeight: 700 }}>💾 Google Drive Backup</h3>
+          <h3 style={{ margin: 0, fontSize: 15, fontWeight: 700 }}>💾 Google Drive Backup <span style={{ fontSize: 11, fontWeight: 400, color: "#6B8090" }}>— every 6 hours</span></h3>
           <button onClick={handleRunBackup} disabled={backupRunning} style={btnStyle(backupRunning, "#3E658C")}>
             {backupRunning ? <><Spinner /> Running...</> : "Run Backup Now"}
           </button>

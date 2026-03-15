@@ -244,6 +244,28 @@ def _run_scheduled_inventory_snapshot():
         _scheduler_locks["inventory_snapshot"].release()
 
 
+def _run_scheduled_backup_verification():
+    """Weekly backup verification — downloads latest backup and compares to live DB."""
+    if not _scheduler_locks["backup"].acquire(blocking=False):
+        logger.warning("Skipping backup verification — backup job is running")
+        return
+    try:
+        started_at = datetime.now(ZoneInfo("America/Chicago"))
+        try:
+            from services.backup import verify_latest_backup
+            result = verify_latest_backup()
+            status = result.get("status", "FAILED")
+            _write_sync_log("backup_verification", started_at, status,
+                            inserted=result.get("tables_ok", 0),
+                            error="; ".join(result.get("warnings", [])[:3]) or None)
+            logger.info(f"Backup verification: {status} — {result.get('tables_ok', 0)}/{result.get('tables_total', 0)} tables OK")
+        except Exception as e:
+            _write_sync_log("backup_verification", started_at, "FAILED", error=str(e))
+            logger.error(f"Backup verification failed: {e}")
+    finally:
+        _scheduler_locks["backup"].release()
+
+
 def _run_duckdb_backup():
     """Nightly backup: Google Drive (full DB) then GitHub (manifest + docs). Scheduler-level mutex."""
     if not _scheduler_locks["backup"].acquire(blocking=False):
@@ -414,8 +436,8 @@ async def _sync_loop():
         scheduler.add_job(_run_scheduled_docs_update, CronTrigger(hour=8, minute=0, timezone=_tz), id="docs_update_8am")
         scheduler.add_job(_run_scheduled_docs_update, CronTrigger(hour=20, minute=0, timezone=_tz), id="docs_update_8pm")
 
-        # Schedule nightly backup at 2am Central (Google Drive + GitHub)
-        scheduler.add_job(_run_duckdb_backup, CronTrigger(hour=2, minute=0, timezone=_tz), id="duckdb_backup_2am", misfire_grace_time=7200)
+        # Schedule backups every 6 hours (2am, 8am, 2pm, 8pm Central)
+        scheduler.add_job(_run_duckdb_backup, CronTrigger(hour="2,8,14,20", minute=0, timezone=_tz), id="backup_6hourly", misfire_grace_time=7200)
 
         # Schedule nightly deep sync at 3am Central — fills all data gaps + re-pulls last 30 days
         scheduler.add_job(_run_scheduled_nightly_deep_sync, CronTrigger(hour=3, minute=0, timezone=_tz), id="nightly_deep_sync_3am", misfire_grace_time=7200)
@@ -428,6 +450,9 @@ async def _sync_loop():
 
         # Schedule analytics rollup at 2:30am Central (after backup completes)
         scheduler.add_job(_run_scheduled_analytics_rollup, CronTrigger(hour=2, minute=30, timezone=_tz), id="analytics_rollup_230am", misfire_grace_time=3600)
+
+        # Schedule weekly backup verification — Sundays at 4am Central
+        scheduler.add_job(_run_scheduled_backup_verification, CronTrigger(day_of_week="sun", hour=4, minute=0, timezone=_tz), id="backup_verification_weekly", misfire_grace_time=7200)
 
         scheduler.start()
         logger.info("APScheduler started — all CronTriggers use ZoneInfo('America/Chicago') for correct Central Time scheduling")
