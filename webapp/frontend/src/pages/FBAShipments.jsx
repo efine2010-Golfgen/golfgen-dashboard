@@ -45,7 +45,13 @@ function PercentBar({ shipped, received }) {
   );
 }
 
-export default function FBAShipments() {
+const INV_VIEWS = [
+  { key: "golfgen-inventory", path: "/golfgen-inventory", label: "GolfGen Inventory" },
+  { key: "inventory",         path: "/inventory",         label: "Amazon Inventory" },
+  { key: "fba-shipments",     path: "/fba-shipments",     label: "Shipments to FBA" },
+];
+
+export default function FBAShipments({ filters = {} }) {
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
   const [syncing, setSyncing] = useState(false);
@@ -120,21 +126,43 @@ export default function FBAShipments() {
   const closedCount = shipments.filter(s => s.status === "CLOSED").length;
   const inTransitCount = shipments.filter(s => ["SHIPPED", "IN_TRANSIT"].includes(s.status)).length;
 
+  const divRaw = (filters.division || "").toLowerCase();
+  const divLabel = !divRaw ? "All Divisions" : divRaw === "golf" ? "Golf (PGAT)" : "Housewares";
+  const custLabel = filters.customer ? ` · ${filters.customer.replace(/_/g, " ").replace(/\b\w/g, l => l.toUpperCase())}` : "";
+  const currentPath = typeof window !== "undefined" ? window.location.pathname : "/fba-shipments";
+
   return (
-    <div>
-      {/* Header */}
-      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 20 }}>
-        <div>
-          <h2 style={{ fontFamily: "'Space Grotesk', sans-serif", fontSize: 22, color: "var(--navy)", margin: 0 }}>
-            Shipments to FBA
-          </h2>
-          <p style={{ fontSize: 12, color: "var(--muted)", marginTop: 4 }}>
-            Amazon FBA Inbound Shipment Plans{data?.lastSync ? ` \u2022 Last synced: ${data.lastSync}` : ""}
-          </p>
+    <div style={{ fontFamily: "'Sora',-apple-system,BlinkMacSystemFont,sans-serif", color: "var(--txt)" }}>
+
+      {/* ══ HEADER — matches Exec Summary style ══ */}
+      <div style={{ marginBottom: 16 }}>
+        <h2 style={{
+          fontFamily: "'DM Serif Display',Georgia,serif",
+          fontSize: 22, fontWeight: 400, margin: 0, color: "var(--txt)",
+        }}>
+          Shipments to FBA
+        </h2>
+        <div style={{
+          fontSize: 12, color: "var(--txt3)", marginTop: 3,
+          fontFamily: "'Space Grotesk',monospace",
+        }}>
+          {divLabel}{custLabel}{data?.lastSync ? ` · Last synced: ${data.lastSync}` : ""}
         </div>
+      </div>
+
+      {/* ══ Sub-nav tabs + sync button ══ */}
+      <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 18, flexWrap: "wrap" }}>
+        <div className="ptab-bar">
+          {INV_VIEWS.map(v => (
+            <a key={v.key} href={v.path}
+              className={`ptab${currentPath === v.path ? " active" : ""}`}
+              style={{ textDecoration: "none" }}>{v.label}</a>
+          ))}
+        </div>
+        <div style={{ flex: 1 }} />
         <button onClick={handleSync} disabled={syncing}
-          style={{ padding: "8px 20px", background: "var(--teal)", color: "#fff", border: "none", borderRadius: 8, fontWeight: 600, fontSize: 13, cursor: "pointer", opacity: syncing ? 0.6 : 1 }}>
-          {syncing ? "Syncing..." : "\u{1F504} Sync from Amazon"}
+          style={{ padding: "6px 16px", background: "var(--teal)", color: "#fff", border: "none", borderRadius: 8, fontWeight: 600, fontSize: 12, cursor: "pointer", opacity: syncing ? 0.6 : 1 }}>
+          {syncing ? "Syncing..." : "↻ Sync from Amazon"}
         </button>
       </div>
 

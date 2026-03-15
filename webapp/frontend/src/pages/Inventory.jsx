@@ -1,11 +1,22 @@
 import { useState, useEffect } from "react";
 import { api } from "../lib/api";
 
+const INV_VIEWS = [
+  { key: "golfgen-inventory", path: "/golfgen-inventory", label: "GolfGen Inventory" },
+  { key: "inventory",         path: "/inventory",         label: "Amazon Inventory" },
+  { key: "fba-shipments",     path: "/fba-shipments",     label: "Shipments to FBA" },
+];
+
 export default function Inventory({ filters = {} }) {
   const [items, setItems] = useState([]);
   const [loading, setLoading] = useState(true);
   const [sortKey, setSortKey] = useState("fbaStock");
   const [sortDir, setSortDir] = useState("desc");
+
+  const divRaw = (filters.division || "").toLowerCase();
+  const divLabel = !divRaw ? "All Divisions" : divRaw === "golf" ? "Golf (PGAT)" : "Housewares";
+  const custLabel = filters.customer ? ` · ${filters.customer.replace(/_/g, " ").replace(/\b\w/g, l => l.toUpperCase())}` : "";
+  const currentPath = typeof window !== "undefined" ? window.location.pathname : "/inventory";
 
   useEffect(() => {
     setLoading(true);
@@ -40,10 +51,33 @@ export default function Inventory({ filters = {} }) {
   }
 
   return (
-    <>
-      <div className="page-header">
-        <h1>Amazon Inventory</h1>
-        <p>{items.length} SKUs in FBA &middot; Days of supply analysis</p>
+    <div style={{ fontFamily: "'Sora',-apple-system,BlinkMacSystemFont,sans-serif", color: "var(--txt)" }}>
+
+      {/* ══ HEADER — matches Exec Summary style ══ */}
+      <div style={{ marginBottom: 16 }}>
+        <h2 style={{
+          fontFamily: "'DM Serif Display',Georgia,serif",
+          fontSize: 22, fontWeight: 400, margin: 0, color: "var(--txt)",
+        }}>
+          Amazon Inventory
+        </h2>
+        <div style={{
+          fontSize: 12, color: "var(--txt3)", marginTop: 3,
+          fontFamily: "'Space Grotesk',monospace",
+        }}>
+          {divLabel}{custLabel} · {items.length} SKUs in FBA · Days of supply analysis
+        </div>
+      </div>
+
+      {/* ══ Sub-nav tabs ══ */}
+      <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 18, flexWrap: "wrap" }}>
+        <div className="ptab-bar">
+          {INV_VIEWS.map(v => (
+            <a key={v.key} href={v.path}
+              className={`ptab${currentPath === v.path ? " active" : ""}`}
+              style={{ textDecoration: "none" }}>{v.label}</a>
+          ))}
+        </div>
       </div>
 
       <div className="kpi-grid" style={{ marginBottom: 24 }}>
@@ -108,7 +142,7 @@ export default function Inventory({ filters = {} }) {
           </tbody>
         </table>
       </div>
-    </>
+    </div>
   );
 }
 

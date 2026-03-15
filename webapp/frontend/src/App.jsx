@@ -285,7 +285,7 @@ function AppShell({ user, isAdmin, allowed, mfaProtected, userMfaEnabled, filter
           {allowed["factory-po"] !== false && <Route path="/factory-po" element={<FactoryPO />} />}
           {allowed["logistics"] !== false && <Route path="/logistics" element={<LogisticsTracking />} />}
           {allowed["supply-chain"] !== false && <Route path="/supply-chain" element={<SupplyChain />} />}
-          {allowed["fba-shipments"] !== false && <Route path="/fba-shipments" element={<FBAShipments />} />}
+          {allowed["fba-shipments"] !== false && <Route path="/fba-shipments" element={<FBAShipments filters={filters} />} />}
           {allowed["item-planning"] !== false && <Route path="/item-planning" element={<ItemPlanning />} />}
           <Route path="/account/security/mfa-setup" element={<MfaSetup />} />
           {isAdmin && <Route path="/permissions" element={<Permissions />} />}
