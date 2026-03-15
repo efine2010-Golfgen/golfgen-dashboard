@@ -1416,7 +1416,7 @@ def return_rate_debug():
 
         # 3. fba_inventory sample ASINs
         inv_rows = con.execute("""
-            SELECT asin, seller_sku FROM fba_inventory
+            SELECT asin, sku FROM fba_inventory
             WHERE date = (SELECT MAX(date) FROM fba_inventory) LIMIT 10
         """).fetchall()
         result["fba_inv_sample"] = [{"b_asin": r[0], "sku": r[1]} for r in inv_rows]
