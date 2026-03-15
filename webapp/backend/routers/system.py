@@ -1192,3 +1192,66 @@ def debug_logs(n: int = Query(100, ge=1, le=200)):
         return {"error": "_log_buffer not available"}
     except Exception as e:
         return {"error": str(e)}
+
+
+@router.get("/api/debug/daily-sales-coverage")
+def debug_daily_sales_coverage():
+    """Check daily_sales data coverage for heatmap debugging."""
+    try:
+        con = get_db()
+        # Total rows
+        total = con.execute("SELECT COUNT(*) FROM daily_sales").fetchone()[0]
+        # ALL rows
+        all_count = con.execute("SELECT COUNT(*) FROM daily_sales WHERE asin = 'ALL'").fetchone()[0]
+        # per-ASIN rows
+        per_asin = con.execute("SELECT COUNT(*) FROM daily_sales WHERE asin != 'ALL'").fetchone()[0]
+        # Date range for ALL
+        all_range = con.execute("""
+            SELECT MIN(date), MAX(date) FROM daily_sales WHERE asin = 'ALL'
+        """).fetchone()
+        # Date range for per-ASIN
+        asin_range = con.execute("""
+            SELECT MIN(date), MAX(date) FROM daily_sales WHERE asin != 'ALL'
+        """).fetchone()
+        # Last 26 weeks ALL coverage
+        from datetime import date as dt_date, timedelta
+        from zoneinfo import ZoneInfo
+        from datetime import datetime
+        today = datetime.now(ZoneInfo("America/Chicago")).date()
+        start_26w = today - timedelta(weeks=26)
+        all_26w = con.execute("""
+            SELECT COUNT(DISTINCT date) FROM daily_sales
+            WHERE asin = 'ALL' AND date >= ? AND date <= ?
+        """, [str(start_26w), str(today)]).fetchone()[0]
+        asin_26w = con.execute("""
+            SELECT COUNT(DISTINCT date) FROM daily_sales
+            WHERE asin != 'ALL' AND date >= ? AND date <= ?
+        """, [str(start_26w), str(today)]).fetchone()[0]
+        # Sample of ALL rows with 0 units in last 26 weeks
+        zero_units = con.execute("""
+            SELECT date, units_ordered FROM daily_sales
+            WHERE asin = 'ALL' AND date >= ? AND date <= ? AND (units_ordered IS NULL OR units_ordered = 0)
+            ORDER BY date LIMIT 20
+        """, [str(start_26w), str(today)]).fetchall()
+        # Division distribution for ALL rows
+        div_dist = con.execute("""
+            SELECT division, COUNT(*) FROM daily_sales WHERE asin = 'ALL' GROUP BY division
+        """).fetchall()
+        con.close()
+        return {
+            "total_rows": total,
+            "asin_ALL_rows": all_count,
+            "per_asin_rows": per_asin,
+            "ALL_date_range": {"min": str(all_range[0]), "max": str(all_range[1])} if all_range else None,
+            "per_asin_date_range": {"min": str(asin_range[0]), "max": str(asin_range[1])} if asin_range else None,
+            "today": str(today),
+            "start_26w": str(start_26w),
+            "ALL_distinct_days_26w": all_26w,
+            "per_asin_distinct_days_26w": asin_26w,
+            "expected_days_26w": (today - start_26w).days + 1,
+            "zero_unit_ALL_rows_sample": [{"date": str(r[0]), "units": r[1]} for r in zero_units],
+            "division_distribution_ALL": [{"division": r[0], "count": r[1]} for r in div_dist],
+        }
+    except Exception as e:
+        import traceback
+        return {"error": str(e), "traceback": traceback.format_exc()}
