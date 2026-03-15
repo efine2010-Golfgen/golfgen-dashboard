@@ -1403,16 +1403,21 @@ async def get_shipment_products(request: Request):
         # Pull products from item_master with FBA inventory and 30/60/90d sales
         rows = con.execute("""
             SELECT im.asin, im.sku, im.product_name, im.division,
-                   COALESCE(inv.afn_fulfillable_quantity, 0) AS fba_on_hand,
+                   COALESCE(inv.fulfillable_quantity, 0) AS fba_on_hand,
                    COALESCE(s30.units, 0) AS units_30d,
                    COALESCE(s30.revenue, 0) AS rev_30d,
                    COALESCE(s60.units, 0) AS units_60d,
                    COALESCE(s60.revenue, 0) AS rev_60d,
                    COALESCE(s90.units, 0) AS units_90d,
-                   COALESCE(s90.revenue, 0) AS rev_90d
+                   COALESCE(s90.revenue, 0) AS rev_90d,
+                   COALESCE(inv.inbound_working_quantity, 0) AS inbound_working,
+                   COALESCE(inv.inbound_shipped_quantity, 0) AS inbound_shipped,
+                   COALESCE(inv.inbound_receiving_quantity, 0) AS inbound_receiving,
+                   COALESCE(inv.reserved_quantity, 0) AS reserved
             FROM item_master im
             LEFT JOIN (
-                SELECT asin, afn_fulfillable_quantity
+                SELECT asin, fulfillable_quantity, inbound_working_quantity,
+                       inbound_shipped_quantity, inbound_receiving_quantity, reserved_quantity
                 FROM fba_inventory
                 WHERE date = (SELECT MAX(date) FROM fba_inventory)
             ) inv ON im.asin = inv.asin
@@ -1449,6 +1454,10 @@ async def get_shipment_products(request: Request):
         for r in rows:
             fba = _n(r[4])
             u30 = _n(r[5])
+            inbound_working = _n(r[11])
+            inbound_shipped = _n(r[12])
+            inbound_receiving = _n(r[13])
+            reserved = _n(r[14])
             products.append({
                 "asin": r[0],
                 "sku": r[1],
@@ -1461,6 +1470,11 @@ async def get_shipment_products(request: Request):
                 "rev60d": round(_n(r[8]), 2),
                 "units90d": _n(r[9]),
                 "rev90d": round(_n(r[10]), 2),
+                "inboundWorking": inbound_working,
+                "inboundShipped": inbound_shipped,
+                "inboundReceiving": inbound_receiving,
+                "reserved": reserved,
+                "inTransitTotal": inbound_working + inbound_shipped + inbound_receiving,
                 "daysOfStock": round(fba / (u30 / 30), 1) if u30 > 0 else 999,
             })
         return {"products": products, "count": len(products)}

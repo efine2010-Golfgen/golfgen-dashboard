@@ -336,25 +336,28 @@ function CreateShipmentModal({ onClose }) {
               ) : (
                 <div style={{ border: "1px solid var(--brd)", borderRadius: 10, overflow: "hidden" }}>
                   <div style={{ overflowX: "auto" }}>
-                    <table style={{ width: "100%", borderCollapse: "collapse", minWidth: 900 }}>
+                    <table style={{ width: "100%", borderCollapse: "collapse", minWidth: 1120 }}>
                       <thead>
                         <tr style={{ borderBottom: "2px solid var(--brd)" }}>
                           <th style={{ ...thS, textAlign: "left", width: 40 }}></th>
                           <th style={{ ...thS, textAlign: "left", minWidth: 100 }}>ASIN</th>
                           <th style={{ ...thS, textAlign: "left", minWidth: 240 }}>Product Description</th>
-                          <th style={{ ...thS, width: 90 }} onClick={() => handleSort("currentStock")}>FBA On Hand{arrow("currentStock")}</th>
-                          <th style={{ ...thS, width: 80 }} onClick={() => handleSort("units30d")}>30D Units{arrow("units30d")}</th>
-                          <th style={{ ...thS, width: 80 }} onClick={() => handleSort("rev30d")}>30D Rev{arrow("rev30d")}</th>
-                          <th style={{ ...thS, width: 80 }} onClick={() => handleSort("units60d")}>60D Units{arrow("units60d")}</th>
-                          <th style={{ ...thS, width: 80 }} onClick={() => handleSort("rev60d")}>60D Rev{arrow("rev60d")}</th>
-                          <th style={{ ...thS, width: 80 }} onClick={() => handleSort("units90d")}>90D Units{arrow("units90d")}</th>
-                          <th style={{ ...thS, width: 80 }} onClick={() => handleSort("rev90d")}>90D Rev{arrow("rev90d")}</th>
-                          <th style={{ ...thS, width: 80 }} onClick={() => handleSort("daysOfStock")}>Days Left{arrow("daysOfStock")}</th>
+                          <th style={{ ...thS, width: 86 }} onClick={() => handleSort("currentStock")}>FBA On Hand{arrow("currentStock")}</th>
+                          <th style={{ ...thS, width: 76 }} onClick={() => handleSort("inboundWorking")}>In Process{arrow("inboundWorking")}</th>
+                          <th style={{ ...thS, width: 76 }} onClick={() => handleSort("inTransitTotal")}>In Transit{arrow("inTransitTotal")}</th>
+                          <th style={{ ...thS, width: 72 }} onClick={() => handleSort("reserved")}>Reserved{arrow("reserved")}</th>
+                          <th style={{ ...thS, width: 74 }} onClick={() => handleSort("units30d")}>30D Units{arrow("units30d")}</th>
+                          <th style={{ ...thS, width: 74 }} onClick={() => handleSort("rev30d")}>30D Rev{arrow("rev30d")}</th>
+                          <th style={{ ...thS, width: 74 }} onClick={() => handleSort("units60d")}>60D Units{arrow("units60d")}</th>
+                          <th style={{ ...thS, width: 74 }} onClick={() => handleSort("rev60d")}>60D Rev{arrow("rev60d")}</th>
+                          <th style={{ ...thS, width: 74 }} onClick={() => handleSort("units90d")}>90D Units{arrow("units90d")}</th>
+                          <th style={{ ...thS, width: 74 }} onClick={() => handleSort("rev90d")}>90D Rev{arrow("rev90d")}</th>
+                          <th style={{ ...thS, width: 74 }} onClick={() => handleSort("daysOfStock")}>Days Left{arrow("daysOfStock")}</th>
                         </tr>
                       </thead>
                       <tbody>
                         {filtered.length === 0 ? (
-                          <tr><td colSpan={11} style={{ padding: 30, textAlign: "center", color: "var(--txt3)", ...SG({ fontSize: 11 }) }}>No products found</td></tr>
+                          <tr><td colSpan={14} style={{ padding: 30, textAlign: "center", color: "var(--txt3)", ...SG({ fontSize: 11 }) }}>No products found</td></tr>
                         ) : filtered.map(p => {
                           const isAdded = selectedItems.find(i => i.sku === p.sku);
                           return (
@@ -377,6 +380,9 @@ function CreateShipmentModal({ onClose }) {
                                 <div style={{ fontSize: 8, color: "var(--txt3)", marginTop: 1 }}>{p.division}</div>
                               </td>
                               <td style={{ ...tdS, fontWeight: 700, color: stockColor(p.currentStock, p.units30d) }}>{fmtD(p.currentStock)}</td>
+                              <td style={{ ...tdS, color: p.inboundWorking > 0 ? "#F5B731" : "var(--txt3)" }}>{fmtD(p.inboundWorking)}</td>
+                              <td style={{ ...tdS, color: p.inTransitTotal > 0 ? "#7BAED0" : "var(--txt3)" }}>{fmtD(p.inTransitTotal)}</td>
+                              <td style={{ ...tdS, color: p.reserved > 0 ? "var(--txt2)" : "var(--txt3)" }}>{fmtD(p.reserved)}</td>
                               <td style={{ ...tdS, fontWeight: 700, color: "var(--txt)" }}>{fmtD(p.units30d)}</td>
                               <td style={{ ...tdS, color: "var(--txt2)" }}>{fmtR(p.rev30d)}</td>
                               <td style={{ ...tdS }}>{fmtD(p.units60d)}</td>
