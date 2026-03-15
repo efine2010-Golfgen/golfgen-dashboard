@@ -1378,3 +1378,69 @@ def debug_heatmap_test():
     except Exception as e:
         import traceback
         return {"error": str(e), "tb": traceback.format_exc()}
+
+
+@router.get("/api/debug/return-rate-check")
+def return_rate_debug():
+    """Debug endpoint to check return rate data pipeline."""
+    from core.database import get_db
+    con = get_db()
+    result = {}
+    try:
+        # 1. Count shipments and refunds
+        ship_rows = con.execute("""
+            SELECT asin, COUNT(*) FROM financial_events
+            WHERE event_type ILIKE '%%Shipment%%'
+              AND date >= CURRENT_DATE - 90
+              AND asin IS NOT NULL AND asin != ''
+            GROUP BY asin ORDER BY COUNT(*) DESC LIMIT 10
+        """).fetchall()
+        result["top_shipment_asins"] = [{"fe_asin": r[0], "count": r[1]} for r in ship_rows]
+
+        refund_rows = con.execute("""
+            SELECT asin, COUNT(*) FROM financial_events
+            WHERE event_type ILIKE '%%refund%%'
+              AND date >= CURRENT_DATE - 90
+            GROUP BY asin ORDER BY COUNT(*) DESC LIMIT 10
+        """).fetchall()
+        result["top_refund_asins"] = [{"fe_asin": r[0], "count": r[1]} for r in refund_rows]
+
+        # 2. item_master SKU mapping
+        im_rows = con.execute("""
+            SELECT asin, sku FROM item_master WHERE sku IS NOT NULL AND sku != '' LIMIT 20
+        """).fetchall()
+        result["item_master_mapping"] = [{"b_asin": r[0], "sku": r[1]} for r in im_rows]
+
+        # 3. fba_inventory sample ASINs
+        inv_rows = con.execute("""
+            SELECT asin, seller_sku FROM fba_inventory
+            WHERE date = (SELECT MAX(date) FROM fba_inventory) LIMIT 10
+        """).fetchall()
+        result["fba_inv_sample"] = [{"b_asin": r[0], "sku": r[1]} for r in inv_rows]
+
+        # 4. Test the mapping
+        sku_to_asin = {}
+        for ir in im_rows:
+            ba = (ir[0] or "").strip(); ss = (ir[1] or "").strip()
+            if ba and ss:
+                sku_to_asin[ss] = ba
+                if ss.endswith("-CA"):
+                    sku_to_asin[ss.rsplit("-CA", 1)[0]] = ba
+
+        mapped_shipments = {}
+        for r in ship_rows:
+            fe_asin = r[0]
+            resolved = sku_to_asin.get(fe_asin, fe_asin) if not (fe_asin and fe_asin.startswith("B0")) else fe_asin
+            mapped_shipments[resolved] = mapped_shipments.get(resolved, 0) + r[1]
+        result["mapped_shipments_by_basin"] = mapped_shipments
+
+        # 5. Check overlap with fba_inventory
+        inv_asins = set(r[0] for r in inv_rows)
+        result["overlap"] = [a for a in mapped_shipments if a in inv_asins]
+        result["overlap_count"] = len(result["overlap"])
+
+    except Exception as e:
+        result["error"] = str(e)
+    finally:
+        con.close()
+    return result
