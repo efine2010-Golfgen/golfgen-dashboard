@@ -285,16 +285,19 @@ def inventory_kpis(division: Optional[str] = None, customer: Optional[str] = Non
             return fe_asin
         return _sku_to_asin.get(fe_asin, fe_asin)
 
+    from datetime import date as _date, timedelta as _td
+    _cutoff_90d = str(_date.today() - _td(days=90))
+
     refund_map = {}
     try:
-        refund_rows = con.execute(f"""
+        refund_rows = con.execute("""
             SELECT asin, COUNT(*) AS refund_count,
                    SUM(ABS(COALESCE(product_charges, 0))) AS refund_amount
             FROM financial_events
-            WHERE event_type ILIKE '%refund%'
-              AND date >= CURRENT_DATE - INTERVAL '90 days'
+            WHERE event_type ILIKE '%%refund%%'
+              AND date >= ?
             GROUP BY asin
-        """).fetchall()
+        """, [_cutoff_90d]).fetchall()
         for r in refund_rows:
             key = _resolve(r[0])
             prev = refund_map.get(key, {"count": 0, "amount": 0})
@@ -306,14 +309,14 @@ def inventory_kpis(division: Optional[str] = None, customer: Optional[str] = Non
     # ── 5. Total shipments per ASIN (90d) for return rate denominator ─────────
     total_units_90d = {}
     try:
-        tu_rows = con.execute(f"""
+        tu_rows = con.execute("""
             SELECT asin, COUNT(*) AS shipment_count
             FROM financial_events
             WHERE event_type ILIKE '%%Shipment%%'
-              AND date >= CURRENT_DATE - INTERVAL '90 days'
+              AND date >= ?
               AND asin IS NOT NULL AND asin != ''
             GROUP BY asin
-        """).fetchall()
+        """, [_cutoff_90d]).fetchall()
         for r in tu_rows:
             key = _resolve(r[0])
             total_units_90d[key] = total_units_90d.get(key, 0) + (r[1] or 0)
@@ -1342,7 +1345,7 @@ def inventory_command_center(
             total_units += total
 
     # ── 2. Sales Velocity (7d, 30d, 90d) ─────────────────────────────────────
-    vel_filter = "WHERE asin != 'ALL' AND CAST(date AS DATE) >= CURRENT_DATE - 90" + hf
+    vel_filter = "WHERE asin != 'ALL' AND date >= CURRENT_DATE - 90" + hf
     vel_rows = con.execute(f"""
         SELECT asin,
                SUM(CASE WHEN date >= CURRENT_DATE - 7 THEN units_ordered ELSE 0 END) AS u7,
@@ -1498,13 +1501,16 @@ def inventory_command_center(
                 return fe_asin  # Already a B-ASIN
             return sku_to_asin.get(fe_asin, fe_asin)
 
+        from datetime import date as _date, timedelta
+        _cutoff = str(_date.today() - timedelta(days=90))
+
         refund_rows = con.execute("""
             SELECT asin, COUNT(*) AS cnt
             FROM financial_events
             WHERE event_type ILIKE '%%refund%%'
-              AND CAST(date AS DATE) >= CURRENT_DATE - 90
+              AND date >= ?
             GROUP BY asin
-        """).fetchall()
+        """, [_cutoff]).fetchall()
         for r in refund_rows:
             key = _resolve_asin(r[0])
             refund_map[key] = _n(refund_map.get(key, 0)) + _n(r[1])
@@ -1513,10 +1519,10 @@ def inventory_command_center(
             SELECT asin, COUNT(*) AS shipment_count
             FROM financial_events
             WHERE event_type ILIKE '%%Shipment%%'
-              AND CAST(date AS DATE) >= CURRENT_DATE - 90
+              AND date >= ?
               AND asin IS NOT NULL AND asin != ''
             GROUP BY asin
-        """).fetchall()
+        """, [_cutoff]).fetchall()
         for r in tu_rows:
             key = _resolve_asin(r[0])
             total_units_map[key] = _n(total_units_map.get(key, 0)) + _n(r[1])

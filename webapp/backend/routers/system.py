@@ -1388,21 +1388,24 @@ def return_rate_debug():
     result = {}
     try:
         # 1. Count shipments and refunds
+        from datetime import date as _date, timedelta
+        _cutoff = str(_date.today() - timedelta(days=90))
+
         ship_rows = con.execute("""
             SELECT asin, COUNT(*) FROM financial_events
             WHERE event_type ILIKE '%%Shipment%%'
-              AND CAST(date AS DATE) >= CURRENT_DATE - 90
+              AND date >= ?
               AND asin IS NOT NULL AND asin != ''
             GROUP BY asin ORDER BY COUNT(*) DESC LIMIT 10
-        """).fetchall()
+        """, [_cutoff]).fetchall()
         result["top_shipment_asins"] = [{"fe_asin": r[0], "count": r[1]} for r in ship_rows]
 
         refund_rows = con.execute("""
             SELECT asin, COUNT(*) FROM financial_events
             WHERE event_type ILIKE '%%refund%%'
-              AND CAST(date AS DATE) >= CURRENT_DATE - 90
+              AND date >= ?
             GROUP BY asin ORDER BY COUNT(*) DESC LIMIT 10
-        """).fetchall()
+        """, [_cutoff]).fetchall()
         result["top_refund_asins"] = [{"fe_asin": r[0], "count": r[1]} for r in refund_rows]
 
         # 2. item_master SKU mapping
