@@ -512,10 +512,14 @@ def sales_summary(
         # financial_events stores PostedDate (settlement, ~14 days after order).
         # Querying by order date always returns 0 for recent periods.
         # Fall back to estimated fees: 15% referral + 12% FBA = 27% of sales.
-        if ty_fees == 0 and ty_sales > 0:
-            ty_fees = round(ty_sales * 0.27, 2)
-        if ly_fees == 0 and ly_sales > 0:
-            ly_fees = round(ly_sales * 0.27, 2)
+        # Also fall back when actuals are suspiciously low (partial settlement
+        # data covering only a fraction of the period).
+        ty_estimated = round(ty_sales * 0.27, 2)
+        if ty_sales > 0 and (ty_fees == 0 or ty_fees < ty_estimated * 0.15):
+            ty_fees = ty_estimated
+        ly_estimated = round(ly_sales * 0.27, 2)
+        if ly_sales > 0 and (ly_fees == 0 or ly_fees < ly_estimated * 0.15):
+            ly_fees = ly_estimated
 
         # Ad spend
         def _sum_ads(s, e):
@@ -1206,18 +1210,22 @@ def sales_fee_breakdown(
         other = round(float(row[2]), 2)
 
         # financial_events PostedDate lag — recent periods always return 0.
-        # Estimate from orders table when no actuals available.
-        if fba == 0 and referral == 0:
-            sales_row = con.execute(f"""
-                SELECT COALESCE(SUM(order_total), 0)
-                FROM orders
-                WHERE purchase_date >= ? AND purchase_date <= ?
-                  AND (order_status IS NULL OR order_status NOT IN ('Cancelled','Pending')) {hw}
-            """, [str(sd), str(ed)] + hp).fetchone()
-            est_sales = float(sales_row[0]) if sales_row else 0
-            if est_sales > 0:
-                fba = round(est_sales * 0.12, 2)
-                referral = round(est_sales * 0.15, 2)
+        # Estimate from orders table when no actuals available, or when
+        # actuals are suspiciously low (partial settlement data).
+        sales_row = con.execute(f"""
+            SELECT COALESCE(SUM(order_total), 0)
+            FROM orders
+            WHERE purchase_date >= ? AND purchase_date <= ?
+              AND (order_status IS NULL OR order_status NOT IN ('Cancelled','Pending')) {hw}
+        """, [str(sd), str(ed)] + hp).fetchone()
+        est_sales = float(sales_row[0]) if sales_row else 0
+        est_fba = round(est_sales * 0.12, 2)
+        est_referral = round(est_sales * 0.15, 2)
+        est_total = est_fba + est_referral
+        actual_total = fba + referral
+        if est_sales > 0 and (actual_total == 0 or actual_total < est_total * 0.15):
+            fba = est_fba
+            referral = est_referral
 
         con.close()
 

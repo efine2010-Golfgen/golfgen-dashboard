@@ -119,6 +119,9 @@ export default function GolfGenInventory({ filters = {} }) {
     return "All";
   })();
 
+  // Show channel column for Golf division (which ships to multiple channels)
+  const showChannel = division === "Golf";
+
   useEffect(() => {
     setLoading(true);
     setExpandedSku(null);
