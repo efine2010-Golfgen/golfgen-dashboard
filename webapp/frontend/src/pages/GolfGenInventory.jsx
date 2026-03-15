@@ -93,7 +93,6 @@ function SortTH({ label, field, sortKey, sortDir, onClick, style }) {
 
 /* ── Main page component ── */
 export default function GolfGenInventory({ filters = {} }) {
-  const [division,     setDivision]    = useState("Golf");
   const [data,         setData]        = useState(null);
   const [overviewData, setOverviewData]= useState(null);
   const [loading,      setLoading]     = useState(true);
@@ -105,6 +104,10 @@ export default function GolfGenInventory({ filters = {} }) {
   const [uploading,    setUploading]   = useState(null);
   const [uploadMsg,    setUploadMsg]   = useState(null);
   const [uploadMeta,   setUploadMeta]  = useState({});
+
+  // Derive division from global VIEW: Divisions filter
+  const divRaw = (filters.division || "").toLowerCase();
+  const division = divRaw === "housewares" || divRaw === "hw" ? "HW" : "Golf";
 
   useEffect(() => {
     api.warehouseSummary().then(d => setOverviewData(d)).catch(() => null);
@@ -125,12 +128,14 @@ export default function GolfGenInventory({ filters = {} }) {
   useEffect(() => {
     setLoading(true);
     setExpandedSku(null);
+    setSearch("");
+    setSuffixFilter("All");
     const div = division === "Golf" ? "golf" : "housewares";
     const ch  = division === "Golf" ? (derivedChannel !== "All" ? derivedChannel : null) : null;
     api.warehouseUnified(div, ch)
       .then(d => { setData(d); setLoading(false); })
       .catch(() => setLoading(false));
-  }, [division, filters.customer]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [division, filters.customer, filters.division]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const handleUpload = async (e, div) => {
     const file = e.target.files[0];
@@ -213,23 +218,47 @@ export default function GolfGenInventory({ filters = {} }) {
     ? Object.entries(channelBreakdown).map(([name, count]) => ({ name, value: count }))
     : [];
 
-  return (
-    <>
-      {/* ══ ROW 1: Division tabs (left) + Upload buttons (right) ══ */}
-      <div style={{ display: "flex", gap: 8, alignItems: "center", marginBottom: 8, flexWrap: "wrap" }}>
+  // Sub-nav items for the Inventory section
+  const INV_VIEWS = [
+    { key: "golfgen-inventory", path: "/golfgen-inventory", label: "GolfGen Inventory" },
+    { key: "inventory",         path: "/inventory",         label: "Amazon Inventory" },
+    { key: "fba-shipments",     path: "/fba-shipments",     label: "Shipments to FBA" },
+  ];
+  const currentPath = typeof window !== "undefined" ? window.location.pathname : "/golfgen-inventory";
 
-        {/* Division tabs */}
-        <div className="range-tabs">
-          {DIVISIONS.map(d => {
-            const isActive = division === d;
-            return (
-              <button key={d}
-                className={`range-tab ${isActive ? "active" : ""}`}
-                onClick={() => { setDivision(d); setSearch(""); setSuffixFilter("All"); }}>
-                {d === "Golf" ? "⛳ Golf" : "🏠 Housewares"}
-              </button>
-            );
-          })}
+  return (
+    <div style={{ fontFamily: "'Sora',-apple-system,BlinkMacSystemFont,sans-serif", color: "var(--txt)" }}>
+
+      {/* ══ HEADER — matches Exec Summary "Performance Snapshot" ══ */}
+      <div style={{ marginBottom: 16 }}>
+        <h2 style={{
+          fontFamily: "'DM Serif Display',Georgia,serif",
+          fontSize: 22, fontWeight: 400, margin: 0, color: "var(--txt)",
+        }}>
+          GolfGen Inventory
+        </h2>
+        <div style={{
+          fontSize: 12, color: "var(--txt3)", marginTop: 3,
+          fontFamily: "'Space Grotesk',monospace",
+        }}>
+          {!divRaw ? "All Divisions" : division === "Golf" ? "Golf (PGAT)" : "Housewares"}
+          {filters.customer ? ` · ${filters.customer.replace(/_/g, " ").replace(/\b\w/g, l => l.toUpperCase())}` : ""}
+        </div>
+      </div>
+
+      {/* ══ Sub-nav tabs: GolfGen Inventory | Amazon Inventory | Shipments to FBA ══ */}
+      <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 18, flexWrap: "wrap" }}>
+        <div className="ptab-bar">
+          {INV_VIEWS.map(v => (
+            <a
+              key={v.key}
+              href={v.path}
+              className={`ptab${currentPath === v.path ? " active" : ""}`}
+              style={{ textDecoration: "none" }}
+            >
+              {v.label}
+            </a>
+          ))}
         </div>
 
         {/* Spacer */}
@@ -503,7 +532,7 @@ export default function GolfGenInventory({ filters = {} }) {
         <strong style={{ color: "var(--txt2)" }}>Good Inv</strong> = Available − Bad. EOM history columns pending snapshot data.{" "}
         Suffix codes: RB = Rebox · RETD = Returned · DONATE = Donate · FBM = FBM · HOLD = Hold · CUST = Customer.
       </div>
-    </>
+    </div>
   );
 }
 
