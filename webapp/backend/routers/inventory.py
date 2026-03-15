@@ -265,6 +265,27 @@ def inventory_kpis(division: Optional[str] = None, customer: Optional[str] = Non
     str_map = {r[0]: r[1] or 0 for r in str_rows}
 
     # ── 4. Return data from financial_events ──────────────────────────────────
+    # Build sku → B-ASIN lookup so financial_events identifiers resolve correctly
+    try:
+        im_rows = con.execute("""
+            SELECT asin, sku FROM item_master WHERE sku IS NOT NULL AND sku != ''
+        """).fetchall()
+        _sku_to_asin = {}
+        for ir in im_rows:
+            ba = (ir[0] or "").strip(); ss = (ir[1] or "").strip()
+            if ba and ss:
+                _sku_to_asin[ss] = ba
+                if ss.endswith("-CA"):
+                    _sku_to_asin[ss.rsplit("-CA", 1)[0]] = ba
+    except Exception:
+        _sku_to_asin = {}
+
+    def _resolve(fe_asin):
+        if fe_asin and fe_asin.startswith("B0"):
+            return fe_asin
+        return _sku_to_asin.get(fe_asin, fe_asin)
+
+    refund_map = {}
     try:
         refund_rows = con.execute(f"""
             SELECT asin, COUNT(*) AS refund_count,
@@ -274,14 +295,15 @@ def inventory_kpis(division: Optional[str] = None, customer: Optional[str] = Non
               AND date >= CURRENT_DATE - INTERVAL '90 days'
             GROUP BY asin
         """).fetchall()
-        refund_map = {r[0]: {"count": r[1], "amount": round(r[2] or 0, 2)} for r in refund_rows}
+        for r in refund_rows:
+            key = _resolve(r[0])
+            prev = refund_map.get(key, {"count": 0, "amount": 0})
+            refund_map[key] = {"count": prev["count"] + (r[1] or 0),
+                               "amount": round(prev["amount"] + (r[2] or 0), 2)}
     except Exception:
         refund_map = {}
 
     # ── 5. Total shipments per ASIN (90d) for return rate denominator ─────────
-    #   Use financial_events Shipment count (same source as refunds) for consistency.
-    #   daily_sales per-ASIN rows are sparse (S&T report lag), so orders/shipment
-    #   events give a much better denominator.
     total_units_90d = {}
     try:
         tu_rows = con.execute(f"""
@@ -292,7 +314,9 @@ def inventory_kpis(division: Optional[str] = None, customer: Optional[str] = Non
               AND asin IS NOT NULL AND asin != ''
             GROUP BY asin
         """).fetchall()
-        total_units_90d = {r[0]: r[1] or 0 for r in tu_rows}
+        for r in tu_rows:
+            key = _resolve(r[0])
+            total_units_90d[key] = total_units_90d.get(key, 0) + (r[1] or 0)
     except Exception:
         pass
 
@@ -327,10 +351,9 @@ def inventory_kpis(division: Optional[str] = None, customer: Optional[str] = Non
         units_90d = str_map.get(asin, 0)
         sell_through_rate = round(units_90d / fulfillable, 2) if fulfillable > 0 else None
 
-        # Return Rate — financial_events.asin may be SellerSKU, not B-ASIN
-        sku_key = inv.get("sku") or ""
-        refunds = refund_map.get(asin, None) or refund_map.get(sku_key, {"count": 0, "amount": 0})
-        total_units = total_units_90d.get(asin, 0) or total_units_90d.get(sku_key, 0)
+        # Return Rate (refund_map + total_units_90d already re-keyed to B-ASIN)
+        refunds = refund_map.get(asin, {"count": 0, "amount": 0})
+        total_units = total_units_90d.get(asin, 0)
         return_rate = round(refunds["count"] / total_units, 4) if total_units > 0 else None
 
         items.append({
@@ -1446,9 +1469,35 @@ def inventory_command_center(
         pass
 
     # ── 9. Return rates from financial_events ─────────────────────────────────
-    refund_map = {}
-    total_units_map = {}
+    # financial_events.asin may store SellerSKU (e.g. GGRTNW222810) rather than
+    # B-ASIN (e.g. B0DPBGG8GY). FBA inventory uses B-ASINs. We need to map
+    # financial_events identifiers → B-ASINs via item_master so both tables align.
+    # Strategy: query raw counts keyed by fe.asin, then build a reverse lookup
+    # from item_master (sku → asin) so we can re-key by B-ASIN.
+    refund_map = {}       # keyed by B-ASIN
+    total_units_map = {}  # keyed by B-ASIN
     try:
+        # Build sku → B-ASIN lookup from item_master
+        im_rows = con.execute("""
+            SELECT asin, sku FROM item_master WHERE sku IS NOT NULL AND sku != ''
+        """).fetchall()
+        sku_to_asin = {}
+        for ir in im_rows:
+            b_asin = (ir[0] or "").strip()
+            seller_sku = (ir[1] or "").strip()
+            if b_asin and seller_sku:
+                sku_to_asin[seller_sku] = b_asin
+                # Also map base SKU without -CA suffix for partial matches
+                base = seller_sku.rsplit("-CA", 1)[0] if seller_sku.endswith("-CA") else None
+                if base:
+                    sku_to_asin[base] = b_asin
+
+        def _resolve_asin(fe_asin):
+            """Map a financial_events asin value to a canonical B-ASIN."""
+            if fe_asin and fe_asin.startswith("B0"):
+                return fe_asin  # Already a B-ASIN
+            return sku_to_asin.get(fe_asin, fe_asin)
+
         refund_rows = con.execute("""
             SELECT asin, COUNT(*) AS cnt
             FROM financial_events
@@ -1456,7 +1505,9 @@ def inventory_command_center(
               AND date >= CURRENT_DATE - 90
             GROUP BY asin
         """).fetchall()
-        refund_map = {r[0]: _n(r[1]) for r in refund_rows}
+        for r in refund_rows:
+            key = _resolve_asin(r[0])
+            refund_map[key] = _n(refund_map.get(key, 0)) + _n(r[1])
 
         tu_rows = con.execute("""
             SELECT asin, COUNT(*) AS shipment_count
@@ -1466,7 +1517,9 @@ def inventory_command_center(
               AND asin IS NOT NULL AND asin != ''
             GROUP BY asin
         """).fetchall()
-        total_units_map = {r[0]: _n(r[1]) for r in tu_rows}
+        for r in tu_rows:
+            key = _resolve_asin(r[0])
+            total_units_map[key] = _n(total_units_map.get(key, 0)) + _n(r[1])
     except Exception:
         pass
 
@@ -1508,19 +1561,16 @@ def inventory_command_center(
             })
 
     # ── 10c. Return rate by SKU table ────────────────────────────────────────
-    # financial_events.asin may store SellerSKU (e.g. GGRTNW222810) instead of
-    # B-ASIN (e.g. B0B2YBWKL8) because the Finances API sometimes lacks ASIN.
-    # Check both the B-ASIN and the seller SKU when looking up refund/shipment data.
+    # refund_map and total_units_map are now keyed by canonical B-ASIN
+    # (resolved via item_master in section 9 above).
     return_rate_table = []
     for asin, inv in inv_map.items():
-        sku = inv.get("sku") or ""
-        # Try B-ASIN first, then seller SKU as fallback key
-        refund_count = _n(refund_map.get(asin, 0)) or _n(refund_map.get(sku, 0))
-        total_u = _n(total_units_map.get(asin, 0)) or _n(total_units_map.get(sku, 0))
-        if total_u > 3:  # Lower threshold — include SKUs with at least a few sales
+        refund_count = _n(refund_map.get(asin, 0))
+        total_u = _n(total_units_map.get(asin, 0))
+        if total_u > 3:
             rate = round(refund_count / total_u * 100, 1) if total_u > 0 else 0
             return_rate_table.append({
-                "sku": sku or asin,
+                "sku": inv.get("sku") or asin,
                 "name": inv.get("name", asin),
                 "sold": int(total_u),
                 "returned": int(refund_count),
@@ -1528,13 +1578,12 @@ def inventory_command_center(
             })
     # Also include FBM items in return rate
     for asin, inv in fbm_map.items():
-        sku = inv.get("sku") or ""
-        refund_count = _n(refund_map.get(asin, 0)) or _n(refund_map.get(sku, 0))
-        total_u = _n(total_units_map.get(asin, 0)) or _n(total_units_map.get(sku, 0))
+        refund_count = _n(refund_map.get(asin, 0))
+        total_u = _n(total_units_map.get(asin, 0))
         if total_u > 3:
             rate = round(refund_count / total_u * 100, 1) if total_u > 0 else 0
             return_rate_table.append({
-                "sku": sku or asin,
+                "sku": inv.get("sku") or asin,
                 "name": inv.get("name", asin),
                 "sold": int(total_u),
                 "returned": int(refund_count),
