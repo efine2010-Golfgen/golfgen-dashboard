@@ -121,31 +121,43 @@ def run_backup() -> dict:
         # Step 1: Export database
         import shutil
         if USE_POSTGRES:
-            # PostgreSQL: export each table as CSV
+            # PostgreSQL: export each table as CSV using raw psycopg2.
+            # Using raw connection (not DbConnection wrapper) because we need
+            # reliable cursor.description access for column names.
+            import csv
+            import psycopg2
             logger.info(f"Backup: Exporting PostgreSQL tables to CSV in {export_dir}")
-            con = get_db()
+            pg_conn = psycopg2.connect(os.environ.get("DATABASE_URL", ""))
+            pg_conn.autocommit = True
             try:
-                tables = con.execute("""
+                cur = pg_conn.cursor()
+                cur.execute("""
                     SELECT tablename FROM pg_tables
                     WHERE schemaname = 'public'
-                """).fetchall()
+                    ORDER BY tablename
+                """)
+                tables = cur.fetchall()
+                exported_count = 0
                 for (table_name,) in tables:
                     try:
-                        result = con.execute(f"SELECT * FROM {table_name}")
-                        # Get column names from cursor description (before fetchall)
-                        cols = [desc[0] for desc in con._cursor.description]
-                        rows = result.fetchall()
-                        import csv
+                        cur.execute(f'SELECT * FROM "{table_name}"')
+                        cols = [desc[0] for desc in cur.description]
+                        rows = cur.fetchall()
                         csv_path = export_dir / f"{table_name}.csv"
                         with open(csv_path, "w", newline="") as f:
                             writer = csv.writer(f)
                             writer.writerow(cols)
                             writer.writerows(rows)
+                        exported_count += 1
                         logger.info(f"Backup: Exported {table_name}: {len(rows)} rows")
                     except Exception as e:
                         logger.warning(f"Backup: Failed to export {table_name}: {e}")
+                        import traceback
+                        logger.warning(traceback.format_exc())
+                cur.close()
+                logger.info(f"Backup: {exported_count}/{len(tables)} tables exported to CSV")
             finally:
-                con.close()
+                pg_conn.close()
         else:
             # DuckDB: native EXPORT DATABASE
             logger.info(f"Backup: Exporting DuckDB to Parquet in {export_dir}")

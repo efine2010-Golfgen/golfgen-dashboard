@@ -182,12 +182,19 @@ def _run_scheduled_nightly_deep_sync():
     """Wrapper for nightly deep sync with logging and scheduler-level mutex."""
     if not _scheduler_locks["sp_api"].acquire(blocking=False):
         logger.warning("Skipping nightly deep sync — SP-API sync already running")
+        _write_sync_log("nightly_deep_sync",
+                        datetime.now(ZoneInfo("America/Chicago")), "SKIPPED",
+                        error="SP-API sync already running — mutex unavailable")
         return
     try:
         result = run_nightly_deep_sync()
         logger.info(f"Nightly deep sync result: {result}")
     except Exception as e:
-        logger.error(f"Nightly deep sync failed: {e}")
+        import traceback
+        logger.error(f"Nightly deep sync failed: {e}\n{traceback.format_exc()}")
+        _write_sync_log("nightly_deep_sync",
+                        datetime.now(ZoneInfo("America/Chicago")), "FAILED",
+                        error=str(e)[:500])
     finally:
         _scheduler_locks["sp_api"].release()
 
@@ -380,46 +387,50 @@ async def _sync_loop():
         logger.error(f"Startup analytics rollup error: {e}\n{traceback.format_exc()}")
 
     # Initialize APScheduler
+    # IMPORTANT: Use ZoneInfo object (not string) for reliable timezone handling.
+    # APScheduler 3.x with string timezone was firing jobs at UTC times instead
+    # of Central, causing all nightly jobs to run 5 hours late (2am→7am, 3am→8am).
+    _tz = ZoneInfo("America/Chicago")
+
     if not scheduler:
-        scheduler = AsyncIOScheduler(timezone="America/Chicago")
+        scheduler = AsyncIOScheduler(timezone=_tz)
 
         # Schedule 4 daily SP-API syncs at 9am, 12pm, 3pm, 6pm Central
-        scheduler.add_job(_run_scheduled_sp_api_sync, CronTrigger(hour=9, minute=0, timezone="America/Chicago"), id="sp_api_sync_9am")
-        scheduler.add_job(_run_scheduled_sp_api_sync, CronTrigger(hour=12, minute=0, timezone="America/Chicago"), id="sp_api_sync_12pm")
-        scheduler.add_job(_run_scheduled_sp_api_sync, CronTrigger(hour=15, minute=0, timezone="America/Chicago"), id="sp_api_sync_3pm")
-        scheduler.add_job(_run_scheduled_sp_api_sync, CronTrigger(hour=18, minute=0, timezone="America/Chicago"), id="sp_api_sync_6pm")
+        scheduler.add_job(_run_scheduled_sp_api_sync, CronTrigger(hour=9, minute=0, timezone=_tz), id="sp_api_sync_9am", misfire_grace_time=3600)
+        scheduler.add_job(_run_scheduled_sp_api_sync, CronTrigger(hour=12, minute=0, timezone=_tz), id="sp_api_sync_12pm", misfire_grace_time=3600)
+        scheduler.add_job(_run_scheduled_sp_api_sync, CronTrigger(hour=15, minute=0, timezone=_tz), id="sp_api_sync_3pm", misfire_grace_time=3600)
+        scheduler.add_job(_run_scheduled_sp_api_sync, CronTrigger(hour=18, minute=0, timezone=_tz), id="sp_api_sync_6pm", misfire_grace_time=3600)
 
         # Schedule today-orders sync every 15 minutes (fast, ~10s)
-        scheduler.add_job(_run_scheduled_today_sync, CronTrigger(minute='*/15', second=0, timezone="America/Chicago"), id="today_sync_15min")
+        scheduler.add_job(_run_scheduled_today_sync, CronTrigger(minute='*/15', second=0, timezone=_tz), id="today_sync_15min")
 
         # Schedule ads sync every 2 hours (0, 2, 4, 6, 8, ... hours)
-        scheduler.add_job(_run_scheduled_ads_sync, CronTrigger(hour='*/2', minute=0, second=0, timezone="America/Chicago"), id="ads_sync_2hourly")
+        scheduler.add_job(_run_scheduled_ads_sync, CronTrigger(hour='*/2', minute=0, second=0, timezone=_tz), id="ads_sync_2hourly")
 
         # Schedule pricing sync every 2 hours (offset by 1 hour from ads)
-        scheduler.add_job(_run_scheduled_pricing_sync, CronTrigger(minute=30, second=0, timezone="America/Chicago"), id="pricing_sync_hourly")
+        scheduler.add_job(_run_scheduled_pricing_sync, CronTrigger(minute=30, second=0, timezone=_tz), id="pricing_sync_hourly")
 
-        # Schedule docs update at 8am and 8pm Central (Prompt 2 implementation)
-        scheduler.add_job(_run_scheduled_docs_update, CronTrigger(hour=8, minute=0, timezone="America/Chicago"), id="docs_update_8am")
-        scheduler.add_job(_run_scheduled_docs_update, CronTrigger(hour=20, minute=0, timezone="America/Chicago"), id="docs_update_8pm")
+        # Schedule docs update at 8am and 8pm Central
+        scheduler.add_job(_run_scheduled_docs_update, CronTrigger(hour=8, minute=0, timezone=_tz), id="docs_update_8am")
+        scheduler.add_job(_run_scheduled_docs_update, CronTrigger(hour=20, minute=0, timezone=_tz), id="docs_update_8pm")
 
-        # Schedule nightly DuckDB backup at 2am Central (Prompt 2 implementation)
-        scheduler.add_job(_run_duckdb_backup, CronTrigger(hour=2, minute=0, timezone="America/Chicago"), id="duckdb_backup_2am")
+        # Schedule nightly backup at 2am Central (Google Drive + GitHub)
+        scheduler.add_job(_run_duckdb_backup, CronTrigger(hour=2, minute=0, timezone=_tz), id="duckdb_backup_2am", misfire_grace_time=7200)
 
         # Schedule nightly deep sync at 3am Central — fills all data gaps + re-pulls last 30 days
-        scheduler.add_job(_run_scheduled_nightly_deep_sync, CronTrigger(hour=3, minute=0, timezone="America/Chicago"), id="nightly_deep_sync_3am", misfire_grace_time=7200)
+        scheduler.add_job(_run_scheduled_nightly_deep_sync, CronTrigger(hour=3, minute=0, timezone=_tz), id="nightly_deep_sync_3am", misfire_grace_time=7200)
 
         # Schedule incremental gap-fill every 2 hours at :45 (avoids :00 full syncs)
-        # Pulls one missing 30-day historical chunk per run; self-deactivates at 97% coverage
-        scheduler.add_job(_run_scheduled_gap_fill, CronTrigger(hour='*/2', minute=45, second=0, timezone="America/Chicago"), id="gap_fill_2hourly")
+        scheduler.add_job(_run_scheduled_gap_fill, CronTrigger(hour='*/2', minute=45, second=0, timezone=_tz), id="gap_fill_2hourly")
 
         # Schedule daily FBA inventory snapshot at 11pm Central (after all syncs, before backup)
-        scheduler.add_job(_run_scheduled_inventory_snapshot, CronTrigger(hour=23, minute=0, timezone="America/Chicago"), id="fba_inventory_snapshot_11pm", misfire_grace_time=3600)
+        scheduler.add_job(_run_scheduled_inventory_snapshot, CronTrigger(hour=23, minute=0, timezone=_tz), id="fba_inventory_snapshot_11pm", misfire_grace_time=3600)
 
         # Schedule analytics rollup at 2:30am Central (after backup completes)
-        scheduler.add_job(_run_scheduled_analytics_rollup, CronTrigger(hour=2, minute=30, timezone="America/Chicago"), id="analytics_rollup_230am", misfire_grace_time=3600)
+        scheduler.add_job(_run_scheduled_analytics_rollup, CronTrigger(hour=2, minute=30, timezone=_tz), id="analytics_rollup_230am", misfire_grace_time=3600)
 
-        await scheduler.start()
-        logger.info("APScheduler started with 4 daily SP-API syncs, 15-min today sync, hourly ads/pricing, docs updates, and nightly backup (America/Chicago)")
+        scheduler.start()
+        logger.info("APScheduler started — all CronTriggers use ZoneInfo('America/Chicago') for correct Central Time scheduling")
 
         # Startup catchup: if current time is past a scheduled sync time and no sync_log entry exists for today, run immediately
         await _startup_sync_catchup()
@@ -437,6 +448,8 @@ async def _startup_sync_catchup():
             ("sp_api_sync", 180, _run_scheduled_sp_api_sync),       # every 3h (9,12,15,18)
             ("ads_sync", 60, _run_scheduled_ads_sync),               # every hour
             ("pricing_sync", 60, _run_scheduled_pricing_sync),       # every hour (offset 30m)
+            ("nightly_backup_gdrive", 1440, _run_duckdb_backup),     # daily at 2am
+            ("nightly_deep_sync", 1440, _run_scheduled_nightly_deep_sync),  # daily at 3am
         ]
 
         from .database import get_db_rw

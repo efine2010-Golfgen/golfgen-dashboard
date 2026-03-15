@@ -538,63 +538,72 @@ def run_nightly_deep_sync():
 
                 from services.sp_api import _get_division_for_asin
 
-                for day_entry in report_data.get("salesAndTrafficByDate", []):
-                    entry_date = day_entry.get("date", "")
-                    traffic = day_entry.get("trafficByDate", {})
-                    sales_info = day_entry.get("salesByDate", {})
-                    ordered_sales = sales_info.get("orderedProductSales", {})
-                    sales_amount = float(ordered_sales.get("amount", 0)) if isinstance(ordered_sales, dict) else float(ordered_sales or 0)
+                try:
+                    for day_entry in report_data.get("salesAndTrafficByDate", []):
+                        entry_date = day_entry.get("date", "")
+                        traffic = day_entry.get("trafficByDate", {})
+                        sales_info = day_entry.get("salesByDate", {})
+                        ordered_sales = sales_info.get("orderedProductSales", {})
+                        sales_amount = float(ordered_sales.get("amount", 0)) if isinstance(ordered_sales, dict) else float(ordered_sales or 0)
 
-                    wcon.execute("""
-                        INSERT OR REPLACE INTO daily_sales
-                        (date, asin, units_ordered, ordered_product_sales,
-                         sessions, session_percentage, page_views,
-                         buy_box_percentage, unit_session_percentage,
-                         division, customer, platform)
-                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'golf', 'amazon', 'sp_api')
-                    """, [
-                        entry_date, "ALL",
-                        int(sales_info.get("unitsOrdered", 0)),
-                        sales_amount,
-                        int(traffic.get("sessions", 0)),
-                        float(traffic.get("sessionPercentage", 0)),
-                        int(traffic.get("pageViews", 0)),
-                        float(traffic.get("buyBoxPercentage", 0)),
-                        float(traffic.get("unitSessionPercentage", 0)),
-                    ])
-                    records += 1
+                        wcon.execute("""
+                            INSERT OR REPLACE INTO daily_sales
+                            (date, asin, units_ordered, ordered_product_sales,
+                             sessions, session_percentage, page_views,
+                             buy_box_percentage, unit_session_percentage,
+                             division, customer, platform)
+                            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'golf', 'amazon', 'sp_api')
+                        """, [
+                            entry_date, "ALL",
+                            int(sales_info.get("unitsOrdered", 0)),
+                            sales_amount,
+                            int(traffic.get("sessions", 0)),
+                            float(traffic.get("sessionPercentage", 0)),
+                            int(traffic.get("pageViews", 0)),
+                            float(traffic.get("buyBoxPercentage", 0)),
+                            float(traffic.get("unitSessionPercentage", 0)),
+                        ])
+                        records += 1
 
-                for asin_entry in report_data.get("salesAndTrafficByAsin", []):
-                    asin = asin_entry.get("childAsin") or asin_entry.get("parentAsin", "")
-                    traffic = asin_entry.get("trafficByAsin", {})
-                    sales_info = asin_entry.get("salesByAsin", {})
-                    entry_date = asin_entry.get("date", str(cs))
-                    ordered_sales = sales_info.get("orderedProductSales", {})
-                    sales_amount = float(ordered_sales.get("amount", 0)) if isinstance(ordered_sales, dict) else float(ordered_sales or 0)
+                    for asin_entry in report_data.get("salesAndTrafficByAsin", []):
+                        asin = asin_entry.get("childAsin") or asin_entry.get("parentAsin", "")
+                        traffic = asin_entry.get("trafficByAsin", {})
+                        sales_info = asin_entry.get("salesByAsin", {})
+                        entry_date = asin_entry.get("date", str(cs))
+                        ordered_sales = sales_info.get("orderedProductSales", {})
+                        sales_amount = float(ordered_sales.get("amount", 0)) if isinstance(ordered_sales, dict) else float(ordered_sales or 0)
 
-                    _div = _get_division_for_asin(asin)
-                    wcon.execute("""
-                        INSERT OR REPLACE INTO daily_sales
-                        (date, asin, units_ordered, ordered_product_sales,
-                         sessions, session_percentage, page_views,
-                         buy_box_percentage, unit_session_percentage,
-                         division, customer, platform)
-                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'amazon', 'sp_api')
-                    """, [
-                        entry_date, asin,
-                        int(sales_info.get("unitsOrdered", 0)),
-                        sales_amount,
-                        int(traffic.get("sessions", 0)),
-                        float(traffic.get("sessionPercentage", 0)),
-                        int(traffic.get("pageViews", 0)),
-                        float(traffic.get("buyBoxPercentage", 0)),
-                        float(traffic.get("unitSessionPercentage", 0)),
-                        _div,
-                    ])
-                    records += 1
+                        _div = _get_division_for_asin(asin)
+                        wcon.execute("""
+                            INSERT OR REPLACE INTO daily_sales
+                            (date, asin, units_ordered, ordered_product_sales,
+                             sessions, session_percentage, page_views,
+                             buy_box_percentage, unit_session_percentage,
+                             division, customer, platform)
+                            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'amazon', 'sp_api')
+                        """, [
+                            entry_date, asin,
+                            int(sales_info.get("unitsOrdered", 0)),
+                            sales_amount,
+                            int(traffic.get("sessions", 0)),
+                            float(traffic.get("sessionPercentage", 0)),
+                            int(traffic.get("pageViews", 0)),
+                            float(traffic.get("buyBoxPercentage", 0)),
+                            float(traffic.get("unitSessionPercentage", 0)),
+                            _div,
+                        ])
+                        records += 1
 
-                wcon.execute("COMMIT")
-                wcon.close()
+                    wcon.execute("COMMIT")
+                except Exception as insert_err:
+                    logger.error(f"  Chunk {cs}-{ce} INSERT error, rolling back: {insert_err}")
+                    try:
+                        wcon.execute("ROLLBACK")
+                    except Exception:
+                        pass
+                    raise
+                finally:
+                    wcon.close()
                 total_records += records
                 chunks_ok += 1
                 logger.info(f"  Chunk {cs}-{ce}: {records} records inserted")
@@ -613,6 +622,8 @@ def run_nightly_deep_sync():
                 break  # No point hammering more chunks — quota is exhausted
             else:
                 logger.error(f"  Chunk {cs}-{ce} error: {e}")
+                import traceback
+                logger.error(traceback.format_exc())
                 _time.sleep(5)  # Brief pause before continuing to next chunk
 
         # Rate-limit: Amazon allows ~15 report requests per minute
