@@ -1303,3 +1303,78 @@ def debug_heatmap_raw():
     except Exception as e:
         import traceback
         return {"error": str(e), "tb": traceback.format_exc()}
+
+
+@router.get("/api/debug/heatmap-test")
+def debug_heatmap_test():
+    """Run the exact heatmap logic and return results for debugging."""
+    from datetime import datetime, timedelta
+    from zoneinfo import ZoneInfo
+    try:
+        con = get_db()
+        today = datetime.now(ZoneInfo("America/Chicago")).date()
+        start_date = today - timedelta(weeks=26)
+        expected_days = (today - start_date).days + 1
+
+        # Step 1: asin='ALL' rows
+        rows_all = con.execute("""
+            SELECT date, COALESCE(units_ordered, 0)
+            FROM daily_sales
+            WHERE asin = 'ALL' AND date >= ? AND date <= ?
+            ORDER BY date
+        """, [str(start_date), str(today)]).fetchall()
+
+        # Step 2: per-ASIN aggregate
+        rows_asin = con.execute("""
+            SELECT date, COALESCE(SUM(units_ordered), 0)
+            FROM daily_sales
+            WHERE asin != 'ALL' AND date >= ? AND date <= ?
+            GROUP BY date ORDER BY date
+        """, [str(start_date), str(today)]).fetchall()
+
+        con.close()
+
+        threshold = expected_days * 0.3
+        used_source = "ALL" if len(rows_all) >= threshold else "per-ASIN"
+
+        # Build the result using the same logic as heatmap endpoint
+        rows = rows_all if len(rows_all) >= threshold else rows_asin
+        
+        def fmt_d(v):
+            if hasattr(v, 'isoformat'):
+                return v.isoformat()
+            return str(v)[:10]
+
+        result = []
+        for r in rows:
+            d_str = fmt_d(r[0])
+            units = int(r[1])
+            try:
+                dt = datetime.strptime(d_str, "%Y-%m-%d").date()
+            except Exception:
+                continue
+            days_ago = (today - dt).days
+            week = days_ago // 7
+            day = dt.weekday()
+            if week < 26:
+                result.append({"week": week, "day": day, "units": units})
+
+        # Summary stats
+        units_by_week = {}
+        for r in result:
+            w = r["week"]
+            units_by_week[w] = units_by_week.get(w, 0) + r["units"]
+
+        return {
+            "today": str(today),
+            "all_row_count": len(rows_all),
+            "per_asin_row_count": len(rows_asin),
+            "threshold": threshold,
+            "used_source": used_source,
+            "result_count": len(result),
+            "units_by_week": {f"W{26-k}": v for k, v in sorted(units_by_week.items())},
+            "sample_recent_10": result[:10] if result else [],
+        }
+    except Exception as e:
+        import traceback
+        return {"error": str(e), "tb": traceback.format_exc()}
