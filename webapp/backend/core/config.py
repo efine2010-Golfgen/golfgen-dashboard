@@ -70,13 +70,13 @@ TAB_API_PREFIXES = {
 USERS = {
     "eric": {
         "name": "Eric",
-        "emails": ["eric@golfgen.com", "eric@egbrands.com"],
+        "emails": ["eric@golfgen.com", "eric@egbrands.com", "efine2010@gmail.com"],
         "password_hash": "$2b$12$CXwF3gjnEyEPwej2qV9trem4AXZi4tUVR50ifvb2dUTiNVBhHAneu",
         "role": "admin",
     },
     "ty": {
         "name": "Ty",
-        "emails": ["ty@golfgen.com", "tysams@egbrands.com"],
+        "emails": ["ty@golfgen.com", "tysams@egbrands.com", "j.tysams@gmail.com"],
         "password_hash": "$2b$12$jurM2OMgL16XIFjNBQu3JeZsq.phyEea08ABqvNMIxZt3ZzgFBjs6",
         "role": "staff",
     },
@@ -118,18 +118,9 @@ GOOGLE_REDIRECT_URI = (
 )
 SESSION_SECRET = os.environ.get("SESSION_SECRET", secrets.token_hex(32))
 
-# Whitelisted emails allowed to login via Google SSO (case-insensitive)
-ALLOWED_SSO_EMAILS = {em.lower() for em in [
-    "eric@golfgen.com",
-    "eric@egbrands.com",
-    "efine2010@gmail.com",
-    "ty@golfgen.com",
-    "tysams@egbrands.com",
-    "kim@golfgen.com",
-    "kim@egbrands.com",
-    "ryan@egbrands.com",
-    "riseecom21@gmail.com",
-]}
+# Whitelisted emails allowed to login via Google SSO — auto-built from USERS
+# Only emails in USERS can log in. No separate list to maintain.
+ALLOWED_SSO_EMAILS = {em.lower() for _u in USERS.values() for em in _u["emails"]}
 
 # Session timeouts
 SESSION_MAX_AGE_HOURS = 18       # Absolute session lifetime

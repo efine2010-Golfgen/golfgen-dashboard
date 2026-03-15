@@ -224,7 +224,7 @@ async def tab_permission_middleware(request: Request, call_next):
     if method == "OPTIONS" or not path.startswith("/api/"):
         return await call_next(request)
 
-    # Skip auth endpoints, system endpoints, upload endpoints, MFA endpoints
+    # Skip auth endpoints (including passkey login), system endpoints, upload endpoints, MFA endpoints
     if (path.startswith("/api/auth/") or
         path.startswith("/api/me") or
         path.startswith("/api/permissions") or
@@ -432,16 +432,15 @@ async def google_callback(code: str = "", error: str = ""):
     email = userinfo.get("email", "").lower().strip()
     name = userinfo.get("name", email.split("@")[0])
 
-    # Check whitelist
-    if email not in ALLOWED_SSO_EMAILS:
-        logger.warning(f"Google SSO rejected: {email} not in whitelist")
-        _write_audit(email, name, "sso_rejected", f"Email not in whitelist: {email}")
+    # Resolve email to a known user — MUST map to a USERS entry to log in
+    user_key = EMAIL_TO_USER.get(email)
+    if not user_key:
+        logger.warning(f"Google SSO rejected: {email} — no matching user in USERS")
+        _write_audit(email, name, "sso_rejected", f"Email not mapped to any user: {email}")
         return RedirectResponse("/?auth_error=not_authorized")
 
-    # Find matching user in USERS config (for role/permissions)
-    user_key = EMAIL_TO_USER.get(email)
-    role = "admin" if user_key and USERS[user_key]["role"] == "admin" else "staff"
-    user_name = USERS[user_key]["name"] if user_key else name
+    role = USERS[user_key]["role"]
+    user_name = USERS[user_key]["name"]
 
     # Create session
     session_token = secrets.token_hex(32)
@@ -461,6 +460,295 @@ async def google_callback(code: str = "", error: str = ""):
         max_age=60 * 60 * SESSION_MAX_AGE_HOURS,
     )
     return response
+
+
+# ── Passkey / WebAuthn Endpoints ──────────────────────────
+
+# WebAuthn RP (Relying Party) configuration
+_RP_ID = os.environ.get("WEBAUTHN_RP_ID", "golfgen-dashboard-production-ce30.up.railway.app")
+_RP_NAME = "GolfGen Dashboard"
+_RP_ORIGIN = os.environ.get("WEBAUTHN_ORIGIN", "https://golfgen-dashboard-production-ce30.up.railway.app")
+
+# In-memory challenge store (short-lived, cleared after use)
+_passkey_challenges = {}  # token_or_email -> challenge_bytes
+
+
+@app.post("/api/auth/passkey/register-options")
+def passkey_register_options(request: Request):
+    """Generate WebAuthn registration challenge. User must be logged in."""
+    sess = _require_auth(request)
+    user_key = _find_user_by_email(sess["user_email"])
+    if not user_key:
+        raise HTTPException(status_code=400, detail="User not found")
+
+    try:
+        from webauthn import generate_registration_options, options_to_json
+        from webauthn.helpers.structs import (
+            AuthenticatorSelectionCriteria,
+            ResidentKeyRequirement,
+            UserVerificationRequirement,
+        )
+    except ImportError:
+        raise HTTPException(status_code=501, detail="WebAuthn library not installed")
+
+    # Get existing credentials for this user (to exclude)
+    con = get_db()
+    existing = con.execute(
+        "SELECT credential_id FROM passkey_credentials WHERE user_key = ?", [user_key]
+    ).fetchall()
+    con.close()
+
+    from webauthn.helpers import bytes_to_base64url, base64url_to_bytes
+    exclude_creds = []
+    for row in existing:
+        from webauthn.helpers.structs import PublicKeyCredentialDescriptor
+        exclude_creds.append(PublicKeyCredentialDescriptor(id=base64url_to_bytes(row[0])))
+
+    options = generate_registration_options(
+        rp_id=_RP_ID,
+        rp_name=_RP_NAME,
+        user_id=user_key.encode("utf-8"),
+        user_name=sess["user_email"],
+        user_display_name=sess["user_name"],
+        authenticator_selection=AuthenticatorSelectionCriteria(
+            resident_key=ResidentKeyRequirement.PREFERRED,
+            user_verification=UserVerificationRequirement.PREFERRED,
+        ),
+        exclude_credentials=exclude_creds,
+    )
+
+    # Store challenge for verification
+    _passkey_challenges[sess["user_email"]] = options.challenge
+
+    import json
+    return JSONResponse(json.loads(options_to_json(options)))
+
+
+class PasskeyRegisterRequest(BaseModel):
+    credential: dict
+    device_name: str = ""
+
+
+@app.post("/api/auth/passkey/register-verify")
+def passkey_register_verify(req: PasskeyRegisterRequest, request: Request):
+    """Verify WebAuthn registration and store credential."""
+    sess = _require_auth(request)
+    user_key = _find_user_by_email(sess["user_email"])
+    if not user_key:
+        raise HTTPException(status_code=400, detail="User not found")
+
+    challenge = _passkey_challenges.pop(sess["user_email"], None)
+    if not challenge:
+        raise HTTPException(status_code=400, detail="No registration challenge found — try again")
+
+    try:
+        from webauthn import verify_registration_response
+        from webauthn.helpers import bytes_to_base64url
+        from webauthn.helpers.structs import RegistrationCredential
+        import json
+
+        credential = RegistrationCredential.parse_raw(json.dumps(req.credential))
+
+        verification = verify_registration_response(
+            credential=credential,
+            expected_challenge=challenge,
+            expected_rp_id=_RP_ID,
+            expected_origin=_RP_ORIGIN,
+        )
+
+        # Store credential in database
+        cred_id_b64 = bytes_to_base64url(verification.credential_id)
+        pub_key_b64 = bytes_to_base64url(verification.credential_public_key)
+        import uuid
+        row_id = str(uuid.uuid4())
+
+        con = get_db()
+        con.execute(
+            "INSERT INTO passkey_credentials (id, user_key, credential_id, public_key, sign_count, device_name) "
+            "VALUES (?, ?, ?, ?, ?, ?)",
+            [row_id, user_key, cred_id_b64, pub_key_b64, verification.sign_count, req.device_name or "Passkey"],
+        )
+        con.close()
+
+        _write_audit(sess["user_email"], sess["user_name"], "passkey_registered",
+                     f"Device: {req.device_name or 'Passkey'}")
+        logger.info(f"Passkey registered for {user_key} ({sess['user_email']})")
+
+        return {"ok": True, "message": "Passkey registered successfully"}
+
+    except Exception as e:
+        logger.error(f"Passkey registration failed: {e}")
+        raise HTTPException(status_code=400, detail=f"Registration failed: {str(e)}")
+
+
+class PasskeyLoginEmailRequest(BaseModel):
+    email: str = ""
+
+
+@app.post("/api/auth/passkey/login-options")
+def passkey_login_options(req: PasskeyLoginEmailRequest):
+    """Generate WebAuthn authentication challenge for login."""
+    try:
+        from webauthn import generate_authentication_options, options_to_json
+        from webauthn.helpers.structs import (
+            PublicKeyCredentialDescriptor,
+            UserVerificationRequirement,
+        )
+        from webauthn.helpers import base64url_to_bytes
+    except ImportError:
+        raise HTTPException(status_code=501, detail="WebAuthn library not installed")
+
+    allow_creds = []
+    lookup_email = req.email.lower().strip() if req.email else ""
+
+    if lookup_email:
+        # If email provided, find credentials for that user
+        user_key = EMAIL_TO_USER.get(lookup_email)
+        if user_key:
+            con = get_db()
+            rows = con.execute(
+                "SELECT credential_id FROM passkey_credentials WHERE user_key = ?", [user_key]
+            ).fetchall()
+            con.close()
+            for row in rows:
+                allow_creds.append(PublicKeyCredentialDescriptor(id=base64url_to_bytes(row[0])))
+
+    options = generate_authentication_options(
+        rp_id=_RP_ID,
+        allow_credentials=allow_creds if allow_creds else None,
+        user_verification=UserVerificationRequirement.PREFERRED,
+    )
+
+    # Store challenge keyed by a temp identifier
+    challenge_key = lookup_email or "__discoverable__"
+    _passkey_challenges[challenge_key] = options.challenge
+
+    import json
+    return JSONResponse(json.loads(options_to_json(options)))
+
+
+class PasskeyLoginVerifyRequest(BaseModel):
+    credential: dict
+    email: str = ""
+
+
+@app.post("/api/auth/passkey/login-verify")
+def passkey_login_verify(req: PasskeyLoginVerifyRequest):
+    """Verify WebAuthn authentication and create session."""
+    try:
+        from webauthn import verify_authentication_response
+        from webauthn.helpers import bytes_to_base64url, base64url_to_bytes
+        from webauthn.helpers.structs import AuthenticationCredential
+        import json
+
+        credential = AuthenticationCredential.parse_raw(json.dumps(req.credential))
+        cred_id_b64 = bytes_to_base64url(credential.raw_id)
+
+        # Look up the credential in database
+        con = get_db_rw()
+        row = con.execute(
+            "SELECT user_key, public_key, sign_count FROM passkey_credentials WHERE credential_id = ?",
+            [cred_id_b64],
+        ).fetchone()
+
+        if not row:
+            con.close()
+            raise HTTPException(status_code=401, detail="Passkey not recognized")
+
+        user_key, pub_key_b64, stored_sign_count = row[0], row[1], row[2]
+
+        # Recover challenge
+        challenge_key = req.email.lower().strip() if req.email else "__discoverable__"
+        challenge = _passkey_challenges.pop(challenge_key, None)
+        if not challenge:
+            # Try discoverable fallback
+            challenge = _passkey_challenges.pop("__discoverable__", None)
+        if not challenge:
+            con.close()
+            raise HTTPException(status_code=400, detail="No login challenge found — try again")
+
+        verification = verify_authentication_response(
+            credential=credential,
+            expected_challenge=challenge,
+            expected_rp_id=_RP_ID,
+            expected_origin=_RP_ORIGIN,
+            credential_public_key=base64url_to_bytes(pub_key_b64),
+            credential_current_sign_count=stored_sign_count,
+        )
+
+        # Update sign count
+        con.execute(
+            "UPDATE passkey_credentials SET sign_count = ? WHERE credential_id = ?",
+            [verification.new_sign_count, cred_id_b64],
+        )
+
+        # Create session for this user
+        if user_key not in USERS:
+            con.close()
+            raise HTTPException(status_code=401, detail="User no longer exists")
+
+        user = USERS[user_key]
+        session_token = secrets.token_hex(32)
+        user_email = user["emails"][0]  # Primary email
+        con.execute(
+            "INSERT INTO sessions (token, user_email, user_name, role, login_method) VALUES (?, ?, ?, ?, 'passkey')",
+            [session_token, user_email, user["name"], user["role"]],
+        )
+        con.close()
+
+        _write_audit(user_email, user["name"], "login_passkey", "Passkey authentication")
+        logger.info(f"Passkey login successful for {user_key}")
+
+        response = JSONResponse({"ok": True, "name": user["name"], "role": user["role"]})
+        response.set_cookie(
+            key="golfgen_session", value=session_token,
+            httponly=True, samesite="none", secure=True,
+            max_age=60 * 60 * SESSION_MAX_AGE_HOURS,
+        )
+        return response
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Passkey login failed: {e}")
+        raise HTTPException(status_code=401, detail=f"Passkey authentication failed: {str(e)}")
+
+
+@app.get("/api/auth/passkey/list")
+def passkey_list(request: Request):
+    """List passkeys for current user."""
+    sess = _require_auth(request)
+    user_key = _find_user_by_email(sess["user_email"])
+    if not user_key:
+        return {"passkeys": []}
+    con = get_db()
+    rows = con.execute(
+        "SELECT id, device_name, created_at FROM passkey_credentials WHERE user_key = ? ORDER BY created_at DESC",
+        [user_key],
+    ).fetchall()
+    con.close()
+    return {"passkeys": [{"id": r[0], "device_name": r[1], "created_at": str(r[2])} for r in rows]}
+
+
+class PasskeyDeleteRequest(BaseModel):
+    passkey_id: str
+
+
+@app.post("/api/auth/passkey/delete")
+def passkey_delete(req: PasskeyDeleteRequest, request: Request):
+    """Delete a passkey for current user."""
+    sess = _require_auth(request)
+    user_key = _find_user_by_email(sess["user_email"])
+    if not user_key:
+        raise HTTPException(status_code=400, detail="User not found")
+    con = get_db()
+    con.execute(
+        "DELETE FROM passkey_credentials WHERE id = ? AND user_key = ?",
+        [req.passkey_id, user_key],
+    )
+    con.close()
+    _write_audit(sess["user_email"], sess["user_name"], "passkey_deleted", f"Passkey {req.passkey_id}")
+    return {"ok": True}
 
 
 @app.get("/api/me")

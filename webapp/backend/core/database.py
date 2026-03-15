@@ -361,6 +361,19 @@ def _init_auth_tables():
         )
     """)
 
+    # ── Passkey / WebAuthn credentials table ───────────────
+    con.execute("""
+        CREATE TABLE IF NOT EXISTS passkey_credentials (
+            id              TEXT PRIMARY KEY,
+            user_key        TEXT NOT NULL,
+            credential_id   TEXT NOT NULL UNIQUE,
+            public_key      TEXT NOT NULL,
+            sign_count      INTEGER DEFAULT 0,
+            device_name     TEXT DEFAULT '',
+            created_at      TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+    """)
+
     # Seed default permissions for staff users (all enabled)
     for ukey, udata in USERS.items():
         if udata["role"] == "staff":

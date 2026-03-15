@@ -42,6 +42,42 @@ export const api = {
   logout: () =>
     fetch(`${API_BASE}/api/auth/logout`, { method: "POST", credentials: "include" }).then(r => r.json()),
   me: () => fetchJSON("/api/me"),
+
+  // Passkey / WebAuthn
+  passkeyRegisterOptions: () =>
+    fetch(`${API_BASE}/api/auth/passkey/register-options`, { method: "POST", credentials: "include" }).then(r => r.json()),
+  passkeyRegisterVerify: (credential, deviceName = "") =>
+    fetch(`${API_BASE}/api/auth/passkey/register-options`, { method: "POST", credentials: "include" })
+      .then(() => fetch(`${API_BASE}/api/auth/passkey/register-verify`, {
+        method: "POST", credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ credential, device_name: deviceName }),
+      })).then(r => r.json()),
+  passkeyRegisterOpts: () =>
+    fetch(`${API_BASE}/api/auth/passkey/register-options`, { method: "POST", credentials: "include" }).then(r => r.json()),
+  passkeyRegisterDone: (credential, deviceName) =>
+    fetch(`${API_BASE}/api/auth/passkey/register-verify`, {
+      method: "POST", credentials: "include",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ credential, device_name: deviceName }),
+    }).then(r => r.json()),
+  passkeyLoginOptions: (email = "") =>
+    fetch(`${API_BASE}/api/auth/passkey/login-options`, {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ email }), credentials: "include",
+    }).then(r => r.json()),
+  passkeyLoginVerify: (credential, email = "") =>
+    fetch(`${API_BASE}/api/auth/passkey/login-verify`, {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ credential, email }), credentials: "include",
+    }).then(r => r.json()),
+  passkeyList: () => fetchJSON("/api/auth/passkey/list"),
+  passkeyDelete: (passkeyId) =>
+    fetch(`${API_BASE}/api/auth/passkey/delete`, {
+      method: "POST", credentials: "include",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ passkey_id: passkeyId }),
+    }).then(r => r.json()),
   myPermissions: () => fetchJSON("/api/permissions/me"),
   allPermissions: () => fetchJSON("/api/permissions"),
   updatePermission: (user, tab, enabled) =>
