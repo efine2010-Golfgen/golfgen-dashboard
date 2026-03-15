@@ -354,15 +354,63 @@ export default function FBAShipments({ filters = {} }) {
         </Card>
       </div>
 
-      {/* ══ Timeline placeholder ══ */}
+      {/* ══ Gantt Timeline ══ */}
       <SecDiv label="Active Shipment Timeline" />
       <Card>
-        <CardHdr title="Shipment Gantt — Timeline View">
-          <Badge text="Coming soon" type="blue" />
+        <CardHdr title="Shipment Gantt — Status Timeline">
+          <span style={{ ...SG({ fontSize: 9, color: 'var(--txt3)' }) }}>{activeShipments.length + closedShipments.slice(0, 8).length} shipments shown</span>
         </CardHdr>
-        <div style={{ padding: 30, textAlign: 'center', color: 'var(--txt3)', ...SG({ fontSize: 11 }) }}>
-          Gantt timeline will show ship-date to ETA for all active and recent shipments once historical data builds up.
-        </div>
+        {(() => {
+          const ganttShipments = [...activeShipments, ...closedShipments.slice(0, 8)];
+          if (ganttShipments.length === 0) return (
+            <div style={{ padding: 30, textAlign: 'center', color: 'var(--txt3)', ...SG({ fontSize: 11 }) }}>
+              No shipments to display. Click "Sync Inbound Now" to fetch data.
+            </div>
+          );
+          const stageMap = { WORKING: 1, SHIPPED: 2, IN_TRANSIT: 2, RECEIVING: 3, CHECKED_IN: 3, CLOSED: 4 };
+          const stageColors = { 1: '#7BAED0', 2: '#E87830', 3: '#F5B731', 4: '#2ECFAA' };
+          const stageLabels = { 1: 'Working', 2: 'Shipped', 3: 'Receiving', 4: 'Closed' };
+          return (
+            <div style={{ padding: '14px 20px', overflowX: 'auto' }}>
+              {/* Stage legend */}
+              <div style={{ display: 'flex', gap: 16, marginBottom: 12 }}>
+                {[1,2,3,4].map(st => (
+                  <div key={st} style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
+                    <div style={{ width: 10, height: 10, borderRadius: 2, background: stageColors[st] }} />
+                    <span style={{ ...SG({ fontSize: 8, color: 'var(--txt3)', textTransform: 'uppercase', letterSpacing: '.05em' }) }}>{stageLabels[st]}</span>
+                  </div>
+                ))}
+              </div>
+              {/* Gantt bars */}
+              {ganttShipments.map(s => {
+                const stage = stageMap[s.status] || 1;
+                const barWidth = (stage / 4) * 100;
+                const barColor = stageColors[stage];
+                const sent = s.totalShipped || 0;
+                const recv = s.totalReceived || 0;
+                return (
+                  <div key={s.shipmentId} style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 6 }}>
+                    <div style={{ minWidth: 140, maxWidth: 140, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                      <span style={{ ...SG({ fontSize: 9, fontWeight: 700, color: 'var(--txt2)' }) }}>{s.shipmentId}</span>
+                    </div>
+                    <div style={{ flex: 1, position: 'relative', height: 20, background: 'var(--ibg)', borderRadius: 4, overflow: 'hidden' }}>
+                      <div style={{ position: 'absolute', top: 0, left: 0, height: '100%', width: `${barWidth}%`, background: barColor, borderRadius: 4, opacity: 0.85, transition: 'width .4s' }} />
+                      <div style={{ position: 'absolute', top: 0, left: 0, right: 0, height: '100%', display: 'flex', alignItems: 'center', padding: '0 8px', justifyContent: 'space-between' }}>
+                        <span style={{ ...SG({ fontSize: 8, fontWeight: 700, color: '#fff', textShadow: '0 1px 2px rgba(0,0,0,.4)', zIndex: 1 }) }}>{s.destination}</span>
+                        <span style={{ ...SG({ fontSize: 8, color: stage >= 3 ? '#fff' : 'var(--txt3)', textShadow: stage >= 3 ? '0 1px 2px rgba(0,0,0,.4)' : 'none', zIndex: 1 }) }}>
+                          {sent > 0 ? `${recv}/${sent}` : '—'}
+                        </span>
+                      </div>
+                    </div>
+                    <div style={{ minWidth: 60 }}>
+                      <StatusPill status={s.status} />
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          );
+        })()}
       </Card>
 
       {/* ══ Lead Time + Carrier placeholder ══ */}
@@ -418,23 +466,25 @@ export default function FBAShipments({ filters = {} }) {
 
         {/* ── Main Table ── */}
         <Card style={{ overflow: 'hidden', marginBottom: 0 }}>
-          <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+          <div style={{ overflowX: 'auto' }}>
+          <table style={{ width: '100%', borderCollapse: 'collapse', minWidth: 900 }}>
             <thead>
               <tr>
                 {[
                   { label: "", w: 26 },
-                  { label: "Shipment", w: 200 },
-                  { label: "Status", w: 100 },
-                  { label: "Dest FC", w: 72 },
-                  { label: "Sent", w: 64, r: true },
-                  { label: "Received", w: 64, r: true },
-                  { label: "Recv %", w: 90 },
-                  { label: "Discrepancy", w: 76, r: true },
-                  { label: "Products", w: 60 },
+                  { label: "Shipment ID", w: 120 },
+                  { label: "Shipment Name", w: 160 },
+                  { label: "Status", w: 90 },
+                  { label: "Dest FC", w: 64 },
+                  { label: "Sent", w: 58, r: true },
+                  { label: "Received", w: 62, r: true },
+                  { label: "Recv %", w: 80 },
+                  { label: "Discrepancy", w: 72, r: true },
+                  { label: "Products", w: 54, r: true },
                 ].map((col, i) => (
                   <th key={i} style={{
                     ...SG({ fontSize: 8, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '.07em', color: 'var(--txt3)' }),
-                    padding: '8px 10px', textAlign: col.r ? 'right' : 'left',
+                    padding: '8px 8px', textAlign: col.r ? 'right' : 'left',
                     borderBottom: '1px solid var(--brd2)', background: 'var(--card2, var(--card))',
                     whiteSpace: 'nowrap', width: col.w,
                   }}>{col.label}</th>
@@ -443,14 +493,13 @@ export default function FBAShipments({ filters = {} }) {
             </thead>
             <tbody>
               {filtered.length === 0 && (
-                <tr><td colSpan={9} style={{ padding: 40, textAlign: 'center', color: 'var(--txt3)', fontSize: 13 }}>
+                <tr><td colSpan={10} style={{ padding: 40, textAlign: 'center', color: 'var(--txt3)', fontSize: 13 }}>
                   {shipments.length === 0 ? 'No FBA shipments found. Click "Sync Inbound Now" to fetch data.' : 'No shipments match current filters.'}
                 </td></tr>
               )}
               {filtered.map(s => {
                 const isExp = expandedId === s.shipmentId;
                 const items = itemsCache[s.shipmentId] || [];
-                // Use server-provided totals for active shipments; compute from items if expanded
                 const sent = items.length > 0
                   ? items.reduce((sum, it) => sum + (it.quantityShipped || 0), 0)
                   : (s.totalShipped || 0);
@@ -466,7 +515,7 @@ export default function FBAShipments({ filters = {} }) {
                     <tr onClick={() => toggleExpand(s.shipmentId)} style={{ cursor: 'pointer' }}
                       onMouseEnter={e => e.currentTarget.style.background = 'var(--ibg)'}
                       onMouseLeave={e => e.currentTarget.style.background = ''}>
-                      <td style={{ padding: '9px 10px' }}>
+                      <td style={{ padding: '9px 8px' }}>
                         <button style={{
                           width: 20, height: 20, borderRadius: 4, border: `1px solid ${isExp ? 'var(--acc1)' : 'var(--brd2)'}`,
                           background: isExp ? 'rgba(46,207,170,.07)' : 'transparent',
@@ -474,74 +523,90 @@ export default function FBAShipments({ filters = {} }) {
                           display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
                         }}>{isExp ? '▲' : '▼'}</button>
                       </td>
-                      <td style={{ padding: '9px 10px' }}>
-                        <div style={{ fontSize: 11, fontWeight: 600, color: 'var(--txt)' }}>{s.shipmentName || s.shipmentId}</div>
-                        <div style={{ ...SG({ fontSize: 8, color: 'var(--txt3)', marginTop: 1 }) }}>{s.shipmentId}{s.itemCount ? ` · ${s.itemCount} ASINs` : ""}</div>
+                      <td style={{ padding: '9px 8px' }}>
+                        <div style={{ ...SG({ fontSize: 10, fontWeight: 700, color: 'var(--acc3, #3E658C)' }) }}>{s.shipmentId}</div>
                       </td>
-                      <td style={{ padding: '9px 10px' }}><StatusPill status={s.status} /></td>
-                      <td style={{ padding: '9px 10px', ...SG({ fontSize: 10, fontWeight: 700, color: 'var(--txt2)' }) }}>{s.destination || "—"}</td>
-                      <td style={{ padding: '9px 10px', textAlign: 'right', fontWeight: 700, color: 'var(--txt)' }}>{sent > 0 ? sent.toLocaleString() : "—"}</td>
-                      <td style={{ padding: '9px 10px', textAlign: 'right', color: 'var(--acc1)' }}>{recv > 0 ? recv.toLocaleString() : "—"}</td>
-                      <td style={{ padding: '9px 10px' }}><RecvBar sent={sent} recv={recv} /></td>
-                      <td style={{ padding: '9px 10px', textAlign: 'right', ...SG({ fontSize: 11, fontWeight: 700, color: discCol }) }}>
+                      <td style={{ padding: '9px 8px' }}>
+                        <div style={{ fontSize: 11, fontWeight: 600, color: 'var(--txt)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', maxWidth: 160 }}>{s.shipmentName || "—"}</div>
+                      </td>
+                      <td style={{ padding: '9px 8px' }}><StatusPill status={s.status} /></td>
+                      <td style={{ padding: '9px 8px', ...SG({ fontSize: 10, fontWeight: 700, color: 'var(--txt2)' }) }}>{s.destination || "—"}</td>
+                      <td style={{ padding: '9px 8px', textAlign: 'right', fontWeight: 700, color: 'var(--txt)' }}>{sent > 0 ? sent.toLocaleString() : "—"}</td>
+                      <td style={{ padding: '9px 8px', textAlign: 'right', color: 'var(--acc1)' }}>{recv > 0 ? recv.toLocaleString() : "—"}</td>
+                      <td style={{ padding: '9px 8px' }}><RecvBar sent={sent} recv={recv} /></td>
+                      <td style={{ padding: '9px 8px', textAlign: 'right', ...SG({ fontSize: 11, fontWeight: 700, color: discCol }) }}>
                         {disc === null ? "—" : disc === 0 ? "0" : disc > 0 ? `+${disc.toLocaleString()}` : disc.toLocaleString()}
                       </td>
-                      <td style={{ padding: '9px 10px', fontSize: 11, color: 'var(--txt3)' }}>{s.itemCount || "—"}</td>
+                      <td style={{ padding: '9px 8px', textAlign: 'right', fontSize: 11, color: 'var(--txt3)' }}>{s.itemCount || "—"}</td>
                     </tr>
 
-                    {/* Expanded items */}
+                    {/* Expanded items — ASIN-level with aligned columns */}
                     {isExp && (
                       <tr style={{ background: 'var(--card2, var(--card))' }}>
-                        <td colSpan={9} style={{ padding: 0 }}>
+                        <td colSpan={10} style={{ padding: 0 }}>
                           <div style={{ borderTop: '2px solid var(--acc1)' }}>
                             {loadingItems === s.shipmentId ? (
                               <div style={{ padding: 16, textAlign: 'center', color: 'var(--txt3)', fontSize: 12 }}>Loading items…</div>
                             ) : items.length > 0 ? (
-                              <>
-                                <div style={{
-                                  display: 'grid', gridTemplateColumns: '32px 1.2fr 1.5fr 70px 70px 76px 70px', gap: 6,
-                                  padding: '6px 14px 6px 40px', background: 'var(--card)', borderBottom: '1px solid var(--brd2)',
-                                }}>
-                                  {["", "SKU / FNSKU", "Description", "Sent", "Received", "Discrepancy", "Recv %"].map((h, i) => (
-                                    <span key={i} style={{ ...SG({ fontSize: 7, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '.07em', color: 'var(--txt3)', textAlign: i > 2 ? 'right' : 'left' }) }}>{h}</span>
-                                  ))}
-                                </div>
-                                {items.map((it, idx) => {
-                                  const iSent = it.quantityShipped || 0;
-                                  const iRecv = it.quantityReceived || 0;
-                                  const iDisc = iRecv > 0 ? iRecv - iSent : null;
-                                  const iPct = iSent > 0 && iRecv > 0 ? Math.round(iRecv / iSent * 100) : 0;
-                                  const iDiscCol = iDisc === null ? 'var(--txt3)' : iDisc < 0 ? '#f87171' : iDisc > 0 ? '#2ECFAA' : 'var(--txt3)';
-                                  const iPctCol = iPct >= 99 ? '#2ECFAA' : iPct >= 90 ? '#F5B731' : '#f87171';
-                                  return (
-                                    <div key={idx} style={{
-                                      display: 'grid', gridTemplateColumns: '32px 1.2fr 1.5fr 70px 70px 76px 70px', gap: 6,
-                                      padding: '7px 14px 7px 40px', borderBottom: '1px solid var(--brd)', alignItems: 'center',
-                                    }}>
-                                      <div style={{ ...SG({ fontSize: 9, color: 'var(--txt3)', fontWeight: 700 }) }}>{idx + 1}</div>
-                                      <div>
-                                        <div style={{ ...SG({ fontSize: 8, color: 'var(--acc3, #3E658C)', fontWeight: 700 }) }}>{it.sku}</div>
-                                        <div style={{ fontSize: 10, color: 'var(--txt)', fontWeight: 600, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{it.fnsku || "—"}</div>
-                                      </div>
-                                      <div style={{ fontSize: 10, color: 'var(--txt2)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }} title={it.productName || ""}>{it.productName || "—"}</div>
-                                      <div style={{ ...SG({ fontSize: 10, textAlign: 'right' }) }}>{iSent.toLocaleString()}</div>
-                                      <div style={{ ...SG({ fontSize: 10, textAlign: 'right', color: iRecv > 0 ? '#2ECFAA' : 'var(--txt3)' }) }}>{iRecv > 0 ? iRecv.toLocaleString() : "—"}</div>
-                                      <div style={{ textAlign: 'right' }}>
-                                        {iDisc === null ? <span style={{ ...SG({ fontSize: 9, color: 'var(--txt3)' }) }}>—</span>
-                                          : iDisc === 0 ? <span style={{ ...SG({ fontSize: 9, color: 'var(--txt3)' }) }}>0</span>
-                                          : <span style={{ ...SG({ fontSize: 9, fontWeight: 700, padding: '1px 5px', borderRadius: 4, background: iDisc < 0 ? 'rgba(248,113,113,.14)' : 'rgba(46,207,170,.12)', color: iDiscCol }) }}>{iDisc > 0 ? `+${iDisc.toLocaleString()}` : iDisc.toLocaleString()}</span>
-                                        }
-                                      </div>
-                                      <div style={{ textAlign: 'right' }}>
-                                        {iRecv > 0 && iSent > 0
-                                          ? <RecvBar sent={iSent} recv={iRecv} />
-                                          : <span style={{ ...SG({ fontSize: 9, color: 'var(--txt3)' }) }}>—</span>
-                                        }
-                                      </div>
-                                    </div>
-                                  );
-                                })}
-                              </>
+                              <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+                                <thead>
+                                  <tr>
+                                    {[
+                                      { label: "", w: 26 },
+                                      { label: "ASIN", w: 120 },
+                                      { label: "Product / SKU", w: 160 },
+                                      { label: "FNSKU", w: 90 },
+                                      { label: "FC", w: 64 },
+                                      { label: "Sent", w: 58, r: true },
+                                      { label: "Received", w: 62, r: true },
+                                      { label: "Recv %", w: 80 },
+                                      { label: "Discrepancy", w: 72, r: true },
+                                      { label: "", w: 54 },
+                                    ].map((col, ci) => (
+                                      <th key={ci} style={{
+                                        ...SG({ fontSize: 7, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '.07em', color: 'var(--txt3)' }),
+                                        padding: '6px 8px', textAlign: col.r ? 'right' : 'left',
+                                        borderBottom: '1px solid var(--brd2)', background: 'var(--card)',
+                                        whiteSpace: 'nowrap', width: col.w,
+                                      }}>{col.label}</th>
+                                    ))}
+                                  </tr>
+                                </thead>
+                                <tbody>
+                                  {items.map((it, idx) => {
+                                    const iSent = it.quantityShipped || 0;
+                                    const iRecv = it.quantityReceived || 0;
+                                    const iDisc = (iSent > 0 || iRecv > 0) ? iRecv - iSent : null;
+                                    const iDiscCol = iDisc === null ? 'var(--txt3)' : iDisc < 0 ? '#f87171' : iDisc > 0 ? '#2ECFAA' : 'var(--txt3)';
+                                    return (
+                                      <tr key={idx} style={{ borderBottom: '1px solid var(--brd)' }}>
+                                        <td style={{ padding: '7px 8px', ...SG({ fontSize: 9, color: 'var(--txt3)', fontWeight: 700 }) }}>{idx + 1}</td>
+                                        <td style={{ padding: '7px 8px' }}>
+                                          <div style={{ ...SG({ fontSize: 10, fontWeight: 700, color: 'var(--acc1)' }) }}>{it.asin || "—"}</div>
+                                        </td>
+                                        <td style={{ padding: '7px 8px' }}>
+                                          <div style={{ fontSize: 10, fontWeight: 600, color: 'var(--txt)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', maxWidth: 160 }} title={it.productName || ""}>{it.productName || "—"}</div>
+                                          <div style={{ ...SG({ fontSize: 8, color: 'var(--acc3, #3E658C)', marginTop: 1 }) }}>{it.sku}</div>
+                                        </td>
+                                        <td style={{ padding: '7px 8px', ...SG({ fontSize: 9, color: 'var(--txt3)' }) }}>{it.fnsku || "—"}</td>
+                                        <td style={{ padding: '7px 8px', ...SG({ fontSize: 10, fontWeight: 700, color: 'var(--txt2)' }) }}>{s.destination || "—"}</td>
+                                        <td style={{ padding: '7px 8px', textAlign: 'right', ...SG({ fontSize: 10 }) }}>{iSent.toLocaleString()}</td>
+                                        <td style={{ padding: '7px 8px', textAlign: 'right', ...SG({ fontSize: 10, color: iRecv > 0 ? '#2ECFAA' : 'var(--txt3)' }) }}>{iRecv > 0 ? iRecv.toLocaleString() : "—"}</td>
+                                        <td style={{ padding: '7px 8px' }}>
+                                          {iRecv > 0 && iSent > 0 ? <RecvBar sent={iSent} recv={iRecv} /> : <span style={{ ...SG({ fontSize: 9, color: 'var(--txt3)' }) }}>—</span>}
+                                        </td>
+                                        <td style={{ padding: '7px 8px', textAlign: 'right' }}>
+                                          {iDisc === null ? <span style={{ ...SG({ fontSize: 9, color: 'var(--txt3)' }) }}>—</span>
+                                            : iDisc === 0 ? <span style={{ ...SG({ fontSize: 9, color: 'var(--txt3)' }) }}>0</span>
+                                            : <span style={{ ...SG({ fontSize: 9, fontWeight: 700, padding: '1px 5px', borderRadius: 4, background: iDisc < 0 ? 'rgba(248,113,113,.14)' : 'rgba(46,207,170,.12)', color: iDiscCol }) }}>{iDisc > 0 ? `+${iDisc.toLocaleString()}` : iDisc.toLocaleString()}</span>
+                                          }
+                                        </td>
+                                        <td style={{ padding: '7px 8px' }}></td>
+                                      </tr>
+                                    );
+                                  })}
+                                </tbody>
+                              </table>
                             ) : (
                               <div style={{ padding: 16, textAlign: 'center', color: 'var(--txt3)', fontSize: 12 }}>No item details available.</div>
                             )}
@@ -554,6 +619,7 @@ export default function FBAShipments({ filters = {} }) {
               })}
             </tbody>
           </table>
+          </div>
         </Card>
 
         {/* ── Sidebar ── */}

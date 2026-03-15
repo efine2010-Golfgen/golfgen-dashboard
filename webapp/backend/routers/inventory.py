@@ -1105,15 +1105,21 @@ def _fetch_fba_shipments_from_api(statuses=None, days_back=90):
                 "totalReceived": 0,
             })
 
-            # Track active shipments for item pre-fetch
+            # Track shipments for item pre-fetch (active first, then recent closed)
             if status in ("WORKING", "SHIPPED", "RECEIVING", "IN_TRANSIT", "CHECKED_IN"):
                 active_ids.append(ship_id)
 
-        # Pre-fetch items for active shipments to populate sent/received/itemCount
-        if active_ids:
-            logger.info(f"FBA Shipments: pre-fetching items for {len(active_ids)} active shipments")
+        # Also include CLOSED shipments for pre-fetch (most recent first, capped)
+        closed_ids = [n["shipmentId"] for n in normalized if n["status"] == "CLOSED"]
+        # Cap total pre-fetches: active first, then up to 20 closed
+        MAX_CLOSED_PREFETCH = 20
+        prefetch_ids = active_ids + closed_ids[:MAX_CLOSED_PREFETCH]
+
+        # Pre-fetch items for shipments to populate sent/received/itemCount
+        if prefetch_ids:
+            logger.info(f"FBA Shipments: pre-fetching items for {len(prefetch_ids)} shipments ({len(active_ids)} active + {min(len(closed_ids), MAX_CLOSED_PREFETCH)} closed)")
             ship_lookup = {n["shipmentId"]: n for n in normalized}
-            for sid in active_ids:
+            for sid in prefetch_ids:
                 try:
                     items = _enrich_shipment_items(sid)
                     if items and sid in ship_lookup:
@@ -1191,7 +1197,7 @@ def _enrich_shipment_items(shipment_id):
                 })
             next_token = payload.get("NextToken")
 
-        # Enrich with product names from item_master (DB)
+        # Enrich with product names + ASIN from item_master (DB)
         if result:
             try:
                 con = get_db()
@@ -1199,12 +1205,14 @@ def _enrich_shipment_items(shipment_id):
                 if skus:
                     placeholders = ",".join(["?"] * len(skus))
                     rows = con.execute(
-                        f"SELECT sku, product_name FROM item_master WHERE sku IN ({placeholders})",
+                        f"SELECT sku, product_name, asin FROM item_master WHERE sku IN ({placeholders})",
                         skus,
                     ).fetchall()
                     name_map = {r[0]: r[1] for r in rows if r[1]}
+                    asin_map = {r[0]: r[2] for r in rows if r[2]}
                     for r in result:
                         r["productName"] = name_map.get(r["sku"], "")
+                        r["asin"] = asin_map.get(r["sku"], "")
             except Exception as e:
                 logger.warning(f"Could not enrich item names for {shipment_id}: {e}")
 
