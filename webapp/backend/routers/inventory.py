@@ -1342,7 +1342,7 @@ def inventory_command_center(
             total_units += total
 
     # ── 2. Sales Velocity (7d, 30d, 90d) ─────────────────────────────────────
-    vel_filter = "WHERE asin != 'ALL' AND date >= CURRENT_DATE - 90" + hf
+    vel_filter = "WHERE asin != 'ALL' AND CAST(date AS DATE) >= CURRENT_DATE - 90" + hf
     vel_rows = con.execute(f"""
         SELECT asin,
                SUM(CASE WHEN date >= CURRENT_DATE - 7 THEN units_ordered ELSE 0 END) AS u7,
@@ -1502,7 +1502,7 @@ def inventory_command_center(
             SELECT asin, COUNT(*) AS cnt
             FROM financial_events
             WHERE event_type ILIKE '%%refund%%'
-              AND date >= CURRENT_DATE - 90
+              AND CAST(date AS DATE) >= CURRENT_DATE - 90
             GROUP BY asin
         """).fetchall()
         for r in refund_rows:
@@ -1513,7 +1513,7 @@ def inventory_command_center(
             SELECT asin, COUNT(*) AS shipment_count
             FROM financial_events
             WHERE event_type ILIKE '%%Shipment%%'
-              AND date >= CURRENT_DATE - 90
+              AND CAST(date AS DATE) >= CURRENT_DATE - 90
               AND asin IS NOT NULL AND asin != ''
             GROUP BY asin
         """).fetchall()

@@ -1391,7 +1391,7 @@ def return_rate_debug():
         ship_rows = con.execute("""
             SELECT asin, COUNT(*) FROM financial_events
             WHERE event_type ILIKE '%%Shipment%%'
-              AND date >= CURRENT_DATE - 90
+              AND CAST(date AS DATE) >= CURRENT_DATE - 90
               AND asin IS NOT NULL AND asin != ''
             GROUP BY asin ORDER BY COUNT(*) DESC LIMIT 10
         """).fetchall()
@@ -1400,7 +1400,7 @@ def return_rate_debug():
         refund_rows = con.execute("""
             SELECT asin, COUNT(*) FROM financial_events
             WHERE event_type ILIKE '%%refund%%'
-              AND date >= CURRENT_DATE - 90
+              AND CAST(date AS DATE) >= CURRENT_DATE - 90
             GROUP BY asin ORDER BY COUNT(*) DESC LIMIT 10
         """).fetchall()
         result["top_refund_asins"] = [{"fe_asin": r[0], "count": r[1]} for r in refund_rows]
