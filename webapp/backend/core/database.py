@@ -98,11 +98,13 @@ def _translate_sql_for_pg(sql: str) -> str:
     # DOUBLE → DOUBLE PRECISION (DuckDB type not valid in PostgreSQL)
     sql = re.sub(r'\bDOUBLE\b(?!\s+PRECISION)', 'DOUBLE PRECISION', sql)
 
-    # CURRENT_DATE - N  →  CURRENT_DATE - INTERVAL 'N days'
+    # CURRENT_DATE - N  →  CAST((CURRENT_DATE - INTERVAL 'N days') AS VARCHAR)
     # DuckDB allows `CURRENT_DATE - 90` but PostgreSQL does not.
+    # We CAST to VARCHAR because many date columns (daily_sales.date) are VARCHAR,
+    # and PostgreSQL cannot compare VARCHAR >= DATE without an explicit cast.
     sql = re.sub(
         r'\bCURRENT_DATE\s*-\s*(\d+)\b',
-        r"CURRENT_DATE - INTERVAL '\1 days'",
+        r"CAST((CURRENT_DATE - INTERVAL '\1 days') AS VARCHAR)",
         sql,
     )
 

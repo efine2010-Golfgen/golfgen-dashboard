@@ -1003,16 +1003,38 @@ def sales_heatmap(
         hw, hp = _hier_where(division, customer)
         today = _today_central()
         start_date = today - timedelta(weeks=26)
+        expected_days = (today - start_date).days + 1
 
-        # Use per-ASIN rows for comprehensive 26-week coverage.
-        # asin='ALL' aggregates only exist for the most recent ~14 days (S&T report lag),
-        # so using them would leave 24 of 26 weeks blank.
+        # Try asin='ALL' first (has full historical coverage from S&T report backfill)
         rows = con.execute(f"""
-            SELECT date, COALESCE(SUM(units_ordered), 0)
+            SELECT date, COALESCE(units_ordered, 0)
             FROM daily_sales
-            WHERE asin != 'ALL' AND date >= ? AND date <= ? {hw}
-            GROUP BY date ORDER BY date
+            WHERE asin = 'ALL' AND date >= ? AND date <= ? {hw}
+            ORDER BY date
         """, [str(start_date), str(today)] + hp).fetchall()
+
+        # Fallback: if ALL rows are sparse, aggregate from per-ASIN rows
+        if len(rows) < (expected_days * 0.3):
+            agg_rows = con.execute(f"""
+                SELECT date, COALESCE(SUM(units_ordered), 0)
+                FROM daily_sales
+                WHERE asin != 'ALL' AND date >= ? AND date <= ? {hw}
+                GROUP BY date ORDER BY date
+            """, [str(start_date), str(today)] + hp).fetchall()
+            if len(agg_rows) > len(rows):
+                # Merge: prefer 'ALL' rows, fill gaps with per-ASIN aggregates
+                all_map = {fmt_date(r[0]): r for r in rows}
+                merged = []
+                for r in agg_rows:
+                    ds = fmt_date(r[0])
+                    merged.append(all_map.get(ds, r))
+                # Also add any ALL rows not in agg_rows
+                agg_dates = {fmt_date(r[0]) for r in agg_rows}
+                for r in rows:
+                    if fmt_date(r[0]) not in agg_dates:
+                        merged.append(r)
+                rows = sorted(merged, key=lambda r: fmt_date(r[0]))
+
         con.close()
 
         result = []

@@ -296,8 +296,14 @@ def _sync_today_orders_inner():
             for pr in price_rows:
                 if pr[1] and pr[1] > 0:
                     asin_prices[pr[0]] = float(pr[1])
-        except Exception:
-            pass
+        except Exception as price_err:
+            logger.warning(f"  ASIN price lookup failed (non-fatal): {price_err}")
+            # If we're inside a transaction that got poisoned, recover it
+            try:
+                con.execute("ROLLBACK")
+                con.execute("BEGIN TRANSACTION")
+            except Exception:
+                pass
         logger.info(f"  ASIN price fallback: {len(asin_prices)} ASINs with known prices")
 
         items_fetched = 0
