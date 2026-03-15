@@ -364,7 +364,11 @@ Full mockup-aligned rebuild of the Profitability page (March 15, 2026):
   - Amazon Fee Detail: 4-category fee breakdown with sub-items, revenue % calculations
   - Item Profitability: SKU-level table with score badges (A/B/C), filter by division/margin health, sortable
   - AUR Analysis: AUR trend table, scatter/bubble chart
-  - Pricing & Coupons: Full CRUD for sale prices and coupons, multi-item coupon support, push-to-Amazon button
+  - Pricing & Coupons: Two-section layout:
+    - Top: Amazon Active Pricing (read-only from SP-API pricing cache) + Amazon Active Coupons (read-only from Ads API coupon cache)
+    - Bottom: Managed Sale Prices CRUD + Managed Coupons CRUD, multi-item coupon support, push-to-Amazon button
+  - GET /api/profitability/amazon-pricing — reads pricing_sync.json cache, enriches with item_master names
+    - Returns: amazonPricing (per-ASIN listPrice/buyBoxPrice/landedPrice/salePrice/discountPct), amazonCoupons (grouped by couponId), lastSync timestamp
 - Database tables (created in core/database.py):
   - sale_prices: id, asin, sku, product_name, regular_price, sale_price, start_date, end_date, marketplace, status, pushed_to_amazon, pushed_at, division, customer, platform
   - coupons: id, title, coupon_type, discount_value, budget, budget_used, start_date, end_date, marketplace, status, pushed_to_amazon, pushed_at, division, customer, platform
@@ -388,6 +392,16 @@ Walmart Marketplace API, Shopify API, cross-platform views.
 
 ### Phase 6 — Intelligence + Forecasting: PLANNED
 Custom date ranges, daily email summary, anomaly alerts, forecast tab, exec dashboard.
+
+### Shipment Marketplace Fix (March 15, 2026): COMPLETE ✓
+- Fixed: Canadian shipments (e.g. FBA194ZKBQXB → YYZ9) were incorrectly appearing in US view
+- Root causes fixed in inventory.py:
+  - create_shipment_plan(): Now reads marketplace from request body, passes to FulfillmentInbound + MarketplaceId
+  - confirm_shipment_plan(): Same marketplace detection + cache refresh with correct marketplace param
+  - _fetch_fba_shipments_from_api(): Added FC-based marketplace detection (Canadian FCs start with "Y" prefix: YYZ9, YOW1, YVR3, YHM1)
+  - Post-fetch filtering ensures only matching-marketplace shipments go into each cache file
+- Marketplace IDs: US = ATVPDKIKX0DER, CA = A2EUQ1WTGCTBG2
+- Cache files: fba_shipments_cache.json (US), fba_shipments_cache_ca.json (CA)
 
 ### Known Issues / Future Work
 - Stranded & Suppressed tab (/stranded) — links exist but no dedicated page built yet
