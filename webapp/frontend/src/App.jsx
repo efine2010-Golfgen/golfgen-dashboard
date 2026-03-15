@@ -177,7 +177,7 @@ function NavSystem({ permissions, mfaProtected, userMfaEnabled }) {
       </nav>
 
       {/* Secondary: sub-views for current category (only when > 1 view) */}
-      {visibleViews.length > 1 && (
+      {visibleViews.length > 1 && activeCat.key !== 'inventory' && (
         <nav className="subnav subnav-sub" style={{ background: 'var(--card)', borderBottom: '1px solid var(--brd2)' }}>
           {visibleViews.map((v, i) => {
             const isActive = location.pathname === v.path;
