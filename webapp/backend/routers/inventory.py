@@ -1389,33 +1389,79 @@ async def get_fba_shipment_items(request: Request, shipment_id: str, marketplace
 
 @router.get("/api/fba-shipments/products")
 async def get_shipment_products(request: Request):
-    """Get available products for shipment creation — ASIN, SKU, product name from item_master + fba_inventory."""
+    """Get available products for shipment creation — ASIN, SKU, product name,
+    FBA on-hand (not FBM), and unit sales for last 30/60/90 days."""
     from core.auth import require_auth
     require_auth(request)
     try:
         con = get_db()
-        # Pull products from item_master that have both ASIN and SKU
+        today = datetime.now(TIMEZONE).date()
+        d30 = (today - timedelta(days=30)).isoformat()
+        d60 = (today - timedelta(days=60)).isoformat()
+        d90 = (today - timedelta(days=90)).isoformat()
+
+        # Pull products from item_master with FBA inventory and 30/60/90d sales
         rows = con.execute("""
-            SELECT DISTINCT im.asin, im.sku, im.product_name, im.division,
-                   COALESCE(inv.afn_fulfillable_quantity, 0) as current_stock
+            SELECT im.asin, im.sku, im.product_name, im.division,
+                   COALESCE(inv.afn_fulfillable_quantity, 0) AS fba_on_hand,
+                   COALESCE(s30.units, 0) AS units_30d,
+                   COALESCE(s30.revenue, 0) AS rev_30d,
+                   COALESCE(s60.units, 0) AS units_60d,
+                   COALESCE(s60.revenue, 0) AS rev_60d,
+                   COALESCE(s90.units, 0) AS units_90d,
+                   COALESCE(s90.revenue, 0) AS rev_90d
             FROM item_master im
             LEFT JOIN (
                 SELECT asin, afn_fulfillable_quantity
                 FROM fba_inventory
                 WHERE date = (SELECT MAX(date) FROM fba_inventory)
             ) inv ON im.asin = inv.asin
+            LEFT JOIN (
+                SELECT asin,
+                       SUM(units_ordered) AS units,
+                       SUM(ordered_product_sales) AS revenue
+                FROM daily_sales
+                WHERE asin != 'ALL' AND date >= %s
+                GROUP BY asin
+            ) s30 ON im.asin = s30.asin
+            LEFT JOIN (
+                SELECT asin,
+                       SUM(units_ordered) AS units,
+                       SUM(ordered_product_sales) AS revenue
+                FROM daily_sales
+                WHERE asin != 'ALL' AND date >= %s
+                GROUP BY asin
+            ) s60 ON im.asin = s60.asin
+            LEFT JOIN (
+                SELECT asin,
+                       SUM(units_ordered) AS units,
+                       SUM(ordered_product_sales) AS revenue
+                FROM daily_sales
+                WHERE asin != 'ALL' AND date >= %s
+                GROUP BY asin
+            ) s90 ON im.asin = s90.asin
             WHERE im.asin IS NOT NULL AND im.asin != ''
               AND im.sku IS NOT NULL AND im.sku != ''
-            ORDER BY im.division, im.product_name
-        """).fetchall()
+            ORDER BY COALESCE(s30.units, 0) DESC, im.product_name
+        """, [d30, d60, d90]).fetchall()
+
         products = []
         for r in rows:
+            fba = _n(r[4])
+            u30 = _n(r[5])
             products.append({
                 "asin": r[0],
                 "sku": r[1],
                 "productName": r[2] or "",
                 "division": r[3] or "unknown",
-                "currentStock": _n(r[4]),
+                "currentStock": fba,
+                "units30d": u30,
+                "rev30d": round(_n(r[6]), 2),
+                "units60d": _n(r[7]),
+                "rev60d": round(_n(r[8]), 2),
+                "units90d": _n(r[9]),
+                "rev90d": round(_n(r[10]), 2),
+                "daysOfStock": round(fba / (u30 / 30), 1) if u30 > 0 else 999,
             })
         return {"products": products, "count": len(products)}
     except Exception as e:

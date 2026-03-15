@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo } from "react";
+import { useState, useEffect, useMemo, useCallback } from "react";
 import { api } from "../lib/api";
 
 const INV_VIEWS = [
@@ -169,11 +169,360 @@ const LegItem = ({ color, label, dashed }) => (
 );
 
 /* ══════════════════════════════════════════════════════════════════════════ */
+/* ── Create Shipment Modal ────────────────────────────────────────────── */
+const DEFAULT_SHIP_FROM = {
+  Name: "GolfGen LLC",
+  AddressLine1: "1201 S Walton Blvd",
+  AddressLine2: "",
+  City: "Bentonville",
+  StateOrProvinceCode: "AR",
+  PostalCode: "72712",
+  CountryCode: "US",
+};
+
+function CreateShipmentModal({ onClose }) {
+  const [step, setStep] = useState(1); // 1=select, 2=address, 3=review, 4=confirmed
+  const [products, setProducts] = useState([]);
+  const [loadingProducts, setLoadingProducts] = useState(true);
+  const [selectedItems, setSelectedItems] = useState([]); // [{sku,asin,productName,quantity}]
+  const [shipFrom, setShipFrom] = useState({ ...DEFAULT_SHIP_FROM });
+  const [labelPref, setLabelPref] = useState("SELLER_LABEL");
+  const [plans, setPlans] = useState(null);
+  const [creating, setCreating] = useState(false);
+  const [confirming, setConfirming] = useState(false);
+  const [error, setError] = useState(null);
+  const [result, setResult] = useState(null);
+  const [searchQ, setSearchQ] = useState("");
+  const [sortCol, setSortCol] = useState("units30d");
+  const [sortDir, setSortDir] = useState("desc");
+
+  useEffect(() => {
+    api.fbaShipmentProducts()
+      .then(d => { setProducts(d.products || []); setLoadingProducts(false); })
+      .catch(() => setLoadingProducts(false));
+  }, []);
+
+  const addItem = (prod) => {
+    if (selectedItems.find(i => i.sku === prod.sku)) return;
+    setSelectedItems(prev => [...prev, { sku: prod.sku, asin: prod.asin, productName: prod.productName, quantity: 1 }]);
+  };
+  const removeItem = (sku) => setSelectedItems(prev => prev.filter(i => i.sku !== sku));
+  const updateQty = (sku, qty) => setSelectedItems(prev => prev.map(i => i.sku === sku ? { ...i, quantity: Math.max(1, parseInt(qty) || 1) } : i));
+
+  const handleCreatePlan = async () => {
+    setCreating(true); setError(null);
+    try {
+      const res = await api.fbaCreatePlan({
+        shipFromAddress: shipFrom,
+        items: selectedItems.map(i => ({ SellerSKU: i.sku, ASIN: i.asin, Quantity: i.quantity, Condition: "NewItem" })),
+        labelPrepPreference: labelPref,
+      });
+      if (res.ok) { setPlans(res.plans); setStep(3); }
+      else setError(res.error || "Failed to create plan");
+    } catch (e) { setError(e.message); }
+    setCreating(false);
+  };
+
+  const handleConfirmPlan = async (plan) => {
+    setConfirming(true); setError(null);
+    try {
+      const res = await api.fbaConfirmPlan({
+        shipmentId: plan.shipmentId,
+        shipmentName: `GolfGen ${new Date().toLocaleDateString()}`,
+        destinationFC: plan.destinationFC,
+        items: plan.items.map(i => ({ SellerSKU: i.SellerSKU, Quantity: i.Quantity })),
+        shipFromAddress: shipFrom,
+        labelPrepPreference: labelPref,
+      });
+      if (res.ok) { setResult(res); setStep(4); }
+      else setError(res.error || "Failed to confirm plan");
+    } catch (e) { setError(e.message); }
+    setConfirming(false);
+  };
+
+  const handleSort = (col) => {
+    if (sortCol === col) setSortDir(d => d === "asc" ? "desc" : "asc");
+    else { setSortCol(col); setSortDir("desc"); }
+  };
+
+  const filtered = useMemo(() => {
+    let list = products;
+    if (searchQ.trim()) {
+      const q = searchQ.toLowerCase();
+      list = list.filter(p => (p.productName + p.sku + p.asin).toLowerCase().includes(q));
+    }
+    list = [...list].sort((a, b) => {
+      const av = a[sortCol] ?? 0, bv = b[sortCol] ?? 0;
+      return sortDir === "asc" ? (av > bv ? 1 : -1) : (av < bv ? 1 : -1);
+    });
+    return list;
+  }, [products, searchQ, sortCol, sortDir]);
+
+  const fmtD = (n) => n == null ? "—" : Number(n).toLocaleString();
+  const fmtR = (n) => n == null ? "—" : `$${Number(n).toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 0 })}`;
+  const stockColor = (stock, u30) => {
+    if (!stock || stock <= 0) return "#f87171";
+    if (u30 > 0 && stock / (u30 / 30) < 14) return "#F5B731";
+    return "#2ECFAA";
+  };
+
+  const overlay = { position: "fixed", top: 0, left: 0, right: 0, bottom: 0, background: "rgba(0,0,0,.65)", zIndex: 9999, display: "flex", alignItems: "center", justifyContent: "center" };
+  const modal = { background: "var(--card)", border: "1px solid var(--brd)", borderRadius: 16, width: "95vw", maxWidth: 1100, maxHeight: "90vh", overflow: "hidden", display: "flex", flexDirection: "column", boxShadow: "0 20px 60px rgba(0,0,0,.5)" };
+  const hdr = { padding: "14px 20px", borderBottom: "1px solid var(--brd)", display: "flex", alignItems: "center", justifyContent: "space-between", background: "var(--card2, var(--card))" };
+  const body = { padding: "16px 20px", overflowY: "auto", flex: 1 };
+  const footer = { padding: "12px 20px", borderTop: "1px solid var(--brd)", display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8 };
+  const btnP = { display: "inline-flex", alignItems: "center", gap: 5, height: 34, padding: "0 18px", borderRadius: 8, ...SG({ fontSize: 11, fontWeight: 700 }), cursor: "pointer", border: "none", background: "var(--acc1)", color: "#fff" };
+  const btnS = { ...btnP, background: "transparent", border: "1px solid var(--brd2)", color: "var(--txt2)" };
+  const inp = { height: 32, padding: "0 10px", borderRadius: 7, border: "1px solid var(--brd2)", background: "var(--ibg)", color: "var(--txt)", ...SG({ fontSize: 10 }), outline: "none", width: "100%" };
+  const thS = { ...SG({ fontSize: 8, fontWeight: 700, textTransform: "uppercase", letterSpacing: ".08em", color: "var(--txt3)", padding: "8px 6px", textAlign: "right", cursor: "pointer", whiteSpace: "nowrap", userSelect: "none" }) };
+  const tdS = { ...SG({ fontSize: 10, padding: "7px 6px", textAlign: "right", color: "var(--txt2)" }) };
+  const arrow = (col) => sortCol === col ? (sortDir === "asc" ? " ▲" : " ▼") : "";
+
+  return (
+    <div style={overlay} onClick={onClose}>
+      <div style={modal} onClick={e => e.stopPropagation()}>
+        {/* Header */}
+        <div style={hdr}>
+          <div>
+            <div style={{ fontSize: 14, fontWeight: 700, color: "var(--txt)" }}>📦 Create FBA Shipment</div>
+            <div style={{ ...SG({ fontSize: 9, color: "var(--txt3)", marginTop: 2 }) }}>
+              Step {step} of 4 — {step === 1 ? "Select Products & Quantities" : step === 2 ? "Ship From Address" : step === 3 ? "Review Amazon Plan" : "Confirmed"}
+            </div>
+          </div>
+          <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+            {[1,2,3,4].map(s => (
+              <div key={s} style={{ width: 28, height: 4, borderRadius: 2, background: s <= step ? "var(--acc1)" : "var(--brd)", transition: "background .3s" }} />
+            ))}
+            <button onClick={onClose} style={{ width: 28, height: 28, borderRadius: 6, border: "1px solid var(--brd2)", background: "transparent", color: "var(--txt3)", fontSize: 14, cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", marginLeft: 8 }}>×</button>
+          </div>
+        </div>
+
+        {/* Body */}
+        <div style={body}>
+          {error && (
+            <div style={{ padding: "8px 12px", borderRadius: 8, background: "rgba(248,113,113,.12)", border: "1px solid rgba(248,113,113,.3)", marginBottom: 12, ...SG({ fontSize: 10, color: "#f87171" }) }}>
+              {error}
+            </div>
+          )}
+
+          {/* ── Step 1: Product Selection Table ── */}
+          {step === 1 && (
+            <>
+              {/* Selected items summary */}
+              {selectedItems.length > 0 && (
+                <div style={{ marginBottom: 14, padding: "10px 14px", borderRadius: 10, background: "rgba(46,207,170,.06)", border: "1px solid rgba(46,207,170,.2)" }}>
+                  <div style={{ ...SG({ fontSize: 8, fontWeight: 700, textTransform: "uppercase", letterSpacing: ".1em", color: "#2ECFAA", marginBottom: 6 }) }}>
+                    Selected: {selectedItems.length} item{selectedItems.length !== 1 ? "s" : ""} · {selectedItems.reduce((s, i) => s + i.quantity, 0)} total units
+                  </div>
+                  <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
+                    {selectedItems.map(item => (
+                      <div key={item.sku} style={{ display: "flex", alignItems: "center", gap: 6, padding: "4px 8px", borderRadius: 6, background: "rgba(46,207,170,.1)", border: "1px solid rgba(46,207,170,.25)" }}>
+                        <span style={{ ...SG({ fontSize: 9, fontWeight: 700, color: "var(--acc1)" }) }}>{item.asin}</span>
+                        <input type="number" min="1" value={item.quantity} onChange={e => updateQty(item.sku, e.target.value)}
+                          style={{ width: 50, height: 22, padding: "0 4px", borderRadius: 4, border: "1px solid var(--brd2)", background: "var(--ibg)", color: "var(--txt)", ...SG({ fontSize: 9 }), textAlign: "center", outline: "none" }} />
+                        <button onClick={() => removeItem(item.sku)} style={{ width: 18, height: 18, borderRadius: 3, border: "1px solid rgba(248,113,113,.3)", background: "rgba(248,113,113,.08)", color: "#f87171", fontSize: 10, cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", padding: 0 }}>×</button>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {/* Search */}
+              <input placeholder="Search by product name, SKU, or ASIN…" value={searchQ} onChange={e => setSearchQ(e.target.value)}
+                style={{ ...inp, marginBottom: 10 }} />
+
+              {loadingProducts ? (
+                <div style={{ padding: 30, textAlign: "center", color: "var(--txt3)", fontSize: 12 }}>Loading products…</div>
+              ) : (
+                <div style={{ border: "1px solid var(--brd)", borderRadius: 10, overflow: "hidden" }}>
+                  <div style={{ overflowX: "auto" }}>
+                    <table style={{ width: "100%", borderCollapse: "collapse", minWidth: 900 }}>
+                      <thead>
+                        <tr style={{ borderBottom: "2px solid var(--brd)" }}>
+                          <th style={{ ...thS, textAlign: "left", width: 40 }}></th>
+                          <th style={{ ...thS, textAlign: "left", minWidth: 100 }}>ASIN</th>
+                          <th style={{ ...thS, textAlign: "left", minWidth: 240 }}>Product Description</th>
+                          <th style={{ ...thS, width: 90 }} onClick={() => handleSort("currentStock")}>FBA On Hand{arrow("currentStock")}</th>
+                          <th style={{ ...thS, width: 80 }} onClick={() => handleSort("units30d")}>30D Units{arrow("units30d")}</th>
+                          <th style={{ ...thS, width: 80 }} onClick={() => handleSort("rev30d")}>30D Rev{arrow("rev30d")}</th>
+                          <th style={{ ...thS, width: 80 }} onClick={() => handleSort("units60d")}>60D Units{arrow("units60d")}</th>
+                          <th style={{ ...thS, width: 80 }} onClick={() => handleSort("rev60d")}>60D Rev{arrow("rev60d")}</th>
+                          <th style={{ ...thS, width: 80 }} onClick={() => handleSort("units90d")}>90D Units{arrow("units90d")}</th>
+                          <th style={{ ...thS, width: 80 }} onClick={() => handleSort("rev90d")}>90D Rev{arrow("rev90d")}</th>
+                          <th style={{ ...thS, width: 80 }} onClick={() => handleSort("daysOfStock")}>Days Left{arrow("daysOfStock")}</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {filtered.length === 0 ? (
+                          <tr><td colSpan={11} style={{ padding: 30, textAlign: "center", color: "var(--txt3)", ...SG({ fontSize: 11 }) }}>No products found</td></tr>
+                        ) : filtered.map(p => {
+                          const isAdded = selectedItems.find(i => i.sku === p.sku);
+                          return (
+                            <tr key={p.sku}
+                              style={{ borderBottom: "1px solid var(--brd)", cursor: isAdded ? "default" : "pointer", opacity: isAdded ? 0.5 : 1, transition: "background .15s" }}
+                              onClick={() => !isAdded && addItem(p)}
+                              onMouseEnter={e => { if (!isAdded) e.currentTarget.style.background = "var(--ibg)"; }}
+                              onMouseLeave={e => { e.currentTarget.style.background = ""; }}>
+                              <td style={{ ...tdS, textAlign: "center" }}>
+                                {isAdded
+                                  ? <span style={{ color: "#2ECFAA", fontWeight: 700 }}>✓</span>
+                                  : <span style={{ color: "var(--acc1)", fontWeight: 700 }}>+</span>}
+                              </td>
+                              <td style={{ ...tdS, textAlign: "left" }}>
+                                <div style={{ fontWeight: 700, color: "var(--acc1)" }}>{p.asin}</div>
+                                <div style={{ fontSize: 8, color: "var(--txt3)", marginTop: 1 }}>{p.sku}</div>
+                              </td>
+                              <td style={{ ...tdS, textAlign: "left", maxWidth: 260, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                                <div style={{ color: "var(--txt)" }}>{p.productName || "—"}</div>
+                                <div style={{ fontSize: 8, color: "var(--txt3)", marginTop: 1 }}>{p.division}</div>
+                              </td>
+                              <td style={{ ...tdS, fontWeight: 700, color: stockColor(p.currentStock, p.units30d) }}>{fmtD(p.currentStock)}</td>
+                              <td style={{ ...tdS, fontWeight: 700, color: "var(--txt)" }}>{fmtD(p.units30d)}</td>
+                              <td style={{ ...tdS, color: "var(--txt2)" }}>{fmtR(p.rev30d)}</td>
+                              <td style={{ ...tdS }}>{fmtD(p.units60d)}</td>
+                              <td style={{ ...tdS }}>{fmtR(p.rev60d)}</td>
+                              <td style={{ ...tdS }}>{fmtD(p.units90d)}</td>
+                              <td style={{ ...tdS }}>{fmtR(p.rev90d)}</td>
+                              <td style={{ ...tdS, fontWeight: 700, color: p.daysOfStock < 14 ? "#f87171" : p.daysOfStock < 30 ? "#F5B731" : "var(--txt2)" }}>
+                                {p.daysOfStock >= 999 ? "∞" : `${Math.round(p.daysOfStock)}d`}
+                              </td>
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              )}
+            </>
+          )}
+
+          {/* ── Step 2: Ship From Address ── */}
+          {step === 2 && (
+            <div style={{ maxWidth: 480 }}>
+              <div style={{ ...SG({ fontSize: 8, fontWeight: 700, textTransform: "uppercase", letterSpacing: ".1em", color: "var(--txt3)", marginBottom: 10 }) }}>Ship From Address</div>
+              {[
+                { key: "Name", label: "Company / Name" },
+                { key: "AddressLine1", label: "Address Line 1" },
+                { key: "AddressLine2", label: "Address Line 2 (optional)" },
+                { key: "City", label: "City" },
+                { key: "StateOrProvinceCode", label: "State" },
+                { key: "PostalCode", label: "Zip Code" },
+                { key: "CountryCode", label: "Country Code" },
+              ].map(f => (
+                <div key={f.key} style={{ marginBottom: 8 }}>
+                  <label style={{ ...SG({ fontSize: 9, color: "var(--txt3)", display: "block", marginBottom: 3 }) }}>{f.label}</label>
+                  <input value={shipFrom[f.key] || ""} onChange={e => setShipFrom(prev => ({ ...prev, [f.key]: e.target.value }))} style={inp} />
+                </div>
+              ))}
+              <div style={{ marginTop: 12 }}>
+                <label style={{ ...SG({ fontSize: 9, color: "var(--txt3)", display: "block", marginBottom: 3 }) }}>Label Prep Preference</label>
+                <select value={labelPref} onChange={e => setLabelPref(e.target.value)} style={{ ...inp, appearance: "auto" }}>
+                  <option value="SELLER_LABEL">Seller Label (you label items)</option>
+                  <option value="AMAZON_LABEL_ONLY">Amazon Label Only</option>
+                  <option value="AMAZON_LABEL_PREFERRED">Amazon Label Preferred</option>
+                </select>
+              </div>
+            </div>
+          )}
+
+          {/* ── Step 3: Review Amazon Plan ── */}
+          {step === 3 && plans && (
+            <>
+              <div style={{ ...SG({ fontSize: 8, fontWeight: 700, textTransform: "uppercase", letterSpacing: ".1em", color: "var(--txt3)", marginBottom: 10 }) }}>
+                Amazon Proposed {plans.length} Shipment{plans.length !== 1 ? "s" : ""}
+              </div>
+              <div style={{ padding: "8px 12px", borderRadius: 8, background: "rgba(123,174,208,.1)", border: "1px solid rgba(123,174,208,.25)", marginBottom: 14, ...SG({ fontSize: 10, color: "#7BAED0" }) }}>
+                Amazon splits your items across fulfillment centers for optimal placement. Each box below is a separate shipment to pack and ship.
+              </div>
+              {plans.map((plan, idx) => (
+                <Card key={idx} style={{ marginBottom: 10 }}>
+                  <div style={{ padding: "10px 14px", borderBottom: "1px solid var(--brd)", display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+                    <div>
+                      <div style={{ fontSize: 12, fontWeight: 700, color: "var(--txt)" }}>{plan.shipmentId}</div>
+                      <div style={{ ...SG({ fontSize: 9, color: "var(--txt3)" }) }}>Destination: <span style={{ fontWeight: 700, color: "var(--acc1)" }}>{plan.destinationFC}</span> · {plan.items.length} item{plan.items.length !== 1 ? "s" : ""}</div>
+                    </div>
+                    <button onClick={() => handleConfirmPlan(plan)} disabled={confirming}
+                      style={{ ...btnP, opacity: confirming ? 0.6 : 1, fontSize: 10, height: 30 }}>
+                      {confirming ? "Creating…" : "Confirm & Create"}
+                    </button>
+                  </div>
+                  <div style={{ padding: "8px 14px" }}>
+                    {plan.items.map((pi, j) => (
+                      <div key={j} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "5px 0", borderBottom: j < plan.items.length - 1 ? "1px solid var(--brd)" : "none" }}>
+                        <div>
+                          <span style={{ ...SG({ fontSize: 10, fontWeight: 700, color: "var(--txt)" }) }}>{pi.SellerSKU}</span>
+                          {pi.FulfillmentNetworkSKU && <span style={{ ...SG({ fontSize: 8, color: "var(--txt3)", marginLeft: 6 }) }}>FNSKU: {pi.FulfillmentNetworkSKU}</span>}
+                        </div>
+                        <span style={{ ...SG({ fontSize: 11, fontWeight: 700, color: "var(--acc1)" }) }}>{pi.Quantity} units</span>
+                      </div>
+                    ))}
+                  </div>
+                </Card>
+              ))}
+            </>
+          )}
+
+          {/* ── Step 4: Confirmed ── */}
+          {step === 4 && result && (
+            <div style={{ textAlign: "center", padding: "30px 20px" }}>
+              <div style={{ fontSize: 40, marginBottom: 10 }}>✅</div>
+              <div style={{ fontSize: 16, fontWeight: 700, color: "var(--acc1)", marginBottom: 6 }}>Shipment Created!</div>
+              <div style={{ ...SG({ fontSize: 12, color: "var(--txt2)", marginBottom: 16 }) }}>{result.message}</div>
+              <div style={{ ...SG({ fontSize: 10, fontWeight: 700, color: "var(--acc3, #3E658C)", marginBottom: 16 }) }}>
+                Shipment ID: {result.shipmentId}
+              </div>
+              {result.sellerCentralUrl && (
+                <a href={result.sellerCentralUrl} target="_blank" rel="noreferrer"
+                  style={{ ...btnP, textDecoration: "none", display: "inline-flex" }}>
+                  Open in Seller Central →
+                </a>
+              )}
+            </div>
+          )}
+        </div>
+
+        {/* Footer */}
+        {step < 4 && (
+          <div style={footer}>
+            <div>
+              {step > 1 && step < 3 && <button onClick={() => setStep(step - 1)} style={btnS}>← Back</button>}
+            </div>
+            <div style={{ display: "flex", gap: 8 }}>
+              <button onClick={onClose} style={btnS}>Cancel</button>
+              {step === 1 && (
+                <button onClick={() => setStep(2)} disabled={selectedItems.length === 0}
+                  style={{ ...btnP, opacity: selectedItems.length === 0 ? 0.4 : 1 }}>
+                  Next: Ship From → ({selectedItems.length} selected)
+                </button>
+              )}
+              {step === 2 && (
+                <button onClick={handleCreatePlan} disabled={creating}
+                  style={{ ...btnP, opacity: creating ? 0.6 : 1 }}>
+                  {creating ? "Submitting to Amazon…" : "Submit Plan to Amazon →"}
+                </button>
+              )}
+            </div>
+          </div>
+        )}
+        {step === 4 && (
+          <div style={footer}>
+            <div />
+            <button onClick={onClose} style={btnP}>Done</button>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+/* ══════════════════════════════════════════════════════════════════════════ */
 export default function Inventory({ filters = {} }) {
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
   const [skuFilter, setSkuFilter] = useState("all");
   const [searchTerm, setSearchTerm] = useState("");
+  const [showCreate, setShowCreate] = useState(false);
 
   const divRaw = (filters.division || "").toLowerCase();
   const divLabel = !divRaw ? "All Divisions" : divRaw === "golf" ? "Golf (PGAT)" : "Housewares";
@@ -242,7 +591,7 @@ export default function Inventory({ filters = {} }) {
             <span style={{ ...SG({ fontSize: 8, color: "var(--txt3)", marginTop: 1, textAlign: "center" }) }}>Auto every 4hr</span>
           </div>
           <div style={{ display: "flex", flexDirection: "column", alignItems: "center" }}>
-            <a href="/fba-shipments" style={{ display: "inline-flex", alignItems: "center", gap: 5, height: 30, padding: "0 12px", borderRadius: 8, ...SG({ fontSize: 10, fontWeight: 700 }), cursor: "pointer", whiteSpace: "nowrap", border: "1px solid var(--acc2, #E87830)", background: "rgba(232,120,48,.1)", color: "var(--acc2, #E87830)", textDecoration: "none" }}>📦 Create Shipment</a>
+            <button onClick={() => setShowCreate(true)} style={{ display: "inline-flex", alignItems: "center", gap: 5, height: 30, padding: "0 12px", borderRadius: 8, ...SG({ fontSize: 10, fontWeight: 700 }), cursor: "pointer", whiteSpace: "nowrap", border: "1px solid var(--acc2, #E87830)", background: "rgba(232,120,48,.1)", color: "var(--acc2, #E87830)" }}>📦 Create Shipment</button>
             <span style={{ ...SG({ fontSize: 8, color: "var(--txt3)", marginTop: 1, textAlign: "center" }) }}>Send to FBA</span>
           </div>
           <button style={{ display: "inline-flex", alignItems: "center", gap: 5, height: 30, padding: "0 12px", borderRadius: 8, ...SG({ fontSize: 10, fontWeight: 700 }), cursor: "pointer", whiteSpace: "nowrap", border: "1px solid var(--brd2)", background: "var(--ibg, rgba(255,255,255,.05))", color: "var(--txt2)" }}>⬇ Export</button>
@@ -788,6 +1137,9 @@ export default function Inventory({ filters = {} }) {
           </Card>
         </div>
       </div>
+
+      {/* Create Shipment Modal */}
+      {showCreate && <CreateShipmentModal onClose={() => setShowCreate(false)} />}
     </div>
   );
 }
