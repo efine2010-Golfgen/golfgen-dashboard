@@ -1260,6 +1260,76 @@ def _init_inventory_extended_tables():
     con.close()
 
 
+def _init_pricing_tables():
+    """Create sale_prices and coupons tables for Profitability Pricing & Coupons tab."""
+    con = get_db_rw()
+
+    # Sequence for sale_prices
+    if USE_POSTGRES:
+        con.execute("CREATE SEQUENCE IF NOT EXISTS sale_prices_seq START 1")
+
+    con.execute("""
+        CREATE TABLE IF NOT EXISTS sale_prices (
+            id              INTEGER PRIMARY KEY,
+            asin            VARCHAR NOT NULL,
+            sku             VARCHAR,
+            product_name    VARCHAR,
+            regular_price   DOUBLE PRECISION DEFAULT 0,
+            sale_price      DOUBLE PRECISION DEFAULT 0,
+            start_date      DATE,
+            end_date        DATE,
+            marketplace     VARCHAR DEFAULT 'US',
+            status          VARCHAR DEFAULT 'scheduled',
+            pushed_to_amazon BOOLEAN DEFAULT FALSE,
+            pushed_at       TIMESTAMP,
+            created_at      TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            updated_at      TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            division        VARCHAR DEFAULT 'unknown',
+            customer        VARCHAR DEFAULT 'amazon',
+            platform        VARCHAR DEFAULT 'sp_api'
+        )
+    """)
+
+    # Sequence for coupons
+    if USE_POSTGRES:
+        con.execute("CREATE SEQUENCE IF NOT EXISTS coupons_seq START 1")
+
+    con.execute("""
+        CREATE TABLE IF NOT EXISTS coupons (
+            id              INTEGER PRIMARY KEY,
+            title           VARCHAR,
+            coupon_type     VARCHAR DEFAULT 'percentage',
+            discount_value  DOUBLE PRECISION DEFAULT 0,
+            budget          DOUBLE PRECISION DEFAULT 0,
+            budget_used     DOUBLE PRECISION DEFAULT 0,
+            start_date      DATE,
+            end_date        DATE,
+            marketplace     VARCHAR DEFAULT 'US',
+            status          VARCHAR DEFAULT 'scheduled',
+            pushed_to_amazon BOOLEAN DEFAULT FALSE,
+            pushed_at       TIMESTAMP,
+            created_at      TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            updated_at      TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            division        VARCHAR DEFAULT 'unknown',
+            customer        VARCHAR DEFAULT 'amazon',
+            platform        VARCHAR DEFAULT 'sp_api'
+        )
+    """)
+
+    # Coupon items junction table — supports multiple items per coupon
+    con.execute("""
+        CREATE TABLE IF NOT EXISTS coupon_items (
+            coupon_id       INTEGER NOT NULL,
+            asin            VARCHAR NOT NULL,
+            sku             VARCHAR,
+            product_name    VARCHAR,
+            PRIMARY KEY (coupon_id, asin)
+        )
+    """)
+
+    con.close()
+
+
 def _fix_pg_sequences():
     """Reset PostgreSQL sequences to match the current max IDs in their tables.
 
@@ -1272,6 +1342,8 @@ def _fix_pg_sequences():
     seq_table_map = {
         "sync_log_seq": "sync_log",
         "docs_update_log_seq": "docs_update_log",
+        "sale_prices_seq": "sale_prices",
+        "coupons_seq": "coupons",
     }
     try:
         con = get_db_rw()
@@ -1358,6 +1430,12 @@ def init_all_tables():
         logger.info("Inventory extended tables initialized")
     except Exception as e:
         logger.error(f"Inventory extended tables init error: {e}")
+
+    try:
+        _init_pricing_tables()
+        logger.info("Pricing tables initialized (sale_prices, coupons, coupon_items)")
+    except Exception as e:
+        logger.error(f"Pricing table init error: {e}")
 
     # ── Fix PostgreSQL sequences after migration ──
     try:

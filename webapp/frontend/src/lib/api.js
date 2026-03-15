@@ -42,33 +42,6 @@ export const api = {
   logout: () =>
     fetch(`${API_BASE}/api/auth/logout`, { method: "POST", credentials: "include" }).then(r => r.json()),
   me: () => fetchJSON("/api/me"),
-
-  // Passkey / WebAuthn
-  passkeyRegisterOpts: () =>
-    fetch(`${API_BASE}/api/auth/passkey/register-options`, { method: "POST", credentials: "include" }).then(r => r.json()),
-  passkeyRegisterDone: (credential, deviceName) =>
-    fetch(`${API_BASE}/api/auth/passkey/register-verify`, {
-      method: "POST", credentials: "include",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ credential, device_name: deviceName }),
-    }).then(r => r.json()),
-  passkeyLoginOptions: (email = "") =>
-    fetch(`${API_BASE}/api/auth/passkey/login-options`, {
-      method: "POST", headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ email }), credentials: "include",
-    }).then(r => r.json()),
-  passkeyLoginVerify: (credential, email = "") =>
-    fetch(`${API_BASE}/api/auth/passkey/login-verify`, {
-      method: "POST", headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ credential, email }), credentials: "include",
-    }).then(r => r.json()),
-  passkeyList: () => fetchJSON("/api/auth/passkey/list"),
-  passkeyDelete: (passkeyId) =>
-    fetch(`${API_BASE}/api/auth/passkey/delete`, {
-      method: "POST", credentials: "include",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ passkey_id: passkeyId }),
-    }).then(r => r.json()),
   myPermissions: () => fetchJSON("/api/permissions/me"),
   allPermissions: () => fetchJSON("/api/permissions"),
   updatePermission: (user, tab, enabled) =>
@@ -99,6 +72,47 @@ export const api = {
   // Profitability (Sellerboard-style)
   profitability: (view = "realtime", h = {}) => fetchJSON(`/api/profitability?view=${view}${_hq(h)}`),
   profitabilityItems: (days = 365, h = {}) => fetchJSON(`/api/profitability/items?days=${days}${_hq(h)}`),
+  profitabilityOverview: (days = 30, h = {}) => fetchJSON(`/api/profitability/overview?days=${days}${_hq(h)}`),
+  profitabilityFeeDetail: (days = 30, h = {}) => fetchJSON(`/api/profitability/fee-detail?days=${days}${_hq(h)}`),
+  profitabilityAur: (days = 56, h = {}) => fetchJSON(`/api/profitability/aur?days=${days}${_hq(h)}`),
+
+  // Sale Prices CRUD
+  salePrices: (h = {}) => fetchJSON(`/api/profitability/sale-prices${_hq(h) ? '?' + _hq(h).slice(1) : ''}`),
+  createSalePrice: (data) =>
+    fetch(`${API_BASE}/api/profitability/sale-prices`, {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(data), credentials: "include",
+    }).then(r => r.json()),
+  updateSalePrice: (id, data) =>
+    fetch(`${API_BASE}/api/profitability/sale-prices/${id}`, {
+      method: "PUT", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(data), credentials: "include",
+    }).then(r => r.json()),
+  deleteSalePrice: (id) =>
+    fetch(`${API_BASE}/api/profitability/sale-prices/${id}`, {
+      method: "DELETE", credentials: "include",
+    }).then(r => r.json()),
+  pushPrice: (id) =>
+    fetch(`${API_BASE}/api/profitability/push-price/${id}`, {
+      method: "POST", credentials: "include",
+    }).then(r => r.json()),
+
+  // Coupons CRUD
+  coupons: (h = {}) => fetchJSON(`/api/profitability/coupons${_hq(h) ? '?' + _hq(h).slice(1) : ''}`),
+  createCoupon: (data) =>
+    fetch(`${API_BASE}/api/profitability/coupons`, {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(data), credentials: "include",
+    }).then(r => r.json()),
+  updateCoupon: (id, data) =>
+    fetch(`${API_BASE}/api/profitability/coupons/${id}`, {
+      method: "PUT", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(data), credentials: "include",
+    }).then(r => r.json()),
+  deleteCoupon: (id) =>
+    fetch(`${API_BASE}/api/profitability/coupons/${id}`, {
+      method: "DELETE", credentials: "include",
+    }).then(r => r.json()),
 
   // Advertising endpoints
   adsSummary: (days = 30, h = {}) => fetchJSON(`/api/ads/summary?days=${days}${_hq(h)}`),

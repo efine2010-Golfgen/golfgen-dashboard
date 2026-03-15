@@ -1,575 +1,1037 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useMemo, useCallback } from "react";
 import {
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip,
-  ResponsiveContainer, Cell, ComposedChart, Line, Area,
-  AreaChart, Legend
+  ResponsiveContainer, Cell, ComposedChart, Line,
+  PieChart, Pie, ScatterChart, Scatter, ZAxis,
+  Legend
 } from "recharts";
 import { api, fmt$ } from "../lib/api";
 import { TOOLTIP_STYLE } from "../lib/constants";
 
-const COMP_VIEWS = [
-  { key: "realtime", label: "Today / WTD / MTD / YTD" },
-  { key: "weekly", label: "Weekly Rollups" },
-  { key: "monthly", label: "Monthly Rollups" },
-  { key: "yearly", label: "Year-over-Year" },
-  { key: "monthly2026", label: new Date().getFullYear() + " by Month" },
+/* ── Constants ─────────────────────────────────────────────── */
+const SUB_TABS = [
+  { key: "pnl", label: "P&L Overview" },
+  { key: "fees", label: "Amazon Fee Detail" },
+  { key: "items", label: "Item Profitability" },
+  { key: "aur", label: "AUR Analysis" },
+  { key: "pricing", label: "Pricing & Coupons" },
 ];
 
-const RANGES = [
+const DAY_OPTIONS = [
+  { label: "7D", days: 7 },
   { label: "30D", days: 30 },
   { label: "90D", days: 90 },
   { label: "6M", days: 180 },
   { label: "1Y", days: 365 },
 ];
 
-const WATERFALL_COLORS = {
-  sales: "#2ECFAA",
-  promo: "#8B5CF6",
-  adSpend: "#F5B731",
-  shipping: "#7BAED0",
-  refunds: "#D03030",
-  amazonFees: "#3E658C",
-  cogs: "#E87830",
-  indirect: "#94a3b8",
-  netProfit_pos: "#2ECFAA",
-  netProfit_neg: "#D03030",
+const ITEM_FILTERS = [
+  { key: "all", label: "All" },
+  { key: "golf", label: "Golf" },
+  { key: "housewares", label: "Housewares" },
+  { key: "healthy", label: "Healthy ≥40%" },
+  { key: "atrisk", label: "At Risk 20-39%" },
+  { key: "danger", label: "Danger <20%" },
+];
+
+const ITEM_SORTS = [
+  { key: "rev", label: "Revenue" },
+  { key: "grossMargin", label: "Gross Margin" },
+  { key: "netMargin", label: "Net Margin" },
+  { key: "totalFeePct", label: "Fee Ratio" },
+  { key: "cogsPct", label: "COGS%" },
+];
+
+const WF_COLORS = {
+  revenue: "#2ECFAA", referral: "#f87171", fba: "#f87171",
+  storage: "#F5B731", other: "#A26BE1", netRev: "#3E658C",
+  cogs: "#E87830", shipping: "#7BAED0", coupon: "#8B5CF6",
+  nop: "#2ECFAA", nopNeg: "#f87171",
 };
 
+const DONUT_COLORS = ["#f87171", "#E87830", "#F5B731", "#A26BE1"];
+
+/* ── Helpers ───────────────────────────────────────────────── */
+function round(n, d = 0) { const f = Math.pow(10, d); return Math.round(n * f) / f; }
+function fmt$2(n) { if (n == null) return "$0"; return (n < 0 ? "-" : "") + "$" + Math.abs(Math.round(n)).toLocaleString(); }
+function fmtPct(n) { if (n == null) return "0%"; return round(n, 1) + "%"; }
+function fmtDate(d) {
+  if (!d) return "—";
+  try { return new Date(d).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "2-digit" }); }
+  catch { return d; }
+}
+function fmtDateInput(d) {
+  if (!d) return "";
+  try { return new Date(d).toISOString().slice(0, 10); } catch { return ""; }
+}
+function scoreClass(s) { return s === "A" ? "sc-a" : s === "B" ? "sc-b" : "sc-c"; }
+function statusClass(s) { return s === "active" ? "status-active" : s === "scheduled" ? "status-sched" : "status-ended"; }
+
+/* ── Styles ────────────────────────────────────────────────── */
+const SG = (sz, wt = 600, c) => ({ fontFamily: "'Space Grotesk', monospace", fontSize: sz, fontWeight: wt, ...(c ? { color: c } : {}) });
+const DM = (sz, c) => ({ fontFamily: "'DM Serif Display', Georgia, serif", fontSize: sz, ...(c ? { color: c } : {}) });
+const cellR = { padding: "8px 10px", textAlign: "right", ...SG(10, 700), color: "var(--txt2)", whiteSpace: "nowrap" };
+const cellL = { ...cellR, textAlign: "left" };
+
+/* ══════════════════════════════════════════════════════════════
+   MAIN COMPONENT
+   ══════════════════════════════════════════════════════════════ */
 export default function Profitability({ filters = {} }) {
-  const [view, setView] = useState("realtime");
-  const [periods, setPeriods] = useState([]);
-  const [loading, setLoading] = useState(true);
-  const [itemDays, setItemDays] = useState(365);
-  const [items, setItems] = useState([]);
-  const [itemLoading, setItemLoading] = useState(true);
-  const [sortCol, setSortCol] = useState("sales");
-  const [sortDir, setSortDir] = useState("desc");
+  const [tab, setTab] = useState("pnl");
+  const [days, setDays] = useState(30);
+  const [toast, setToast] = useState(null);
 
-  // Load waterfall periods
-  useEffect(() => {
-    setLoading(true);
-    api.profitability(view, filters).then(data => {
-      setPeriods(data.periods || []);
-      setLoading(false);
-    }).catch(() => setLoading(false));
-  }, [view, filters.division, filters.customer]);
-
-  // Load item-level data
-  useEffect(() => {
-    setItemLoading(true);
-    api.profitabilityItems(itemDays, filters).then(data => {
-      setItems(data.items || []);
-      setItemLoading(false);
-    }).catch(() => setItemLoading(false));
-  }, [itemDays, filters.division, filters.customer]);
-
-  // Sort items
-  const sortedItems = [...items].sort((a, b) => {
-    const av = a[sortCol] ?? 0, bv = b[sortCol] ?? 0;
-    return sortDir === "desc" ? bv - av : av - bv;
-  });
-
-  const handleSort = (col) => {
-    if (sortCol === col) setSortDir(d => d === "desc" ? "asc" : "desc");
-    else { setSortCol(col); setSortDir("desc"); }
-  };
-
-  // Pick the "primary" period for the big waterfall chart (MTD for realtime, or last item)
-  const primaryIdx = view === "realtime" ? 2 : periods.length > 1 ? periods.length - 1 : 0;
-  const primary = periods[primaryIdx] || null;
-
-  // Build waterfall chart data from primary period
-  const waterfallData = primary ? [
-    { name: "Sales", value: primary.sales, fill: WATERFALL_COLORS.sales },
-    ...(primary.promo > 0 ? [{ name: "Promo", value: -primary.promo, fill: WATERFALL_COLORS.promo }] : []),
-    { name: "Ad Spend", value: -primary.adSpend, fill: WATERFALL_COLORS.adSpend },
-    ...(primary.shipping > 0 ? [{ name: "Shipping", value: -primary.shipping, fill: WATERFALL_COLORS.shipping }] : []),
-    ...(primary.refunds > 0 ? [{ name: "Refunds", value: -primary.refunds, fill: WATERFALL_COLORS.refunds }] : []),
-    { name: "Amazon Fees", value: -primary.amazonFees, fill: WATERFALL_COLORS.amazonFees },
-    { name: "COGS", value: -primary.cogs, fill: WATERFALL_COLORS.cogs },
-    ...(primary.indirect > 0 ? [{ name: "Indirect", value: -primary.indirect, fill: WATERFALL_COLORS.indirect }] : []),
-    { name: "Net Profit", value: primary.netProfit, fill: primary.netProfit >= 0 ? WATERFALL_COLORS.netProfit_pos : WATERFALL_COLORS.netProfit_neg },
-  ] : [];
-
-  // Build cost breakdown pie-like data for a horizontal stacked bar
-  const costBreakdown = primary ? [
-    { name: "COGS", value: primary.cogs, pct: primary.sales > 0 ? round(primary.cogs / primary.sales * 100, 1) : 0, fill: "#E87830" },
-    { name: "Amazon Fees", value: primary.amazonFees, pct: primary.sales > 0 ? round(primary.amazonFees / primary.sales * 100, 1) : 0, fill: "#3E658C" },
-    { name: "Ad Spend", value: primary.adSpend, pct: primary.sales > 0 ? round(primary.adSpend / primary.sales * 100, 1) : 0, fill: "#F5B731" },
-    { name: "Net Profit", value: primary.netProfit, pct: primary.margin, fill: primary.netProfit >= 0 ? "#2ECFAA" : "#D03030" },
-  ] : [];
-
-  // Multi-period net profit trend
-  const profitTrend = periods.map(p => ({
-    label: p.label,
-    sales: p.sales,
-    netProfit: p.netProfit,
-    margin: p.margin,
-    adSpend: p.adSpend,
-    cogs: p.cogs,
-    amazonFees: p.amazonFees,
-  }));
+  const showToast = useCallback((msg) => {
+    setToast(msg);
+    setTimeout(() => setToast(null), 3000);
+  }, []);
 
   return (
     <>
-      <div className="page-header">
-        <h1>Profitability</h1>
-        <p>Sellerboard-style P&L waterfall &bull; Revenue → deductions → inventory cost → overhead</p>
-      </div>
-
-      {/* ── Period View Tabs ─────────────────────────────── */}
-      <div className="comp-tabs" style={{ marginBottom: 20 }}>
-        {COMP_VIEWS.map(v => (
-          <button
-            key={v.key}
-            className={`comp-tab ${view === v.key ? "active" : ""}`}
-            onClick={() => setView(v.key)}
-          >
-            {v.label}
-          </button>
+      {/* Sub-nav tabs */}
+      <div className="inv-subnav">
+        {SUB_TABS.map(t => (
+          <button key={t.key} className={`inv-tab ${tab === t.key ? "active" : ""}`}
+            onClick={() => setTab(t.key)}>{t.label}</button>
         ))}
       </div>
 
-      {loading ? (
-        <div className="loading"><div className="spinner" /> Loading profitability...</div>
-      ) : (
-        <>
-          {/* ── KPI Row ──────────────────────────────────── */}
-          {primary && (
-            <div className="kpi-grid" style={{ marginBottom: 24 }}>
-              <KPI label="Net Revenue" value={fmt$(primary.sales)} className="teal" />
-              <KPI label="Net Profit" value={fmt$(primary.netProfit)} className={primary.netProfit >= 0 ? "pos" : "neg"} />
-              <KPI label="Margin" value={`${primary.margin}%`} className={primary.margin >= 0 ? "pos" : "neg"} />
-              <KPI label="ROI" value={`${primary.roi}%`} className={primary.roi >= 0 ? "pos" : "neg"} />
-              <KPI label="Ad Spend" value={fmt$(primary.adSpend)} />
-              <KPI label="COGS" value={fmt$(primary.cogs)} />
-              <KPI label="Amazon Fees" value={fmt$(primary.amazonFees)} />
-              <KPI label="Returns" value={`${primary.refundUnits || 0} (${primary.returnPct || 0}%)`} className={(primary.refundUnits || 0) > 0 ? "neg" : ""} />
-              <KPI label="Real ACOS" value={`${primary.realAcos}%`} />
-            </div>
-          )}
+      {/* Page header */}
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 14, flexWrap: "wrap", gap: 10 }}>
+        <div>
+          <div style={{ ...DM(22), color: "var(--teal, #2ECFAA)" }}>Profitability Command Center</div>
+          <div style={{ ...SG(11, 500), color: "var(--muted, #6B8090)", marginTop: 2 }}>
+            {filters.division || "All Divisions"} · {filters.customer || "All Channels"} · Last {days} Days · Financial Events
+          </div>
+        </div>
+        <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
+          {DAY_OPTIONS.map(d => (
+            <button key={d.days} className={`range-tab ${days === d.days ? "active" : ""}`}
+              onClick={() => setDays(d.days)} style={{ ...SG(10, 700), padding: "4px 10px", borderRadius: 7, border: "1px solid var(--border)", background: days === d.days ? "var(--navy)" : "transparent", color: days === d.days ? "#fff" : "var(--muted)", cursor: "pointer" }}>
+              {d.label}
+            </button>
+          ))}
+        </div>
+      </div>
 
-          {/* ── Waterfall Comparison Table ────────────────── */}
-          {periods.length > 0 && (
-            <div className="table-card" style={{ marginBottom: 24 }}>
-              <h3>Profit Waterfall by Period</h3>
-              <div style={{ overflowX: "auto" }}>
-                <table className="comp-table">
-                  <thead>
-                    <tr>
-                      <th style={{ textAlign: "left", color: "#fff" }}>Component</th>
-                      {periods.map(p => (
-                        <th key={p.label}>
-                          {p.label}
-                          {p.sub && <div style={{ fontSize: 10, fontWeight: 400, opacity: 0.7 }}>{p.sub}</div>}
-                        </th>
-                      ))}
-                    </tr>
-                  </thead>
-                  <tbody>
-                    <WaterfallRow label="Sales" periods={periods} field="sales" cls="revenue-row" />
-                    <WaterfallRow label="Promo" periods={periods} field="promo" negative />
-                    <WaterfallRow label="Ad Spend" periods={periods} field="adSpend" negative />
-                    <WaterfallRow label="Shipping" periods={periods} field="shipping" negative />
-                    <WaterfallRow label="Refunds" periods={periods} field="refunds" negative />
-                    <WaterfallRow label="Amazon Fees" periods={periods} field="amazonFees" negative bold />
-                    <WaterfallRow label="  FBA Fees" periods={periods} field="fbaFees" negative sub />
-                    <WaterfallRow label="  Referral Fees" periods={periods} field="referralFees" negative sub />
-                    <WaterfallRow label="  Other Fees" periods={periods} field="otherFees" negative sub />
-                    <WaterfallRow label="Refund Units" periods={periods} field="refundUnits" isUnit />
-                    <WaterfallRow label="Return %" periods={periods} field="returnPct" isSuffix="%" />
-                    <tr className="divider-row"><td colSpan={periods.length + 1} style={{ padding: 0 }} /></tr>
-                    <WaterfallRow label="COGS" periods={periods} field="cogs" negative />
-                    <WaterfallRow label="Indirect" periods={periods} field="indirect" negative />
-                    <WaterfallRow label="Net Profit" periods={periods} field="netProfit" cls="profit-row" isPnl />
-                    <WaterfallRow label="Margin %" periods={periods} field="margin" isSuffix="%" cls="profit-row" />
-                    <WaterfallRow label="ROI %" periods={periods} field="roi" isSuffix="%" />
-                    <WaterfallRow label="Real ACOS %" periods={periods} field="realAcos" isSuffix="%" />
-                  </tbody>
-                </table>
-              </div>
-            </div>
-          )}
+      {/* Tab content */}
+      {tab === "pnl" && <PnlOverview filters={filters} days={days} showToast={showToast} />}
+      {tab === "fees" && <FeeDetail filters={filters} days={days} />}
+      {tab === "items" && <ItemProfitability filters={filters} days={days} />}
+      {tab === "aur" && <AurAnalysis filters={filters} days={days} />}
+      {tab === "pricing" && <PricingCoupons filters={filters} showToast={showToast} />}
 
-          {/* ── Charts Row ───────────────────────────────── */}
-          <div className="chart-grid">
-            {/* Waterfall Bar Chart */}
-            <div className="chart-card">
-              <h3>Revenue → Net Profit Waterfall</h3>
-              <p className="sub">{primary ? primary.label : ""} breakdown</p>
-              <ResponsiveContainer width="100%" height={320}>
-                <BarChart data={waterfallData} margin={{ top: 10, right: 10, bottom: 10, left: 10 }}>
+      {/* Toast */}
+      {toast && (
+        <div style={{
+          position: "fixed", bottom: 24, right: 24, background: "var(--navy, #0E1F2D)",
+          border: "1px solid var(--teal, #2ECFAA)", borderRadius: 10, padding: "12px 18px",
+          ...SG(11, 700, "var(--teal, #2ECFAA)"),
+          boxShadow: "0 8px 32px rgba(0,0,0,.5)", zIndex: 9999,
+        }}>{toast}</div>
+      )}
+    </>
+  );
+}
+
+/* ══════════════════════════════════════════════════════════════
+   TAB 1 — P&L OVERVIEW
+   ══════════════════════════════════════════════════════════════ */
+function PnlOverview({ filters, days, showToast }) {
+  const [data, setData] = useState(null);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    setLoading(true);
+    api.profitabilityOverview(days, filters).then(d => { setData(d); setLoading(false); }).catch(() => setLoading(false));
+  }, [days, filters.division, filters.customer, filters.marketplace]);
+
+  if (loading) return <div className="loading"><div className="spinner" /> Loading P&L overview...</div>;
+  if (!data) return <div style={{ color: "var(--muted)", padding: 40, textAlign: "center" }}>No data available</div>;
+
+  const kpis = data.kpis || {};
+  const wf = data.waterfall || {};
+  const marginTrend = data.marginTrend || [];
+  const feeDonut = data.feeDonut || [];
+
+  // Build waterfall rows from the waterfall object
+  const grossRev0 = wf.sales || 0;
+  const waterfall = [
+    { label: "Gross Revenue", value: grossRev0 },
+    { label: "Referral Fees", value: -(wf.referralFees || 0) },
+    { label: "FBA Fulfillment", value: -(wf.fbaFees || 0) },
+    { label: "Storage Fees", value: -(wf.storageFees || 0) },
+    { label: "Other Fees", value: -((wf.otherFees || 0) - (wf.storageFees || 0)) },
+    { label: "Net Revenue", value: grossRev0 - (wf.amazonFees || 0) },
+    { label: "COGS", value: -(wf.cogs || 0) },
+    { label: "Shipping", value: -(wf.shipping || 0) },
+    { label: "Net Operating Profit", value: wf.netProfit || 0 },
+  ].filter(w => Math.abs(w.value) > 0.01 || w.label === "Net Operating Profit" || w.label === "Gross Revenue");
+
+  // Build waterfall chart data
+  const wfChartData = waterfall.map(w => ({
+    name: w.label,
+    value: w.value,
+    fill: w.label.includes("Gross Rev") ? WF_COLORS.revenue :
+          w.label.includes("Referral") ? WF_COLORS.referral :
+          w.label.includes("FBA") ? WF_COLORS.fba :
+          w.label.includes("Storage") ? WF_COLORS.storage :
+          w.label.includes("Other") ? WF_COLORS.other :
+          w.label.includes("Net Rev") ? WF_COLORS.netRev :
+          w.label.includes("COGS") ? WF_COLORS.cogs :
+          w.label.includes("Ship") ? WF_COLORS.shipping :
+          w.label.includes("Coupon") ? WF_COLORS.coupon :
+          (w.value >= 0 ? WF_COLORS.nop : WF_COLORS.nopNeg),
+  }));
+
+  const grossRev = kpis.grossRevenue || 0;
+
+  return (
+    <>
+      {/* KPI Row */}
+      <div className="kpi-grid" style={{ marginBottom: 14 }}>
+        <KpiCard label="Gross Revenue" value={fmt$2(kpis.grossRevenue)} color="#2ECFAA" sub="Before all fees" />
+        <KpiCard label="Net Revenue" value={fmt$2(kpis.netRevenue)} color="#2ECFAA" sub="After Amazon fees" />
+        <KpiCard label="Gross Margin" value={fmtPct(kpis.grossMargin)} color="#E87830" sub="After COGS + fees" />
+        <KpiCard label="Total Amazon Fees" value={fmt$2(kpis.totalFees)} color="#f87171" sub={`${kpis.feePct || 0}% of gross rev`} />
+        <KpiCard label="Total COGS" value={fmt$2(kpis.totalCogs)} color="#F5B731" sub={`${kpis.cogsPct || 0}% of gross rev`} />
+        <KpiCard label="Net Operating Profit" value={fmt$2(kpis.netProfit)} color="#7BAED0" sub="After COGS + all fees" />
+        <KpiCard label="Avg Unit Cost" value={`$${round(kpis.avgUnitCost || 0, 2)}`} color="#A26BE1" sub="Blended landed COGS" />
+        <KpiCard label="Contribution / Unit" value={`$${round(kpis.contributionPerUnit || 0, 2)}`} color="#2ECFAA" sub="Rev less COGS + fees" />
+      </div>
+
+      {/* Section: P&L Waterfall */}
+      <div className="sec-div"><span>P&L Waterfall — {days} Days · Gross to Net</span></div>
+
+      <div style={{ display: "grid", gridTemplateColumns: "1fr 340px", gap: 12, marginBottom: 12 }}>
+        {/* Waterfall chart + table */}
+        <div className="table-card" style={{ padding: 0 }}>
+          <div style={{ padding: "10px 16px", borderBottom: "1px solid var(--border)", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+            <span style={{ ...SG(12, 700) }}>Revenue Waterfall — Gross to Net Operating Profit</span>
+          </div>
+          <div style={{ padding: "14px 18px" }}>
+            <ResponsiveContainer width="100%" height={180}>
+              <BarChart data={wfChartData} margin={{ top: 5, right: 5, bottom: 5, left: 5 }}>
+                <CartesianGrid strokeDasharray="3 3" stroke="rgba(14,31,45,0.08)" />
+                <XAxis dataKey="name" tick={{ ...SG(8, 600), fill: "var(--muted, #6B8090)" }} interval={0} angle={-20} textAnchor="end" height={40} />
+                <YAxis tick={{ ...SG(9, 600), fill: "var(--muted, #6B8090)" }} tickFormatter={v => `$${(Math.abs(v)/1000).toFixed(0)}k`} />
+                <Tooltip contentStyle={TOOLTIP_STYLE} formatter={v => [fmt$2(v), ""]} />
+                <Bar dataKey="value" radius={[4,4,0,0]}>
+                  {wfChartData.map((e, i) => <Cell key={i} fill={e.fill} />)}
+                </Bar>
+              </BarChart>
+            </ResponsiveContainer>
+          </div>
+          {/* Tabular waterfall rows */}
+          {waterfall.map((w, i) => (
+            <WfRow key={i} label={w.label} amount={w.value} pct={grossRev > 0 ? round(Math.abs(w.value) / grossRev * 100, 1) : 0}
+              color={w.value >= 0 ? "#2ECFAA" : "#f87171"} maxVal={grossRev}
+              isTotal={w.label.includes("Net Operating") || w.label.includes("Gross Rev")}
+              isSub={w.label.includes("Referral") || w.label.includes("FBA") || w.label.includes("Storage") || w.label.includes("Other Fee")} />
+          ))}
+        </div>
+
+        {/* Right side: Margin Trend + Fee Donut */}
+        <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+          {/* Margin Trend */}
+          <div className="table-card" style={{ padding: 0 }}>
+            <div style={{ padding: "10px 16px", borderBottom: "1px solid var(--border)" }}>
+              <span style={SG(12, 700)}>8-Week Margin Trend</span>
+            </div>
+            <div style={{ padding: 14 }}>
+              <ResponsiveContainer width="100%" height={160}>
+                <ComposedChart data={marginTrend}>
                   <CartesianGrid strokeDasharray="3 3" stroke="rgba(14,31,45,0.08)" />
-                  <XAxis dataKey="name" tick={{ fill: "#6B8090", fontSize: 11 }} />
-                  <YAxis tick={{ fill: "#6B8090", fontSize: 11 }} tickFormatter={v => `$${(Math.abs(v)/1000).toFixed(0)}k`} />
-                  <Tooltip contentStyle={TOOLTIP_STYLE} formatter={(v) => [fmt$(Math.abs(v)), v < 0 ? "Cost" : "Amount"]} />
-                  <Bar dataKey="value" radius={[4,4,0,0]}>
-                    {waterfallData.map((entry, i) => (
-                      <Cell key={i} fill={entry.fill} />
-                    ))}
-                  </Bar>
-                </BarChart>
+                  <XAxis dataKey="label" tick={{ ...SG(8, 600), fill: "var(--muted)" }} />
+                  <YAxis tick={{ ...SG(9, 600), fill: "var(--muted)" }} tickFormatter={v => `${v}%`} />
+                  <Tooltip contentStyle={TOOLTIP_STYLE} formatter={v => [`${round(v, 1)}%`, ""]} />
+                  <Line type="monotone" dataKey="grossMargin" name="Gross Margin" stroke="#2ECFAA" strokeWidth={2} dot={{ r: 3 }} />
+                  <Line type="monotone" dataKey="netMargin" name="Net Margin" stroke="#7BAED0" strokeWidth={2} dot={{ r: 3 }} />
+                  <Line type="monotone" dataKey="feeRatio" name="Fee Ratio" stroke="#f87171" strokeWidth={1.5} strokeDasharray="4 4" dot={{ r: 2 }} />
+                  <Legend wrapperStyle={{ ...SG(9, 600) }} />
+                </ComposedChart>
               </ResponsiveContainer>
             </div>
+          </div>
 
-            {/* Cost Breakdown as % of Revenue */}
-            <div className="chart-card">
-              <h3>Cost Structure (% of Sales)</h3>
-              <p className="sub">{primary ? primary.label : ""} — where the money goes</p>
-              <div style={{ padding: "20px 0" }}>
-                {costBreakdown.map(item => (
-                  <div key={item.name} style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 16 }}>
-                    <div style={{ width: 100, fontSize: 12, fontWeight: 600, color: "#2A3D50", flexShrink: 0 }}>{item.name}</div>
-                    <div style={{ flex: 1, background: "rgba(14,31,45,0.06)", borderRadius: 6, height: 28, overflow: "hidden", position: "relative" }}>
-                      <div style={{
-                        width: `${Math.min(Math.abs(item.pct), 100)}%`,
-                        height: "100%",
-                        background: item.fill,
-                        borderRadius: 6,
-                        transition: "width 0.5s ease",
-                        display: "flex",
-                        alignItems: "center",
-                        justifyContent: "flex-end",
-                        paddingRight: 8,
-                      }}>
-                        {Math.abs(item.pct) > 8 && (
-                          <span style={{ color: "#fff", fontSize: 11, fontWeight: 700 }}>{item.pct}%</span>
-                        )}
-                      </div>
-                      {Math.abs(item.pct) <= 8 && (
-                        <span style={{ position: "absolute", left: `${Math.abs(item.pct) + 2}%`, top: "50%", transform: "translateY(-50%)", fontSize: 11, fontWeight: 600, color: "#6B8090" }}>{item.pct}%</span>
-                      )}
+          {/* Fee Donut */}
+          <div className="table-card" style={{ padding: 0, flex: 1 }}>
+            <div style={{ padding: "10px 16px", borderBottom: "1px solid var(--border)" }}>
+              <span style={SG(12, 700)}>Fee Composition</span>
+            </div>
+            <div style={{ padding: 14, display: "flex", alignItems: "center", gap: 12 }}>
+              <ResponsiveContainer width="50%" height={140}>
+                <PieChart>
+                  <Pie data={feeDonut} dataKey="value" nameKey="name" cx="50%" cy="50%" innerRadius={35} outerRadius={55}>
+                    {feeDonut.map((_, i) => <Cell key={i} fill={DONUT_COLORS[i % DONUT_COLORS.length]} />)}
+                  </Pie>
+                  <Tooltip contentStyle={TOOLTIP_STYLE} formatter={v => [fmt$2(v), ""]} />
+                </PieChart>
+              </ResponsiveContainer>
+              <div style={{ flex: 1 }}>
+                {feeDonut.map((f, i) => (
+                  <div key={i} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "4px 0", borderBottom: "1px solid var(--border, rgba(14,31,45,0.06))" }}>
+                    <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                      <span style={{ width: 8, height: 8, borderRadius: 2, background: DONUT_COLORS[i % DONUT_COLORS.length], flexShrink: 0 }} />
+                      <span style={SG(9, 600, "var(--muted)")}>{f.name}</span>
                     </div>
-                    <div style={{ width: 80, textAlign: "right", fontSize: 13, fontWeight: 600, fontFamily: "'Space Grotesk', sans-serif", color: "#2A3D50" }}>{fmt$(item.value)}</div>
+                    <span style={SG(10, 700)}>{fmt$2(f.value)}</span>
                   </div>
                 ))}
               </div>
             </div>
           </div>
-
-          {/* ── Multi-period Profit Trend ────────────────── */}
-          {profitTrend.length > 1 && (
-            <div className="chart-grid" style={{ marginTop: 20 }}>
-              <div className="chart-card">
-                <h3>Profit Trend Across Periods</h3>
-                <p className="sub">Net profit and margin by period</p>
-                <ResponsiveContainer width="100%" height={300}>
-                  <ComposedChart data={profitTrend}>
-                    <CartesianGrid strokeDasharray="3 3" stroke="rgba(14,31,45,0.08)" />
-                    <XAxis dataKey="label" tick={{ fill: "#6B8090", fontSize: 11 }} />
-                    <YAxis yAxisId="left" tick={{ fill: "#6B8090", fontSize: 11 }} tickFormatter={v => `$${(v/1000).toFixed(0)}k`} />
-                    <YAxis yAxisId="right" orientation="right" tick={{ fill: "#6B8090", fontSize: 11 }} tickFormatter={v => `${v}%`} />
-                    <Tooltip contentStyle={TOOLTIP_STYLE} />
-                    <Legend />
-                    <Bar yAxisId="left" dataKey="sales" name="Sales" fill="#2ECFAA" opacity={0.3} radius={[3,3,0,0]} />
-                    <Bar yAxisId="left" dataKey="netProfit" name="Net Profit" fill="#3E658C" radius={[3,3,0,0]} />
-                    <Line yAxisId="right" type="monotone" dataKey="margin" name="Margin %" stroke="#E87830" strokeWidth={2.5} dot />
-                  </ComposedChart>
-                </ResponsiveContainer>
-              </div>
-
-              <div className="chart-card">
-                <h3>Cost Stack by Period</h3>
-                <p className="sub">Where revenue goes across periods</p>
-                <ResponsiveContainer width="100%" height={300}>
-                  <BarChart data={profitTrend}>
-                    <CartesianGrid strokeDasharray="3 3" stroke="rgba(14,31,45,0.08)" />
-                    <XAxis dataKey="label" tick={{ fill: "#6B8090", fontSize: 11 }} />
-                    <YAxis tick={{ fill: "#6B8090", fontSize: 11 }} tickFormatter={v => `$${(v/1000).toFixed(0)}k`} />
-                    <Tooltip contentStyle={TOOLTIP_STYLE} formatter={v => [fmt$(v), ""]} />
-                    <Legend />
-                    <Bar dataKey="cogs" name="COGS" stackId="costs" fill="#E87830" />
-                    <Bar dataKey="amazonFees" name="Amazon Fees" stackId="costs" fill="#3E658C" />
-                    <Bar dataKey="adSpend" name="Ad Spend" stackId="costs" fill="#F5B731" />
-                    <Bar dataKey="netProfit" name="Net Profit" stackId="costs" fill="#2ECFAA" radius={[3,3,0,0]} />
-                  </BarChart>
-                </ResponsiveContainer>
-              </div>
-            </div>
-          )}
-        </>
-      )}
-
-      {/* ── Item-Level Breakdown ──────────────────────────── */}
-      <div style={{ marginTop: 32 }}>
-        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 16 }}>
-          <div>
-            <h2 style={{ fontFamily: "'Space Grotesk', sans-serif", fontSize: 18, fontWeight: 700, color: "var(--navy)", marginBottom: 4 }}>
-              Item-Level Profitability
-            </h2>
-            <p style={{ color: "var(--muted)", fontSize: 13 }}>Per-ASIN profit breakdown &bull; Sellerboard-style metrics</p>
-          </div>
-          <div className="range-tabs">
-            {RANGES.map(r => (
-              <button
-                key={r.days}
-                className={`range-tab ${itemDays === r.days ? "active" : ""}`}
-                onClick={() => setItemDays(r.days)}
-              >
-                {r.label}
-              </button>
-            ))}
-          </div>
         </div>
-
-        {itemLoading ? (
-          <div className="loading"><div className="spinner" /> Loading item data...</div>
-        ) : (
-          <div className="table-card" style={{ padding: 0 }}>
-            <div style={{ overflowX: "auto" }}>
-              <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12 }}>
-                <thead>
-                  <tr style={{ background: "var(--navy)" }}>
-                    <SortTh label="Product" col="name" sortCol={sortCol} sortDir={sortDir} onClick={handleSort} align="left" first />
-                    <th style={staticThStyle}>Coupon</th>
-                    <th style={staticThStyle}>Coupon End</th>
-                    <th style={staticThStyle}>Sale Price</th>
-                    <th style={staticThStyle}>Sale Dates</th>
-                    <SortTh label="Units" col="units" sortCol={sortCol} sortDir={sortDir} onClick={handleSort} />
-                    <SortTh label="Sales" col="sales" sortCol={sortCol} sortDir={sortDir} onClick={handleSort} />
-                    <SortTh label="Ad Spend" col="adSpend" sortCol={sortCol} sortDir={sortDir} onClick={handleSort} />
-                    <SortTh label="Amazon Fees" col="amazonFees" sortCol={sortCol} sortDir={sortDir} onClick={handleSort} />
-                    <SortTh label="COGS" col="cogs" sortCol={sortCol} sortDir={sortDir} onClick={handleSort} />
-                    <SortTh label="Returns" col="refundUnits" sortCol={sortCol} sortDir={sortDir} onClick={handleSort} />
-                    <SortTh label="Return %" col="returnPct" sortCol={sortCol} sortDir={sortDir} onClick={handleSort} />
-                    <SortTh label="Net Profit" col="netProfit" sortCol={sortCol} sortDir={sortDir} onClick={handleSort} />
-                    <SortTh label="Margin" col="margin" sortCol={sortCol} sortDir={sortDir} onClick={handleSort} />
-                    <SortTh label="ROI" col="roi" sortCol={sortCol} sortDir={sortDir} onClick={handleSort} />
-                  </tr>
-                </thead>
-                <tbody>
-                  {sortedItems.map(item => (
-                    <tr key={item.asin} style={{ borderBottom: "1px solid rgba(14,31,45,0.04)" }}>
-                      <td style={{ padding: "10px 12px", maxWidth: 220 }}>
-                        <div style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", fontWeight: 600, color: "var(--body-text)" }}>{item.name}</div>
-                        <div style={{ fontSize: 10, color: "var(--muted)", marginTop: 1, fontFamily: "'Space Grotesk', monospace" }}>
-                          {item.asin}{item.sku ? ` · ${item.sku}` : ""}
-                        </div>
-                      </td>
-                      <td style={{ ...cellStyle, textAlign: "center" }}>
-                        <CouponPill status={item.couponStatus} discount={item.couponDiscount} type={item.couponType} />
-                      </td>
-                      <td style={{ ...cellStyle, textAlign: "center", fontSize: 11 }}>
-                        {item.couponEndDate ? fmtDate(item.couponEndDate) : <span style={{ color: "var(--muted)" }}>—</span>}
-                      </td>
-                      <td style={{ ...cellStyle, textAlign: "center" }}>
-                        {item.salePrice ? (
-                          <span>
-                            <span style={{ fontWeight: 600, color: "#E87830" }}>${item.salePrice.toFixed(2)}</span>
-                            {item.listPrice && item.listPrice > item.salePrice && (
-                              <span style={{ fontSize: 10, color: "var(--muted)", textDecoration: "line-through", marginLeft: 4 }}>
-                                ${item.listPrice.toFixed(2)}
-                              </span>
-                            )}
-                          </span>
-                        ) : (
-                          <span style={{ color: "var(--muted)" }}>—</span>
-                        )}
-                      </td>
-                      <td style={{ ...cellStyle, textAlign: "center", fontSize: 10 }}>
-                        {item.salePriceStartDate || item.salePriceEndDate ? (
-                          <span>
-                            {item.salePriceStartDate ? fmtDate(item.salePriceStartDate) : "—"}
-                            <span style={{ color: "var(--muted)", margin: "0 2px" }}>→</span>
-                            {item.salePriceEndDate ? fmtDate(item.salePriceEndDate) : "—"}
-                          </span>
-                        ) : (
-                          <span style={{ color: "var(--muted)" }}>—</span>
-                        )}
-                      </td>
-                      <td style={cellStyle}>{item.units.toLocaleString()}</td>
-                      <td style={cellStyle}>{fmt$(item.sales)}</td>
-                      <td style={cellStyle}>{fmt$(item.adSpend)}</td>
-                      <td style={cellStyle}>{fmt$(item.amazonFees)}</td>
-                      <td style={cellStyle}>{fmt$(item.cogs)}</td>
-                      <td style={{ ...cellStyle, color: (item.refundUnits || 0) > 0 ? "var(--neg)" : undefined }}>{(item.refundUnits || 0).toLocaleString()}</td>
-                      <td style={{ ...cellStyle, color: (item.returnPct || 0) > 0 ? "var(--neg)" : undefined }}>{(item.returnPct || 0)}%</td>
-                      <td style={{ ...cellStyle, color: item.netProfit >= 0 ? "var(--pos)" : "var(--neg)", fontWeight: 700 }}>
-                        {fmt$(item.netProfit)}
-                      </td>
-                      <td style={{ ...cellStyle, color: item.margin >= 0 ? "var(--pos)" : "var(--neg)" }}>
-                        {item.margin}%
-                      </td>
-                      <td style={{ ...cellStyle, color: item.roi >= 0 ? "var(--pos)" : "var(--neg)" }}>
-                        {item.roi}%
-                      </td>
-                    </tr>
-                  ))}
-                  {/* Totals row */}
-                  {sortedItems.length > 0 && (() => {
-                    const totals = sortedItems.reduce((acc, i) => ({
-                      units: acc.units + i.units,
-                      sales: acc.sales + i.sales,
-                      adSpend: acc.adSpend + i.adSpend,
-                      amazonFees: acc.amazonFees + i.amazonFees,
-                      cogs: acc.cogs + i.cogs,
-                      netProfit: acc.netProfit + i.netProfit,
-                      refundUnits: acc.refundUnits + (i.refundUnits || 0),
-                    }), { units: 0, sales: 0, adSpend: 0, amazonFees: 0, cogs: 0, netProfit: 0, refundUnits: 0 });
-                    const totalMargin = totals.sales > 0 ? round(totals.netProfit / totals.sales * 100, 1) : 0;
-                    const totalRoi = totals.cogs > 0 ? round(totals.netProfit / totals.cogs * 100, 1) : 0;
-                    const totalReturnPct = totals.units > 0 ? round(totals.refundUnits / totals.units * 100, 1) : 0;
-                    return (
-                      <tr style={{ background: "rgba(14,31,45,0.04)", fontWeight: 700, borderTop: "2px solid var(--border)" }}>
-                        <td style={{ padding: "12px 12px", color: "var(--navy)" }}>TOTAL ({sortedItems.length} products)</td>
-                        <td style={cellStyle}></td>
-                        <td style={cellStyle}></td>
-                        <td style={cellStyle}></td>
-                        <td style={cellStyle}>{totals.units.toLocaleString()}</td>
-                        <td style={cellStyle}>{fmt$(totals.sales)}</td>
-                        <td style={cellStyle}>{fmt$(totals.adSpend)}</td>
-                        <td style={cellStyle}>{fmt$(totals.amazonFees)}</td>
-                        <td style={cellStyle}>{fmt$(totals.cogs)}</td>
-                        <td style={{ ...cellStyle, color: totals.refundUnits > 0 ? "var(--neg)" : undefined }}>{totals.refundUnits.toLocaleString()}</td>
-                        <td style={{ ...cellStyle, color: totalReturnPct > 0 ? "var(--neg)" : undefined }}>{totalReturnPct}%</td>
-                        <td style={{ ...cellStyle, color: totals.netProfit >= 0 ? "var(--pos)" : "var(--neg)" }}>{fmt$(totals.netProfit)}</td>
-                        <td style={{ ...cellStyle, color: totalMargin >= 0 ? "var(--pos)" : "var(--neg)" }}>{totalMargin}%</td>
-                        <td style={{ ...cellStyle, color: totalRoi >= 0 ? "var(--pos)" : "var(--neg)" }}>{totalRoi}%</td>
-                      </tr>
-                    );
-                  })()}
-                </tbody>
-              </table>
-            </div>
-          </div>
-        )}
       </div>
     </>
   );
 }
 
-/* ── Sub-Components ──────────────────────────────────────── */
+/* ══════════════════════════════════════════════════════════════
+   TAB 2 — AMAZON FEE DETAIL
+   ══════════════════════════════════════════════════════════════ */
+function FeeDetail({ filters, days }) {
+  const [data, setData] = useState(null);
+  const [loading, setLoading] = useState(true);
 
-const staticThStyle = {
-  padding: "12px 12px",
-  textAlign: "center",
-  color: "rgba(255,255,255,0.7)",
-  fontSize: 11,
-  fontWeight: 700,
-  textTransform: "uppercase",
-  letterSpacing: "0.8px",
-  whiteSpace: "nowrap",
-  borderBottom: "none",
-};
+  useEffect(() => {
+    setLoading(true);
+    api.profitabilityFeeDetail(days, filters).then(d => { setData(d); setLoading(false); }).catch(() => setLoading(false));
+  }, [days, filters.division, filters.customer, filters.marketplace]);
 
-const COUPON_COLORS = {
-  ACTIVE: { bg: "#ECFDF5", text: "#065F46", border: "#A7F3D0" },
-  SCHEDULED: { bg: "#EFF6FF", text: "#1E40AF", border: "#BFDBFE" },
-  PAUSED: { bg: "#FEF3C7", text: "#92400E", border: "#FDE68A" },
-  EXPIRED: { bg: "#F3F4F6", text: "#6B7280", border: "#E5E7EB" },
-};
+  if (loading) return <div className="loading"><div className="spinner" /> Loading fee detail...</div>;
+  if (!data) return <div style={{ color: "var(--muted)", padding: 40, textAlign: "center" }}>No fee data available</div>;
 
-function CouponPill({ status, discount, type }) {
-  if (!status) return <span style={{ color: "var(--muted)", fontSize: 11 }}>—</span>;
-  const colors = COUPON_COLORS[status] || COUPON_COLORS.EXPIRED;
-  const discountLabel = discount
-    ? (type === "PERCENTAGE" ? `${discount}%` : `$${discount}`)
-    : "";
+  const categories = data.categories || [];
+  const totalFees = data.total_fees || 0;
+
   return (
-    <span style={{
-      display: "inline-block",
-      padding: "2px 8px",
-      borderRadius: 12,
-      fontSize: 10,
-      fontWeight: 700,
-      letterSpacing: "0.5px",
-      background: colors.bg,
-      color: colors.text,
-      border: `1px solid ${colors.border}`,
-      whiteSpace: "nowrap",
-    }}>
-      {status}{discountLabel ? ` ${discountLabel}` : ""}
-    </span>
+    <>
+      <div className="sec-div"><span>Amazon Fee Breakdown — {days} Days</span></div>
+      <div className="table-card" style={{ padding: 0 }}>
+        <div style={{ padding: "10px 16px", borderBottom: "1px solid var(--border)", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+          <span style={SG(12, 700)}>Complete Fee Breakdown</span>
+          <span style={SG(10, 700, "#f87171")}>Total: {fmt$2(totalFees)}</span>
+        </div>
+        {/* Header */}
+        <div style={{ display: "grid", gridTemplateColumns: "220px 1fr 80px 70px 70px", gap: 8, padding: "7px 14px", borderBottom: "1px solid var(--border)", background: "var(--navy, #0E1F2D)" }}>
+          <span style={SG(8, 700, "rgba(255,255,255,0.5)")}>FEE TYPE</span>
+          <span style={SG(8, 700, "rgba(255,255,255,0.5)")}></span>
+          <span style={{ ...SG(8, 700, "rgba(255,255,255,0.5)"), textAlign: "right" }}>AMOUNT</span>
+          <span style={{ ...SG(8, 700, "rgba(255,255,255,0.5)"), textAlign: "right" }}>% OF REV</span>
+          <span style={{ ...SG(8, 700, "rgba(255,255,255,0.5)"), textAlign: "right" }}>WoW Δ</span>
+        </div>
+        {categories.map((cat, ci) => (
+          <div key={ci}>
+            {/* Category header */}
+            <div style={{ display: "grid", gridTemplateColumns: "220px 1fr 80px 70px 70px", gap: 8, padding: "8px 14px", borderBottom: "1px solid var(--border)", background: "rgba(14,31,45,0.03)" }}>
+              <span style={SG(10, 700)}>{cat.name}</span>
+              <div style={{ height: 6, background: "var(--border, rgba(14,31,45,0.08))", borderRadius: 3, overflow: "hidden", alignSelf: "center" }}>
+                <div style={{ width: `${totalFees > 0 ? Math.abs(cat.total) / totalFees * 100 : 0}%`, height: "100%", borderRadius: 3, background: DONUT_COLORS[ci % DONUT_COLORS.length] }} />
+              </div>
+              <span style={{ ...SG(11, 700, "#f87171"), textAlign: "right" }}>{fmt$2(cat.total)}</span>
+              <span style={{ ...SG(10, 700, "var(--muted)"), textAlign: "right" }}>{fmtPct(cat.pct_of_rev)}</span>
+              <span style={{ textAlign: "right" }}></span>
+            </div>
+            {/* Sub-items */}
+            {(cat.items || []).map((item, ii) => (
+              <div key={ii} style={{ display: "grid", gridTemplateColumns: "220px 1fr 80px 70px 70px", gap: 8, padding: "6px 14px 6px 28px", borderBottom: "1px solid var(--border, rgba(14,31,45,0.04))" }}>
+                <span style={SG(9, 500, "var(--muted)")}>{item.name}</span>
+                <div style={{ height: 4, background: "var(--border, rgba(14,31,45,0.06))", borderRadius: 2, overflow: "hidden", alignSelf: "center" }}>
+                  <div style={{ width: `${totalFees > 0 ? Math.abs(item.amount) / totalFees * 100 : 0}%`, height: "100%", borderRadius: 2, background: DONUT_COLORS[ci % DONUT_COLORS.length], opacity: 0.6 }} />
+                </div>
+                <span style={{ ...SG(10, 600), textAlign: "right" }}>{fmt$2(item.amount)}</span>
+                <span style={{ ...SG(9, 600, "var(--muted)"), textAlign: "right" }}>{fmtPct(item.pct_of_rev)}</span>
+                <span style={{ textAlign: "right" }}></span>
+              </div>
+            ))}
+          </div>
+        ))}
+      </div>
+    </>
   );
 }
 
-function fmtDate(dateStr) {
-  if (!dateStr) return null;
-  try {
-    const d = new Date(dateStr);
-    if (isNaN(d.getTime())) return dateStr;
-    return d.toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
-  } catch {
-    return dateStr;
-  }
-}
+/* ══════════════════════════════════════════════════════════════
+   TAB 3 — ITEM PROFITABILITY
+   ══════════════════════════════════════════════════════════════ */
+function ItemProfitability({ filters, days }) {
+  const [items, setItems] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [filter, setFilter] = useState("all");
+  const [sortKey, setSortKey] = useState("rev");
+  const [search, setSearch] = useState("");
 
-const cellStyle = {
-  padding: "10px 12px",
-  textAlign: "right",
-  whiteSpace: "nowrap",
-  fontFamily: "'Space Grotesk', sans-serif",
-  fontSize: 13,
-  color: "var(--body-text)",
-};
+  useEffect(() => {
+    setLoading(true);
+    api.profitabilityItems(days, filters).then(d => { setItems(d.items || []); setLoading(false); }).catch(() => setLoading(false));
+  }, [days, filters.division, filters.customer, filters.marketplace]);
 
-function round(n, d = 0) {
-  const f = Math.pow(10, d);
-  return Math.round(n * f) / f;
-}
+  const filtered = useMemo(() => {
+    let list = [...items];
+    // Division / margin filter
+    if (filter === "golf") list = list.filter(i => (i.division || "").toLowerCase() === "golf");
+    else if (filter === "housewares") list = list.filter(i => (i.division || "").toLowerCase() === "housewares");
+    else if (filter === "healthy") list = list.filter(i => (i.grossMargin || 0) >= 40);
+    else if (filter === "atrisk") list = list.filter(i => (i.grossMargin || 0) >= 20 && (i.grossMargin || 0) < 40);
+    else if (filter === "danger") list = list.filter(i => (i.grossMargin || 0) < 20);
+    // Search
+    if (search) {
+      const q = search.toLowerCase();
+      list = list.filter(i => (i.name || "").toLowerCase().includes(q) || (i.asin || "").toLowerCase().includes(q) || (i.sku || "").toLowerCase().includes(q));
+    }
+    // Sort
+    list.sort((a, b) => (b[sortKey] || 0) - (a[sortKey] || 0));
+    return list;
+  }, [items, filter, sortKey, search]);
 
-function KPI({ label, value, className = "" }) {
+  if (loading) return <div className="loading"><div className="spinner" /> Loading item data...</div>;
+
   return (
-    <div className="kpi-card">
-      <div className="kpi-label">{label}</div>
-      <div className={`kpi-value ${className}`}>{value}</div>
+    <>
+      <div className="sec-div"><span>Item-Level Profitability — {days} Days</span></div>
+      <div className="table-card" style={{ padding: 0 }}>
+        {/* Toolbar */}
+        <div style={{ display: "flex", alignItems: "center", gap: 5, padding: "10px 16px 8px", flexWrap: "wrap" }}>
+          {ITEM_FILTERS.map(f => (
+            <button key={f.key}
+              onClick={() => setFilter(f.key)}
+              style={{
+                ...SG(9, filter === f.key ? 700 : 600),
+                height: 24, padding: "0 9px", borderRadius: 7,
+                border: `1px solid ${filter === f.key ? "transparent" : "var(--border)"}`,
+                background: filter === f.key ? "var(--navy, #0E1F2D)" : "transparent",
+                color: filter === f.key ? "#fff" : "var(--muted)",
+                cursor: "pointer",
+              }}>{f.label}</button>
+          ))}
+          <select value={sortKey} onChange={e => setSortKey(e.target.value)}
+            style={{ ...SG(9, 600), height: 24, padding: "0 8px", borderRadius: 7, border: "1px solid var(--border)", background: "transparent", color: "var(--muted)", cursor: "pointer", marginLeft: 8 }}>
+            {ITEM_SORTS.map(s => <option key={s.key} value={s.key}>Sort: {s.label}</option>)}
+          </select>
+          <input type="text" placeholder="Search SKU / ASIN..." value={search} onChange={e => setSearch(e.target.value)}
+            style={{ ...SG(10, 500), height: 24, padding: "0 9px", borderRadius: 7, border: "1px solid var(--border)", background: "transparent", color: "var(--body-text, #2A3D50)", width: 180, marginLeft: "auto", outline: "none" }} />
+        </div>
+
+        {/* Table header */}
+        <div style={{ overflowX: "auto" }}>
+          <table style={{ width: "100%", borderCollapse: "collapse" }}>
+            <thead>
+              <tr style={{ background: "var(--navy, #0E1F2D)" }}>
+                {["SKU / ASIN", "30D Rev", "COGS/u", "COGS%", "Ref Fee", "FBA Fee", "Storage", "Other", "Total Fees", "Gross Margin", "Net Margin", "$/Unit Net", "Score"].map((h, i) => (
+                  <th key={i} style={{ ...SG(8, 700), padding: "8px 10px", textAlign: i === 0 ? "left" : "right", color: "rgba(255,255,255,0.6)", textTransform: "uppercase", letterSpacing: "0.06em", whiteSpace: "nowrap" }}>{h}</th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {filtered.map(item => {
+                const gm = item.grossMargin || 0;
+                const gmColor = gm >= 40 ? "#2ECFAA" : gm >= 20 ? "#F5B731" : "#f87171";
+                return (
+                  <tr key={item.asin} style={{ borderBottom: "1px solid var(--border, rgba(14,31,45,0.04))" }}>
+                    <td style={{ ...cellL, maxWidth: 200 }}>
+                      <div style={{ fontWeight: 600, color: "var(--body-text, #2A3D50)", fontSize: 11, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{item.name || item.sku || item.asin}</div>
+                      <div style={SG(7.5, 500, "var(--muted)")}>{item.asin}{item.sku ? ` · ${item.sku}` : ""}</div>
+                    </td>
+                    <td style={cellR}>{fmt$2(item.rev)}</td>
+                    <td style={cellR}>${round(item.cogsPerUnit || 0, 2)}</td>
+                    <td style={cellR}>{fmtPct(item.cogsPct)}</td>
+                    <td style={cellR}>{fmt$2(item.referralTotal)}</td>
+                    <td style={cellR}>{fmt$2(item.fbaTotal)}</td>
+                    <td style={cellR}>{fmt$2(item.storageFees || 0)}</td>
+                    <td style={cellR}>{fmt$2(item.otherFees || 0)}</td>
+                    <td style={{ ...cellR, color: "#f87171", fontWeight: 700 }}>{fmt$2(item.totalFees || (item.referralTotal + item.fbaTotal + (item.storageFees || 0)))}</td>
+                    <td style={{ ...cellR, color: gmColor, fontWeight: 700 }}>{fmtPct(gm)}</td>
+                    <td style={{ ...cellR, color: (item.margin || 0) >= 0 ? "#2ECFAA" : "#f87171" }}>{fmtPct(item.margin)}</td>
+                    <td style={{ ...cellR, color: (item.netPerUnit || 0) >= 0 ? "#2ECFAA" : "#f87171" }}>${round(item.netPerUnit || 0, 2)}</td>
+                    <td style={{ ...cellR, textAlign: "center" }}>
+                      <span style={{
+                        display: "inline-flex", alignItems: "center", justifyContent: "center",
+                        width: 30, height: 19, borderRadius: 5, ...SG(9, 800),
+                        background: item.score === "A" ? "rgba(46,207,170,.15)" : item.score === "B" ? "rgba(245,183,49,.14)" : "rgba(248,113,113,.14)",
+                        color: item.score === "A" ? "#2ECFAA" : item.score === "B" ? "#F5B731" : "#f87171",
+                      }}>{item.score || "—"}</span>
+                    </td>
+                  </tr>
+                );
+              })}
+              {filtered.length === 0 && (
+                <tr><td colSpan={13} style={{ padding: 30, textAlign: "center", color: "var(--muted)" }}>No items match your filters</td></tr>
+              )}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </>
+  );
+}
+
+/* ══════════════════════════════════════════════════════════════
+   TAB 4 — AUR ANALYSIS
+   ══════════════════════════════════════════════════════════════ */
+function AurAnalysis({ filters, days }) {
+  const [data, setData] = useState(null);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    setLoading(true);
+    api.profitabilityAur(days > 56 ? days : 56, filters).then(d => { setData(d); setLoading(false); }).catch(() => setLoading(false));
+  }, [days, filters.division, filters.customer, filters.marketplace]);
+
+  if (loading) return <div className="loading"><div className="spinner" /> Loading AUR data...</div>;
+  if (!data) return <div style={{ color: "var(--muted)", padding: 40, textAlign: "center" }}>No AUR data available</div>;
+
+  const skus = data.skus || [];
+  const weeks = ["Wk-8", "Wk-7", "Wk-6", "Wk-5", "Wk-4", "Wk-3", "Wk-2", "Wk-1"];
+  const bubbles = skus.map(s => ({ name: s.name || s.asin, aur: s.aur || 0, net_margin: s.netMargin || 0, revenue: (s.aur || 0) * (s.totalUnits || 0) }));
+
+  return (
+    <>
+      <div className="sec-div"><span>AUR Trend by SKU — 8-Week Window</span></div>
+
+      {/* AUR Trend Table */}
+      <div className="table-card" style={{ padding: 0, marginBottom: 12 }}>
+        <div style={{ padding: "10px 16px", borderBottom: "1px solid var(--border)" }}>
+          <span style={SG(12, 700)}>Average Unit Revenue (AUR) — Weekly Trend</span>
+        </div>
+        <div style={{ overflowX: "auto" }}>
+          <table style={{ width: "100%", borderCollapse: "collapse" }}>
+            <thead>
+              <tr style={{ background: "var(--navy, #0E1F2D)" }}>
+                <th style={{ ...SG(8, 700), padding: "8px 14px", textAlign: "left", color: "rgba(255,255,255,0.6)", textTransform: "uppercase" }}>SKU / ASIN</th>
+                {weeks.map((w, i) => (
+                  <th key={i} style={{ ...SG(8, 700), padding: "8px 6px", textAlign: "center", color: "rgba(255,255,255,0.6)" }}>{w}</th>
+                ))}
+                <th style={{ ...SG(8, 700), padding: "8px 10px", textAlign: "right", color: "rgba(255,255,255,0.6)" }}>AVG AUR</th>
+                <th style={{ ...SG(8, 700), padding: "8px 10px", textAlign: "center", color: "rgba(255,255,255,0.6)" }}>TREND</th>
+              </tr>
+            </thead>
+            <tbody>
+              {skus.map((s, si) => {
+                const aurs = (s.weeklyAur || []).map(a => a == null ? 0 : a);
+                const avg = s.aur || 0;
+                const trend = aurs.length >= 2 ? (aurs[aurs.length - 1] - aurs[0]) : 0;
+                return (
+                  <tr key={si} style={{ borderBottom: "1px solid var(--border, rgba(14,31,45,0.04))" }}>
+                    <td style={{ ...cellL, maxWidth: 190 }}>
+                      <div style={{ fontWeight: 600, color: "var(--body-text)", fontSize: 11, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{s.name || s.sku || s.asin}</div>
+                      <div style={SG(7.5, 500, "var(--muted)")}>{s.asin}</div>
+                    </td>
+                    {aurs.map((a, ai) => (
+                      <td key={ai} style={{ ...cellR, textAlign: "center", fontSize: 9.5 }}>${round(a, 2)}</td>
+                    ))}
+                    {/* Pad empty cells if fewer than 8 weeks */}
+                    {Array.from({ length: Math.max(0, weeks.length - aurs.length) }).map((_, pi) => (
+                      <td key={`p${pi}`} style={cellR}>—</td>
+                    ))}
+                    <td style={{ ...cellR, fontWeight: 700 }}>${round(avg, 2)}</td>
+                    <td style={{ ...cellR, textAlign: "center" }}>
+                      <span style={{ ...SG(9, 700), color: trend >= 0 ? "#2ECFAA" : "#f87171" }}>
+                        {trend >= 0 ? "▲" : "▼"} ${Math.abs(round(trend, 2))}
+                      </span>
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      {/* Bubble chart: AUR vs Net Margin */}
+      <div className="sec-div"><span>AUR vs Net Margin — Bubble Size = Revenue</span></div>
+      <div className="table-card" style={{ padding: 14 }}>
+        <ResponsiveContainer width="100%" height={320}>
+          <ScatterChart margin={{ top: 10, right: 20, bottom: 10, left: 10 }}>
+            <CartesianGrid strokeDasharray="3 3" stroke="rgba(14,31,45,0.08)" />
+            <XAxis type="number" dataKey="aur" name="AUR" tick={{ ...SG(9, 600), fill: "var(--muted)" }} tickFormatter={v => `$${v}`} label={{ value: "AUR ($)", position: "bottom", offset: -2, style: SG(9, 600) }} />
+            <YAxis type="number" dataKey="net_margin" name="Net Margin" tick={{ ...SG(9, 600), fill: "var(--muted)" }} tickFormatter={v => `${v}%`} label={{ value: "Net Margin %", angle: -90, position: "insideLeft", style: SG(9, 600) }} />
+            <ZAxis type="number" dataKey="revenue" range={[50, 800]} />
+            <Tooltip contentStyle={TOOLTIP_STYLE} formatter={(v, name) => [name === "AUR" ? `$${round(v, 2)}` : name === "Net Margin" ? `${round(v, 1)}%` : fmt$2(v), name]} />
+            <Scatter data={bubbles} fill="#2ECFAA" fillOpacity={0.6} stroke="#2ECFAA" strokeWidth={1} />
+          </ScatterChart>
+        </ResponsiveContainer>
+      </div>
+    </>
+  );
+}
+
+/* ══════════════════════════════════════════════════════════════
+   TAB 5 — PRICING & COUPONS
+   ══════════════════════════════════════════════════════════════ */
+function PricingCoupons({ filters, showToast }) {
+  const [prices, setPrices] = useState([]);
+  const [coupons, setCoupons] = useState([]);
+  const [products, setProducts] = useState([]);
+  const [loading, setLoading] = useState(true);
+
+  // Forms
+  const [showPriceForm, setShowPriceForm] = useState(false);
+  const [showCouponForm, setShowCouponForm] = useState(false);
+  const [editPrice, setEditPrice] = useState(null);
+  const [editCoupon, setEditCoupon] = useState(null);
+
+  const reload = useCallback(() => {
+    setLoading(true);
+    Promise.all([
+      api.salePrices(filters),
+      api.coupons(filters),
+      api.profitabilityItems(365, filters),
+    ]).then(([sp, cp, items]) => {
+      setPrices(sp.prices || []);
+      setCoupons(cp.coupons || []);
+      setProducts((items.items || []).map(i => ({ asin: i.asin, sku: i.sku, name: i.name })));
+      setLoading(false);
+    }).catch(() => setLoading(false));
+  }, [filters.division, filters.customer, filters.marketplace]);
+
+  useEffect(() => { reload(); }, [reload]);
+
+  // Price CRUD
+  const handleCreatePrice = async (data) => {
+    await api.createSalePrice(data);
+    showToast("Sale price created");
+    setShowPriceForm(false);
+    reload();
+  };
+  const handleUpdatePrice = async (id, data) => {
+    await api.updateSalePrice(id, data);
+    showToast("Sale price updated");
+    setEditPrice(null);
+    reload();
+  };
+  const handleDeletePrice = async (id) => {
+    if (!confirm("Delete this sale price?")) return;
+    await api.deleteSalePrice(id);
+    showToast("Sale price deleted");
+    reload();
+  };
+  const handlePushPrice = async (id) => {
+    const res = await api.pushPrice(id);
+    showToast(res.pushed ? "Pushed to Amazon!" : res.error || "Push not available yet");
+    reload();
+  };
+
+  // Coupon CRUD
+  const handleCreateCoupon = async (data) => {
+    await api.createCoupon(data);
+    showToast("Coupon created");
+    setShowCouponForm(false);
+    reload();
+  };
+  const handleUpdateCoupon = async (id, data) => {
+    await api.updateCoupon(id, data);
+    showToast("Coupon updated");
+    setEditCoupon(null);
+    reload();
+  };
+  const handleDeleteCoupon = async (id) => {
+    if (!confirm("Delete this coupon?")) return;
+    await api.deleteCoupon(id);
+    showToast("Coupon deleted");
+    reload();
+  };
+
+  if (loading) return <div className="loading"><div className="spinner" /> Loading pricing data...</div>;
+
+  return (
+    <>
+      {/* Action buttons */}
+      <div style={{ display: "flex", gap: 8, marginBottom: 14 }}>
+        <button onClick={() => { setShowPriceForm(!showPriceForm); setShowCouponForm(false); }}
+          style={{ ...SG(10, 700), height: 30, padding: "0 12px", borderRadius: 8, border: "1px solid #2ECFAA", background: "rgba(46,207,170,.1)", color: "#2ECFAA", cursor: "pointer" }}>
+          + New Sale Price
+        </button>
+        <button onClick={() => { setShowCouponForm(!showCouponForm); setShowPriceForm(false); }}
+          style={{ ...SG(10, 700), height: 30, padding: "0 12px", borderRadius: 8, border: "1px solid #E87830", background: "rgba(232,120,48,.1)", color: "#E87830", cursor: "pointer" }}>
+          + New Coupon
+        </button>
+      </div>
+
+      {/* Create Sale Price Form */}
+      {showPriceForm && (
+        <SalePriceForm products={products} onSubmit={handleCreatePrice} onCancel={() => setShowPriceForm(false)} />
+      )}
+
+      {/* Create Coupon Form */}
+      {showCouponForm && (
+        <CouponForm products={products} onSubmit={handleCreateCoupon} onCancel={() => setShowCouponForm(false)} />
+      )}
+
+      {/* Active/Scheduled Pricing */}
+      <div className="sec-div"><span>Active &amp; Scheduled Sale Prices</span></div>
+      <div className="table-card" style={{ padding: 0, marginBottom: 12 }}>
+        <div style={{ overflowX: "auto" }}>
+          <table style={{ width: "100%", borderCollapse: "collapse" }}>
+            <thead>
+              <tr style={{ background: "var(--navy, #0E1F2D)" }}>
+                {["SKU / ASIN", "Reg Price", "Sale Price", "Discount", "Start", "End", "Status", "Actions"].map((h, i) => (
+                  <th key={i} style={{ ...SG(8, 700), padding: "8px 10px", textAlign: i === 0 ? "left" : "center", color: "rgba(255,255,255,0.6)", textTransform: "uppercase" }}>{h}</th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {prices.map(p => {
+                const disc = p.regular_price > 0 ? round((1 - p.sale_price / p.regular_price) * 100, 0) : 0;
+                return (
+                  <tr key={p.id} style={{ borderBottom: "1px solid var(--border, rgba(14,31,45,0.04))" }}>
+                    <td style={{ ...cellL, maxWidth: 200 }}>
+                      <div style={{ fontWeight: 600, fontSize: 11, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{p.product_name || p.sku || p.asin}</div>
+                      <div style={SG(7.5, 500, "var(--muted)")}>{p.asin}{p.sku ? ` · ${p.sku}` : ""}</div>
+                    </td>
+                    <td style={{ ...cellR, textAlign: "center" }}>${round(p.regular_price, 2)}</td>
+                    <td style={{ ...cellR, textAlign: "center", color: "#E87830", fontWeight: 700 }}>${round(p.sale_price, 2)}</td>
+                    <td style={{ ...cellR, textAlign: "center" }}>
+                      <span style={{ ...SG(9, 700), padding: "2px 7px", borderRadius: 6, background: "rgba(46,207,170,.13)", color: "#2ECFAA" }}>{disc}% off</span>
+                    </td>
+                    <td style={{ ...cellR, textAlign: "center", fontSize: 10 }}>{fmtDate(p.start_date)}</td>
+                    <td style={{ ...cellR, textAlign: "center", fontSize: 10 }}>{fmtDate(p.end_date)}</td>
+                    <td style={{ ...cellR, textAlign: "center" }}>
+                      <StatusBadge status={p.status} />
+                    </td>
+                    <td style={{ ...cellR, textAlign: "center" }}>
+                      <div style={{ display: "flex", gap: 4, justifyContent: "center" }}>
+                        <button onClick={() => setEditPrice(p)} style={editBtnStyle}>✏️</button>
+                        <button onClick={() => handlePushPrice(p.id)} title="Push to Amazon" style={{ ...editBtnStyle, borderColor: "#2ECFAA", color: "#2ECFAA" }}>⬆</button>
+                        <button onClick={() => handleDeletePrice(p.id)} style={delBtnStyle}>✕</button>
+                      </div>
+                    </td>
+                  </tr>
+                );
+              })}
+              {prices.length === 0 && (
+                <tr><td colSpan={8} style={{ padding: 20, textAlign: "center", color: "var(--muted)" }}>No sale prices configured</td></tr>
+              )}
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      {/* Active/Scheduled Coupons */}
+      <div className="sec-div"><span>Active &amp; Scheduled Coupons</span></div>
+      <div className="table-card" style={{ padding: 0 }}>
+        <div style={{ overflowX: "auto" }}>
+          <table style={{ width: "100%", borderCollapse: "collapse" }}>
+            <thead>
+              <tr style={{ background: "var(--navy, #0E1F2D)" }}>
+                {["Title / Items", "Off", "Type", "Budget", "Used", "Start", "End", "Status", "Actions"].map((h, i) => (
+                  <th key={i} style={{ ...SG(8, 700), padding: "8px 10px", textAlign: i === 0 ? "left" : "center", color: "rgba(255,255,255,0.6)", textTransform: "uppercase" }}>{h}</th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {coupons.map(c => {
+                const usedPct = c.budget > 0 ? round(c.budget_used / c.budget * 100, 0) : 0;
+                return (
+                  <tr key={c.id} style={{ borderBottom: "1px solid var(--border, rgba(14,31,45,0.04))" }}>
+                    <td style={{ ...cellL, maxWidth: 220 }}>
+                      <div style={{ fontWeight: 600, fontSize: 11 }}>{c.title || "Untitled Coupon"}</div>
+                      <div style={SG(7.5, 500, "var(--muted)")}>
+                        {(c.items || []).map(it => it.sku || it.asin).join(", ") || "No items"}
+                      </div>
+                    </td>
+                    <td style={{ ...cellR, textAlign: "center", color: "#E87830", fontWeight: 700 }}>
+                      {c.coupon_type === "percentage" ? `${c.discount_value}%` : `$${round(c.discount_value, 2)}`}
+                    </td>
+                    <td style={{ ...cellR, textAlign: "center" }}>
+                      <span style={SG(9, 600, "var(--muted)")}>{c.coupon_type === "percentage" ? "%" : "$"}</span>
+                    </td>
+                    <td style={{ ...cellR, textAlign: "center" }}>${round(c.budget || 0, 0)}</td>
+                    <td style={{ ...cellR, textAlign: "center" }}>
+                      <div style={{ display: "flex", alignItems: "center", gap: 5, justifyContent: "center" }}>
+                        <div style={{ width: 50, height: 5, borderRadius: 3, background: "var(--border, rgba(14,31,45,0.1))", overflow: "hidden" }}>
+                          <div style={{ width: `${Math.min(usedPct, 100)}%`, height: "100%", borderRadius: 3, background: usedPct > 80 ? "#f87171" : "#2ECFAA" }} />
+                        </div>
+                        <span style={SG(9, 700)}>{usedPct}%</span>
+                      </div>
+                    </td>
+                    <td style={{ ...cellR, textAlign: "center", fontSize: 10 }}>{fmtDate(c.start_date)}</td>
+                    <td style={{ ...cellR, textAlign: "center", fontSize: 10 }}>{fmtDate(c.end_date)}</td>
+                    <td style={{ ...cellR, textAlign: "center" }}>
+                      <StatusBadge status={c.status} />
+                    </td>
+                    <td style={{ ...cellR, textAlign: "center" }}>
+                      <div style={{ display: "flex", gap: 4, justifyContent: "center" }}>
+                        <button onClick={() => setEditCoupon(c)} style={editBtnStyle}>✏️</button>
+                        <button onClick={() => handleDeleteCoupon(c.id)} style={delBtnStyle}>✕</button>
+                      </div>
+                    </td>
+                  </tr>
+                );
+              })}
+              {coupons.length === 0 && (
+                <tr><td colSpan={9} style={{ padding: 20, textAlign: "center", color: "var(--muted)" }}>No coupons configured</td></tr>
+              )}
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      {/* Edit modals */}
+      {editPrice && (
+        <Modal title="Edit Sale Price" onClose={() => setEditPrice(null)}>
+          <SalePriceForm products={products} initial={editPrice}
+            onSubmit={(data) => handleUpdatePrice(editPrice.id, data)}
+            onCancel={() => setEditPrice(null)} isEdit />
+        </Modal>
+      )}
+      {editCoupon && (
+        <Modal title="Edit Coupon" onClose={() => setEditCoupon(null)}>
+          <CouponForm products={products} initial={editCoupon}
+            onSubmit={(data) => handleUpdateCoupon(editCoupon.id, data)}
+            onCancel={() => setEditCoupon(null)} isEdit />
+        </Modal>
+      )}
+    </>
+  );
+}
+
+/* ══════════════════════════════════════════════════════════════
+   SUB-COMPONENTS
+   ══════════════════════════════════════════════════════════════ */
+
+function KpiCard({ label, value, color, sub, delta }) {
+  return (
+    <div className="kpi-card" style={{ position: "relative", overflow: "hidden" }}>
+      <div style={{ position: "absolute", top: 0, left: 0, right: 0, height: 2, background: color }} />
+      <div style={SG(7, 700, "var(--muted)")}>{label.toUpperCase()}</div>
+      <div style={{ ...DM(20), color, lineHeight: 1, margin: "4px 0 2px" }}>{value}</div>
+      {delta && <span style={SG(8, 700, delta.startsWith("▲") ? "#2ECFAA" : "#f87171")}>{delta}</span>}
+      {sub && <div style={SG(8, 500, "var(--muted)")}>{sub}</div>}
     </div>
   );
 }
 
-function WaterfallRow({ label, periods, field, negative = false, cls = "", isPnl = false, isSuffix = "", bold = false, sub = false, isUnit = false }) {
+function WfRow({ label, amount, pct, color, maxVal, isTotal, isSub }) {
+  const barW = maxVal > 0 ? Math.abs(amount) / maxVal * 100 : 0;
   return (
-    <tr className={cls} style={sub ? { background: "rgba(14,31,45,0.02)" } : undefined}>
-      <td className="comp-metric" style={{
-        fontWeight: bold ? 700 : sub ? 400 : 600,
-        color: sub ? "var(--muted)" : undefined,
-        fontSize: sub ? 12 : undefined,
-        paddingLeft: sub ? 28 : undefined,
-      }}>{label}</td>
-      {periods.map((p, i) => {
-        const val = p[field] ?? 0;
-        const display = isUnit ? val.toLocaleString() : isSuffix ? `${val}${isSuffix}` : fmt$(Math.abs(val));
-        const prefix = negative && val > 0 ? "-" : "";
-        const color = isPnl ? (val >= 0 ? "var(--pos)" : "var(--neg)") :
-                      isSuffix ? (field === "margin" || field === "roi" ? (val >= 0 ? "var(--pos)" : "var(--neg)") : "var(--body-text)") :
-                      sub ? "var(--muted)" : undefined;
-        return (
-          <td key={i} style={{ textAlign: "center" }}>
-            <span className="comp-value" style={{
-              ...(color ? { color } : {}),
-              ...(sub ? { fontSize: 12 } : {}),
-              ...(bold ? { fontWeight: 700 } : {}),
-            }}>
-              {isUnit ? display : isSuffix ? display : `${prefix}${display}`}
-            </span>
-          </td>
-        );
-      })}
-    </tr>
+    <div style={{
+      display: "flex", alignItems: "center", gap: 10, padding: "6px 18px",
+      borderBottom: "1px solid var(--border, rgba(14,31,45,0.04))",
+      ...(isTotal ? { background: "rgba(14,31,45,0.04)", borderTop: "2px solid #2ECFAA" } : {}),
+    }}>
+      <span style={{ ...SG(isSub ? 8 : 9, isTotal ? 700 : 600), color: isSub ? "var(--muted)" : undefined, width: 200, flexShrink: 0, paddingLeft: isSub ? 12 : 0 }}>{label}</span>
+      <div style={{ flex: 1, height: 8, background: "var(--border, rgba(14,31,45,0.06))", borderRadius: 4, overflow: "hidden" }}>
+        <div style={{ width: `${Math.min(barW, 100)}%`, height: "100%", borderRadius: 4, background: color, opacity: isSub ? 0.5 : 0.8, transition: "width 0.6s" }} />
+      </div>
+      <span style={{ ...DM(14, color), width: 80, textAlign: "right", flexShrink: 0 }}>
+        {amount < 0 ? "−" : ""}{fmt$2(Math.abs(amount))}
+      </span>
+      <span style={{ ...SG(9, 700, color), width: 42, textAlign: "right", flexShrink: 0 }}>{pct}%</span>
+    </div>
   );
 }
 
-function SortTh({ label, col, sortCol, sortDir, onClick, align = "right", first = false }) {
-  const active = sortCol === col;
-  const arrow = active ? (sortDir === "desc" ? " ▼" : " ▲") : "";
+function StatusBadge({ status }) {
+  const s = (status || "").toLowerCase();
+  if (s === "active") return <span style={{ ...SG(8, 700), padding: "2px 7px", borderRadius: 6, background: "rgba(46,207,170,.13)", color: "#2ECFAA", display: "inline-flex", alignItems: "center", gap: 4 }}><span style={{ width: 5, height: 5, borderRadius: "50%", background: "#2ECFAA" }} />Active</span>;
+  if (s === "scheduled") return <span style={{ ...SG(8, 700), padding: "2px 7px", borderRadius: 6, background: "rgba(123,174,208,.13)", color: "#7BAED0" }}>Scheduled</span>;
+  return <span style={{ ...SG(8, 700), padding: "2px 7px", borderRadius: 6, background: "rgba(141,174,200,.08)", color: "var(--muted)" }}>Ended</span>;
+}
+
+const editBtnStyle = { width: 28, height: 22, borderRadius: 5, border: "1px solid var(--border)", background: "transparent", color: "var(--muted)", fontSize: 10, cursor: "pointer", display: "inline-flex", alignItems: "center", justifyContent: "center" };
+const delBtnStyle = { ...editBtnStyle, borderColor: "rgba(248,113,113,.2)", color: "rgba(248,113,113,.5)" };
+
+function Modal({ title, onClose, children }) {
   return (
-    <th
-      onClick={() => onClick(col)}
-      style={{
-        padding: "12px 12px",
-        textAlign: align,
-        color: active ? "#fff" : "rgba(255,255,255,0.7)",
-        fontSize: 11,
-        fontWeight: 700,
-        textTransform: "uppercase",
-        letterSpacing: "0.8px",
-        cursor: "pointer",
-        whiteSpace: "nowrap",
-        borderBottom: "none",
-        ...(first ? { borderRadius: "8px 0 0 0" } : {}),
-      }}
-    >
-      {label}{arrow}
-    </th>
+    <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,.6)", zIndex: 1000, display: "flex", alignItems: "center", justifyContent: "center" }}
+      onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}>
+      <div style={{ background: "var(--card-bg, #fff)", border: "1px solid var(--border)", borderRadius: 14, padding: 24, width: 520, maxWidth: "95vw", boxShadow: "0 20px 60px rgba(0,0,0,.3)" }}>
+        <div style={{ ...DM(18), color: "#2ECFAA", marginBottom: 4 }}>{title}</div>
+        <div style={{ borderTop: "1px solid var(--border)", paddingTop: 16 }}>
+          {children}
+        </div>
+      </div>
+    </div>
   );
 }
+
+/* ── Sale Price Form ──────────────────────────────── */
+function SalePriceForm({ products, onSubmit, onCancel, initial, isEdit }) {
+  const [asin, setAsin] = useState(initial?.asin || "");
+  const [regPrice, setRegPrice] = useState(initial?.regular_price || "");
+  const [salePrice, setSalePrice] = useState(initial?.sale_price || "");
+  const [startDate, setStartDate] = useState(fmtDateInput(initial?.start_date) || "");
+  const [endDate, setEndDate] = useState(fmtDateInput(initial?.end_date) || "");
+  const [marketplace, setMarketplace] = useState(initial?.marketplace || "US");
+
+  const disc = regPrice && salePrice && Number(regPrice) > 0
+    ? round((1 - Number(salePrice) / Number(regPrice)) * 100, 0) : 0;
+
+  const selectedProduct = products.find(p => p.asin === asin);
+
+  const handleSubmit = () => {
+    onSubmit({
+      asin,
+      sku: selectedProduct?.sku || "",
+      product_name: selectedProduct?.name || "",
+      regular_price: Number(regPrice),
+      sale_price: Number(salePrice),
+      start_date: startDate,
+      end_date: endDate,
+      marketplace,
+    });
+  };
+
+  return (
+    <div className="table-card" style={{ padding: 16, marginBottom: 12 }}>
+      <div style={{ ...SG(9, 700, "var(--muted)"), textTransform: "uppercase", letterSpacing: "0.1em", marginBottom: 12 }}>
+        {isEdit ? "Edit Sale Price" : "Create New Sale Price"}
+      </div>
+      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
+        <FormRow label="SKU / ASIN">
+          <select value={asin} onChange={e => setAsin(e.target.value)} style={inputStyle}>
+            <option value="">Select product...</option>
+            {products.map(p => <option key={p.asin} value={p.asin}>{p.name || p.sku || p.asin}</option>)}
+          </select>
+        </FormRow>
+        <FormRow label="Marketplace">
+          <select value={marketplace} onChange={e => setMarketplace(e.target.value)} style={inputStyle}>
+            <option value="US">US</option>
+            <option value="CA">CA</option>
+          </select>
+        </FormRow>
+        <FormRow label="Regular Price">
+          <input type="number" step="0.01" value={regPrice} onChange={e => setRegPrice(e.target.value)} placeholder="$0.00" style={inputStyle} />
+        </FormRow>
+        <FormRow label="Sale Price">
+          <input type="number" step="0.01" value={salePrice} onChange={e => setSalePrice(e.target.value)} placeholder="$0.00" style={inputStyle} />
+        </FormRow>
+        <FormRow label="Start Date">
+          <input type="date" value={startDate} onChange={e => setStartDate(e.target.value)} style={inputStyle} />
+        </FormRow>
+        <FormRow label="End Date">
+          <input type="date" value={endDate} onChange={e => setEndDate(e.target.value)} style={inputStyle} />
+        </FormRow>
+      </div>
+      {disc > 0 && <div style={{ ...SG(10, 700, "#2ECFAA"), marginTop: 8 }}>Discount: {disc}% off</div>}
+      <div style={{ display: "flex", gap: 8, marginTop: 14, justifyContent: "flex-end" }}>
+        <button onClick={onCancel} style={{ ...SG(10, 700), height: 32, padding: "0 16px", borderRadius: 8, border: "1px solid var(--border)", background: "transparent", color: "var(--muted)", cursor: "pointer" }}>Cancel</button>
+        <button onClick={handleSubmit} style={{ ...SG(10, 700), height: 32, padding: "0 16px", borderRadius: 8, border: "1px solid #2ECFAA", background: "rgba(46,207,170,.12)", color: "#2ECFAA", cursor: "pointer" }}>
+          {isEdit ? "Update" : "Create"} Sale Price
+        </button>
+      </div>
+    </div>
+  );
+}
+
+/* ── Coupon Form (multi-item) ──────────────────────── */
+function CouponForm({ products, onSubmit, onCancel, initial, isEdit }) {
+  const [title, setTitle] = useState(initial?.title || "");
+  const [couponType, setCouponType] = useState(initial?.coupon_type || "percentage");
+  const [discountValue, setDiscountValue] = useState(initial?.discount_value || "");
+  const [budget, setBudget] = useState(initial?.budget || "");
+  const [startDate, setStartDate] = useState(fmtDateInput(initial?.start_date) || "");
+  const [endDate, setEndDate] = useState(fmtDateInput(initial?.end_date) || "");
+  const [marketplace, setMarketplace] = useState(initial?.marketplace || "US");
+  const [selectedItems, setSelectedItems] = useState(
+    (initial?.items || []).map(i => i.asin) || []
+  );
+
+  const toggleItem = (asin) => {
+    setSelectedItems(prev =>
+      prev.includes(asin) ? prev.filter(a => a !== asin) : [...prev, asin]
+    );
+  };
+
+  const handleSubmit = () => {
+    onSubmit({
+      title,
+      coupon_type: couponType,
+      discount_value: Number(discountValue),
+      budget: Number(budget),
+      start_date: startDate,
+      end_date: endDate,
+      marketplace,
+      items: selectedItems.map(asin => {
+        const p = products.find(pp => pp.asin === asin);
+        return { asin, sku: p?.sku || "", product_name: p?.name || "" };
+      }),
+    });
+  };
+
+  return (
+    <div className="table-card" style={{ padding: 16, marginBottom: 12 }}>
+      <div style={{ ...SG(9, 700, "var(--muted)"), textTransform: "uppercase", letterSpacing: "0.1em", marginBottom: 12 }}>
+        {isEdit ? "Edit Coupon" : "Create New Coupon"}
+      </div>
+      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
+        <FormRow label="Title" span={2}>
+          <input type="text" value={title} onChange={e => setTitle(e.target.value)} placeholder="Coupon title" style={inputStyle} />
+        </FormRow>
+        <FormRow label="Coupon Type">
+          <select value={couponType} onChange={e => setCouponType(e.target.value)} style={inputStyle}>
+            <option value="percentage">Percentage Off</option>
+            <option value="fixed">Fixed Amount Off</option>
+          </select>
+        </FormRow>
+        <FormRow label={couponType === "percentage" ? "Discount %" : "Discount $"}>
+          <input type="number" step="0.01" value={discountValue} onChange={e => setDiscountValue(e.target.value)}
+            placeholder={couponType === "percentage" ? "e.g. 10" : "e.g. 5.00"} style={inputStyle} />
+        </FormRow>
+        <FormRow label="Budget ($)">
+          <input type="number" step="1" value={budget} onChange={e => setBudget(e.target.value)} placeholder="$500" style={inputStyle} />
+        </FormRow>
+        <FormRow label="Marketplace">
+          <select value={marketplace} onChange={e => setMarketplace(e.target.value)} style={inputStyle}>
+            <option value="US">US</option>
+            <option value="CA">CA</option>
+          </select>
+        </FormRow>
+        <FormRow label="Start Date">
+          <input type="date" value={startDate} onChange={e => setStartDate(e.target.value)} style={inputStyle} />
+        </FormRow>
+        <FormRow label="End Date">
+          <input type="date" value={endDate} onChange={e => setEndDate(e.target.value)} style={inputStyle} />
+        </FormRow>
+      </div>
+
+      {/* Multi-item selector */}
+      <div style={{ marginTop: 12 }}>
+        <div style={{ ...SG(9, 700, "var(--muted)"), textTransform: "uppercase", marginBottom: 6 }}>
+          Select Items ({selectedItems.length} selected)
+        </div>
+        <div style={{ maxHeight: 200, overflowY: "auto", border: "1px solid var(--border)", borderRadius: 8, padding: 4 }}>
+          {products.map(p => (
+            <label key={p.asin} style={{
+              display: "flex", alignItems: "center", gap: 8, padding: "5px 8px", borderRadius: 6, cursor: "pointer",
+              background: selectedItems.includes(p.asin) ? "rgba(46,207,170,.08)" : "transparent",
+            }}>
+              <input type="checkbox" checked={selectedItems.includes(p.asin)} onChange={() => toggleItem(p.asin)}
+                style={{ accentColor: "#2ECFAA" }} />
+              <div>
+                <div style={{ fontSize: 11, fontWeight: 600 }}>{p.name || p.sku || p.asin}</div>
+                <div style={SG(8, 500, "var(--muted)")}>{p.asin}{p.sku ? ` · ${p.sku}` : ""}</div>
+              </div>
+            </label>
+          ))}
+          {products.length === 0 && <div style={{ padding: 10, textAlign: "center", color: "var(--muted)", fontSize: 11 }}>No products found</div>}
+        </div>
+      </div>
+
+      <div style={{ display: "flex", gap: 8, marginTop: 14, justifyContent: "flex-end" }}>
+        <button onClick={onCancel} style={{ ...SG(10, 700), height: 32, padding: "0 16px", borderRadius: 8, border: "1px solid var(--border)", background: "transparent", color: "var(--muted)", cursor: "pointer" }}>Cancel</button>
+        <button onClick={handleSubmit} style={{ ...SG(10, 700), height: 32, padding: "0 16px", borderRadius: 8, border: "1px solid #E87830", background: "rgba(232,120,48,.12)", color: "#E87830", cursor: "pointer" }}>
+          {isEdit ? "Update" : "Create"} Coupon
+        </button>
+      </div>
+    </div>
+  );
+}
+
+function FormRow({ label, children, span }) {
+  return (
+    <div style={{ ...(span === 2 ? { gridColumn: "span 2" } : {}) }}>
+      <div style={{ ...SG(9, 600, "var(--muted)"), marginBottom: 3 }}>{label}</div>
+      {children}
+    </div>
+  );
+}
+
+const inputStyle = {
+  width: "100%", height: 30, padding: "0 10px", borderRadius: 7,
+  border: "1px solid var(--border)", background: "transparent",
+  color: "var(--body-text, #2A3D50)", fontSize: 11,
+  fontFamily: "'Sora', sans-serif", outline: "none",
+  boxSizing: "border-box",
+};
