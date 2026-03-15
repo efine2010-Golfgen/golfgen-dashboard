@@ -1164,7 +1164,6 @@ def sales_fee_breakdown(
             FROM financial_events
             WHERE date >= ? AND date <= ? {hw}
         """, [str(sd), str(ed)] + hp).fetchone()
-        con.close()
 
         fba = round(float(row[0]), 2)
         referral = round(float(row[1]), 2)
@@ -1183,6 +1182,8 @@ def sales_fee_breakdown(
             if est_sales > 0:
                 fba = round(est_sales * 0.12, 2)
                 referral = round(est_sales * 0.15, 2)
+
+        con.close()
 
         # Estimate storage from other_fees or use a portion
         storage = round(other * 0.6, 2) if other else 0
@@ -1601,6 +1602,37 @@ def summary(
         total_net = 0
         margin = 0
 
+    # ── Returns/refunds from financial_events ──
+    returns_units = 0
+    returns_amount = 0.0
+    try:
+        ret_row = con.execute(f"""
+            SELECT COALESCE(COUNT(*), 0),
+                   COALESCE(SUM(ABS(product_charges)), 0)
+            FROM financial_events
+            WHERE date >= ? AND event_type = 'Refund'{hf}
+        """, [cutoff] + hp).fetchone()
+        if ret_row:
+            returns_units = int(ret_row[0])
+            returns_amount = round(float(ret_row[1]), 2)
+    except Exception as e:
+        logger.debug(f"Returns query: {e}")
+
+    # Also try analytics_daily for returns if available
+    if used_analytics:
+        try:
+            ret_analytics = con.execute(f"""
+                SELECT COALESCE(SUM(returns_units), 0),
+                       COALESCE(SUM(returns_amount), 0)
+                FROM analytics_daily
+                WHERE date >= ?{hf}
+            """, [cutoff] + hp).fetchone()
+            if ret_analytics and int(ret_analytics[0]) > 0:
+                returns_units = int(ret_analytics[0])
+                returns_amount = round(float(ret_analytics[1]), 2)
+        except Exception:
+            pass
+
     con.close()
     return {
         "days": days,
@@ -1612,6 +1644,8 @@ def summary(
         "convRate": conv_rate,
         "netProfit": total_net,
         "margin": margin,
+        "returns": returns_units,
+        "returnsAmount": returns_amount,
     }
 
 
@@ -1651,6 +1685,38 @@ def get_daily_sales(
         WHERE date >= ? AND asin = 'ALL'{hf}
         ORDER BY date
     """, [cutoff] + hp).fetchall()
+
+    # ── Fallback: if asin='ALL' rows are sparse, aggregate from per-ASIN rows ──
+    # This happens when the Sales & Traffic Report only has a few days of 'ALL'
+    # but per-ASIN rows exist from backfill or financial events.
+    if len(rows) < (days * 0.3):
+        try:
+            agg_rows = con.execute(f"""
+                SELECT date,
+                       COALESCE(SUM(ordered_product_sales), 0) AS revenue,
+                       COALESCE(SUM(units_ordered), 0) AS units,
+                       COALESCE(SUM(sessions), 0) AS sessions
+                FROM daily_sales
+                WHERE date >= ? AND asin != 'ALL'{hf}
+                GROUP BY date
+                ORDER BY date
+            """, [cutoff] + hp).fetchall()
+            if len(agg_rows) > len(rows):
+                # Merge: use agg_rows as base, overlay with 'ALL' rows where they exist
+                all_rows_map = {}
+                for r in rows:
+                    all_rows_map[fmt_date(r[0])] = r
+                merged = []
+                for r in agg_rows:
+                    ds = fmt_date(r[0])
+                    if ds in all_rows_map:
+                        merged.append(all_rows_map[ds])
+                    else:
+                        merged.append(r)
+                rows = merged
+        except Exception as e:
+            logger.warning(f"/api/daily per-ASIN fallback: {e}")
+
     con.close()
 
     data = []

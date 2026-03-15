@@ -235,7 +235,11 @@ class DbConnection:
                 self._cursor.close()
             except Exception:
                 pass
-        self._conn.close()
+            self._cursor = None
+        try:
+            self._conn.close()
+        except Exception:
+            pass
 
     # Allow use as context manager
     def __enter__(self):
@@ -1106,6 +1110,36 @@ def _init_inventory_snapshot_table():
     con.close()
 
 
+def _fix_pg_sequences():
+    """Reset PostgreSQL sequences to match the current max IDs in their tables.
+
+    After a DuckDB → PostgreSQL migration, the sequences can get out of sync
+    because migrated rows have explicit IDs that bypass nextval().  This causes
+    'duplicate key value violates unique constraint' errors on INSERT.
+    """
+    if not USE_POSTGRES:
+        return
+    seq_table_map = {
+        "sync_log_seq": "sync_log",
+        "docs_update_log_seq": "docs_update_log",
+    }
+    try:
+        con = get_db_rw()
+        for seq, table in seq_table_map.items():
+            try:
+                max_row = con.execute(
+                    f"SELECT COALESCE(MAX(id), 0) FROM {table}"
+                ).fetchone()
+                max_id = int(max_row[0]) if max_row else 0
+                con.execute(f"SELECT setval('{seq}', {max(max_id, 1)})")
+                logger.info(f"Sequence {seq} reset to {max(max_id, 1)}")
+            except Exception as e:
+                logger.warning(f"Sequence reset {seq}: {e}")
+        con.close()
+    except Exception as e:
+        logger.warning(f"Sequence fix error (non-fatal): {e}")
+
+
 def init_all_tables():
     """Initialize all DuckDB tables on startup."""
     try:
@@ -1168,6 +1202,12 @@ def init_all_tables():
         logger.info("Inventory snapshot table initialized")
     except Exception as e:
         logger.error(f"Inventory snapshot table init error: {e}")
+
+    # ── Fix PostgreSQL sequences after migration ──
+    try:
+        _fix_pg_sequences()
+    except Exception as e:
+        logger.warning(f"Sequence fix error (non-fatal): {e}")
 
     # ── Auto-tag item_master divisions based on product names ──
     try:
