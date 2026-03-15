@@ -158,22 +158,26 @@ function heatmapSVG(data, W=1100) {
   Array.from({length:WEEKS},(_,w) => { if(w%4===0||w===WEEKS-1) s+=`<text x="${padL+(w+.5)*cellW}" y="${padT-5}" text-anchor="middle" font-size="8" fill="${B.sub}">W${WEEKS-w}</text>`; });
   DAYS.forEach((d,i) => s+=`<text x="${padL-3}" y="${padT+(i+.5)*cellH+4}" text-anchor="end" font-size="9" fill="${B.sub}">${d}</text>`);
   // Rank-based color scaling so ALL cells are clearly visible.
-  // Sort unique unit values to build a percentile map, then map each cell
-  // to an alpha between 0.18 (lowest rank) and 0.92 (highest rank).
+  // Use percentile ranks for alpha so outliers don't crush the scale.
   const allUnits = [];
   for (let w=0;w<WEEKS;w++) for (let d=0;d<7;d++) allUnits.push(lookup[`${WEEKS-1-w},${d}`]||0);
   const sorted = [...allUnits].filter(v=>v>0).sort((a,b)=>a-b);
   const rankMap = {};
-  sorted.forEach((v,i) => { if(!(v in rankMap)) rankMap[v] = i; });
+  sorted.forEach((v,i) => { rankMap[v] = i; }); // last wins = highest rank for dupes
   const maxRank = sorted.length - 1 || 1;
   for (let w=0; w<WEEKS; w++) {
     for (let d=0; d<7; d++) {
       const units = lookup[`${WEEKS-1-w},${d}`] || 0;
       const pct = units > 0 ? (rankMap[units] || 0) / maxRank : 0;
-      const alpha = units > 0 ? (0.18 + pct * 0.74).toFixed(2) : '0.05';
+      // Alpha: 0.30 minimum for any cell with data, up to 0.92 for highest
+      const alpha = units > 0 ? (0.30 + pct * 0.62).toFixed(2) : '0.05';
       const c = d >= 5 ? B.o2 : B.b2;
       s += `<rect x="${(padL+w*cellW+2).toFixed(1)}" y="${(padT+d*cellH+2).toFixed(1)}" width="${(cellW-4).toFixed(1)}" height="${(cellH-4).toFixed(1)}" rx="3" fill="${c}" fill-opacity="${alpha}"/>`;
-      if (pct > 0.75) s += `<text x="${(padL+(w+.5)*cellW).toFixed(1)}" y="${(padT+(d+.5)*cellH+3.5).toFixed(1)}" text-anchor="middle" font-size="7" fill="white" opacity=".85">${units}</text>`;
+      // Show numeric value on EVERY cell that has data
+      if (units > 0) {
+        const fs = units >= 100 ? 6 : 7;
+        s += `<text x="${(padL+(w+.5)*cellW).toFixed(1)}" y="${(padT+(d+.5)*cellH+3.5).toFixed(1)}" text-anchor="middle" font-size="${fs}" fill="white" opacity=".9">${units}</text>`;
+      }
     }
   }
   return s + '</svg>';
@@ -248,7 +252,7 @@ function funnelSVG(data) {
 
     // Funnel trapezoid
     s += `<path d="M${funnelCX - tyW/2},${rowY + 2} L${funnelCX + tyW/2},${rowY + 2} L${funnelCX + nextTyW/2},${rowY + segH - 1} L${funnelCX - nextTyW/2},${rowY + segH - 1} Z" fill="url(#fg${i})" opacity=".92"/>`;
-    s += `<path d="M${funnelCX - lyW/2},${rowY} L${funnelCX + lyW/2},${rowY} L${funnelCX + nextLyW/2},${rowY + segH} L${funnelCX - nextLyW/2},${rowY + segH} Z" fill="none" stroke="${B.sub}" stroke-width="1.5" stroke-dasharray="5 3" opacity=".75"/>`;
+    s += `<path d="M${funnelCX - lyW/2},${rowY} L${funnelCX + lyW/2},${rowY} L${funnelCX + nextLyW/2},${rowY + segH} L${funnelCX - nextLyW/2},${rowY + segH} Z" fill="none" stroke="#f59e0b" stroke-width="2.5" stroke-dasharray="7 4" opacity=".95"/>`;
     // TY value on funnel bar
     s += `<text x="${funnelCX}" y="${rowMid + 4}" text-anchor="middle" font-size="12" font-weight="700" fill="#fff">${fN(f.ty)}</text>`;
 

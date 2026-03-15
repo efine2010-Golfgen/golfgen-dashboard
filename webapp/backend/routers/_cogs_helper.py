@@ -65,6 +65,11 @@ def compute_cogs_for_range(con, sd, ed, hw: str = "", hp: list = None,
                            fallback_pct: float = 0.35) -> float:
     """Compute total COGS for a date range by summing (units × unit_cost) per ASIN.
 
+    Strategy (tries three sources in order):
+    1. daily_sales per-ASIN rows — best granularity (but only ~10 days of data)
+    2. orders table — has per-ASIN data for recent orders
+    3. daily_sales asin='ALL' total revenue × fallback_pct — last resort
+
     Parameters:
         con: database connection (from get_db())
         sd, ed: start/end dates (date objects or strings)
@@ -79,7 +84,9 @@ def compute_cogs_for_range(con, sd, ed, hw: str = "", hp: list = None,
 
     unit_costs = load_unit_costs()
 
-    # Get per-ASIN units and revenue for the date range
+    # ── Source 1: daily_sales per-ASIN rows ──
+    total_cogs = 0
+    has_data = False
     try:
         rows = con.execute(f"""
             SELECT asin,
@@ -89,21 +96,67 @@ def compute_cogs_for_range(con, sd, ed, hw: str = "", hp: list = None,
             WHERE asin != 'ALL' AND date >= ? AND date <= ? {hw}
             GROUP BY asin
         """, [str(sd), str(ed)] + hp).fetchall()
+        if rows and len(rows) > 0:
+            for r in rows:
+                asin = r[0]
+                units = int(r[1] or 0)
+                revenue = float(r[2] or 0)
+                if units == 0 and revenue == 0:
+                    continue
+                has_data = True
+                cost = unit_costs.get(asin, 0)
+                if cost > 0:
+                    total_cogs += units * cost
+                elif revenue > 0:
+                    total_cogs += revenue * fallback_pct
     except Exception as e:
-        logger.error(f"compute_cogs_for_range query error: {e}")
-        return 0
+        logger.warning(f"compute_cogs: daily_sales per-ASIN query error: {e}")
 
-    total_cogs = 0
-    for r in rows:
-        asin = r[0]
-        units = int(r[1] or 0)
-        revenue = float(r[2] or 0)
+    if has_data and total_cogs > 0:
+        return round(total_cogs, 2)
 
-        cost = unit_costs.get(asin, 0)
-        if cost > 0:
-            total_cogs += units * cost
-        elif revenue > 0:
-            # Fallback: estimate COGS as % of revenue
-            total_cogs += revenue * fallback_pct
+    # ── Source 2: orders table (has per-ASIN data for recent periods) ──
+    try:
+        ord_rows = con.execute(f"""
+            SELECT asin,
+                   COUNT(*) AS units,
+                   COALESCE(SUM(CAST(order_total AS DOUBLE PRECISION)), 0) AS revenue
+            FROM orders
+            WHERE purchase_date >= ? AND purchase_date <= ? {hw}
+              AND asin IS NOT NULL AND asin != ''
+            GROUP BY asin
+        """, [str(sd), str(ed) + 'T23:59:59'] + hp).fetchall()
+        if ord_rows and len(ord_rows) > 0:
+            order_cogs = 0
+            order_has_data = False
+            for r in ord_rows:
+                asin = r[0]
+                units = int(r[1] or 0)
+                revenue = float(r[2] or 0)
+                if units == 0:
+                    continue
+                order_has_data = True
+                cost = unit_costs.get(asin, 0)
+                if cost > 0:
+                    order_cogs += units * cost
+                elif revenue > 0:
+                    order_cogs += revenue * fallback_pct
+            if order_has_data and order_cogs > 0:
+                return round(order_cogs, 2)
+    except Exception as e:
+        logger.warning(f"compute_cogs: orders table query error: {e}")
 
-    return round(total_cogs, 2)
+    # ── Source 3: daily_sales ALL-aggregate revenue × fallback % ──
+    try:
+        all_row = con.execute(f"""
+            SELECT COALESCE(SUM(ordered_product_sales), 0)
+            FROM daily_sales
+            WHERE asin = 'ALL' AND date >= ? AND date <= ? {hw}
+        """, [str(sd), str(ed)] + hp).fetchone()
+        total_rev = float(all_row[0]) if all_row else 0
+        if total_rev > 0:
+            return round(total_rev * fallback_pct, 2)
+    except Exception as e:
+        logger.warning(f"compute_cogs: ALL-aggregate fallback error: {e}")
+
+    return 0
