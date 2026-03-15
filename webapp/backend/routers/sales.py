@@ -2227,3 +2227,4 @@ def color_mix(
         result.append({"color": color, "revenue": round(rev, 2), "pct": pct})
 
     return {"colors": result, "total": round(total_rev, 2)}
+
