@@ -620,6 +620,12 @@ body {
   border-top-color: var(--acc2);
 }
 
+/* Inventory page KPI cards */
+.inv-kpi-card { transition: border-color .2s; }
+.inv-kpi-card:hover { border-color: var(--acc1) !important; }
+.inv-sku-table tr:hover td { background: var(--ibg, rgba(255,255,255,.05)); }
+.inv-repl-row:hover { background: var(--ibg, rgba(255,255,255,.05)); }
+
 .kpi-label {
   font-size: 11px;
   text-transform: uppercase;

@@ -13,7 +13,7 @@ const DM = (extra = {}) => ({ fontFamily: "'DM Serif Display',Georgia,serif", ..
 
 const fmtK = (n) => {
   if (n == null) return "—";
-  if (Math.abs(n) >= 1_000_000) return `$${(n / 1_000_000).toFixed(2)}M`;
+  if (Math.abs(n) >= 1_000_000) return `${(n / 1_000_000).toFixed(2)}M`;
   if (Math.abs(n) >= 1000) return `${(n / 1000).toFixed(1)}K`;
   return n.toLocaleString();
 };
@@ -186,7 +186,7 @@ export default function Inventory({ filters = {} }) {
 
       {/* ══ HEADER — matches Exec Summary style ══ */}
       <div style={{ marginBottom: 16 }}>
-        <h2 style={{ ...DM({ fontSize: 22, fontWeight: 400, margin: 0, color: "var(--txt)" }) }}>
+        <h2 style={{ ...DM({ fontSize: 22, fontWeight: 400, margin: 0, color: "var(--acc1, #2ECFAA)" }) }}>
           Amazon FBA Inventory
         </h2>
         <div style={{ ...SG({ fontSize: 12, color: "var(--txt3)", marginTop: 3 }) }}>
@@ -236,7 +236,7 @@ export default function Inventory({ filters = {} }) {
       {/* ══ 8 KPI CARDS ══ */}
       <div style={{ display: "grid", gridTemplateColumns: "repeat(8, 1fr)", gap: 8, marginBottom: 16 }}>
         {kpiCards.map((c, i) => (
-          <div key={i} style={{ background: "linear-gradient(145deg, var(--card, #112030), var(--card2, #1A2D42))", borderRadius: 11, padding: "11px 13px", border: "1px solid var(--brd)", position: "relative", overflow: "hidden" }}>
+          <div key={i} className="inv-kpi-card" style={{ background: "linear-gradient(145deg, var(--card, #112030), var(--card2, #1A2D42))", borderRadius: 11, padding: "11px 13px", border: "1px solid var(--brd)", position: "relative", overflow: "hidden" }}>
             <div style={{ position: "absolute", top: 0, left: 0, right: 0, height: 2, background: c.accent }} />
             <div style={{ ...SG({ fontSize: 7, color: "var(--txt3)", textTransform: "uppercase", letterSpacing: ".09em", marginBottom: 4 }) }}>{c.label}</div>
             <div style={{ ...DM({ fontSize: 20, lineHeight: 1, marginBottom: 2, color: c.color }) }}>{c.value}</div>
@@ -426,10 +426,11 @@ export default function Inventory({ filters = {} }) {
             <span style={{ color: "#F5B731" }}>{data.skus?.filter(s => s.risk === "watch").length || 0}</span> Watch ·{" "}
             <span style={{ color: "#2ECFAA" }}>{data.skus?.filter(s => s.risk === "low").length || 0}</span> Healthy
           </span>
+          {data.skus?.some(s => s.risk === "critical") && <Badge type="warn">Reorder needed this week</Badge>}
         </CardHdr>
         {/* Header */}
-        <div style={{ display: "grid", gridTemplateColumns: "16px 1fr 72px 72px 66px 66px 72px 74px", gap: 8, padding: "7px 16px", borderBottom: "1px solid var(--brd2)", background: "var(--card2)" }}>
-          {["", "SKU / Product", "On Hand", "Inbound", "Daily Vel.", "Days Cover", "Wks Cover", "Risk"].map((h, i) => (
+        <div style={{ display: "grid", gridTemplateColumns: "16px 1fr 72px 72px 66px 66px 72px 72px 74px", gap: 8, padding: "7px 16px", borderBottom: "1px solid var(--brd2)", background: "var(--card2)" }}>
+          {["", "SKU / Product", "On Hand", "Inbound", "Daily Vel.", "Days Cover", "Wks Cover", "Reorder Pt", "Risk"].map((h, i) => (
             <span key={i} style={{ ...SG({ fontSize: 8, fontWeight: 700, textTransform: "uppercase", letterSpacing: ".07em", color: "var(--txt3)", textAlign: i >= 2 ? "right" : "left" }) }}>{h}</span>
           ))}
         </div>
@@ -437,7 +438,7 @@ export default function Inventory({ filters = {} }) {
           const riskColor = s.risk === "critical" ? "#f87171" : s.risk === "watch" ? "#F5B731" : "#2ECFAA";
           const riskBg = s.risk === "critical" ? "rgba(248,113,113,.15)" : s.risk === "watch" ? "rgba(245,183,49,.14)" : "rgba(46,207,170,.12)";
           return (
-            <div key={i} style={{ display: "grid", gridTemplateColumns: "16px 1fr 72px 72px 66px 66px 72px 74px", gap: 8, padding: "9px 16px", borderBottom: "1px solid var(--brd)", alignItems: "center" }}>
+            <div key={i} style={{ display: "grid", gridTemplateColumns: "16px 1fr 72px 72px 66px 66px 72px 72px 74px", gap: 8, padding: "9px 16px", borderBottom: "1px solid var(--brd)", alignItems: "center" }}>
               <span style={{ width: 8, height: 8, borderRadius: "50%", background: riskColor, display: "inline-block" }} />
               <div>
                 <div style={{ fontSize: 11, fontWeight: 600, color: "var(--txt)", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{s.name}</div>
@@ -450,6 +451,7 @@ export default function Inventory({ filters = {} }) {
                 {s.daysCover != null ? Math.round(s.daysCover) : "∞"}
               </span>
               <span style={{ ...SG({ fontSize: 10, textAlign: "right" }) }}>{s.weeksCover != null ? s.weeksCover : "∞"}</span>
+              <span style={{ ...SG({ fontSize: 10, textAlign: "right", color: "var(--txt3)" }) }}>{s.reorderPt != null ? fmtNum(s.reorderPt) : "—"}</span>
               <span style={{ ...SG({ fontSize: 9, fontWeight: 700, padding: "2px 8px", borderRadius: 6, textAlign: "center", background: riskBg, color: riskColor, whiteSpace: "nowrap" }) }}>
                 {s.risk === "critical" ? "CRITICAL" : s.risk === "watch" ? "WATCH" : "HEALTHY"}
               </span>
@@ -531,7 +533,7 @@ export default function Inventory({ filters = {} }) {
 
       <Card style={{ overflow: "hidden", marginBottom: 14 }}>
         <div style={{ overflowX: "auto" }}>
-          <table style={{ width: "100%", borderCollapse: "collapse", tableLayout: "fixed", minWidth: 900 }}>
+          <table className="inv-sku-table" style={{ width: "100%", borderCollapse: "collapse", tableLayout: "fixed", minWidth: 960 }}>
             <thead>
               <tr>
                 {[
@@ -544,6 +546,7 @@ export default function Inventory({ filters = {} }) {
                   { label: "Buy Box", w: 84 },
                   { label: "Conv %", w: 52, r: true },
                   { label: "Sell-Thru", w: 56, r: true },
+                  { label: "Aged 180+", w: 56, r: true },
                   { label: "Ret Rate", w: 56, r: true },
                   { label: "Risk", w: 60, center: true },
                 ].map((col, i) => (
@@ -582,10 +585,11 @@ export default function Inventory({ filters = {} }) {
                     </td>
                     <td style={{ ...SG({ fontSize: 10, color: "var(--txt2)", padding: "8px 10px", textAlign: "right", verticalAlign: "middle" }) }}>{s.convPct > 0 ? `${s.convPct}%` : "—"}</td>
                     <td style={{ ...SG({ fontSize: 10, color: "var(--txt2)", padding: "8px 10px", textAlign: "right", verticalAlign: "middle" }) }}>{s.sellThru != null ? `${s.sellThru}×` : "—"}</td>
+                    <td style={{ ...SG({ fontSize: 10, color: s.aged180 > 0 ? "#F5B731" : "var(--txt3)", padding: "8px 10px", textAlign: "right", verticalAlign: "middle" }) }}>{s.aged180 > 0 ? fmtNum(s.aged180) : "—"}</td>
                     <td style={{ ...SG({ fontSize: 10, color: "var(--txt2)", padding: "8px 10px", textAlign: "right", verticalAlign: "middle" }) }}>{s.returnRate != null ? `${s.returnRate}%` : "—"}</td>
                     <td style={{ padding: "8px 10px", textAlign: "center", verticalAlign: "middle" }}>
-                      <span style={{ ...SG({ display: "inline-flex", alignItems: "center", justifyContent: "center", width: 52, height: 18, borderRadius: 5, fontSize: 9, fontWeight: 800, background: riskBg, color: riskColor }) }}>
-                        {s.risk === "critical" ? "CRIT" : s.risk === "watch" ? "WATCH" : "OK"}
+                      <span style={{ ...SG({ display: "inline-flex", alignItems: "center", justifyContent: "center", width: 32, height: 18, borderRadius: 5, fontSize: 9, fontWeight: 800, background: riskBg, color: riskColor }) }}>
+                        {s.risk === "critical" ? "HI" : s.risk === "watch" ? "MED" : "LOW"}
                       </span>
                     </td>
                   </tr>
