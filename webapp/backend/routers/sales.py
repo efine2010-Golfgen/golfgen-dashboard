@@ -2011,8 +2011,13 @@ def period_comparison(
         except Exception:
             pass
 
-        # Use actual fees if available, otherwise use ratio-based estimates
-        if actual_fba > 0 or actual_referral > 0:
+        # Use actual fees if they look reasonable, otherwise use ratio-based estimates.
+        # financial_events often only covers ~90 days of settlements, so for longer
+        # periods (YTD, full year) the actual fees may cover only a fraction of revenue.
+        # Sanity check: actual fees should be at least 15% of what the ratio estimates
+        # predict; if lower, the coverage is incomplete and estimates are more accurate.
+        estimated_total = rev * (fba_pct + referral_pct)
+        if (actual_fba > 0 or actual_referral > 0) and (actual_fba + actual_referral) >= estimated_total * 0.15:
             fba_fees = actual_fba
             referral_fees = actual_referral
         else:
