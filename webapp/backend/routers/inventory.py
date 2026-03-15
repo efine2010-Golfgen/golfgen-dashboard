@@ -1187,8 +1187,8 @@ def _load_sp_api_credentials() -> dict | None:
     if env_refresh:
         return {
             "refresh_token": env_refresh,
-            "lwa_app_id": os.environ.get("SP_API_LWA_APP_ID") or os.environ.get("LWA_APP_ID", ""),
-            "lwa_client_secret": os.environ.get("SP_API_LWA_CLIENT_SECRET") or os.environ.get("LWA_CLIENT_SECRET", ""),
+            "lwa_app_id": os.environ.get("SP_API_LWA_APP_ID") or os.environ.get("SP_API_CLIENT_ID") or os.environ.get("LWA_APP_ID", ""),
+            "lwa_client_secret": os.environ.get("SP_API_LWA_CLIENT_SECRET") or os.environ.get("SP_API_CLIENT_SECRET") or os.environ.get("LWA_CLIENT_SECRET", ""),
             "aws_access_key": os.environ.get("SP_API_AWS_ACCESS_KEY", ""),
             "aws_secret_key": os.environ.get("SP_API_AWS_SECRET_KEY", ""),
             "role_arn": os.environ.get("SP_API_ROLE_ARN", ""),

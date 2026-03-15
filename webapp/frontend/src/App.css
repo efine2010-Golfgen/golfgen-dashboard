@@ -673,7 +673,7 @@ body {
   font-family: 'Space Grotesk', sans-serif;
   font-size: 15px;
   font-weight: 600;
-  color: var(--navy);
+  color: var(--txt);
   margin-bottom: 4px;
 }
 
@@ -699,7 +699,7 @@ body {
   font-family: 'Space Grotesk', sans-serif;
   font-size: 15px;
   font-weight: 600;
-  color: var(--navy);
+  color: var(--txt);
   margin-bottom: 16px;
 }
 
@@ -832,7 +832,7 @@ tr:hover td { background: rgba(46,207,170,.05); }
   font-family: 'Space Grotesk', sans-serif;
   font-size: 14px;
   font-weight: 600;
-  color: var(--navy);
+  color: var(--txt);
 }
 
 .comp-chg {
