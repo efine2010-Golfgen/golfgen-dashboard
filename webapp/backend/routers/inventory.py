@@ -1421,7 +1421,7 @@ async def get_shipment_products(request: Request):
                        SUM(units_ordered) AS units,
                        SUM(ordered_product_sales) AS revenue
                 FROM daily_sales
-                WHERE asin != 'ALL' AND date >= %s
+                WHERE asin != 'ALL' AND date >= ?
                 GROUP BY asin
             ) s30 ON im.asin = s30.asin
             LEFT JOIN (
@@ -1429,7 +1429,7 @@ async def get_shipment_products(request: Request):
                        SUM(units_ordered) AS units,
                        SUM(ordered_product_sales) AS revenue
                 FROM daily_sales
-                WHERE asin != 'ALL' AND date >= %s
+                WHERE asin != 'ALL' AND date >= ?
                 GROUP BY asin
             ) s60 ON im.asin = s60.asin
             LEFT JOIN (
@@ -1437,7 +1437,7 @@ async def get_shipment_products(request: Request):
                        SUM(units_ordered) AS units,
                        SUM(ordered_product_sales) AS revenue
                 FROM daily_sales
-                WHERE asin != 'ALL' AND date >= %s
+                WHERE asin != 'ALL' AND date >= ?
                 GROUP BY asin
             ) s90 ON im.asin = s90.asin
             WHERE im.asin IS NOT NULL AND im.asin != ''
