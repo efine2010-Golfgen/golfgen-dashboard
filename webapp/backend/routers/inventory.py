@@ -278,13 +278,18 @@ def inventory_kpis(division: Optional[str] = None, customer: Optional[str] = Non
     except Exception:
         refund_map = {}
 
-    # ── 5. Total units ordered per ASIN (90d) for return rate denominator ─────
+    # ── 5. Total shipments per ASIN (90d) for return rate denominator ─────────
+    #   Use financial_events Shipment count (same source as refunds) for consistency.
+    #   daily_sales per-ASIN rows are sparse (S&T report lag), so orders/shipment
+    #   events give a much better denominator.
     total_units_90d = {}
     try:
         tu_rows = con.execute(f"""
-            SELECT asin, SUM(units_ordered) AS total_units
-            FROM daily_sales
-            WHERE asin != 'ALL' AND date >= CURRENT_DATE - INTERVAL '90 days'
+            SELECT asin, COUNT(*) AS shipment_count
+            FROM financial_events
+            WHERE event_type ILIKE '%%Shipment%%'
+              AND date >= CURRENT_DATE - INTERVAL '90 days'
+              AND asin IS NOT NULL AND asin != ''
             GROUP BY asin
         """).fetchall()
         total_units_90d = {r[0]: r[1] or 0 for r in tu_rows}
@@ -1452,9 +1457,12 @@ def inventory_command_center(
         """).fetchall()
         refund_map = {r[0]: _n(r[1]) for r in refund_rows}
 
-        tu_rows = con.execute(f"""
-            SELECT asin, SUM(units_ordered) FROM daily_sales
-            WHERE asin != 'ALL' AND date >= CURRENT_DATE - 90
+        tu_rows = con.execute("""
+            SELECT asin, COUNT(*) AS shipment_count
+            FROM financial_events
+            WHERE event_type ILIKE '%%Shipment%%'
+              AND date >= CURRENT_DATE - 90
+              AND asin IS NOT NULL AND asin != ''
             GROUP BY asin
         """).fetchall()
         total_units_map = {r[0]: _n(r[1]) for r in tu_rows}
