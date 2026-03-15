@@ -502,28 +502,32 @@ def sales_summary(
         def _sum_fees(s, e, extra_params):
             try:
                 r = con.execute(f"""
-                    SELECT COALESCE(SUM(ABS(fba_fees)) + SUM(ABS(commission)), 0)
+                    SELECT COALESCE(SUM(ABS(fba_fees)), 0) + COALESCE(SUM(ABS(commission)), 0),
+                           COALESCE(SUM(ABS(other_fees)), 0),
+                           COALESCE(SUM(ABS(promotion_amount)), 0),
+                           COALESCE(SUM(ABS(shipping_charges)), 0)
                     FROM financial_events
                     WHERE date >= ? AND date <= ? {hw}
                 """, [str(s), str(e)] + extra_params).fetchone()
-                return float(r[0]) if r else 0
-            except Exception:
+                fba_ref = float(r[0]) if r else 0
+                other = float(r[1]) if r else 0
+                promo = float(r[2]) if r else 0
+                ship = float(r[3]) if r else 0
+                return fba_ref + other + promo + ship
+            except Exception as fee_err:
+                logger.error(f"_sum_fees error: {fee_err} | s={s} e={e} hw={hw}")
                 return 0
 
         ty_fees = _sum_fees(sd, ed, hp)
         ly_fees = _sum_fees(ly_sd, ly_ed, hp)
 
         # financial_events stores PostedDate (settlement, ~14 days after order).
-        # Querying by order date always returns 0 for recent periods.
-        # Fall back to estimated fees: 15% referral + 12% FBA = 27% of sales.
-        # Also fall back when actuals are suspiciously low (partial settlement
-        # data covering only a fraction of the period).
-        ty_estimated = round(ty_sales * 0.27, 2)
-        if ty_sales > 0 and (ty_fees == 0 or ty_fees < ty_estimated * 0.15):
-            ty_fees = ty_estimated
-        ly_estimated = round(ly_sales * 0.27, 2)
-        if ly_sales > 0 and (ly_fees == 0 or ly_fees < ly_estimated * 0.15):
-            ly_fees = ly_estimated
+        # Fall back to estimated 27% of sales ONLY when financial_events
+        # returned truly zero fees (no data for the period at all).
+        if ty_sales > 0 and ty_fees == 0:
+            ty_fees = round(ty_sales * 0.27, 2)
+        if ly_sales > 0 and ly_fees == 0:
+            ly_fees = round(ly_sales * 0.27, 2)
 
         # Ad spend
         def _sum_ads(s, e):
@@ -1194,17 +1198,19 @@ def sales_fee_breakdown(
     start: str | None = Query(None),
     end: str | None = Query(None),
 ):
-    """Break down Amazon fees by type."""
+    """Break down Amazon fees by type — all fee columns from financial_events."""
     try:
         con = get_db()
         sd, ed = _period_to_dates(period, start, end)
         hw, hp = _hier_where(division, customer)
 
-        # Sum FBA fees and commission separately
+        # Sum every fee column separately for granular breakdown
         row = con.execute(f"""
             SELECT COALESCE(SUM(ABS(fba_fees)), 0),
                    COALESCE(SUM(ABS(commission)), 0),
-                   COALESCE(SUM(ABS(other_fees)), 0)
+                   COALESCE(SUM(ABS(other_fees)), 0),
+                   COALESCE(SUM(ABS(promotion_amount)), 0),
+                   COALESCE(SUM(ABS(shipping_charges)), 0)
             FROM financial_events
             WHERE date >= ? AND date <= ? {hw}
         """, [str(sd), str(ed)] + hp).fetchone()
@@ -1212,39 +1218,38 @@ def sales_fee_breakdown(
         fba = round(float(row[0]), 2)
         referral = round(float(row[1]), 2)
         other = round(float(row[2]), 2)
+        promo = round(float(row[3]), 2)
+        shipping = round(float(row[4]), 2)
 
-        # financial_events PostedDate lag — recent periods always return 0.
-        # Estimate from orders table when no actuals available, or when
-        # actuals are suspiciously low (partial settlement data).
-        sales_row = con.execute(f"""
-            SELECT COALESCE(SUM(order_total), 0)
-            FROM orders
-            WHERE purchase_date >= ? AND purchase_date <= ?
-              AND (order_status IS NULL OR order_status NOT IN ('Cancelled','Pending')) {hw}
-        """, [str(sd), str(ed)] + hp).fetchone()
-        est_sales = float(sales_row[0]) if sales_row else 0
-        est_fba = round(est_sales * 0.12, 2)
-        est_referral = round(est_sales * 0.15, 2)
-        est_total = est_fba + est_referral
-        actual_total = fba + referral
-        if est_sales > 0 and (actual_total == 0 or actual_total < est_total * 0.15):
-            fba = est_fba
-            referral = est_referral
+        actual_total = fba + referral + other + promo + shipping
+        estimated = False
+
+        # financial_events PostedDate lag — recent periods may return 0.
+        # Estimate from daily_sales revenue when actuals are suspiciously low.
+        if actual_total == 0:
+            sales_row = con.execute(f"""
+                SELECT COALESCE(SUM(ordered_product_sales), 0)
+                FROM daily_sales
+                WHERE asin = 'ALL' AND date >= ? AND date <= ? {hw}
+            """, [str(sd), str(ed)] + hp).fetchone()
+            est_sales = float(sales_row[0]) if sales_row else 0
+            if est_sales > 0:
+                fba = round(est_sales * 0.12, 2)
+                referral = round(est_sales * 0.15, 2)
+                estimated = True
 
         con.close()
-
-        # Estimate storage from other_fees or use a portion
-        storage = round(other * 0.6, 2) if other else 0
-        misc = round(other - storage, 2) if other else 0
 
         result = [
             {"type": "FBA Fulfillment", "amount": fba},
             {"type": "Referral Fee", "amount": referral},
-            {"type": "Storage Fees", "amount": storage},
-            {"type": "Other Fees", "amount": misc},
+            {"type": "Promotions", "amount": promo},
+            {"type": "Shipping Credits", "amount": shipping},
+            {"type": "Other Fees", "amount": other},
         ]
         # Filter out zero entries
-        return [r for r in result if r["amount"] > 0] or result
+        items = [r for r in result if r["amount"] > 0] or result
+        return {"items": items, "total": round(sum(i["amount"] for i in items), 2), "estimated": estimated}
     except Exception as e:
         logger.error(f"sales/fee-breakdown error: {e}")
         return {"error": str(e)}

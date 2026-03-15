@@ -683,7 +683,7 @@ export default function Sales({ filters = {} }) {
           <MetricCard label="AUR"           value={f$(m.aur)}            ly={f$(ly('aur'))}           delta={dp(m.aur,ly('aur'))}/>
           <MetricCard label="COGS"          value={f$(m.cogs)}           ly={f$(ly('cogs'))}          delta={dp(m.cogs,ly('cogs'))}/>
           <MetricCard label="Amazon Fees"   value={f$(m.amazon_fees)}    ly={f$(ly('amazon_fees'))}   delta={dp(m.amazon_fees,ly('amazon_fees'))}
-            expandContent={feeBreak && Array.isArray(feeBreak) && <div>{feeBreak.map(f=><div key={f.type} style={{display:'flex',justifyContent:'space-between',fontSize:10,marginBottom:5}}><span style={{color:'var(--txt3)'}}>{f.type}</span><span style={{fontWeight:600,color:'var(--txt)'}}>{f$(f.amount)}</span></div>)}</div>}/>
+            expandContent={feeBreak && (feeBreak.items || Array.isArray(feeBreak)) && <div>{(feeBreak.items || feeBreak).map(f=><div key={f.type} style={{display:'flex',justifyContent:'space-between',fontSize:10,marginBottom:5}}><span style={{color:'var(--txt3)'}}>{f.type}</span><span style={{fontWeight:600,color:'var(--txt)'}}>{f$(f.amount)}</span></div>)}{feeBreak.estimated && <div style={{fontSize:9,color:'#f59e0b',marginTop:4,fontStyle:'italic'}}>* Estimated (settlement data pending)</div>}</div>}/>
           <MetricCard label="Gross Margin $"  value={f$(m.gross_margin)}     ly={f$(ly('gross_margin'))}     delta={dp(m.gross_margin,ly('gross_margin'))}/>
           <MetricCard label="Gross Margin %"  value={fP(m.gross_margin_pct)} ly={fP(ly('gross_margin_pct'))} delta={dp(m.gross_margin_pct,ly('gross_margin_pct'))}/>
         </>}

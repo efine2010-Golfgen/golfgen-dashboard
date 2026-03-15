@@ -106,6 +106,9 @@ for _ukey, _udata in USERS.items():
     for _em in _udata["emails"]:
         EMAIL_TO_USER[_em.lower()] = _ukey
 
+# ── Anthropic API (Ask Claude feature) ────────────────────
+ANTHROPIC_API_KEY = os.environ.get("ANTHROPIC_API_KEY", "")
+
 # ── Google SSO Configuration ──────────────────────────────
 GOOGLE_CLIENT_ID = os.environ.get("GOOGLE_CLIENT_ID") or os.environ.get("GOOGLE_OAUTH_CLIENT_ID", "")
 GOOGLE_CLIENT_SECRET = os.environ.get("GOOGLE_CLIENT_SECRET") or os.environ.get("GOOGLE_OAUTH_CLIENT_SECRET", "")

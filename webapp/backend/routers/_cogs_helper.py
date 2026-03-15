@@ -107,6 +107,7 @@ def compute_cogs_for_range(con, sd, ed, hw: str = "", hp: list = None,
                     total_cogs += units * cost
                 elif revenue > 0:
                     total_cogs += revenue * fallback_pct
+        logger.info(f"compute_cogs Source1: sd={sd} ed={ed} rows={len(rows) if rows else 0} has_data={has_data} cogs={total_cogs}")
     except Exception as e:
         logger.warning(f"compute_cogs: daily_sales per-ASIN query error: {e}")
 
@@ -114,7 +115,11 @@ def compute_cogs_for_range(con, sd, ed, hw: str = "", hp: list = None,
         return round(total_cogs, 2)
 
     # ── Source 2: orders table (has per-ASIN data for recent periods) ──
+    # purchase_date is VARCHAR ISO — use ISO bounds for correct comparison
     try:
+        from datetime import datetime as _dt
+        sd_iso = _dt(sd.year, sd.month, sd.day, 0, 0, 0).isoformat()
+        ed_iso = _dt(ed.year, ed.month, ed.day, 23, 59, 59).isoformat()
         ord_rows = con.execute(f"""
             SELECT asin,
                    COUNT(*) AS units,
@@ -123,7 +128,7 @@ def compute_cogs_for_range(con, sd, ed, hw: str = "", hp: list = None,
             WHERE purchase_date >= ? AND purchase_date <= ? {hw}
               AND asin IS NOT NULL AND asin != ''
             GROUP BY asin
-        """, [str(sd), str(ed) + 'T23:59:59'] + hp).fetchall()
+        """, [sd_iso, ed_iso] + hp).fetchall()
         if ord_rows and len(ord_rows) > 0:
             order_cogs = 0
             order_has_data = False
@@ -139,6 +144,7 @@ def compute_cogs_for_range(con, sd, ed, hw: str = "", hp: list = None,
                     order_cogs += units * cost
                 elif revenue > 0:
                     order_cogs += revenue * fallback_pct
+            logger.info(f"compute_cogs Source2: sd={sd_iso} ed={ed_iso} rows={len(ord_rows)} has_data={order_has_data} cogs={order_cogs}")
             if order_has_data and order_cogs > 0:
                 return round(order_cogs, 2)
     except Exception as e:

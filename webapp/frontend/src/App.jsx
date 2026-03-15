@@ -22,6 +22,7 @@ import MfaVerify from "./pages/MfaVerify";
 import AuditLog from "./pages/AuditLog";
 import Sales from "./pages/Sales";
 import HierarchyFilter from "./components/HierarchyFilter";
+import AskClaude from "./components/AskClaude";
 import "./App.css";
 
 /* ── Category definitions with view mappings ── */
@@ -33,7 +34,7 @@ const CATEGORIES = [
     ],
   },
   {
-    key: "sales", label: "Sales",
+    key: "sales", label: "Item Sales",
     views: [
       { key: "products", path: "/products", label: "Item Sales" },
       { key: "item-master", path: "/item-master", label: "Item Master" },
@@ -92,34 +93,38 @@ function detectCategory(pathname) {
   return "exec-summary";
 }
 
-/* ── Theme Selector (swatch + name + all buttons — lives in filter bar right side) ── */
+/* ── Theme Selector (double-stacked: Dark row on top, Light row below, selected theme pill to the right) ── */
 function ThemeSelector() {
   const { theme, setTheme, themes } = useTheme();
-  const divStyle = { width:1, height:16, background:'var(--brd2)', flexShrink:0 };
-  const lblStyle = { fontFamily:"'Space Grotesk',monospace", fontSize:7, fontWeight:700, textTransform:'uppercase', letterSpacing:'.1em', color:'var(--txt3)', whiteSpace:'nowrap' };
+  const lblStyle = { fontFamily:"'Space Grotesk',monospace", fontSize:7, fontWeight:700, textTransform:'uppercase', letterSpacing:'.1em', color:'var(--txt3)', whiteSpace:'nowrap', minWidth:28 };
   return (
-    <div style={{ display:'flex', alignItems:'center', gap:6, marginLeft:'auto', flexShrink:0 }}>
+    <div style={{ display:'flex', alignItems:'center', gap:8, marginLeft:'auto', flexShrink:0 }}>
+      {/* Two rows of theme buttons */}
+      <div style={{ display:'flex', flexDirection:'column', gap:3 }}>
+        {/* Dark row */}
+        <div style={{ display:'flex', alignItems:'center', gap:4 }}>
+          <span style={lblStyle}>Dark</span>
+          {['midnight', 'night', 'fairway'].map(t => (
+            <button key={t} className={`tbtn${theme === t ? ' active' : ''}`} onClick={() => setTheme(t)}>
+              {themes[t].name}
+            </button>
+          ))}
+        </div>
+        {/* Light row */}
+        <div style={{ display:'flex', alignItems:'center', gap:4 }}>
+          <span style={lblStyle}>Light</span>
+          {['slate', 'warm', 'fresh'].map(t => (
+            <button key={t} className={`tbtn${theme === t ? ' active' : ''}`} onClick={() => setTheme(t)}>
+              {themes[t].name}
+            </button>
+          ))}
+        </div>
+      </div>
       {/* Current theme indicator pill */}
       <div style={{ display:'flex', alignItems:'center', gap:5, padding:'3px 8px', borderRadius:6, border:'1px solid var(--brd2)', background:'var(--ibg)' }}>
         <div style={{ width:10, height:10, borderRadius:3, background:themes[theme].sw, flexShrink:0 }} />
         <span style={{ fontFamily:"'Space Grotesk',monospace", fontSize:10, fontWeight:700, color:'var(--txt2)', whiteSpace:'nowrap' }}>{themes[theme].name}</span>
       </div>
-      <div style={divStyle} />
-      {/* Dark group */}
-      <span style={lblStyle}>Dark</span>
-      {['midnight', 'night', 'fairway'].map(t => (
-        <button key={t} className={`tbtn${theme === t ? ' active' : ''}`} onClick={() => setTheme(t)}>
-          {themes[t].name}
-        </button>
-      ))}
-      <div style={divStyle} />
-      {/* Light group */}
-      <span style={lblStyle}>Light</span>
-      {['slate', 'warm', 'fresh'].map(t => (
-        <button key={t} className={`tbtn${theme === t ? ' active' : ''}`} onClick={() => setTheme(t)}>
-          {themes[t].name}
-        </button>
-      ))}
     </div>
   );
 }
@@ -202,6 +207,8 @@ function NavSystem({ permissions, mfaProtected, userMfaEnabled }) {
 
 /* ── App Shell ── */
 function AppShell({ user, isAdmin, allowed, mfaProtected, userMfaEnabled, filters, division, customer, handleFilterChange, handleLogout }) {
+  const location = useLocation();
+  const activeTab = detectCategory(location.pathname);
   return (
     <div className="app">
       {/* ── Sticky header wrapper ── */}
@@ -256,10 +263,11 @@ function AppShell({ user, isAdmin, allowed, mfaProtected, userMfaEnabled, filter
           </div>
         </div>
 
-        {/* ── Filter Bar (View filter + theme selector) — Tier 2 ── */}
+        {/* ── Filter Bar (View filter + Ask Claude + theme selector) — Tier 2 ── */}
         <div className="filter-bar">
           <span className="filter-lbl">View:</span>
           <HierarchyFilter division={division} customer={customer} onChange={handleFilterChange} compact />
+          <AskClaude activeTab={activeTab} division={division} customer={customer} />
           <ThemeSelector />
         </div>
 
