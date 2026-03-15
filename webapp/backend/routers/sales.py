@@ -716,6 +716,9 @@ def sales_period_comparison(
             },
             "daily": {
                 "Today": "today", "Yesterday": "yesterday",
+                "2 Days Ago": "2_days_ago", "3 Days Ago": "3_days_ago",
+                "4 Days Ago": "4_days_ago", "5 Days Ago": "5_days_ago",
+                "6 Days Ago": "6_days_ago",
             },
             "weekly": {
                 "WTD": "wtd", "Last Week": "last_week",
@@ -724,6 +727,7 @@ def sales_period_comparison(
             },
             "monthly": {
                 "MTD": "mtd", "Last Month": "last_month",
+                "2 Months Ago": "2_months_ago", "3 Months Ago": "3_months_ago",
                 "Last 12 Months": "last_12m",
             },
             "yearly": {
@@ -800,6 +804,11 @@ def sales_period_comparison(
                 # Orders can never exceed units — cap it
                 if units > 0 and orders > units:
                     orders = units
+                # Orders table only has recent data (~30 days).
+                # If orders count is suspiciously low vs units, the table
+                # doesn't cover this period — fall back to units.
+                if units > 0 and orders > 0 and orders < units * 0.3:
+                    orders = units
             except Exception:
                 orders = units
             try:
@@ -813,6 +822,8 @@ def sales_period_comparison(
                 """, [ly_s_iso, ly_e_iso] + hp).fetchone()
                 ly_orders = int(ly_o_row[0]) if ly_o_row and ly_o_row[0] else ly_units
                 if ly_units > 0 and ly_orders > ly_units:
+                    ly_orders = ly_units
+                if ly_units > 0 and ly_orders > 0 and ly_orders < ly_units * 0.3:
                     ly_orders = ly_units
             except Exception:
                 ly_orders = ly_units
