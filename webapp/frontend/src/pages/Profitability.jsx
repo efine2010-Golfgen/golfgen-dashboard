@@ -578,7 +578,7 @@ function PricingCoupons({ filters, showToast }) {
       api.coupons(filters),
       api.profitabilityItems(365, filters),
     ]).then(([sp, cp, items]) => {
-      setPrices(sp.prices || []);
+      setPrices(sp.salePrices || []);
       setCoupons(cp.coupons || []);
       setProducts((items.items || []).map(i => ({ asin: i.asin, sku: i.sku, name: i.name })));
       setLoading(false);
@@ -672,20 +672,20 @@ function PricingCoupons({ filters, showToast }) {
             </thead>
             <tbody>
               {prices.map(p => {
-                const disc = p.regular_price > 0 ? round((1 - p.sale_price / p.regular_price) * 100, 0) : 0;
+                const disc = p.regularPrice > 0 ? round((1 - p.salePrice / p.regularPrice) * 100, 0) : 0;
                 return (
                   <tr key={p.id} style={{ borderBottom: "1px solid var(--border, rgba(14,31,45,0.04))" }}>
                     <td style={{ ...cellL, maxWidth: 200 }}>
-                      <div style={{ fontWeight: 600, fontSize: 11, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{p.product_name || p.sku || p.asin}</div>
+                      <div style={{ fontWeight: 600, fontSize: 11, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{p.productName || p.sku || p.asin}</div>
                       <div style={SG(7.5, 500, "var(--muted)")}>{p.asin}{p.sku ? ` · ${p.sku}` : ""}</div>
                     </td>
-                    <td style={{ ...cellR, textAlign: "center" }}>${round(p.regular_price, 2)}</td>
-                    <td style={{ ...cellR, textAlign: "center", color: "#E87830", fontWeight: 700 }}>${round(p.sale_price, 2)}</td>
+                    <td style={{ ...cellR, textAlign: "center" }}>${round(p.regularPrice, 2)}</td>
+                    <td style={{ ...cellR, textAlign: "center", color: "#E87830", fontWeight: 700 }}>${round(p.salePrice, 2)}</td>
                     <td style={{ ...cellR, textAlign: "center" }}>
                       <span style={{ ...SG(9, 700), padding: "2px 7px", borderRadius: 6, background: "rgba(46,207,170,.13)", color: "#2ECFAA" }}>{disc}% off</span>
                     </td>
-                    <td style={{ ...cellR, textAlign: "center", fontSize: 10 }}>{fmtDate(p.start_date)}</td>
-                    <td style={{ ...cellR, textAlign: "center", fontSize: 10 }}>{fmtDate(p.end_date)}</td>
+                    <td style={{ ...cellR, textAlign: "center", fontSize: 10 }}>{fmtDate(p.startDate)}</td>
+                    <td style={{ ...cellR, textAlign: "center", fontSize: 10 }}>{fmtDate(p.endDate)}</td>
                     <td style={{ ...cellR, textAlign: "center" }}>
                       <StatusBadge status={p.status} />
                     </td>
@@ -721,7 +721,7 @@ function PricingCoupons({ filters, showToast }) {
             </thead>
             <tbody>
               {coupons.map(c => {
-                const usedPct = c.budget > 0 ? round(c.budget_used / c.budget * 100, 0) : 0;
+                const usedPct = c.budget > 0 ? round(c.budgetUsed / c.budget * 100, 0) : 0;
                 return (
                   <tr key={c.id} style={{ borderBottom: "1px solid var(--border, rgba(14,31,45,0.04))" }}>
                     <td style={{ ...cellL, maxWidth: 220 }}>
@@ -731,10 +731,10 @@ function PricingCoupons({ filters, showToast }) {
                       </div>
                     </td>
                     <td style={{ ...cellR, textAlign: "center", color: "#E87830", fontWeight: 700 }}>
-                      {c.coupon_type === "percentage" ? `${c.discount_value}%` : `$${round(c.discount_value, 2)}`}
+                      {c.couponType === "percentage" ? `${c.discountValue}%` : `$${round(c.discountValue, 2)}`}
                     </td>
                     <td style={{ ...cellR, textAlign: "center" }}>
-                      <span style={SG(9, 600, "var(--muted)")}>{c.coupon_type === "percentage" ? "%" : "$"}</span>
+                      <span style={SG(9, 600, "var(--muted)")}>{c.couponType === "percentage" ? "%" : "$"}</span>
                     </td>
                     <td style={{ ...cellR, textAlign: "center" }}>${round(c.budget || 0, 0)}</td>
                     <td style={{ ...cellR, textAlign: "center" }}>
@@ -745,8 +745,8 @@ function PricingCoupons({ filters, showToast }) {
                         <span style={SG(9, 700)}>{usedPct}%</span>
                       </div>
                     </td>
-                    <td style={{ ...cellR, textAlign: "center", fontSize: 10 }}>{fmtDate(c.start_date)}</td>
-                    <td style={{ ...cellR, textAlign: "center", fontSize: 10 }}>{fmtDate(c.end_date)}</td>
+                    <td style={{ ...cellR, textAlign: "center", fontSize: 10 }}>{fmtDate(c.startDate)}</td>
+                    <td style={{ ...cellR, textAlign: "center", fontSize: 10 }}>{fmtDate(c.endDate)}</td>
                     <td style={{ ...cellR, textAlign: "center" }}>
                       <StatusBadge status={c.status} />
                     </td>
@@ -849,10 +849,10 @@ function Modal({ title, onClose, children }) {
 /* ── Sale Price Form ──────────────────────────────── */
 function SalePriceForm({ products, onSubmit, onCancel, initial, isEdit }) {
   const [asin, setAsin] = useState(initial?.asin || "");
-  const [regPrice, setRegPrice] = useState(initial?.regular_price || "");
-  const [salePrice, setSalePrice] = useState(initial?.sale_price || "");
-  const [startDate, setStartDate] = useState(fmtDateInput(initial?.start_date) || "");
-  const [endDate, setEndDate] = useState(fmtDateInput(initial?.end_date) || "");
+  const [regPrice, setRegPrice] = useState(initial?.regularPrice || "");
+  const [salePrice, setSalePrice] = useState(initial?.salePrice || "");
+  const [startDate, setStartDate] = useState(fmtDateInput(initial?.startDate) || "");
+  const [endDate, setEndDate] = useState(fmtDateInput(initial?.endDate) || "");
   const [marketplace, setMarketplace] = useState(initial?.marketplace || "US");
 
   const disc = regPrice && salePrice && Number(regPrice) > 0
@@ -918,11 +918,11 @@ function SalePriceForm({ products, onSubmit, onCancel, initial, isEdit }) {
 /* ── Coupon Form (multi-item) ──────────────────────── */
 function CouponForm({ products, onSubmit, onCancel, initial, isEdit }) {
   const [title, setTitle] = useState(initial?.title || "");
-  const [couponType, setCouponType] = useState(initial?.coupon_type || "percentage");
-  const [discountValue, setDiscountValue] = useState(initial?.discount_value || "");
+  const [couponType, setCouponType] = useState(initial?.couponType || "percentage");
+  const [discountValue, setDiscountValue] = useState(initial?.discountValue || "");
   const [budget, setBudget] = useState(initial?.budget || "");
-  const [startDate, setStartDate] = useState(fmtDateInput(initial?.start_date) || "");
-  const [endDate, setEndDate] = useState(fmtDateInput(initial?.end_date) || "");
+  const [startDate, setStartDate] = useState(fmtDateInput(initial?.startDate) || "");
+  const [endDate, setEndDate] = useState(fmtDateInput(initial?.endDate) || "");
   const [marketplace, setMarketplace] = useState(initial?.marketplace || "US");
   const [selectedItems, setSelectedItems] = useState(
     (initial?.items || []).map(i => i.asin) || []
