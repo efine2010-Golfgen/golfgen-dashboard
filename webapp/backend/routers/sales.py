@@ -482,17 +482,8 @@ def sales_summary(
         ty_aov = round(ty_sales / ty_orders, 2) if ty_orders else 0
         ly_aov = round(ly_sales / ly_orders, 2) if ly_orders else 0
 
-        # S&T report has 24hr+ lag — sessions/glance_views are unavailable for
-        # today and possibly yesterday. Return None so frontend shows "—".
-        if period == 'today':
-            ty_sessions = None
-            ty_gv = None
-        elif period == 'yesterday' and ty_sessions == 0:
-            ty_sessions = None
-            ty_gv = None
-
-        ty_conv = round(ty_units / ty_sessions, 4) if ty_sessions else None
-        ly_conv = round(ly_units / ly_sessions, 4) if ly_sessions else None
+        ty_conv = round(ty_units / ty_sessions, 4) if ty_sessions else 0
+        ly_conv = round(ly_units / ly_sessions, 4) if ly_sessions else 0
         # CTR from advertising table (clicks / impressions); 0 when ads data absent
         def _ads_ctr(s, e, extra_params):
             try:
@@ -841,20 +832,11 @@ def sales_period_comparison(
             aur = round(float(sales) / units, 2) if units else 0
             aov = round(float(sales) / orders, 2) if orders else 0
 
-            # S&T report has 24hr+ lag — null out sessions for today,
-            # and for yesterday if S&T hasn't synced yet (sessions=0).
-            if period_key == 'today':
-                sessions = None
-                glance_views = None
-            elif period_key == 'yesterday' and sessions == 0:
-                sessions = None
-                glance_views = None
-
-            conv = round(float(units) / sessions, 4) if sessions else None
+            conv = round(float(units) / sessions, 4) if sessions else 0
             ctr = 0
             ly_aur = round(float(ly_sales) / ly_units, 2) if ly_units else 0
             ly_aov = round(float(ly_sales) / ly_orders, 2) if ly_orders else 0
-            ly_conv = round(float(ly_units) / ly_sessions, 4) if ly_sessions else None
+            ly_conv = round(float(ly_units) / ly_sessions, 4) if ly_sessions else 0
             result[label] = {
                 "sales": round(sales, 2), "units": units, "aur": aur,
                 "orders": orders, "aov": aov,
