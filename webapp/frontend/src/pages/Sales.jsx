@@ -157,26 +157,23 @@ function heatmapSVG(data, W=1100) {
   let s = `<svg width="100%" viewBox="0 0 ${svgW} ${svgH}" style="overflow:visible;display:block">`;
   Array.from({length:WEEKS},(_,w) => { if(w%4===0||w===WEEKS-1) s+=`<text x="${padL+(w+.5)*cellW}" y="${padT-5}" text-anchor="middle" font-size="8" fill="${B.sub}">W${WEEKS-w}</text>`; });
   DAYS.forEach((d,i) => s+=`<text x="${padL-3}" y="${padT+(i+.5)*cellH+4}" text-anchor="end" font-size="9" fill="${B.sub}">${d}</text>`);
-  // Rank-based color scaling so ALL cells are clearly visible.
-  // Use percentile ranks for alpha so outliers don't crush the scale.
-  const allUnits = [];
-  for (let w=0;w<WEEKS;w++) for (let d=0;d<7;d++) allUnits.push(lookup[`${WEEKS-1-w},${d}`]||0);
-  const sorted = [...allUnits].filter(v=>v>0).sort((a,b)=>a-b);
-  const rankMap = {};
-  sorted.forEach((v,i) => { rankMap[v] = i; }); // last wins = highest rank for dupes
-  const maxRank = sorted.length - 1 || 1;
+  // Log-based color scaling — gives clear visual heat differences.
+  // Low values get cool/light cells, high values get intense/dark cells.
+  const logMax = Math.log1p(mx);
   for (let w=0; w<WEEKS; w++) {
     for (let d=0; d<7; d++) {
       const units = lookup[`${WEEKS-1-w},${d}`] || 0;
-      const pct = units > 0 ? (rankMap[units] || 0) / maxRank : 0;
-      // Alpha: 0.30 minimum for any cell with data, up to 0.92 for highest
-      const alpha = units > 0 ? (0.30 + pct * 0.62).toFixed(2) : '0.05';
+      // Log scale maps small values to lower alphas and large values to higher
+      const pct = units > 0 && logMax > 0 ? Math.log1p(units) / logMax : 0;
+      // Alpha range: 0.12 (lowest) to 0.92 (highest), 0.04 for empty
+      const alpha = units > 0 ? (0.12 + pct * 0.80).toFixed(2) : '0.04';
       const c = d >= 5 ? B.o2 : B.b2;
       s += `<rect x="${(padL+w*cellW+2).toFixed(1)}" y="${(padT+d*cellH+2).toFixed(1)}" width="${(cellW-4).toFixed(1)}" height="${(cellH-4).toFixed(1)}" rx="3" fill="${c}" fill-opacity="${alpha}"/>`;
       // Show numeric value on EVERY cell that has data
       if (units > 0) {
         const fs = units >= 100 ? 6 : 7;
-        s += `<text x="${(padL+(w+.5)*cellW).toFixed(1)}" y="${(padT+(d+.5)*cellH+3.5).toFixed(1)}" text-anchor="middle" font-size="${fs}" fill="white" opacity=".9">${units}</text>`;
+        const txtAlpha = pct > 0.4 ? '.95' : '.75';
+        s += `<text x="${(padL+(w+.5)*cellW).toFixed(1)}" y="${(padT+(d+.5)*cellH+3.5).toFixed(1)}" text-anchor="middle" font-size="${fs}" fill="white" opacity="${txtAlpha}">${units}</text>`;
       }
     }
   }
@@ -252,7 +249,7 @@ function funnelSVG(data) {
 
     // Funnel trapezoid
     s += `<path d="M${funnelCX - tyW/2},${rowY + 2} L${funnelCX + tyW/2},${rowY + 2} L${funnelCX + nextTyW/2},${rowY + segH - 1} L${funnelCX - nextTyW/2},${rowY + segH - 1} Z" fill="url(#fg${i})" opacity=".92"/>`;
-    s += `<path d="M${funnelCX - lyW/2},${rowY} L${funnelCX + lyW/2},${rowY} L${funnelCX + nextLyW/2},${rowY + segH} L${funnelCX - nextLyW/2},${rowY + segH} Z" fill="none" stroke="#f59e0b" stroke-width="2.5" stroke-dasharray="7 4" opacity=".95"/>`;
+    s += `<path d="M${funnelCX - lyW/2},${rowY} L${funnelCX + lyW/2},${rowY} L${funnelCX + nextLyW/2},${rowY + segH} L${funnelCX - nextLyW/2},${rowY + segH} Z" fill="none" stroke="#f59e0b" stroke-width="1.8" stroke-dasharray="6 3" opacity=".95"/>`;
     // TY value on funnel bar
     s += `<text x="${funnelCX}" y="${rowMid + 4}" text-anchor="middle" font-size="12" font-weight="700" fill="#fff">${fN(f.ty)}</text>`;
 
