@@ -1226,6 +1226,13 @@ async def get_fba_shipment_items(request: Request, shipment_id: str):
     return {"shipmentId": shipment_id, "items": items, "totalItems": len(items)}
 
 
+def _n(v, default=0):
+    """Coerce DB values (Decimal, None) to float for safe arithmetic."""
+    if v is None:
+        return default
+    return float(v)
+
+
 @router.get("/api/inventory/command-center")
 def inventory_command_center(
     division: Optional[str] = None,
@@ -1265,11 +1272,11 @@ def inventory_command_center(
 
     for r in inv_rows:
         asin = r[0]
-        fulfillable = r[3]
-        inbound = r[4] + r[5] + r[6]
-        reserved = r[7]
-        unfulfillable = r[8]
-        total = r[9] or (fulfillable + inbound + reserved + unfulfillable)
+        fulfillable = _n(r[3])
+        inbound = _n(r[4]) + _n(r[5]) + _n(r[6])
+        reserved = _n(r[7])
+        unfulfillable = _n(r[8])
+        total = _n(r[9]) or (fulfillable + inbound + reserved + unfulfillable)
 
         cogs_name = cogs_data.get(asin, {}).get("product_name", "")
         if cogs_name and cogs_name.strip().upper() == asin.upper():
@@ -1310,10 +1317,10 @@ def inventory_command_center(
     vel_map = {}
     for r in vel_rows:
         vel_map[r[0]] = {
-            "u7": r[1] or 0, "u30": r[2] or 0, "u90": r[3] or 0,
-            "avg7": round((r[1] or 0) / 7.0, 2),
-            "avg30": round((r[2] or 0) / 30.0, 2),
-            "rev30": round(r[4] or 0, 2),
+            "u7": _n(r[1]), "u30": _n(r[2]), "u90": _n(r[3]),
+            "avg7": round(_n(r[1]) / 7.0, 2),
+            "avg30": round(_n(r[2]) / 30.0, 2),
+            "rev30": round(_n(r[4]), 2),
         }
 
     # ── 3. Buy Box % data (last 30 days, daily) ──────────────────────────────
@@ -1328,7 +1335,7 @@ def inventory_command_center(
         ORDER BY date
     """, hp).fetchall()
 
-    bb_trend = [{"date": str(r[0]), "bb": round(r[1] or 0, 1), "sessions": r[2] or 0} for r in bb_rows]
+    bb_trend = [{"date": str(r[0]), "bb": round(_n(r[1]), 1), "sessions": _n(r[2])} for r in bb_rows]
 
     # Per-ASIN buy box for the table
     bb_asin_rows = con.execute(f"""
@@ -1341,7 +1348,7 @@ def inventory_command_center(
         {bb_filter}
         GROUP BY asin
     """, hp).fetchall()
-    bb_map = {r[0]: {"bb": round(r[1] or 0, 1), "sessions": r[2] or 0, "conv": round(r[3] or 0, 1)} for r in bb_asin_rows}
+    bb_map = {r[0]: {"bb": round(_n(r[1]), 1), "sessions": _n(r[2]), "conv": round(_n(r[3]), 1)} for r in bb_asin_rows}
 
     # ── 4. Daily velocity trend (30 days) ─────────────────────────────────────
     vel_trend_rows = con.execute(f"""
@@ -1351,15 +1358,15 @@ def inventory_command_center(
         GROUP BY date
         ORDER BY date
     """).fetchall()
-    vel_trend = [{"date": str(r[0]), "units": r[1] or 0} for r in vel_trend_rows]
+    vel_trend = [{"date": str(r[0]), "units": _n(r[1])} for r in vel_trend_rows]
 
     # ── 5. Inventory value (fba_inventory × COGS) ─────────────────────────────
     total_inv_value = 0.0
     for asin, inv in inv_map.items():
         cogs_info = cogs_data.get(asin, {})
-        unit_cost = cogs_info.get("cogs", 0)
+        unit_cost = _n(cogs_info.get("cogs", 0))
         if unit_cost > 0:
-            total_inv_value += inv["fulfillable"] * unit_cost
+            total_inv_value += _n(inv["fulfillable"]) * unit_cost
 
     # ── 6. Aging data ─────────────────────────────────────────────────────────
     aging_data = {"brackets": [], "total_ltsf": 0, "aged_180_plus": 0}
@@ -1379,7 +1386,7 @@ def inventory_command_center(
                 aging_data["brackets"].append({
                     "label": lbl, "units": val, "pct": round(val / total_aged * 100, 1), "color": clr
                 })
-            aging_data["total_ltsf"] = round(aging_rows[5] or 0, 2)
+            aging_data["total_ltsf"] = round(_n(aging_rows[5]), 2)
             aging_data["aged_180_plus"] = vals[2] + vals[3] + vals[4]
     except Exception:
         pass
@@ -1396,8 +1403,8 @@ def inventory_command_center(
         for r in stranded_rows:
             stranded_items.append({
                 "asin": r[0], "sku": r[1] or "", "name": r[2] or r[0],
-                "qty": r[3] or 0, "reason": r[4] or "Unknown",
-                "value": round(r[5] or 0, 2),
+                "qty": _n(r[3]), "reason": r[4] or "Unknown",
+                "value": round(_n(r[5]), 2),
             })
     except Exception:
         pass
@@ -1416,7 +1423,7 @@ def inventory_command_center(
             reimbursements.append({
                 "id": r[0], "date": str(r[1]) if r[1] else "", "asin": r[2] or "",
                 "sku": r[3] or "", "name": r[4] or "", "reason": r[5] or "",
-                "qty": r[6] or 0, "amount": round(r[7] or 0, 2),
+                "qty": _n(r[6]), "amount": round(_n(r[7]), 2),
             })
     except Exception:
         pass
@@ -1432,14 +1439,14 @@ def inventory_command_center(
               AND date >= CURRENT_DATE - 90
             GROUP BY asin
         """).fetchall()
-        refund_map = {r[0]: r[1] or 0 for r in refund_rows}
+        refund_map = {r[0]: _n(r[1]) for r in refund_rows}
 
         tu_rows = con.execute(f"""
             SELECT asin, SUM(units_ordered) FROM daily_sales
             WHERE asin != 'ALL' AND date >= CURRENT_DATE - 90
             GROUP BY asin
         """).fetchall()
-        total_units_map = {r[0]: r[1] or 0 for r in tu_rows}
+        total_units_map = {r[0]: _n(r[1]) for r in tu_rows}
     except Exception:
         pass
 
@@ -1455,7 +1462,7 @@ def inventory_command_center(
             ORDER BY snapshot_date
             LIMIT 90
         """).fetchall()
-        inv_trend = [{"date": str(r[0]), "sellable": r[1] or 0, "inbound": r[2] or 0} for r in trend_rows]
+        inv_trend = [{"date": str(r[0]), "sellable": _n(r[1]), "inbound": _n(r[2])} for r in trend_rows]
     except Exception:
         pass
 
@@ -1464,6 +1471,11 @@ def inventory_command_center(
     # ── Build KPIs ────────────────────────────────────────────────────────────
     total_vel_7d = sum(v["u7"] for v in vel_map.values())
     total_vel_30d = sum(v["u30"] for v in vel_map.values())
+    total_fulfillable = _n(total_fulfillable)
+    total_inbound = _n(total_inbound)
+    total_reserved = _n(total_reserved)
+    total_unfulfillable = _n(total_unfulfillable)
+    total_units = _n(total_units)
     avg_daily_30d = round(total_vel_30d / 30.0, 1) if total_vel_30d else 0
     avg_daily_7d = round(total_vel_7d / 7.0, 1) if total_vel_7d else 0
     weeks_cover = round(total_fulfillable / (avg_daily_7d * 7), 1) if avg_daily_7d > 0 else 0
@@ -1513,18 +1525,18 @@ def inventory_command_center(
         vel = vel_map.get(asin, {"u7": 0, "u30": 0, "u90": 0, "avg7": 0, "avg30": 0, "rev30": 0})
         bb = bb_map.get(asin, {"bb": 0, "sessions": 0, "conv": 0})
 
-        avg_daily = vel["avg7"]
-        fulfillable = inv["fulfillable"]
+        avg_daily = _n(vel["avg7"])
+        fulfillable = _n(inv["fulfillable"])
         days_cover = round(fulfillable / avg_daily, 1) if avg_daily > 0 else None
         weeks_cover_sku = round(days_cover / 7.0, 1) if days_cover is not None else None
 
         reorder_point = round(avg_daily * DEFAULT_LEAD_TIME_DAYS) + round(avg_daily * DEFAULT_SAFETY_STOCK_DAYS)
         stockout_risk = (days_cover is not None and days_cover < DEFAULT_LEAD_TIME_DAYS)
 
-        sell_thru_sku = round(vel["u90"] / fulfillable, 2) if fulfillable > 0 else None
+        sell_thru_sku = round(_n(vel["u90"]) / fulfillable, 2) if fulfillable > 0 else None
 
-        refund_count = refund_map.get(asin, 0)
-        total_u = total_units_map.get(asin, 0)
+        refund_count = _n(refund_map.get(asin, 0))
+        total_u = _n(total_units_map.get(asin, 0))
         return_rate = round(refund_count / total_u * 100, 1) if total_u > 0 else None
 
         # Risk scoring
@@ -1544,8 +1556,8 @@ def inventory_command_center(
             "asin": asin,
             "sku": inv["sku"],
             "name": inv["name"],
-            "onHand": fulfillable,
-            "inbound": inv["inbound"],
+            "onHand": int(fulfillable),
+            "inbound": int(_n(inv["inbound"])),
             "daysCover": days_cover,
             "weeksCover": weeks_cover_sku,
             "dailyVel": avg_daily,
@@ -1582,10 +1594,10 @@ def inventory_command_center(
     reorder_timeline = reorder_timeline[:12]
 
     # ── Health metrics ────────────────────────────────────────────────────────
-    total_stranded = sum(s["qty"] for s in stranded_items)
-    total_stranded_value = sum(s["value"] for s in stranded_items)
-    reserved_pct = round(total_reserved / total_units * 100, 1) if total_units > 0 else 0
-    turnover = round(total_90d_units * 4 / total_fulfillable, 1) if total_fulfillable > 0 else 0
+    total_stranded = sum(_n(s["qty"]) for s in stranded_items)
+    total_stranded_value = sum(_n(s["value"]) for s in stranded_items)
+    reserved_pct = round(_n(total_reserved) / _n(total_units) * 100, 1) if total_units > 0 else 0
+    turnover = round(_n(total_90d_units) * 4 / _n(total_fulfillable), 1) if total_fulfillable > 0 else 0
 
     # Health score (0-100)
     health_score = 100
