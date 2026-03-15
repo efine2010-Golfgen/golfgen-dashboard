@@ -5,6 +5,21 @@ import { api, fmt$ } from "../lib/api";
 const SG = (x = {}) => ({ fontFamily: "'Space Grotesk',monospace", ...x });
 const DM = (x = {}) => ({ fontFamily: "'DM Serif Display',Georgia,serif", ...x });
 
+/* ── Smart name shortener: strips common prefix, keeps distinguishing part ── */
+const shortName = (name, maxLen = 22) => {
+  if (!name) return "—";
+  // Strip common brand prefixes that make every name look the same
+  let s = name
+    .replace(/^PGA TOUR\s*/i, "")
+    .replace(/^Elite Global\s*/i, "")
+    .replace(/^EGB\s*/i, "")
+    .replace(/^GolfGen\s*/i, "")
+    .trim();
+  if (!s) s = name; // fallback if name was ONLY the prefix
+  if (s.length > maxLen) s = s.slice(0, maxLen) + "…";
+  return s;
+};
+
 const fmtK = (n) => {
   if (n == null) return "—";
   if (Math.abs(n) >= 1_000_000) return `$${(n / 1_000_000).toFixed(2)}M`;
@@ -329,7 +344,7 @@ export default function Products({ filters = {} }) {
           <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
             {warnings.map(p => (
               <span key={p.asin} style={{ padding: "2px 8px", borderRadius: 99, fontSize: 10, fontWeight: 700, background: "rgba(248,113,113,.2)", color: "#f87171", whiteSpace: "nowrap" }}>
-                {p.asin} · {(p.name || "").slice(0, 20)} — CVR {(p.convRate || 0).toFixed(1)}%{p.acos > 40 ? ` · ACOS ${p.acos.toFixed(0)}%` : ""}{p.ret > 8 ? ` · Ret ${p.ret.toFixed(0)}%` : ""}
+                {p.asin} · {shortName(p.name, 24)} — CVR {(p.convRate || 0).toFixed(1)}%{p.acos > 40 ? ` · ACOS ${p.acos.toFixed(0)}%` : ""}{p.ret > 8 ? ` · Ret ${p.ret.toFixed(0)}%` : ""}
               </span>
             ))}
           </div>
@@ -342,7 +357,7 @@ export default function Products({ filters = {} }) {
           <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
             {stars.map(p => (
               <span key={p.asin} style={{ padding: "2px 8px", borderRadius: 99, fontSize: 10, fontWeight: 700, background: "rgba(46,207,170,.13)", color: "#2ECFAA", whiteSpace: "nowrap" }}>
-                {p.asin} · {(p.name || "").slice(0, 20)} — CVR {(p.convRate || 0).toFixed(1)}% · Margin {(p.margin || 0).toFixed(1)}%
+                {p.asin} · {shortName(p.name, 24)} — CVR {(p.convRate || 0).toFixed(1)}% · Margin {(p.margin || 0).toFixed(1)}%
               </span>
             ))}
           </div>
@@ -441,10 +456,10 @@ export default function Products({ filters = {} }) {
                 {/* Rows */}
                 {hmProducts.map(p => {
                   const cd = p.cvrData || [];
-                  const shortName = (p.name || "").split(" ").slice(0, 2).join(" ");
+                  const sName = shortName(p.name, 18);
                   return (
                     <div key={p.asin + "-cvrhm"} style={{ display: "flex", alignItems: "center", gap: 2, marginBottom: 2 }}>
-                      <span style={{ ...SG(), fontSize: 8, color: "var(--txt2)", width: 118, flexShrink: 0, textAlign: "right", paddingRight: 8, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{shortName}</span>
+                      <span style={{ ...SG(), fontSize: 8, color: "var(--txt2)", width: 118, flexShrink: 0, textAlign: "right", paddingRight: 8, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{sName}</span>
                       {cd.map((v, i) => {
                         const { bg, fg } = cvrHmBgFg(v);
                         return <HmCell key={i} value={v} fmt={v => `${v.toFixed(1)}%`} bg={bg} fg={fg} />;
@@ -477,11 +492,11 @@ export default function Products({ filters = {} }) {
                 </div>
                 {hmProducts.map(p => {
                   const vd = p.velData || [];
-                  const shortName = (p.name || "").split(" ").slice(0, 2).join(" ");
+                  const sName = shortName(p.name, 18);
                   const isDeclining = vd.length >= 2 && vd[vd.length - 1] < vd[0] * 0.85;
                   return (
                     <div key={p.asin + "-unithm"} style={{ display: "flex", alignItems: "center", gap: 2, marginBottom: 2 }}>
-                      <span style={{ ...SG(), fontSize: 8, color: "var(--txt2)", width: 118, flexShrink: 0, textAlign: "right", paddingRight: 8, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{shortName}</span>
+                      <span style={{ ...SG(), fontSize: 8, color: "var(--txt2)", width: 118, flexShrink: 0, textAlign: "right", paddingRight: 8, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{sName}</span>
                       {vd.map((v, i) => {
                         const { bg, fg } = unitsHmBgFg(v, maxUnitsAll, isDeclining && i >= vd.length - 3, p.isHW);
                         return <HmCell key={i} value={v} fmt={v => Math.round(v)} bg={bg} fg={fg} />;
@@ -778,7 +793,7 @@ function BubbleChart({ items }) {
             <g key={p.asin}>
               <circle cx={cx} cy={cy} r={r} fill={color} stroke={color.replace(/[\d.]+\)$/, "1)")} strokeWidth="1" opacity=".85" />
               <text x={cx} y={cy - r - 4} textAnchor="middle" fontSize="7" fill={textColor} style={SG({ fontWeight: 700 })}>
-                {(p.name || "").split(" ").slice(0, 2).join(" ")}
+                {shortName(p.name, 20)}
               </text>
             </g>
           );
