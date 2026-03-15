@@ -189,7 +189,12 @@ def _build_product_list(con, cutoff: str) -> list:
 
     products = []
     for r in rows:
-        asin, revenue, units, sessions, glance_views = r
+        asin = r[0]
+        # PostgreSQL may return Decimal — coerce to native Python types
+        revenue = float(r[1] or 0)
+        units = int(r[2] or 0)
+        sessions = int(r[3] or 0)
+        glance_views = int(r[4] or 0)
         orders = units  # proxy until per-ASIN order count is available
         api_name = inv_names.get(asin, {}).get("product_name", "")
         if units == 0:
@@ -1960,7 +1965,8 @@ def period_comparison(
             WHERE date >= ? AND date < ? AND asin = 'ALL'{hf}
         """, [p["start"], p["end"]] + hp).fetchone()
 
-        rev, units, sessions = row
+        # PostgreSQL may return Decimal — coerce to native Python types
+        rev, units, sessions = float(row[0] or 0), int(row[1] or 0), int(row[2] or 0)
         # True order count from orders table — exclude Cancelled
         try:
             o_row = con.execute(f"""
@@ -2033,7 +2039,7 @@ def period_comparison(
             WHERE date >= ? AND date < ? AND asin = 'ALL'{hf}
         """, [ly_start.strftime("%Y-%m-%d"), ly_end.strftime("%Y-%m-%d")] + hp).fetchone()
 
-        ly_rev, ly_units, ly_sessions = ly_row
+        ly_rev, ly_units, ly_sessions = float(ly_row[0] or 0), int(ly_row[1] or 0), int(ly_row[2] or 0)
         try:
             ly_o_row = con.execute(f"""
                 SELECT COUNT(DISTINCT order_id) FROM orders
