@@ -22,6 +22,7 @@ import MfaVerify from "./pages/MfaVerify";
 import AuditLog from "./pages/AuditLog";
 import Sales from "./pages/Sales";
 import RetailReporting from "./pages/RetailReporting";
+import WalmartAnalytics from "./pages/WalmartAnalytics";
 import HierarchyFilter from "./components/HierarchyFilter";
 import AskClaude from "./components/AskClaude";
 import "./App.css";
@@ -76,9 +77,10 @@ const CATEGORIES = [
     ],
   },
   {
-    key: "retail-reporting", label: "Retail Reporting",
+    key: "retail-reporting", label: "Walmart Analytics",
     views: [
-      { key: "retail-reporting", path: "/retail-reporting", label: "Retail Reporting" },
+      { key: "walmart-analytics", path: "/walmart-analytics", label: "Walmart Analytics" },
+      { key: "retail-reporting", path: "/retail-reporting", label: "Upload & Data" },
     ],
   },
   {
@@ -331,6 +333,7 @@ function AppShell({ user, isAdmin, allowed, mfaProtected, userMfaEnabled, filter
           {allowed["inventory"] !== false && <Route path="/inventory" element={<Inventory filters={filters} />} />}
           {allowed["golfgen-inventory"] !== false && <Route path="/golfgen-inventory" element={<GolfGenInventory filters={filters} />} />}
           {allowed["advertising"] !== false && <Route path="/advertising" element={<Advertising filters={filters} />} />}
+          {allowed["retail-reporting"] !== false && <Route path="/walmart-analytics" element={<WalmartAnalytics filters={filters} />} />}
           {allowed["retail-reporting"] !== false && <Route path="/retail-reporting" element={<RetailReporting filters={filters} />} />}
           {allowed["item-master"] !== false && <Route path="/item-master" element={<ItemMaster filters={filters} />} />}
           {allowed["factory-po"] !== false && <Route path="/factory-po" element={<FactoryPO />} />}

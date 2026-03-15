@@ -327,6 +327,7 @@ export const api = {
   retailEcomm: (h = {}, week = "", limit = 100, offset = 0) =>
     fetchJSON(`/api/retail/ecomm?limit=${limit}&offset=${offset}${week ? '&week=' + week : ''}${_hq(h)}`),
   retailOrderForecast: (h = {}) => fetchJSON(`/api/retail/order-forecast${_hq(h) ? '?' + _hq(h).slice(1) : ''}`),
+  walmartAnalytics: (h = {}) => fetchJSON('/api/retail/walmart-analytics' + (_hq(h) ? '?' + _hq(h).slice(1) : '')),
   retailUpload: (file) => {
     const fd = new FormData();
     fd.append("file", file);

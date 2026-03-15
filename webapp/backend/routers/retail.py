@@ -832,3 +832,403 @@ def get_retail_summary(division: str = None, customer: str = None):
         "posSummary": pos_summary,
         "uploads": uploads,
     }
+
+
+# ═══════════════════════════════════════════════════════════════════════
+#  WALMART ANALYTICS COMPREHENSIVE ENDPOINT
+# ═══════════════════════════════════════════════════════════════════════
+
+@router.get("/api/retail/walmart-analytics")
+def get_walmart_analytics(division: str = None, customer: str = None):
+    """Return comprehensive data for the Walmart Analytics mockup page.
+
+    This endpoint aggregates data from walmart_item_weekly, walmart_store_weekly,
+    walmart_scorecard, walmart_ecomm_weekly, and walmart_order_forecast tables
+    to support all 5 sections of the analytics page:
+    1. Sales Performance (KPIs, sales by type, item-level, category breakdown)
+    2. Inventory Health (KPIs, instock trend, OH per store, instock by type)
+    3. Vendor Scorecard (grouped metrics)
+    4. eCommerce (KPIs, item-level breakdown)
+    5. Order Forecast (KPIs, forecasts)
+    """
+    con = get_db()
+    from core.hierarchy import hierarchy_filter
+    hw, hp = hierarchy_filter(division=division, customer=customer or "walmart_stores")
+
+    # Determine if data is available
+    data_available = True
+    try:
+        total_items = con.execute(
+            f"SELECT COUNT(*) FROM walmart_item_weekly WHERE 1=1 {hw}", hp
+        ).fetchone()
+        data_available = total_items and total_items[0] > 0
+    except Exception:
+        data_available = False
+
+    # ── 1. SALES PERFORMANCE ─────────────────────────────────────────────
+
+    sales_performance = {
+        "kpis": {},
+        "salesByType": {},
+        "items": [],
+        "categories": {},
+    }
+
+    if data_available:
+        # KPIs by period type (L52W, L26W, L13W, L4W, L1W/LW)
+        period_types = ["L52W", "L26W", "L13W", "L4W", "L1W"]
+        for pt in period_types:
+            ui_period = "L52W" if pt == "L52W" else "L26W" if pt == "L26W" else "L13W" if pt == "L13W" else "L4W" if pt == "L4W" else "LW"
+
+            r = con.execute(f"""
+                SELECT
+                    SUM(pos_sales_ty), SUM(pos_sales_ly),
+                    SUM(pos_qty_ty), SUM(pos_qty_ly),
+                    SUM(CASE WHEN sales_type IN ('Regular', 'Rollback') THEN pos_sales_ty ELSE 0 END) as regular_ty,
+                    SUM(CASE WHEN sales_type IN ('Regular', 'Rollback') THEN pos_sales_ly ELSE 0 END) as regular_ly,
+                    SUM(CASE WHEN sales_type = 'Clearance' THEN pos_sales_ty ELSE 0 END) as clearance_ty,
+                    SUM(CASE WHEN sales_type = 'Clearance' THEN pos_sales_ly ELSE 0 END) as clearance_ly
+                FROM walmart_item_weekly
+                WHERE period_type = ? AND 1=1 {hw}
+            """, [pt] + hp).fetchone()
+
+            if r:
+                sales_performance["kpis"][ui_period] = {
+                    "posSalesTy": _n(r[0]),
+                    "posSalesLy": _n(r[1]),
+                    "posQtyTy": _n(r[2]),
+                    "posQtyLy": _n(r[3]),
+                    "regularSalesTy": _n(r[4]),
+                    "regularSalesLy": _n(r[5]),
+                    "clearanceSalesTy": _n(r[6]),
+                    "clearanceSalesLy": _n(r[7]),
+                }
+
+        # Sales by type breakdown for key periods
+        for pt in ["L4W", "L13W", "L52W", "L1W"]:
+            ui_period = "L52W" if pt == "L52W" else "L26W" if pt == "L26W" else "L13W" if pt == "L13W" else "L4W" if pt == "L4W" else "LW"
+
+            rows = con.execute(f"""
+                SELECT
+                    COALESCE(sales_type, 'Other') as st,
+                    SUM(pos_sales_ty) as sales_ty,
+                    SUM(pos_sales_ly) as sales_ly,
+                    SUM(pos_qty_ty) as qty_ty
+                FROM walmart_item_weekly
+                WHERE period_type = ? AND 1=1 {hw}
+                GROUP BY COALESCE(sales_type, 'Other')
+                ORDER BY sales_ty DESC
+            """, [pt] + hp).fetchall()
+
+            sales_performance["salesByType"][ui_period] = {}
+            for row in rows:
+                st = row[0] or "Other"
+                sales_performance["salesByType"][ui_period][st] = {
+                    "salesTy": _n(row[1]),
+                    "salesLy": _n(row[2]),
+                    "qtyTy": _n(row[3]),
+                }
+
+        # Item-level performance: aggregate across all periods
+        item_rows = con.execute(f"""
+            SELECT
+                prime_item_desc,
+                SUM(CASE WHEN period_type = 'L1W' THEN pos_sales_ty ELSE 0 END) as pos_sales_lw,
+                SUM(CASE WHEN period_type = 'L1W' THEN pos_sales_ly ELSE 0 END) as pos_sales_lw_ly,
+                SUM(CASE WHEN period_type = 'L1W' THEN pos_qty_ty ELSE 0 END) as pos_qty_lw,
+                SUM(CASE WHEN period_type = 'L1W' THEN pos_qty_ly ELSE 0 END) as pos_qty_lw_ly,
+                SUM(CASE WHEN period_type = 'L4W' THEN traited_store_count_ty ELSE 0 END) as traited_stores,
+                SUM(CASE WHEN period_type = 'L4W' THEN on_hand_qty_ty ELSE 0 END) as on_hand_ty,
+                SUM(CASE WHEN period_type = 'L4W' THEN on_hand_qty_ly ELSE 0 END) as on_hand_ly,
+                SUM(CASE WHEN period_type = 'L4W' THEN instock_pct_ty ELSE 0 END) as instock_avg
+            FROM walmart_item_weekly
+            WHERE prime_item_desc IS NOT NULL AND 1=1 {hw}
+            GROUP BY prime_item_desc
+            ORDER BY pos_sales_lw DESC
+            LIMIT 50
+        """, hp).fetchall()
+
+        for row in item_rows:
+            aur = _n(row[1]) / _n(row[3]) if _n(row[3]) > 0 else 0
+            aur_ly = _n(row[2]) / _n(row[4]) if _n(row[4]) > 0 else 0
+
+            sales_performance["items"].append({
+                "itemDesc": row[0],
+                "posSalesTy": _n(row[1]),
+                "posSalesLy": _n(row[2]),
+                "posQtyTy": _n(row[3]),
+                "posQtyLy": _n(row[4]),
+                "traitedStores": _safe_int(row[5]),
+                "onHandTy": _n(row[6]),
+                "onHandLy": _n(row[7]),
+                "aur": aur,
+                "aurLy": aur_ly,
+                "instockPct": _n(row[8]),
+            })
+
+        # Category breakdown based on item descriptions
+        category_keywords = {
+            "Junior Clubs": ["junior", "youth", "kid"],
+            "Tee-Up Practice": ["tee", "practice", "range", "training"],
+            "Balls": ["ball", "golf ball"],
+        }
+
+        category_data = {}
+        for item in sales_performance["items"]:
+            desc_lower = (item["itemDesc"] or "").lower()
+            found_cat = "Other"
+            for cat, keywords in category_keywords.items():
+                if any(kw in desc_lower for kw in keywords):
+                    found_cat = cat
+                    break
+
+            if found_cat not in category_data:
+                category_data[found_cat] = {"salesTy": 0, "salesLy": 0, "qtyTy": 0, "count": 0}
+            category_data[found_cat]["salesTy"] += item["posSalesTy"]
+            category_data[found_cat]["salesLy"] += item["posSalesLy"]
+            category_data[found_cat]["qtyTy"] += item["posQtyTy"]
+            category_data[found_cat]["count"] += 1
+
+        sales_performance["categories"] = category_data
+
+    # ── 2. INVENTORY HEALTH ──────────────────────────────────────────────
+
+    inventory_health = {
+        "kpis": {},
+        "instockTrend": {},
+        "ohPerStore": {},
+        "instockByType": {},
+    }
+
+    if data_available:
+        # Inventory KPIs
+        r = con.execute(f"""
+            SELECT
+                SUM(on_hand_qty_ty),
+                AVG(instock_pct_ty),
+                SUM(on_hand_qty_ty * 0.5),
+                COUNT(DISTINCT prime_item_desc)
+            FROM walmart_item_weekly
+            WHERE period_type = 'L4W' AND 1=1 {hw}
+        """, hp).fetchone()
+
+        if r:
+            inventory_health["kpis"] = {
+                "totalStoreOh": _n(r[0]),
+                "instockPct": _n(r[1]) if r[1] else 0,
+                "retailInventory": _n(r[2]),
+                "weeksOfSupply": 4.0,
+            }
+
+        # Instock trend by item across windows (L52W → L1W)
+        items_trend = con.execute(f"""
+            SELECT DISTINCT prime_item_desc
+            FROM walmart_item_weekly
+            WHERE period_type IN ('L1W', 'L4W', 'L13W', 'L26W', 'L52W') AND 1=1 {hw}
+            LIMIT 30
+        """, hp).fetchall()
+
+        for item_row in items_trend:
+            item_desc = item_row[0]
+            if not item_desc:
+                continue
+
+            trend_vals = []
+            for pt in ["L52W", "L26W", "L13W", "L4W", "L1W"]:
+                r = con.execute(f"""
+                    SELECT AVG(instock_pct_ty)
+                    FROM walmart_item_weekly
+                    WHERE period_type = ? AND prime_item_desc = ? AND 1=1 {hw}
+                """, [pt] + hp).fetchone()
+                trend_vals.append(_n(r[0]) if r and r[0] else 0)
+
+            inventory_health["instockTrend"][item_desc] = trend_vals
+
+        # OH per traited store by window
+        for pt in ["L1W", "L4W", "L13W", "L52W"]:
+            ui_period = "LW" if pt == "L1W" else pt
+
+            rows = con.execute(f"""
+                SELECT
+                    prime_item_desc,
+                    on_hand_qty_ty / NULLIF(traited_store_count_ty, 0) as oh_per_store_ty,
+                    on_hand_qty_ly / NULLIF(traited_store_count_ly, 0) as oh_per_store_ly
+                FROM walmart_item_weekly
+                WHERE period_type = ? AND traited_store_count_ty > 0 AND 1=1 {hw}
+                ORDER BY on_hand_qty_ty DESC
+                LIMIT 20
+            """, [pt] + hp).fetchall()
+
+            if rows:
+                inventory_health["ohPerStore"][ui_period] = {
+                    "ty": [_n(r[1]) for r in rows],
+                    "ly": [_n(r[2]) for r in rows],
+                }
+
+        # Instock by sales type
+        for pt in ["L4W", "L13W"]:
+            rows = con.execute(f"""
+                SELECT
+                    COALESCE(sales_type, 'Other') as st,
+                    AVG(instock_pct_ty) as instock_avg
+                FROM walmart_item_weekly
+                WHERE period_type = ? AND 1=1 {hw}
+                GROUP BY COALESCE(sales_type, 'Other')
+            """, [pt] + hp).fetchall()
+
+            inventory_health["instockByType"][pt] = {}
+            for row in rows:
+                inventory_health["instockByType"][pt][row[0]] = _n(row[1])
+
+    # ── 3. VENDOR SCORECARD ──────────────────────────────────────────────
+
+    scorecard_rows = con.execute(f"""
+        SELECT
+            vendor_section, metric_group, metric_name, period, period_range,
+            value_ty, value_ly, value_diff
+        FROM walmart_scorecard
+        WHERE 1=1 {hw}
+        ORDER BY vendor_section, metric_group, metric_name, period
+    """, hp).fetchall()
+
+    scorecard = [
+        {
+            "vendorSection": r[0],
+            "metricGroup": r[1],
+            "metricName": r[2],
+            "period": r[3],
+            "periodRange": r[4],
+            "valueTy": _n(r[5]),
+            "valueLy": _n(r[6]),
+            "valueDiff": _n(r[7]),
+        }
+        for r in scorecard_rows
+    ]
+
+    # ── 4. eCOMMERCE ─────────────────────────────────────────────────────
+
+    ecommerce = {
+        "kpis": {},
+        "items": [],
+    }
+
+    if data_available:
+        # eComm KPIs
+        r = con.execute(f"""
+            SELECT
+                SUM(auth_based_net_sales_ty),
+                SUM(auth_based_net_sales_ly),
+                SUM(shipped_based_net_sales_ty),
+                SUM(shipped_based_net_sales_ly),
+                COUNT(DISTINCT all_links_item_number)
+            FROM walmart_ecomm_weekly
+            WHERE 1=1 {hw}
+        """, hp).fetchone()
+
+        if r:
+            ecommerce["kpis"] = {
+                "authSalesTy": _n(r[0]),
+                "authSalesLy": _n(r[1]),
+                "shippedSalesTy": _n(r[2]),
+                "shippedSalesLy": _n(r[3]),
+                "totalItems": _safe_int(r[4]),
+            }
+
+        # Item-level eComm data
+        ecomm_items = con.execute(f"""
+            SELECT
+                product_name,
+                brand_name,
+                base_unit_retail_amount,
+                auth_based_net_sales_ty,
+                auth_based_net_sales_ly,
+                shipped_based_net_sales_ty,
+                shipped_based_net_sales_ly
+            FROM walmart_ecomm_weekly
+            WHERE 1=1 {hw}
+            ORDER BY auth_based_net_sales_ty DESC
+            LIMIT 50
+        """, hp).fetchall()
+
+        ecommerce["items"] = [
+            {
+                "productName": r[0],
+                "brand": r[1],
+                "retailAmount": _n(r[2]),
+                "authSalesTy": _n(r[3]),
+                "authSalesLy": _n(r[4]),
+                "shippedSalesTy": _n(r[5]),
+                "shippedSalesLy": _n(r[6]),
+            }
+            for r in ecomm_items
+        ]
+
+    # ── 5. ORDER FORECAST ────────────────────────────────────────────────
+
+    order_forecast = {
+        "kpis": {},
+        "items": [],
+    }
+
+    if data_available:
+        # Latest snapshot
+        r = con.execute("""
+            SELECT COUNT(DISTINCT store_dc_nbr) as dc_count
+            FROM walmart_order_forecast
+            ORDER BY snapshot_date DESC
+            LIMIT 1
+        """).fetchone()
+
+        if r:
+            order_forecast["kpis"] = {
+                "dcCount": _safe_int(r[0]),
+            }
+
+        # Forecast items
+        forecast_items = con.execute("""
+            SELECT DISTINCT snapshot_date, store_dc_nbr, store_dc_type
+            FROM walmart_order_forecast
+            ORDER BY snapshot_date DESC
+            LIMIT 100
+        """).fetchall()
+
+        order_forecast["items"] = [
+            {
+                "snapshotDate": str(r[0]),
+                "storeDcNbr": r[1],
+                "storeDcType": r[2],
+            }
+            for r in forecast_items
+        ]
+
+    # ── Latest week for reference ────────────────────────────────────────
+    latest_week = None
+    try:
+        r = con.execute("SELECT MAX(walmart_week) FROM walmart_item_weekly").fetchone()
+        latest_week = r[0] if r else None
+    except Exception:
+        pass
+
+    con.close()
+
+    return {
+        "salesPerformance": sales_performance,
+        "inventoryHealth": inventory_health,
+        "scorecard": scorecard,
+        "ecommerce": ecommerce,
+        "orderForecast": order_forecast,
+        "latestWeek": latest_week,
+        "dataAvailable": data_available,
+    }
+
+
+@router.post("/api/retail/pull-from-drive")
+async def pull_from_drive():
+    """Pull latest Scintilla reports from Google Drive folder.
+
+    Stub for now — will implement Google Drive integration later.
+    """
+    return {
+        "status": "not_implemented",
+        "message": "Google Drive integration coming soon. Use manual upload for now.",
+    }
