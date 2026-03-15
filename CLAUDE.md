@@ -163,7 +163,7 @@ webapp/
 - Auto-migration: auto_migrate_from_duckdb() in database.py runs on startup if Postgres is empty and DuckDB file exists — copies all 26 tables
 - Health endpoint (/api/health) still shows DB_PATH in "path" field even in Postgres mode — this is cosmetic only, queries go to PostgreSQL
 - All Decimal/float type mismatches fixed: _n() helper coerces Decimal to float for JSON serialization
-### All Tables (27 total)
+### All Tables (30 total)
 Transactional (all have division + customer + platform):
   orders, daily_sales, financial_events, fba_inventory, advertising,
   ads_campaigns, ads_keywords, ads_search_terms, ads_negative_keywords
@@ -176,6 +176,9 @@ Analytics (pre-aggregated, fast queries):
 
 Reference:
   item_master (SOURCE OF TRUTH for division mapping)
+
+Pricing/Coupons:
+  sale_prices, coupons, coupon_items (junction table for multi-item coupons)
 
 Planning/Operations:
   monthly_sales_history, item_plan_overrides, item_plan_curve_selection,
@@ -343,6 +346,34 @@ Full mockup-aligned rebuild of the Inventory page (March 15, 2026):
 - Key helpers: SG() / DM() for font styles, Card/CardHdr/SecDiv/Badge/LegItem components
 - _n() helper in backend coerces Decimal/None to float for safe JSON serialization
 
+### Phase 2c — Profitability Command Center Overhaul: COMPLETE ✓
+Full mockup-aligned rebuild of the Profitability page (March 15, 2026):
+- Backend: routers/profitability.py — all endpoints
+  - GET /api/profitability/overview — 8 KPIs, waterfall P&L, margin trend, fee donut
+  - GET /api/profitability/fee-detail — Fee breakdown by 4 categories (Referral, FBA, Storage, Other) with sub-items
+  - GET /api/profitability/items — Item-level profitability with score grades (A/B/C)
+  - GET /api/profitability/aur — AUR trend by SKU, scatter/bubble data
+  - Sale Prices CRUD: GET/POST/PUT/DELETE /api/profitability/sale-prices
+  - Coupons CRUD: GET/POST/PUT/DELETE /api/profitability/coupons (multi-item via coupon_items junction table)
+  - POST /api/profitability/push-price/{id} — Push sale price to Amazon (graceful fallback if SP-API not yet implemented)
+  - COGS loaded from CSV (COGS_PATH), fallback to 35% of AUR when missing
+  - Fee fallback: referral 15%, FBA 12% when financial_events has no data
+  - All responses use camelCase keys (grossRevenue, marginTrend, feeDonut, salePrices, etc.)
+- Frontend: Profitability.jsx — 5 sub-tab structure
+  - P&L Overview: 8 KPI cards, waterfall chart + tabular rows, margin trend chart, fee donut
+  - Amazon Fee Detail: 4-category fee breakdown with sub-items, revenue % calculations
+  - Item Profitability: SKU-level table with score badges (A/B/C), filter by division/margin health, sortable
+  - AUR Analysis: AUR trend table, scatter/bubble chart
+  - Pricing & Coupons: Full CRUD for sale prices and coupons, multi-item coupon support, push-to-Amazon button
+- Database tables (created in core/database.py):
+  - sale_prices: id, asin, sku, product_name, regular_price, sale_price, start_date, end_date, marketplace, status, pushed_to_amazon, pushed_at, division, customer, platform
+  - coupons: id, title, coupon_type, discount_value, budget, budget_used, start_date, end_date, marketplace, status, pushed_to_amazon, pushed_at, division, customer, platform
+  - coupon_items: coupon_id, asin, sku, product_name (PK: coupon_id + asin) — junction table for multi-item coupons
+  - PostgreSQL sequences: sale_prices_seq, coupons_seq
+- Pydantic models: SalePriceCreate, CouponCreate for POST/PUT validation (snake_case input)
+- Mockup reference: GolfGen_Profitability_v1.html (in uploads)
+- Key pattern: Backend returns camelCase, frontend reads camelCase, forms submit snake_case (Pydantic models)
+
 ### Phase 3 — Redundancy + Backup Hardening: PARTIAL
 Done: Nightly Google Drive backup (2am), nightly GitHub backup.
 Remaining: Hot standby, weekly backup verification, 6-hour snapshots.
@@ -366,6 +397,10 @@ Custom date ranges, daily email summary, anomaly alerts, forecast tab, exec dash
 - Storage Fee Forecast uses base LTSF × seasonal multiplier (estimated)
 - KPI deltas compare 7d vs 30d velocity — not true YoY comparison
 - Daily/weekly unit sales by day may still have data gaps
+- SP-API push_sale_price() function not yet implemented in services/sp_api.py — graceful fallback returns error message
+- Fee Detail sub-items (Pick & Pack, Weight Handling, etc.) are estimated percentages, not from actual API breakdowns
+- Storage fee estimate in fee-detail uses fba_inventory.estimated_monthly_storage_fee scaled by days/30
+- COGS data requires manual CSV upload to COGS_PATH — no UI for COGS management yet
 
 ## Backup System
 - Google Drive: nightly 2am Central, 30-day retention
