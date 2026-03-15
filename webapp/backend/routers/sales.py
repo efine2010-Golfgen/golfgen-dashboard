@@ -1223,6 +1223,7 @@ def sales_fee_breakdown(
 
         actual_total = fba + referral + other + promo + shipping
         estimated = False
+        logger.info(f"fee-breakdown: fba={fba} ref={referral} other={other} promo={promo} ship={shipping} actual_total={actual_total} estimated={estimated}")
 
         # financial_events PostedDate lag — recent periods may return 0.
         # Estimate from daily_sales revenue when actuals are suspiciously low.
