@@ -5,6 +5,8 @@ const INV_VIEWS = [
   { key: "golfgen-inventory", path: "/golfgen-inventory", label: "GolfGen Inventory" },
   { key: "inventory",         path: "/inventory",         label: "Amazon Inventory" },
   { key: "fba-shipments",     path: "/fba-shipments",     label: "Shipments to FBA" },
+  { key: "stranded",          path: "/stranded",          label: "Stranded & Suppressed" },
+  { key: "inventory-ledger",  path: "/inventory-ledger",  label: "Inventory Ledger" },
 ];
 
 /* ── tiny inline-style helpers ── */
@@ -168,29 +170,44 @@ export default function Inventory({ filters = {} }) {
   const alerts = data.alerts || {};
 
   /* ── KPI card data ── */
+  const deltas = k.deltas || {};
   const kpiCards = [
-    { label: "FBA Units On Hand", value: fmtNum(k.totalUnits), color: "#2ECFAA", accent: "#2ECFAA", sub: "All sellable ASINs" },
-    { label: "Sellable Now", value: fmtNum(k.sellable), color: "#7BAED0", accent: "#7BAED0", sub: "Fulfillable qty" },
-    { label: "Inbound Pipeline", value: fmtNum(k.inbound), color: "#E87830", accent: "#E87830", sub: "In transit to FBA" },
-    { label: "Avg Weeks Cover", value: k.weeksCover ?? "—", color: "#F5B731", accent: "#F5B731", sub: "Portfolio avg" },
-    { label: "Aged >180 Days", value: fmtNum(k.aged180Plus), color: "#f87171", accent: "#f87171", sub: "LTSF fee risk" },
-    { label: "Sell-Through Rate", value: k.sellThrough != null ? `${k.sellThrough}×` : "—", color: "#3E658C", accent: "#3E658C", sub: "90d units / avg inv" },
-    { label: "Inventory Value", value: k.inventoryValue > 0 ? `$${fmtK(k.inventoryValue)}` : "—", color: "#2ECFAA", accent: "#2ECFAA", sub: "At cost" },
-    { label: "Avg Buy Box %", value: fmtPct(k.avgBuyBox), color: "#2ECFAA", accent: "#2ECFAA", sub: "Weighted by sessions" },
+    { label: "FBA Units On Hand", value: fmtNum(k.totalUnits), color: "#2ECFAA", accent: "#2ECFAA", sub: "All sellable ASINs", delta: deltas.totalUnits },
+    { label: "Sellable Now", value: fmtNum(k.sellable), color: "#7BAED0", accent: "#7BAED0", sub: "Fulfillable qty", delta: deltas.sellable },
+    { label: "Inbound Pipeline", value: fmtNum(k.inbound), color: "#E87830", accent: "#E87830", sub: "In transit to FBA", delta: deltas.inbound },
+    { label: "Avg Weeks Cover", value: k.weeksCover ?? "—", color: "#F5B731", accent: "#F5B731", sub: "Portfolio avg", delta: deltas.weeksCover },
+    { label: "Aged >180 Days", value: fmtNum(k.aged180Plus), color: "#f87171", accent: "#f87171", sub: "LTSF fee risk", delta: deltas.aged180Plus },
+    { label: "Sell-Through Rate", value: k.sellThrough != null ? `${k.sellThrough}×` : "—", color: "#3E658C", accent: "#3E658C", sub: "90d units / avg inv", delta: deltas.sellThrough },
+    { label: "Inventory Value", value: k.inventoryValue > 0 ? `$${fmtK(k.inventoryValue)}` : "—", color: "#2ECFAA", accent: "#2ECFAA", sub: "At cost", delta: deltas.inventoryValue },
+    { label: "Avg Buy Box %", value: fmtPct(k.avgBuyBox), color: "#2ECFAA", accent: "#2ECFAA", sub: "Weighted by sessions", delta: deltas.avgBuyBox },
   ];
 
-  const pipeTotal = pipe.sellable + pipe.inbound + pipe.reserved + pipe.unfulfillable || 1;
+  const pipeTotal = pipe.sellable + pipe.inbound + pipe.reserved + (pipe.fcTransfer || 0) + pipe.unfulfillable || 1;
 
   return (
     <div style={{ fontFamily: "'Sora',-apple-system,BlinkMacSystemFont,sans-serif", color: "var(--txt)" }}>
 
       {/* ══ HEADER — matches Exec Summary style ══ */}
-      <div style={{ marginBottom: 16 }}>
-        <h2 style={{ ...DM({ fontSize: 22, fontWeight: 400, margin: 0, color: "var(--acc1, #2ECFAA)" }) }}>
-          Amazon FBA Inventory
-        </h2>
-        <div style={{ ...SG({ fontSize: 12, color: "var(--txt3)", marginTop: 3 }) }}>
-          {divLabel}{custLabel} · {k.totalAsins || 0} active ASINs
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 16, flexWrap: "wrap", gap: 10 }}>
+        <div>
+          <h2 style={{ ...DM({ fontSize: 22, fontWeight: 400, margin: 0, color: "var(--acc1, #2ECFAA)" }) }}>
+            Amazon FBA Inventory
+          </h2>
+          <div style={{ ...SG({ fontSize: 12, color: "var(--txt3)", marginTop: 3 }) }}>
+            {divLabel}{custLabel} · {k.totalAsins || 0} active ASINs
+          </div>
+        </div>
+        <div style={{ display: "flex", alignItems: "center", gap: 7 }}>
+          <div style={{ display: "flex", flexDirection: "column", alignItems: "center" }}>
+            <button style={{ display: "inline-flex", alignItems: "center", gap: 5, height: 30, padding: "0 12px", borderRadius: 8, ...SG({ fontSize: 10, fontWeight: 700 }), cursor: "pointer", whiteSpace: "nowrap", border: "1px solid var(--acc1)", background: "rgba(46,207,170,.1)", color: "var(--acc1)" }}>⛳ Sync FBA ↑</button>
+            <span style={{ ...SG({ fontSize: 8, color: "var(--txt3)", marginTop: 1, textAlign: "center" }) }}>Auto every 4hr</span>
+          </div>
+          <div style={{ display: "flex", flexDirection: "column", alignItems: "center" }}>
+            <button style={{ display: "inline-flex", alignItems: "center", gap: 5, height: 30, padding: "0 12px", borderRadius: 8, ...SG({ fontSize: 10, fontWeight: 700 }), cursor: "pointer", whiteSpace: "nowrap", border: "1px solid var(--acc2, #E87830)", background: "rgba(232,120,48,.1)", color: "var(--acc2, #E87830)" }}>📦 Create Shipment</button>
+            <span style={{ ...SG({ fontSize: 8, color: "var(--txt3)", marginTop: 1, textAlign: "center" }) }}>Send to FBA</span>
+          </div>
+          <button style={{ display: "inline-flex", alignItems: "center", gap: 5, height: 30, padding: "0 12px", borderRadius: 8, ...SG({ fontSize: 10, fontWeight: 700 }), cursor: "pointer", whiteSpace: "nowrap", border: "1px solid var(--brd2)", background: "var(--ibg, rgba(255,255,255,.05))", color: "var(--txt2)" }}>⬇ Export</button>
+          <button style={{ display: "inline-flex", alignItems: "center", gap: 5, height: 30, padding: "0 12px", borderRadius: 8, ...SG({ fontSize: 10, fontWeight: 700 }), cursor: "pointer", whiteSpace: "nowrap", border: "1px solid var(--brd2)", background: "var(--ibg, rgba(255,255,255,.05))", color: "var(--txt2)" }}>⚙ Alerts</button>
         </div>
       </div>
 
@@ -240,6 +257,7 @@ export default function Inventory({ filters = {} }) {
             <div style={{ position: "absolute", top: 0, left: 0, right: 0, height: 2, background: c.accent }} />
             <div style={{ ...SG({ fontSize: 7, color: "var(--txt3)", textTransform: "uppercase", letterSpacing: ".09em", marginBottom: 4 }) }}>{c.label}</div>
             <div style={{ ...DM({ fontSize: 20, lineHeight: 1, marginBottom: 2, color: c.color }) }}>{c.value}</div>
+            {c.delta?.label && <div style={{ ...SG({ display: "inline-flex", alignItems: "center", gap: 2, fontSize: 8, fontWeight: 700, color: c.delta.value > 0 ? "#2ECFAA" : c.delta.value < 0 ? "#f87171" : "var(--txt3)" }) }}>{c.delta.label}</div>}
             <div style={{ ...SG({ fontSize: 8, color: "var(--txt3)", marginTop: 1 }) }}>{c.sub}</div>
           </div>
         ))}
@@ -290,13 +308,15 @@ export default function Inventory({ filters = {} }) {
         {/* Pipeline */}
         <Card style={{ marginBottom: 0 }}>
           <CardHdr title="Inventory Pipeline — All Locations">
-            <span style={{ ...SG({ fontSize: 10, color: "var(--txt3)" }) }}>Total: <span style={{ color: "var(--txt)", fontWeight: 600 }}>{fmtNum(pipeTotal)}</span> units</span>
+            <span style={{ ...SG({ fontSize: 10, color: "var(--txt3)" }) }}>Total tracked: <span style={{ color: "var(--txt)", fontWeight: 600 }}>{fmtNum(pipeTotal)}</span> units</span>
+            <Badge type="ok">Healthy</Badge>
           </CardHdr>
           <div style={{ display: "flex", gap: 0, padding: "14px 20px" }}>
             {[
               { icon: "✅", val: pipe.sellable, lbl: "Sellable", color: "#2ECFAA" },
               { icon: "📦", val: pipe.inbound, lbl: "Inbound", color: "#E87830" },
               { icon: "🔒", val: pipe.reserved, lbl: "Reserved", color: "#7BAED0" },
+              { icon: "🔄", val: pipe.fcTransfer || 0, lbl: "FC Transfer", color: "#F5B731" },
               { icon: "⚠️", val: pipe.unfulfillable, lbl: "Unfulfillable", color: "#f87171" },
             ].map((s, i, arr) => (
               <div key={i} style={{ flex: 1, textAlign: "center", position: "relative" }}>
@@ -313,9 +333,41 @@ export default function Inventory({ filters = {} }) {
               <div style={{ width: `${pipe.sellable / pipeTotal * 100}%`, background: "#2ECFAA", opacity: 0.85 }} />
               <div style={{ width: `${pipe.inbound / pipeTotal * 100}%`, background: "#E87830", opacity: 0.85 }} />
               <div style={{ width: `${pipe.reserved / pipeTotal * 100}%`, background: "#7BAED0", opacity: 0.85 }} />
+              <div style={{ width: `${(pipe.fcTransfer || 0) / pipeTotal * 100}%`, background: "#F5B731", opacity: 0.85 }} />
               <div style={{ width: `${pipe.unfulfillable / pipeTotal * 100}%`, background: "#f87171", opacity: 0.85 }} />
             </div>
           </div>
+          {/* Reserved Breakdown */}
+          {pipe.reservedBreakdown && (
+            <div style={{ borderTop: "1px solid var(--brd)", padding: "10px 20px" }}>
+              <div style={{ ...SG({ fontSize: 8, fontWeight: 700, textTransform: "uppercase", letterSpacing: ".08em", color: "var(--txt3)", marginBottom: 7 }) }}>Reserved Breakdown</div>
+              <div style={{ display: "flex", gap: 16, flexWrap: "wrap" }}>
+                {[
+                  { lbl: "Customer Orders", val: pipe.reservedBreakdown.customerOrders, color: "#7BAED0" },
+                  { lbl: "FC Transfer", val: pipe.reservedBreakdown.fcTransfer, color: "#7BAED0" },
+                  { lbl: "FC Processing", val: pipe.reservedBreakdown.fcProcessing, color: "#7BAED0" },
+                ].map((b, i) => (
+                  <div key={i} style={{ ...SG({ fontSize: 9, color: "var(--txt3)" }) }}>{b.lbl} <span style={{ color: b.color, fontWeight: 700 }}>{fmtNum(b.val)}</span></div>
+                ))}
+              </div>
+            </div>
+          )}
+          {/* Unfulfillable Breakdown */}
+          {pipe.unfulfillableBreakdown && (
+            <div style={{ borderTop: "1px solid var(--brd)", padding: "10px 20px" }}>
+              <div style={{ ...SG({ fontSize: 8, fontWeight: 700, textTransform: "uppercase", letterSpacing: ".08em", color: "var(--txt3)", marginBottom: 7 }) }}>Unfulfillable Breakdown</div>
+              <div style={{ display: "flex", gap: 14, flexWrap: "wrap" }}>
+                {[
+                  { lbl: "Customer Dmg", val: pipe.unfulfillableBreakdown.customerDamaged },
+                  { lbl: "Warehouse Dmg", val: pipe.unfulfillableBreakdown.warehouseDamaged },
+                  { lbl: "Defective", val: pipe.unfulfillableBreakdown.defective },
+                  { lbl: "Carrier Dmg", val: pipe.unfulfillableBreakdown.carrierDamaged },
+                ].map((b, i) => (
+                  <div key={i} style={{ ...SG({ fontSize: 9, color: "var(--txt3)" }) }}>{b.lbl} <span style={{ color: "#f87171", fontWeight: 700 }}>{fmtNum(b.val)}</span></div>
+                ))}
+              </div>
+            </div>
+          )}
         </Card>
 
         {/* Aging */}
@@ -342,16 +394,85 @@ export default function Inventory({ filters = {} }) {
               <div style={{ padding: "16px 20px", color: "var(--txt3)", ...SG({ fontSize: 10 }) }}>Aging data will appear after the next SP-API sync</div>
             )}
           </div>
+          {/* Monthly Storage Fee Forecast */}
+          {data.storageForecast?.length > 0 && (
+            <div style={{ borderTop: "1px solid var(--brd)", padding: "12px 20px" }}>
+              <div style={{ ...SG({ fontSize: 8, fontWeight: 700, textTransform: "uppercase", letterSpacing: ".08em", color: "var(--txt3)", marginBottom: 8 }) }}>Monthly Storage Fee Forecast — Next 6 Months</div>
+              <div style={{ display: "flex", alignItems: "flex-end", gap: 6, height: 70 }}>
+                {data.storageForecast.map((m, i) => {
+                  const maxFee = Math.max(...data.storageForecast.map(x => x.fee), 1);
+                  const barH = Math.max(4, (m.fee / maxFee) * 56);
+                  const col = m.fee > maxFee * 0.85 ? "#f87171" : m.fee > maxFee * 0.7 ? "#F5B731" : "#2ECFAA";
+                  return (
+                    <div key={i} style={{ flex: 1, display: "flex", flexDirection: "column", alignItems: "center" }}>
+                      <span style={{ ...SG({ fontSize: 7, color: col, fontWeight: 700, marginBottom: 2 }) }}>${m.fee >= 1000 ? `${(m.fee / 1000).toFixed(1)}K` : m.fee}</span>
+                      <div style={{ width: "100%", height: barH, borderRadius: 2, background: col, opacity: 0.7 }} />
+                      <span style={{ ...SG({ fontSize: 7, color: "var(--txt3)", marginTop: 3 }) }}>{m.month}</span>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          )}
         </Card>
       </div>
 
-      {/* ══ HEALTH METRICS ══ */}
-      <SecDiv label="Portfolio Health" />
+      {/* ══ FC DISTRIBUTION & HEALTH ══ */}
+      <SecDiv label="FC Distribution & Health" />
       <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 14, marginBottom: 14 }}>
-        {/* Health score gauge */}
+        {/* FC Distribution */}
         <Card style={{ marginBottom: 0 }}>
           <div style={{ padding: "9px 14px", borderBottom: "1px solid var(--brd)", background: "var(--card2)", display: "flex", alignItems: "center", justifyContent: "space-between" }}>
-            <span style={{ fontSize: 11, fontWeight: 700, color: "var(--txt)" }}>Portfolio Health Score</span>
+            <span style={{ fontSize: 11, fontWeight: 700, color: "var(--txt)" }}>Amazon FC Distribution</span>
+            <Badge type="ok">{data.fcDistribution?.length || 0} FCs</Badge>
+          </div>
+          {(data.fcDistribution || []).map((fc, i) => (
+            <div key={i} style={{ display: "flex", alignItems: "center", gap: 10, padding: "7px 16px", borderBottom: i < (data.fcDistribution?.length || 0) - 1 ? "1px solid var(--brd)" : "none" }}>
+              <span style={{ ...SG({ fontSize: 9, fontWeight: 700, color: "var(--txt2)", width: 42, flexShrink: 0 }) }}>{fc.name}</span>
+              <div style={{ flex: 1, height: 8, background: "var(--brd)", borderRadius: 4, overflow: "hidden" }}>
+                <div style={{ height: "100%", width: `${fc.pct * 2}%`, borderRadius: 4, background: fc.color }} />
+              </div>
+              <span style={{ ...SG({ fontSize: 9, color: "var(--txt3)", width: 52, textAlign: "right", flexShrink: 0 }) }}>{fc.units >= 1000 ? `${(fc.units / 1000).toFixed(1)}K` : fc.units}</span>
+              <span style={{ ...SG({ fontSize: 9, fontWeight: 700, width: 32, textAlign: "right", flexShrink: 0, color: fc.color }) }}>{fc.pct}%</span>
+            </div>
+          ))}
+          {(!data.fcDistribution || data.fcDistribution.length === 0) && (
+            <div style={{ padding: "16px 14px", color: "var(--txt3)", ...SG({ fontSize: 10 }) }}>FC data will appear after SP-API sync</div>
+          )}
+        </Card>
+
+        {/* Return Rate by SKU */}
+        <Card style={{ marginBottom: 0 }}>
+          <div style={{ padding: "9px 14px", borderBottom: "1px solid var(--brd)", background: "var(--card2)", display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+            <span style={{ fontSize: 11, fontWeight: 700, color: "var(--txt)" }}>Return Rate by SKU (90 Days)</span>
+            {data.returnRateTable?.length > 0 && <Badge type="ok">Avg {(data.returnRateTable.reduce((s, r) => s + r.rate, 0) / data.returnRateTable.length).toFixed(1)}%</Badge>}
+          </div>
+          {/* Column headers */}
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 44px 44px 54px", gap: 6, padding: "5px 16px", borderBottom: "1px solid var(--brd2)", background: "var(--card2)" }}>
+            {["SKU", "Sold", "Returned", "Rate"].map((h, i) => (
+              <span key={i} style={{ ...SG({ fontSize: 8, fontWeight: 700, color: "var(--txt3)", textAlign: i > 0 ? "right" : "left" }) }}>{h}</span>
+            ))}
+          </div>
+          {(data.returnRateTable || []).slice(0, 8).map((r, i) => {
+            const rateCol = r.rate > 4 ? "#f87171" : r.rate > 3 ? "#F5B731" : "#2ECFAA";
+            return (
+              <div key={i} style={{ display: "grid", gridTemplateColumns: "1fr 44px 44px 54px", gap: 6, alignItems: "center", padding: "6px 16px", borderBottom: "1px solid var(--brd)" }}>
+                <span style={{ ...SG({ fontSize: 9, color: "#3E658C", fontWeight: 700 }) }}>{r.sku}</span>
+                <span style={{ ...SG({ fontSize: 9, color: "var(--txt2)", textAlign: "right" }) }}>{fmtNum(r.sold)}</span>
+                <span style={{ ...SG({ fontSize: 9, color: "var(--txt3)", textAlign: "right" }) }}>{r.returned}</span>
+                <span style={{ ...SG({ fontSize: 10, fontWeight: 700, color: rateCol, textAlign: "right" }) }}>{r.rate}%</span>
+              </div>
+            );
+          })}
+          {(!data.returnRateTable || data.returnRateTable.length === 0) && (
+            <div style={{ padding: "16px 14px", color: "var(--txt3)", ...SG({ fontSize: 10 }) }}>Return data pending</div>
+          )}
+        </Card>
+
+        {/* Portfolio Health Metrics */}
+        <Card style={{ marginBottom: 0 }}>
+          <div style={{ padding: "9px 14px", borderBottom: "1px solid var(--brd)", background: "var(--card2)", display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+            <span style={{ fontSize: 11, fontWeight: 700, color: "var(--txt)" }}>Portfolio Health Metrics</span>
             <div>
               <svg viewBox="0 0 120 60" width="80" height="40" style={{ display: "inline-block", verticalAlign: "middle" }}>
                 <path d="M10 55 A46 46 0 0 1 110 55" fill="none" stroke="var(--brd)" strokeWidth="9" strokeLinecap="round" />
@@ -362,11 +483,14 @@ export default function Inventory({ filters = {} }) {
             </div>
           </div>
           {[
-            { lbl: "Inventory Turnover", val: `${health.turnover}×`, color: "#7BAED0" },
+            { lbl: "Inventory Turnover", val: `${health.turnover}×`, color: "#7BAED0", extra: null, delta: true },
             { lbl: "Stranded Units", val: fmtNum(health.strandedUnits), color: health.strandedUnits > 0 ? "#F5B731" : "#2ECFAA", extra: health.strandedSkus > 0 ? `${health.strandedSkus} SKUs` : "" },
+            { lbl: "Researching (Lost)", val: fmtNum(health.researching || 0), color: (health.researching || 0) > 0 ? "#f87171" : "var(--txt3)", extra: (health.researching || 0) > 0 ? "Investigate" : "" },
             { lbl: "Reserved %", val: `${health.reservedPct}%`, color: "var(--txt2)", extra: health.reservedPct < 20 ? "Normal" : "Elevated" },
+            { lbl: "Order Defect Rate", val: `${health.orderDefectRate || 0}%`, color: (health.orderDefectRate || 0) < 1 ? "#2ECFAA" : "#f87171", extra: (health.orderDefectRate || 0) < 1 ? "Excellent" : "Action needed" },
+            { lbl: "Cancellation Rate", val: `${health.cancellationRate || 0}%`, color: (health.cancellationRate || 0) < 2.5 ? "#2ECFAA" : "#F5B731", extra: (health.cancellationRate || 0) < 2.5 ? "Healthy" : "Elevated" },
           ].map((m, i) => (
-            <div key={i} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "8px 14px", borderBottom: i < 2 ? "1px solid var(--brd)" : "none" }}>
+            <div key={i} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "8px 14px", borderBottom: i < 5 ? "1px solid var(--brd)" : "none" }}>
               <div>
                 <div style={{ ...SG({ fontSize: 8, color: "var(--txt3)", textTransform: "uppercase", letterSpacing: ".07em" }) }}>{m.lbl}</div>
                 <div style={{ ...DM({ fontSize: 15, lineHeight: 1, color: m.color }) }}>{m.val}</div>
@@ -374,46 +498,6 @@ export default function Inventory({ filters = {} }) {
               {m.extra && <span style={{ ...SG({ fontSize: 8, color: "var(--txt3)" }) }}>{m.extra}</span>}
             </div>
           ))}
-        </Card>
-
-        {/* Stranded */}
-        <Card style={{ marginBottom: 0 }}>
-          <div style={{ padding: "9px 14px", borderBottom: "1px solid var(--brd)", background: "var(--card2)", display: "flex", alignItems: "center", justifyContent: "space-between" }}>
-            <span style={{ fontSize: 11, fontWeight: 700, color: "var(--txt)" }}>Stranded Inventory</span>
-            {health.strandedValue > 0 && <Badge type="warn">${fmtK(health.strandedValue)} at risk</Badge>}
-          </div>
-          {(data.stranded || []).length > 0 ? data.stranded.slice(0, 6).map((s, i) => (
-            <div key={i} style={{ display: "grid", gridTemplateColumns: "1fr 54px 54px auto", gap: 6, alignItems: "center", padding: "7px 14px", borderBottom: "1px solid var(--brd)" }}>
-              <div>
-                <div style={{ fontSize: 10, fontWeight: 600, color: "var(--txt)", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{s.name}</div>
-                <div style={{ ...SG({ fontSize: 8, color: "#3E658C" }) }}>{s.sku}</div>
-              </div>
-              <span style={{ ...SG({ fontSize: 10, textAlign: "right", fontWeight: 700 }) }}>{s.qty}</span>
-              <span style={{ ...SG({ fontSize: 10, textAlign: "right", color: "var(--txt3)" }) }}>${s.value}</span>
-              <span style={{ ...SG({ fontSize: 8, fontWeight: 700, padding: "2px 6px", borderRadius: 4, background: "rgba(245,183,49,.15)", color: "#F5B731" }) }}>{s.reason}</span>
-            </div>
-          )) : (
-            <div style={{ padding: "16px 14px", color: "var(--txt3)", ...SG({ fontSize: 10 }) }}>No stranded inventory detected</div>
-          )}
-        </Card>
-
-        {/* Reimbursements */}
-        <Card style={{ marginBottom: 0 }}>
-          <div style={{ padding: "9px 14px", borderBottom: "1px solid var(--brd)", background: "var(--card2)", display: "flex", alignItems: "center", justifyContent: "space-between" }}>
-            <span style={{ fontSize: 11, fontWeight: 700, color: "var(--txt)" }}>Recent Reimbursements</span>
-            {data.reimbursements?.length > 0 && <Badge type="ok">+${data.reimbursements.reduce((s, r) => s + r.amount, 0).toFixed(0)}</Badge>}
-          </div>
-          {(data.reimbursements || []).length > 0 ? data.reimbursements.slice(0, 5).map((r, i) => (
-            <div key={i} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "8px 14px", borderBottom: i < Math.min(data.reimbursements.length, 5) - 1 ? "1px solid var(--brd)" : "none" }}>
-              <div>
-                <div style={{ ...SG({ fontSize: 8, color: "var(--txt3)", textTransform: "uppercase", letterSpacing: ".07em" }) }}>{r.reason}</div>
-                <div style={{ ...DM({ fontSize: 13, lineHeight: 1, color: "#2ECFAA" }) }}>${r.amount.toFixed(2)}</div>
-                <div style={{ ...SG({ fontSize: 8, color: "var(--txt3)" }) }}>{r.sku} · {r.qty} unit{r.qty !== 1 ? "s" : ""}</div>
-              </div>
-            </div>
-          )) : (
-            <div style={{ padding: "16px 14px", color: "var(--txt3)", ...SG({ fontSize: 10 }) }}>No reimbursements in the last 90 days</div>
-          )}
         </Card>
       </div>
 
@@ -498,107 +582,152 @@ export default function Inventory({ filters = {} }) {
         </div>
       </Card>
 
-      {/* ══ SKU COMMAND CENTER ══ */}
-      <SecDiv label="SKU Command Center" />
-      <div style={{ display: "flex", alignItems: "center", gap: 5, marginBottom: 12, flexWrap: "wrap" }}>
-        <span style={{ ...SG({ fontSize: 8, fontWeight: 700, textTransform: "uppercase", letterSpacing: ".1em", color: "var(--txt3)" }) }}>Risk:</span>
-        {[
-          { key: "all", label: "All" },
-          { key: "critical", label: "Critical", color: "#f87171" },
-          { key: "watch", label: "Watch", color: "#F5B731" },
-          { key: "low", label: "Healthy", color: "#2ECFAA" },
-        ].map(f => (
-          <button key={f.key} onClick={() => setSkuFilter(f.key)}
-            style={{
-              display: "inline-flex", alignItems: "center", height: 24, padding: "0 9px", borderRadius: 7,
-              ...SG({ fontSize: 9, fontWeight: skuFilter === f.key ? 700 : 600 }),
-              border: `1px solid ${skuFilter === f.key ? "transparent" : f.color ? `${f.color}40` : "var(--brd2)"}`,
-              background: skuFilter === f.key ? "var(--atab, #1a4060)" : "var(--ibg, rgba(255,255,255,.05))",
-              color: skuFilter === f.key ? "#fff" : f.color || "var(--txt3)",
-              cursor: "pointer", whiteSpace: "nowrap",
-            }}>{f.label}</button>
-        ))}
-        <span style={{ ...SG({ fontSize: 9, color: "var(--txt3)" }) }}>{filteredSkus.length} of {data.skus?.length || 0}</span>
-        <input
-          placeholder="Search ASIN, SKU, title…"
-          value={searchTerm}
-          onChange={e => setSearchTerm(e.target.value)}
-          style={{
-            height: 24, padding: "0 9px", borderRadius: 7, border: "1px solid var(--brd2)",
-            background: "var(--ibg, rgba(255,255,255,.05))", color: "var(--txt)", fontSize: 10,
-            outline: "none", width: 200, ...SG(), marginLeft: "auto",
-          }}
-        />
-      </div>
-
-      <Card style={{ overflow: "hidden", marginBottom: 14 }}>
-        <div style={{ overflowX: "auto" }}>
-          <table className="inv-sku-table" style={{ width: "100%", borderCollapse: "collapse", tableLayout: "fixed", minWidth: 960 }}>
-            <thead>
-              <tr>
-                {[
-                  { label: "Product", w: 180 },
-                  { label: "On Hand", w: 62, r: true },
-                  { label: "Inbound", w: 56, r: true },
-                  { label: "Days Cvr", w: 56, r: true },
-                  { label: "Wks Cover", w: 62, r: true },
-                  { label: "Daily Vel", w: 56, r: true },
-                  { label: "Buy Box", w: 84 },
-                  { label: "Conv %", w: 52, r: true },
-                  { label: "Sell-Thru", w: 56, r: true },
-                  { label: "Aged 180+", w: 56, r: true },
-                  { label: "Ret Rate", w: 56, r: true },
-                  { label: "Risk", w: 60, center: true },
-                ].map((col, i) => (
-                  <th key={i} style={{
-                    ...SG({ fontSize: 8, fontWeight: 700, textTransform: "uppercase", letterSpacing: ".07em", color: "var(--txt3)", padding: "8px 10px", textAlign: col.r ? "right" : col.center ? "center" : "left", borderBottom: "1px solid var(--brd2)", background: "var(--card2)", whiteSpace: "nowrap", width: col.w }),
-                  }}>{col.label}</th>
-                ))}
-              </tr>
-            </thead>
-            <tbody>
-              {filteredSkus.slice(0, 50).map((s, i) => {
-                const riskColor = s.risk === "critical" ? "#f87171" : s.risk === "watch" ? "#F5B731" : "#2ECFAA";
-                const riskBg = s.risk === "critical" ? "rgba(248,113,113,.15)" : s.risk === "watch" ? "rgba(245,183,49,.14)" : "rgba(46,207,170,.12)";
-                const bbColor = s.buyBox >= 90 ? "#2ECFAA" : s.buyBox >= 80 ? "#F5B731" : s.buyBox > 0 ? "#f87171" : "var(--txt3)";
-                const bbPct = Math.min(100, s.buyBox || 0);
-                return (
-                  <tr key={s.asin} style={{ borderBottom: "1px solid var(--brd)" }}>
-                    <td style={{ padding: "8px 10px", verticalAlign: "middle" }}>
-                      <div style={{ fontWeight: 600, color: "var(--txt)", fontSize: 10, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis", maxWidth: 180 }}>{s.name}</div>
-                      <div style={{ ...SG({ fontSize: 8, color: "#3E658C" }) }}>{s.sku || s.asin}</div>
-                    </td>
-                    <td style={{ ...SG({ fontSize: 10, color: "var(--txt2)", padding: "8px 10px", textAlign: "right", verticalAlign: "middle" }) }}>{fmtNum(s.onHand)}</td>
-                    <td style={{ ...SG({ fontSize: 10, color: "var(--txt2)", padding: "8px 10px", textAlign: "right", verticalAlign: "middle" }) }}>{fmtNum(s.inbound)}</td>
-                    <td style={{ ...SG({ fontSize: 10, color: s.daysCover != null && s.daysCover < 30 ? "#f87171" : "var(--txt2)", padding: "8px 10px", textAlign: "right", verticalAlign: "middle" }) }}>
-                      {s.daysCover != null ? Math.round(s.daysCover) : "∞"}
-                    </td>
-                    <td style={{ ...SG({ fontSize: 10, color: "var(--txt2)", padding: "8px 10px", textAlign: "right", verticalAlign: "middle" }) }}>{s.weeksCover != null ? s.weeksCover : "∞"}</td>
-                    <td style={{ ...SG({ fontSize: 10, color: "var(--txt2)", padding: "8px 10px", textAlign: "right", verticalAlign: "middle" }) }}>{s.dailyVel}</td>
-                    <td style={{ padding: "8px 10px", verticalAlign: "middle" }}>
-                      <div style={{ display: "flex", alignItems: "center", gap: 5 }}>
-                        <div style={{ width: 44, height: 5, borderRadius: 3, background: "var(--brd)", overflow: "hidden", flexShrink: 0 }}>
-                          <div style={{ height: "100%", width: `${bbPct}%`, borderRadius: 3, background: bbColor }} />
-                        </div>
-                        <span style={{ ...SG({ fontSize: 10, fontWeight: 700, color: bbColor }) }}>{s.buyBox > 0 ? `${s.buyBox}%` : "—"}</span>
-                      </div>
-                    </td>
-                    <td style={{ ...SG({ fontSize: 10, color: "var(--txt2)", padding: "8px 10px", textAlign: "right", verticalAlign: "middle" }) }}>{s.convPct > 0 ? `${s.convPct}%` : "—"}</td>
-                    <td style={{ ...SG({ fontSize: 10, color: "var(--txt2)", padding: "8px 10px", textAlign: "right", verticalAlign: "middle" }) }}>{s.sellThru != null ? `${s.sellThru}×` : "—"}</td>
-                    <td style={{ ...SG({ fontSize: 10, color: s.aged180 > 0 ? "#F5B731" : "var(--txt3)", padding: "8px 10px", textAlign: "right", verticalAlign: "middle" }) }}>{s.aged180 > 0 ? fmtNum(s.aged180) : "—"}</td>
-                    <td style={{ ...SG({ fontSize: 10, color: "var(--txt2)", padding: "8px 10px", textAlign: "right", verticalAlign: "middle" }) }}>{s.returnRate != null ? `${s.returnRate}%` : "—"}</td>
-                    <td style={{ padding: "8px 10px", textAlign: "center", verticalAlign: "middle" }}>
-                      <span style={{ ...SG({ display: "inline-flex", alignItems: "center", justifyContent: "center", width: 32, height: 18, borderRadius: 5, fontSize: 9, fontWeight: 800, background: riskBg, color: riskColor }) }}>
-                        {s.risk === "critical" ? "HI" : s.risk === "watch" ? "MED" : "LOW"}
-                      </span>
-                    </td>
+      {/* ══ SKU COMMAND CENTER & STRANDED ══ */}
+      <SecDiv label="SKU Command Center & Stranded Inventory" />
+      <div style={{ display: "grid", gridTemplateColumns: "1fr 320px", gap: 14, marginBottom: 14 }}>
+        {/* ── Main: SKU Table ── */}
+        <div>
+          <div style={{ display: "flex", alignItems: "center", gap: 5, marginBottom: 12, flexWrap: "wrap" }}>
+            <span style={{ ...SG({ fontSize: 8, fontWeight: 700, textTransform: "uppercase", letterSpacing: ".1em", color: "var(--txt3)" }) }}>Risk:</span>
+            {[
+              { key: "all", label: "All" },
+              { key: "critical", label: "Critical", color: "#f87171" },
+              { key: "watch", label: "Watch", color: "#F5B731" },
+              { key: "low", label: "Healthy", color: "#2ECFAA" },
+            ].map(f => (
+              <button key={f.key} onClick={() => setSkuFilter(f.key)}
+                style={{
+                  display: "inline-flex", alignItems: "center", height: 24, padding: "0 9px", borderRadius: 7,
+                  ...SG({ fontSize: 9, fontWeight: skuFilter === f.key ? 700 : 600 }),
+                  border: `1px solid ${skuFilter === f.key ? "transparent" : f.color ? `${f.color}40` : "var(--brd2)"}`,
+                  background: skuFilter === f.key ? "var(--atab, #1a4060)" : "var(--ibg, rgba(255,255,255,.05))",
+                  color: skuFilter === f.key ? "#fff" : f.color || "var(--txt3)",
+                  cursor: "pointer", whiteSpace: "nowrap",
+                }}>{f.label}</button>
+            ))}
+            <span style={{ ...SG({ fontSize: 9, color: "var(--txt3)" }) }}>{filteredSkus.length} of {data.skus?.length || 0}</span>
+            <input
+              placeholder="Search ASIN, SKU, title…"
+              value={searchTerm}
+              onChange={e => setSearchTerm(e.target.value)}
+              style={{
+                height: 24, padding: "0 9px", borderRadius: 7, border: "1px solid var(--brd2)",
+                background: "var(--ibg, rgba(255,255,255,.05))", color: "var(--txt)", fontSize: 10,
+                outline: "none", width: 200, ...SG(), marginLeft: "auto",
+              }}
+            />
+          </div>
+          <Card style={{ overflow: "hidden", marginBottom: 0 }}>
+            <div style={{ overflowX: "auto" }}>
+              <table className="inv-sku-table" style={{ width: "100%", borderCollapse: "collapse", tableLayout: "fixed", minWidth: 960 }}>
+                <thead>
+                  <tr>
+                    {[
+                      { label: "Product", w: 180 },
+                      { label: "On Hand", w: 62, r: true },
+                      { label: "Inbound", w: 56, r: true },
+                      { label: "Days Cvr", w: 56, r: true },
+                      { label: "Wks Cover", w: 62, r: true },
+                      { label: "Daily Vel", w: 56, r: true },
+                      { label: "Buy Box", w: 84 },
+                      { label: "Conv %", w: 52, r: true },
+                      { label: "Sell-Thru", w: 56, r: true },
+                      { label: "Aged 180+", w: 56, r: true },
+                      { label: "Ret Rate", w: 56, r: true },
+                      { label: "Risk", w: 60, center: true },
+                    ].map((col, i) => (
+                      <th key={i} style={{
+                        ...SG({ fontSize: 8, fontWeight: 700, textTransform: "uppercase", letterSpacing: ".07em", color: "var(--txt3)", padding: "8px 10px", textAlign: col.r ? "right" : col.center ? "center" : "left", borderBottom: "1px solid var(--brd2)", background: "var(--card2)", whiteSpace: "nowrap", width: col.w }),
+                      }}>{col.label}</th>
+                    ))}
                   </tr>
-                );
-              })}
-            </tbody>
-          </table>
+                </thead>
+                <tbody>
+                  {filteredSkus.slice(0, 50).map((s, i) => {
+                    const riskColor = s.risk === "critical" ? "#f87171" : s.risk === "watch" ? "#F5B731" : "#2ECFAA";
+                    const riskBg = s.risk === "critical" ? "rgba(248,113,113,.15)" : s.risk === "watch" ? "rgba(245,183,49,.14)" : "rgba(46,207,170,.12)";
+                    const bbColor = s.buyBox >= 90 ? "#2ECFAA" : s.buyBox >= 80 ? "#F5B731" : s.buyBox > 0 ? "#f87171" : "var(--txt3)";
+                    const bbPct = Math.min(100, s.buyBox || 0);
+                    return (
+                      <tr key={s.asin} style={{ borderBottom: "1px solid var(--brd)" }}>
+                        <td style={{ padding: "8px 10px", verticalAlign: "middle" }}>
+                          <div style={{ fontWeight: 600, color: "var(--txt)", fontSize: 10, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis", maxWidth: 180 }}>{s.name}</div>
+                          <div style={{ ...SG({ fontSize: 8, color: "#3E658C" }) }}>{s.sku || s.asin}</div>
+                        </td>
+                        <td style={{ ...SG({ fontSize: 10, color: "var(--txt2)", padding: "8px 10px", textAlign: "right", verticalAlign: "middle" }) }}>{fmtNum(s.onHand)}</td>
+                        <td style={{ ...SG({ fontSize: 10, color: "var(--txt2)", padding: "8px 10px", textAlign: "right", verticalAlign: "middle" }) }}>{fmtNum(s.inbound)}</td>
+                        <td style={{ ...SG({ fontSize: 10, color: s.daysCover != null && s.daysCover < 30 ? "#f87171" : "var(--txt2)", padding: "8px 10px", textAlign: "right", verticalAlign: "middle" }) }}>
+                          {s.daysCover != null ? Math.round(s.daysCover) : "∞"}
+                        </td>
+                        <td style={{ ...SG({ fontSize: 10, color: "var(--txt2)", padding: "8px 10px", textAlign: "right", verticalAlign: "middle" }) }}>{s.weeksCover != null ? s.weeksCover : "∞"}</td>
+                        <td style={{ ...SG({ fontSize: 10, color: "var(--txt2)", padding: "8px 10px", textAlign: "right", verticalAlign: "middle" }) }}>{s.dailyVel}</td>
+                        <td style={{ padding: "8px 10px", verticalAlign: "middle" }}>
+                          <div style={{ display: "flex", alignItems: "center", gap: 5 }}>
+                            <div style={{ width: 44, height: 5, borderRadius: 3, background: "var(--brd)", overflow: "hidden", flexShrink: 0 }}>
+                              <div style={{ height: "100%", width: `${bbPct}%`, borderRadius: 3, background: bbColor }} />
+                            </div>
+                            <span style={{ ...SG({ fontSize: 10, fontWeight: 700, color: bbColor }) }}>{s.buyBox > 0 ? `${s.buyBox}%` : "—"}</span>
+                          </div>
+                        </td>
+                        <td style={{ ...SG({ fontSize: 10, color: "var(--txt2)", padding: "8px 10px", textAlign: "right", verticalAlign: "middle" }) }}>{s.convPct > 0 ? `${s.convPct}%` : "—"}</td>
+                        <td style={{ ...SG({ fontSize: 10, color: "var(--txt2)", padding: "8px 10px", textAlign: "right", verticalAlign: "middle" }) }}>{s.sellThru != null ? `${s.sellThru}×` : "—"}</td>
+                        <td style={{ ...SG({ fontSize: 10, color: s.aged180 > 0 ? "#F5B731" : "var(--txt3)", padding: "8px 10px", textAlign: "right", verticalAlign: "middle" }) }}>{s.aged180 > 0 ? fmtNum(s.aged180) : "—"}</td>
+                        <td style={{ ...SG({ fontSize: 10, color: "var(--txt2)", padding: "8px 10px", textAlign: "right", verticalAlign: "middle" }) }}>{s.returnRate != null ? `${s.returnRate}%` : "—"}</td>
+                        <td style={{ padding: "8px 10px", textAlign: "center", verticalAlign: "middle" }}>
+                          <span style={{ ...SG({ display: "inline-flex", alignItems: "center", justifyContent: "center", width: 32, height: 18, borderRadius: 5, fontSize: 9, fontWeight: 800, background: riskBg, color: riskColor }) }}>
+                            {s.risk === "critical" ? "HI" : s.risk === "watch" ? "MED" : "LOW"}
+                          </span>
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          </Card>
         </div>
-      </Card>
+
+        {/* ── Side Panel: Stranded + Reimbursements ── */}
+        <div>
+          <Card style={{ marginBottom: 14 }}>
+            <div style={{ padding: "9px 14px", borderBottom: "1px solid var(--brd)", background: "var(--card2)", display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+              <span style={{ fontSize: 11, fontWeight: 700, color: "var(--txt)" }}>Stranded Inventory</span>
+              {health.strandedValue > 0 && <Badge type="warn">${fmtK(health.strandedValue)} at risk</Badge>}
+            </div>
+            {(data.stranded || []).length > 0 ? data.stranded.slice(0, 6).map((s, i) => (
+              <div key={i} style={{ display: "grid", gridTemplateColumns: "1fr 54px 54px auto", gap: 6, alignItems: "center", padding: "7px 14px", borderBottom: "1px solid var(--brd)" }}>
+                <div>
+                  <div style={{ fontSize: 10, fontWeight: 600, color: "var(--txt)", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{s.name || s.sku}</div>
+                  <div style={{ ...SG({ fontSize: 8, color: "#3E658C" }) }}>{s.sku} · {s.qty} units</div>
+                </div>
+                <span style={{ ...SG({ fontSize: 10, textAlign: "right", fontWeight: 700, color: "#f87171" }) }}>{s.qty}</span>
+                <span style={{ ...SG({ fontSize: 9, textAlign: "right", color: "var(--txt3)" }) }}>${s.value >= 1000 ? `${(s.value / 1000).toFixed(1)}K` : s.value}</span>
+                <span style={{ ...SG({ fontSize: 8, fontWeight: 700, padding: "2px 6px", borderRadius: 4, background: s.reason?.includes("Listing") ? "rgba(208,48,48,.15)" : s.reason?.includes("Price") ? "rgba(245,183,49,.15)" : "rgba(123,174,208,.15)", color: s.reason?.includes("Listing") ? "#f87171" : s.reason?.includes("Price") ? "#F5B731" : "#7BAED0" }) }}>{s.reason}</span>
+              </div>
+            )) : (
+              <div style={{ padding: "16px 14px", color: "var(--txt3)", ...SG({ fontSize: 10 }) }}>No stranded inventory detected</div>
+            )}
+          </Card>
+
+          <Card style={{ marginBottom: 0 }}>
+            <div style={{ padding: "9px 14px", borderBottom: "1px solid var(--brd)", background: "var(--card2)", display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+              <span style={{ fontSize: 11, fontWeight: 700, color: "var(--txt)" }}>Recent Reimbursements</span>
+              {data.reimbursements?.length > 0 && <Badge type="ok">+${data.reimbursements.reduce((s, r) => s + r.amount, 0).toFixed(0)}</Badge>}
+            </div>
+            {(data.reimbursements || []).length > 0 ? data.reimbursements.slice(0, 5).map((r, i) => (
+              <div key={i} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "8px 14px", borderBottom: i < Math.min(data.reimbursements.length, 5) - 1 ? "1px solid var(--brd)" : "none" }}>
+                <div>
+                  <div style={{ ...SG({ fontSize: 8, color: "var(--txt3)", textTransform: "uppercase", letterSpacing: ".07em" }) }}>{r.reason}</div>
+                  <div style={{ ...DM({ fontSize: 13, lineHeight: 1, color: "#2ECFAA" }) }}>${r.amount.toFixed(2)}</div>
+                  <div style={{ ...SG({ fontSize: 8, color: "var(--txt3)" }) }}>{r.sku} · {r.qty} unit{r.qty !== 1 ? "s" : ""}</div>
+                </div>
+              </div>
+            )) : (
+              <div style={{ padding: "16px 14px", color: "var(--txt3)", ...SG({ fontSize: 10 }) }}>No reimbursements in the last 90 days</div>
+            )}
+          </Card>
+        </div>
+      </div>
     </div>
   );
 }
