@@ -44,15 +44,6 @@ export const api = {
   me: () => fetchJSON("/api/me"),
 
   // Passkey / WebAuthn
-  passkeyRegisterOptions: () =>
-    fetch(`${API_BASE}/api/auth/passkey/register-options`, { method: "POST", credentials: "include" }).then(r => r.json()),
-  passkeyRegisterVerify: (credential, deviceName = "") =>
-    fetch(`${API_BASE}/api/auth/passkey/register-options`, { method: "POST", credentials: "include" })
-      .then(() => fetch(`${API_BASE}/api/auth/passkey/register-verify`, {
-        method: "POST", credentials: "include",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ credential, device_name: deviceName }),
-      })).then(r => r.json()),
   passkeyRegisterOpts: () =>
     fetch(`${API_BASE}/api/auth/passkey/register-options`, { method: "POST", credentials: "include" }).then(r => r.json()),
   passkeyRegisterDone: (credential, deviceName) =>

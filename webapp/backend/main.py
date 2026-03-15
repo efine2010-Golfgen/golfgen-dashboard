@@ -543,11 +543,22 @@ def passkey_register_verify(req: PasskeyRegisterRequest, request: Request):
 
     try:
         from webauthn import verify_registration_response
-        from webauthn.helpers import bytes_to_base64url
-        from webauthn.helpers.structs import RegistrationCredential
-        import json
+        from webauthn.helpers import bytes_to_base64url, base64url_to_bytes
+        from webauthn.helpers.structs import (
+            RegistrationCredential,
+            AuthenticatorAttestationResponse,
+        )
 
-        credential = RegistrationCredential.parse_raw(json.dumps(req.credential))
+        cred_data = req.credential
+        resp = cred_data.get("response", {})
+        credential = RegistrationCredential(
+            id=cred_data["id"],
+            raw_id=base64url_to_bytes(cred_data.get("rawId", cred_data["id"])),
+            response=AuthenticatorAttestationResponse(
+                client_data_json=base64url_to_bytes(resp["clientDataJSON"]),
+                attestation_object=base64url_to_bytes(resp["attestationObject"]),
+            ),
+        )
 
         verification = verify_registration_response(
             credential=credential,
@@ -562,7 +573,7 @@ def passkey_register_verify(req: PasskeyRegisterRequest, request: Request):
         import uuid
         row_id = str(uuid.uuid4())
 
-        con = get_db()
+        con = get_db_rw()
         con.execute(
             "INSERT INTO passkey_credentials (id, user_key, credential_id, public_key, sign_count, device_name) "
             "VALUES (?, ?, ?, ?, ?, ?)",
@@ -638,10 +649,24 @@ def passkey_login_verify(req: PasskeyLoginVerifyRequest):
     try:
         from webauthn import verify_authentication_response
         from webauthn.helpers import bytes_to_base64url, base64url_to_bytes
-        from webauthn.helpers.structs import AuthenticationCredential
-        import json
+        from webauthn.helpers.structs import (
+            AuthenticationCredential,
+            AuthenticatorAssertionResponse,
+        )
 
-        credential = AuthenticationCredential.parse_raw(json.dumps(req.credential))
+        cred_data = req.credential
+        resp = cred_data.get("response", {})
+        raw_id_bytes = base64url_to_bytes(cred_data.get("rawId", cred_data["id"]))
+        credential = AuthenticationCredential(
+            id=cred_data["id"],
+            raw_id=raw_id_bytes,
+            response=AuthenticatorAssertionResponse(
+                client_data_json=base64url_to_bytes(resp["clientDataJSON"]),
+                authenticator_data=base64url_to_bytes(resp["authenticatorData"]),
+                signature=base64url_to_bytes(resp["signature"]),
+                user_handle=base64url_to_bytes(resp["userHandle"]) if resp.get("userHandle") else None,
+            ),
+        )
         cred_id_b64 = bytes_to_base64url(credential.raw_id)
 
         # Look up the credential in database
@@ -741,7 +766,7 @@ def passkey_delete(req: PasskeyDeleteRequest, request: Request):
     user_key = _find_user_by_email(sess["user_email"])
     if not user_key:
         raise HTTPException(status_code=400, detail="User not found")
-    con = get_db()
+    con = get_db_rw()
     con.execute(
         "DELETE FROM passkey_credentials WHERE id = ? AND user_key = ?",
         [req.passkey_id, user_key],
