@@ -1118,6 +1118,15 @@ def _fetch_fba_shipments_from_api(statuses=None, days_back=90, marketplace="US")
                 parts = [ship_from.get("City", ""), ship_from.get("StateOrProvinceCode", "")]
                 ship_from_str = ", ".join(p for p in parts if p)
 
+            # Detect actual marketplace from FC code (Canadian FCs start with Y)
+            # Known Canadian FCs: YYZ, YOW, YVR, YHM, etc.
+            fc_marketplace = marketplace
+            if dest and len(dest) >= 3:
+                fc_prefix = dest[:3].upper()
+                # Canadian FCs typically start with Y (YYZ9, YOW1, YVR3, YHM1, etc.)
+                if fc_prefix.startswith("Y"):
+                    fc_marketplace = "CA"
+
             normalized.append({
                 "shipmentId": ship_id,
                 "shipmentName": ship_name,
@@ -1126,7 +1135,7 @@ def _fetch_fba_shipments_from_api(statuses=None, days_back=90, marketplace="US")
                 "labelPrep": label_prep,
                 "casesRequired": are_cases_required,
                 "shipFrom": ship_from_str,
-                "marketplace": marketplace,
+                "marketplace": fc_marketplace,
                 "itemCount": 0,
                 "totalShipped": 0,
                 "totalReceived": 0,
@@ -1156,10 +1165,14 @@ def _fetch_fba_shipments_from_api(statuses=None, days_back=90, marketplace="US")
                 except Exception as e:
                     logger.warning(f"Failed to pre-fetch items for {sid}: {e}")
 
+        # Filter shipments to only those matching requested marketplace
+        # (SP-API may return cross-marketplace shipments on a unified account)
+        filtered = [s for s in normalized if s.get("marketplace", marketplace) == marketplace]
+
         result = {
-            "shipments": normalized,
+            "shipments": filtered,
             "lastSync": datetime.now(TIMEZONE).strftime("%m/%d/%Y %I:%M %p"),
-            "totalShipments": len(normalized),
+            "totalShipments": len(filtered),
             "marketplace": marketplace,
         }
 
@@ -1557,10 +1570,13 @@ async def create_shipment_plan(request: Request):
     if not credentials:
         return JSONResponse(status_code=500, content={"error": "SP-API credentials not configured"})
 
+    # Detect marketplace from request body (default US)
+    mp = body.get("marketplace", "US").upper()
+
     try:
         fba = FulfillmentInbound(
             credentials=credentials,
-            marketplace=Marketplaces.US,
+            marketplace=_get_marketplace_enum(mp),
         )
 
         # Build the inbound shipment plan items
@@ -1577,13 +1593,13 @@ async def create_shipment_plan(request: Request):
                 plan_item["QuantityInCase"] = str(int(item["QuantityInCase"]))
             plan_items.append(plan_item)
 
-        logger.info(f"Creating inbound shipment plan: {len(plan_items)} items from {ship_from.get('City', '?')}, {ship_from.get('StateOrProvinceCode', '?')}")
+        logger.info(f"Creating inbound shipment plan ({mp}): {len(plan_items)} items from {ship_from.get('City', '?')}, {ship_from.get('StateOrProvinceCode', '?')}")
 
         resp = fba.create_inbound_shipment_plan(
             ShipFromAddress=ship_from,
             InboundShipmentPlanRequestItems=plan_items,
             LabelPrepPreference=label_pref,
-            MarketplaceId="ATVPDKIKX0DER",
+            MarketplaceId=_get_marketplace_id(mp),
         )
 
         payload = resp.payload or {}
@@ -1673,10 +1689,13 @@ async def confirm_shipment_plan(request: Request):
     if not credentials:
         return JSONResponse(status_code=500, content={"error": "SP-API credentials not configured"})
 
+    # Detect marketplace from request body (default US)
+    mp = body.get("marketplace", "US").upper()
+
     try:
         fba = FulfillmentInbound(
             credentials=credentials,
-            marketplace=Marketplaces.US,
+            marketplace=_get_marketplace_enum(mp),
         )
 
         shipment_items = []
@@ -1686,7 +1705,7 @@ async def confirm_shipment_plan(request: Request):
                 "QuantityShipped": int(item.get("Quantity", item.get("QuantityShipped", 0))),
             })
 
-        logger.info(f"Confirming shipment plan {shipment_id}: {len(shipment_items)} items → {dest_fc}")
+        logger.info(f"Confirming shipment plan ({mp}) {shipment_id}: {len(shipment_items)} items → {dest_fc}")
 
         resp = fba.create_inbound_shipment(
             ShipmentId=shipment_id,
@@ -1698,13 +1717,13 @@ async def confirm_shipment_plan(request: Request):
                 "ShipmentStatus": "WORKING",
             },
             InboundShipmentItems=shipment_items,
-            MarketplaceId="ATVPDKIKX0DER",
+            MarketplaceId=_get_marketplace_id(mp),
         )
 
-        logger.info(f"Shipment {shipment_id} confirmed and created in Seller Central")
+        logger.info(f"Shipment {shipment_id} confirmed and created in Seller Central ({mp})")
 
-        # Refresh the shipments cache
-        _fetch_fba_shipments_from_api()
+        # Refresh the shipments cache for the correct marketplace
+        _fetch_fba_shipments_from_api(marketplace=mp)
 
         return {
             "ok": True,

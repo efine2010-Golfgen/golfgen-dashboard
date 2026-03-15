@@ -76,6 +76,9 @@ export const api = {
   profitabilityFeeDetail: (days = 30, h = {}) => fetchJSON(`/api/profitability/fee-detail?days=${days}${_hq(h)}`),
   profitabilityAur: (days = 56, h = {}) => fetchJSON(`/api/profitability/aur?days=${days}${_hq(h)}`),
 
+  // Amazon Live Pricing + Coupons (read-only from SP-API cache)
+  amazonPricing: () => fetchJSON(`/api/profitability/amazon-pricing`),
+
   // Sale Prices CRUD
   salePrices: (h = {}) => fetchJSON(`/api/profitability/sale-prices${_hq(h) ? '?' + _hq(h).slice(1) : ''}`),
   createSalePrice: (data) =>

@@ -937,6 +937,103 @@ def aur_analysis(division: Optional[str] = None, customer: Optional[str] = None,
     return {"skus": results}
 
 
+# ── Amazon Live Pricing + Coupons (read-only from SP-API cache) ──────────
+
+@router.get("/api/profitability/amazon-pricing")
+def get_amazon_pricing():
+    """Return live Amazon pricing (list, buy box, landed) and active coupons
+    from the hourly SP-API / Ads API sync cache.  Two sections:
+      - amazonPricing: per-ASIN list of listPrice, buyBoxPrice, landedPrice, salePrice
+      - amazonCoupons: per-coupon list with ASINs, discount, budget, state
+    """
+    pricing_cache = _load_pricing_cache()
+    live_prices = pricing_cache.get("prices", {})
+    live_coupons = pricing_cache.get("coupons", {})
+    last_sync = pricing_cache.get("lastSync")
+
+    # Enrich with item_master names
+    con = get_db()
+    try:
+        im_rows = con.execute(
+            "SELECT asin, sku, product_name, division FROM item_master"
+        ).fetchall()
+    except Exception:
+        im_rows = []
+    try:
+        inv_rows = con.execute(
+            "SELECT asin, sku, product_name FROM fba_inventory"
+        ).fetchall()
+    except Exception:
+        inv_rows = []
+    con.close()
+
+    names = {}
+    for r in im_rows:
+        names[r[0]] = {"sku": r[1] or "", "name": r[2] or "", "division": r[3] or "unknown"}
+    for r in inv_rows:
+        if r[0] not in names:
+            names[r[0]] = {"sku": r[1] or "", "name": r[2] or "", "division": "unknown"}
+
+    # Build Amazon Pricing section
+    pricing_rows = []
+    for asin, data in live_prices.items():
+        info = names.get(asin, {})
+        listing = data.get("listingPrice")
+        buy_box = data.get("buyBoxPrice")
+        landed = data.get("landedPrice")
+        # If buy box < listing, that's effectively a sale price
+        sale = None
+        if listing and buy_box and buy_box < listing:
+            sale = buy_box
+        pricing_rows.append({
+            "asin": asin,
+            "sku": info.get("sku", ""),
+            "productName": info.get("name", ""),
+            "division": info.get("division", "unknown"),
+            "listPrice": _n(listing),
+            "buyBoxPrice": _n(buy_box),
+            "landedPrice": _n(landed),
+            "salePrice": _n(sale),
+            "discountPct": round((1 - buy_box / listing) * 100, 1) if listing and buy_box and listing > 0 else 0,
+            "fetchedAt": data.get("fetchedAt"),
+        })
+    pricing_rows.sort(key=lambda x: x["productName"] or x["asin"])
+
+    # Build Amazon Coupons section — group by couponId
+    seen_coupons = {}
+    for asin, data in live_coupons.items():
+        cid = data.get("couponId", asin)
+        if cid not in seen_coupons:
+            seen_coupons[cid] = {
+                "couponId": cid,
+                "state": data.get("state", "UNKNOWN"),
+                "discountType": data.get("discountType", "%"),
+                "discountValue": _n(data.get("discountValue", 0)),
+                "budgetAmount": _n(data.get("budgetAmount", 0)),
+                "budgetUsed": _n(data.get("budgetUsed", 0)),
+                "redemptions": data.get("redemptions", 0),
+                "startDate": data.get("startDate", ""),
+                "endDate": data.get("endDate", ""),
+                "asins": [],
+            }
+        info = names.get(asin, {})
+        seen_coupons[cid]["asins"].append({
+            "asin": asin,
+            "sku": info.get("sku", ""),
+            "productName": info.get("name", ""),
+        })
+
+    coupon_rows = sorted(seen_coupons.values(), key=lambda x: x.get("state", ""))
+
+    return {
+        "amazonPricing": pricing_rows,
+        "amazonCoupons": coupon_rows,
+        "lastSync": last_sync,
+        "pricingCount": len(pricing_rows),
+        "couponCount": len(coupon_rows),
+    }
+
+
 # ── NEW: Sale Prices CRUD ────────────────────────────────────────────────
 
 class SalePriceCreate(BaseModel):

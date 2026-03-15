@@ -563,6 +563,9 @@ function PricingCoupons({ filters, showToast }) {
   const [prices, setPrices] = useState([]);
   const [coupons, setCoupons] = useState([]);
   const [products, setProducts] = useState([]);
+  const [amazonPricing, setAmazonPricing] = useState([]);
+  const [amazonCoupons, setAmazonCoupons] = useState([]);
+  const [lastSync, setLastSync] = useState(null);
   const [loading, setLoading] = useState(true);
 
   // Forms
@@ -577,10 +580,14 @@ function PricingCoupons({ filters, showToast }) {
       api.salePrices(filters),
       api.coupons(filters),
       api.profitabilityItems(365, filters),
-    ]).then(([sp, cp, items]) => {
+      api.amazonPricing(),
+    ]).then(([sp, cp, items, amz]) => {
       setPrices(sp.salePrices || []);
       setCoupons(cp.coupons || []);
       setProducts((items.items || []).map(i => ({ asin: i.asin, sku: i.sku, name: i.name })));
+      setAmazonPricing(amz.amazonPricing || []);
+      setAmazonCoupons(amz.amazonCoupons || []);
+      setLastSync(amz.lastSync || null);
       setLoading(false);
     }).catch(() => setLoading(false));
   }, [filters.division, filters.customer, filters.marketplace]);
@@ -658,8 +665,110 @@ function PricingCoupons({ filters, showToast }) {
         <CouponForm products={products} onSubmit={handleCreateCoupon} onCancel={() => setShowCouponForm(false)} />
       )}
 
-      {/* Active/Scheduled Pricing */}
-      <div className="sec-div"><span>Active &amp; Scheduled Sale Prices</span></div>
+      {/* Amazon Active Pricing — read-only from SP-API */}
+      <div className="sec-div"><span>Amazon Active Pricing — Live from SP-API {lastSync ? `(synced ${fmtDate(lastSync)})` : ""}</span></div>
+      <div className="table-card" style={{ padding: 0, marginBottom: 12 }}>
+        <div style={{ overflowX: "auto" }}>
+          <table style={{ width: "100%", borderCollapse: "collapse" }}>
+            <thead>
+              <tr style={{ background: "var(--navy, #0E1F2D)" }}>
+                {["SKU / ASIN", "Division", "List Price", "Buy Box", "Landed Price", "Sale Price", "Discount"].map((h, i) => (
+                  <th key={i} style={{ ...SG(8, 700), padding: "8px 10px", textAlign: i === 0 ? "left" : "center", color: "rgba(255,255,255,0.6)", textTransform: "uppercase" }}>{h}</th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {amazonPricing.map(p => (
+                <tr key={p.asin} style={{ borderBottom: "1px solid var(--border, rgba(14,31,45,0.04))" }}>
+                  <td style={{ ...cellL, maxWidth: 200 }}>
+                    <div style={{ fontWeight: 600, fontSize: 11, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{p.productName || p.sku || p.asin}</div>
+                    <div style={SG(7.5, 500, "var(--muted)")}>{p.asin}{p.sku ? ` · ${p.sku}` : ""}</div>
+                  </td>
+                  <td style={{ ...cellR, textAlign: "center" }}>
+                    <span style={{ ...SG(8, 700), padding: "2px 7px", borderRadius: 5, background: p.division === "golf" ? "rgba(46,207,170,.1)" : "rgba(232,120,48,.1)", color: p.division === "golf" ? "#2ECFAA" : "#E87830" }}>{p.division}</span>
+                  </td>
+                  <td style={{ ...cellR, textAlign: "center" }}>{p.listPrice ? `$${round(p.listPrice, 2)}` : "—"}</td>
+                  <td style={{ ...cellR, textAlign: "center", color: "#2ECFAA", fontWeight: 700 }}>{p.buyBoxPrice ? `$${round(p.buyBoxPrice, 2)}` : "—"}</td>
+                  <td style={{ ...cellR, textAlign: "center" }}>{p.landedPrice ? `$${round(p.landedPrice, 2)}` : "—"}</td>
+                  <td style={{ ...cellR, textAlign: "center", color: p.salePrice ? "#E87830" : "var(--muted)" }}>{p.salePrice ? `$${round(p.salePrice, 2)}` : "—"}</td>
+                  <td style={{ ...cellR, textAlign: "center" }}>
+                    {p.discountPct > 0 ? (
+                      <span style={{ ...SG(9, 700), padding: "2px 7px", borderRadius: 6, background: "rgba(46,207,170,.13)", color: "#2ECFAA" }}>{round(p.discountPct, 0)}% off</span>
+                    ) : <span style={{ color: "var(--muted)" }}>—</span>}
+                  </td>
+                </tr>
+              ))}
+              {amazonPricing.length === 0 && (
+                <tr><td colSpan={7} style={{ padding: 20, textAlign: "center", color: "var(--muted)" }}>No Amazon pricing data cached — pricing sync runs every hour at :30</td></tr>
+              )}
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      {/* Amazon Active Coupons — read-only from Ads API */}
+      <div className="sec-div"><span>Amazon Active Coupons — Live from Ads API</span></div>
+      <div className="table-card" style={{ padding: 0, marginBottom: 12 }}>
+        <div style={{ overflowX: "auto" }}>
+          <table style={{ width: "100%", borderCollapse: "collapse" }}>
+            <thead>
+              <tr style={{ background: "var(--navy, #0E1F2D)" }}>
+                {["Coupon ID", "Items", "Discount", "Budget", "Used", "Redemptions", "State", "Start", "End"].map((h, i) => (
+                  <th key={i} style={{ ...SG(8, 700), padding: "8px 10px", textAlign: i <= 1 ? "left" : "center", color: "rgba(255,255,255,0.6)", textTransform: "uppercase" }}>{h}</th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {amazonCoupons.map(c => {
+                const usedPct = c.budgetAmount > 0 ? round(c.budgetUsed / c.budgetAmount * 100, 0) : 0;
+                return (
+                  <tr key={c.couponId} style={{ borderBottom: "1px solid var(--border, rgba(14,31,45,0.04))" }}>
+                    <td style={{ ...cellL, maxWidth: 130 }}>
+                      <div style={SG(9, 600)}>{c.couponId}</div>
+                    </td>
+                    <td style={{ ...cellL, maxWidth: 200 }}>
+                      <div style={SG(8, 500, "var(--muted)")}>
+                        {(c.asins || []).map(a => a.productName || a.sku || a.asin).join(", ") || "—"}
+                      </div>
+                    </td>
+                    <td style={{ ...cellR, textAlign: "center", color: "#E87830", fontWeight: 700 }}>
+                      {c.discountType === "%" ? `${c.discountValue}%` : `$${round(c.discountValue, 2)}`}
+                    </td>
+                    <td style={{ ...cellR, textAlign: "center" }}>${round(c.budgetAmount || 0, 0)}</td>
+                    <td style={{ ...cellR, textAlign: "center" }}>
+                      <div style={{ display: "flex", alignItems: "center", gap: 5, justifyContent: "center" }}>
+                        <div style={{ width: 50, height: 5, borderRadius: 3, background: "var(--border, rgba(14,31,45,0.1))", overflow: "hidden" }}>
+                          <div style={{ width: `${Math.min(usedPct, 100)}%`, height: "100%", borderRadius: 3, background: usedPct > 80 ? "#f87171" : "#2ECFAA" }} />
+                        </div>
+                        <span style={SG(9, 700)}>{usedPct}%</span>
+                      </div>
+                    </td>
+                    <td style={{ ...cellR, textAlign: "center" }}>{c.redemptions || 0}</td>
+                    <td style={{ ...cellR, textAlign: "center" }}>
+                      <span style={{
+                        ...SG(8, 700), padding: "2px 7px", borderRadius: 6, display: "inline-flex", alignItems: "center", gap: 4,
+                        background: c.state === "ENABLED" ? "rgba(46,207,170,.13)" : "rgba(123,174,208,.13)",
+                        color: c.state === "ENABLED" ? "#2ECFAA" : "#7BAED0",
+                      }}>
+                        {c.state === "ENABLED" && <span style={{ width: 5, height: 5, borderRadius: "50%", background: "#2ECFAA" }} />}
+                        {c.state || "UNKNOWN"}
+                      </span>
+                    </td>
+                    <td style={{ ...cellR, textAlign: "center", fontSize: 10 }}>{fmtDate(c.startDate)}</td>
+                    <td style={{ ...cellR, textAlign: "center", fontSize: 10 }}>{fmtDate(c.endDate)}</td>
+                  </tr>
+                );
+              })}
+              {amazonCoupons.length === 0 && (
+                <tr><td colSpan={9} style={{ padding: 20, textAlign: "center", color: "var(--muted)" }}>No active Amazon coupons found — coupon sync runs hourly</td></tr>
+              )}
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      {/* Managed Sale Prices — our CRUD */}
+      <div className="sec-div"><span>Managed Sale Prices</span></div>
       <div className="table-card" style={{ padding: 0, marginBottom: 12 }}>
         <div style={{ overflowX: "auto" }}>
           <table style={{ width: "100%", borderCollapse: "collapse" }}>
