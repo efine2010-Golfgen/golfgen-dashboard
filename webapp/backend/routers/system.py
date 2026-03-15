@@ -1447,3 +1447,33 @@ def return_rate_debug():
     finally:
         con.close()
     return result
+
+
+@router.get("/api/debug/marketplace-check")
+def marketplace_check():
+    """Debug: check marketplace column values across key tables."""
+    from core.database import get_db
+    con = get_db()
+    result = {}
+    tables = ["orders", "daily_sales", "financial_events", "fba_inventory",
+              "analytics_daily", "analytics_sku"]
+    for tbl in tables:
+        try:
+            rows = con.execute(f"""
+                SELECT marketplace, COUNT(*) FROM {tbl}
+                GROUP BY marketplace ORDER BY COUNT(*) DESC
+            """).fetchall()
+            result[tbl] = [{"marketplace": r[0], "count": r[1]} for r in rows]
+        except Exception as e:
+            result[tbl] = {"error": str(e)}
+    # Also check if column exists
+    try:
+        cols = con.execute("""
+            SELECT column_name FROM information_schema.columns
+            WHERE table_name = 'daily_sales' AND column_name = 'marketplace'
+        """).fetchall()
+        result["daily_sales_has_marketplace_col"] = len(cols) > 0
+    except Exception as e:
+        result["column_check_error"] = str(e)
+    con.close()
+    return result
