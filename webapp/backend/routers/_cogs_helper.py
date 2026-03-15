@@ -112,43 +112,28 @@ def compute_cogs_for_range(con, sd, ed, hw: str = "", hp: list = None,
         logger.warning(f"compute_cogs: daily_sales per-ASIN query error: {e}")
 
     if has_data and total_cogs > 0:
+        # ── Coverage check: per-ASIN rows may only cover part of the date range ──
+        # (S&T report only keeps ~10 days of per-ASIN data)
+        # Compare per-ASIN revenue to ALL-aggregate revenue for the full range.
+        # If per-ASIN covers <90%, scale COGS proportionally.
+        try:
+            per_asin_rev = sum(float(r[2] or 0) for r in rows if float(r[2] or 0) > 0)
+            all_row = con.execute(f"""
+                SELECT COALESCE(SUM(ordered_product_sales), 0)
+                FROM daily_sales
+                WHERE asin = 'ALL' AND date >= ? AND date <= ? {hw}
+            """, [str(sd), str(ed)] + hp).fetchone()
+            total_rev = float(all_row[0]) if all_row else 0
+            if total_rev > 0 and per_asin_rev > 0 and per_asin_rev < total_rev * 0.90:
+                scale = total_rev / per_asin_rev
+                scaled_cogs = total_cogs * scale
+                logger.info(f"compute_cogs coverage: per_asin_rev={per_asin_rev:.2f} total_rev={total_rev:.2f} scale={scale:.2f} scaled_cogs={scaled_cogs:.2f}")
+                return round(scaled_cogs, 2)
+        except Exception as cov_err:
+            logger.warning(f"compute_cogs coverage check error: {cov_err}")
         return round(total_cogs, 2)
 
-    # ── Source 2: orders table (has per-ASIN data for recent periods) ──
-    # purchase_date is VARCHAR ISO — use ISO bounds for correct comparison
-    try:
-        from datetime import datetime as _dt
-        sd_iso = _dt(sd.year, sd.month, sd.day, 0, 0, 0).isoformat()
-        ed_iso = _dt(ed.year, ed.month, ed.day, 23, 59, 59).isoformat()
-        ord_rows = con.execute(f"""
-            SELECT asin,
-                   COUNT(*) AS units,
-                   COALESCE(SUM(CAST(order_total AS DOUBLE PRECISION)), 0) AS revenue
-            FROM orders
-            WHERE purchase_date >= ? AND purchase_date <= ? {hw}
-              AND asin IS NOT NULL AND asin != ''
-            GROUP BY asin
-        """, [sd_iso, ed_iso] + hp).fetchall()
-        if ord_rows and len(ord_rows) > 0:
-            order_cogs = 0
-            order_has_data = False
-            for r in ord_rows:
-                asin = r[0]
-                units = int(r[1] or 0)
-                revenue = float(r[2] or 0)
-                if units == 0:
-                    continue
-                order_has_data = True
-                cost = unit_costs.get(asin, 0)
-                if cost > 0:
-                    order_cogs += units * cost
-                elif revenue > 0:
-                    order_cogs += revenue * fallback_pct
-            logger.info(f"compute_cogs Source2: sd={sd_iso} ed={ed_iso} rows={len(ord_rows)} has_data={order_has_data} cogs={order_cogs}")
-            if order_has_data and order_cogs > 0:
-                return round(order_cogs, 2)
-    except Exception as e:
-        logger.warning(f"compute_cogs: orders table query error: {e}")
+    # ── Source 2: (removed — orders table has no asin column) ──
 
     # ── Source 3: daily_sales ALL-aggregate revenue × fallback % ──
     try:
