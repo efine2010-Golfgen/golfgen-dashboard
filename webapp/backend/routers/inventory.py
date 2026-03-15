@@ -268,10 +268,10 @@ def inventory_kpis(division: Optional[str] = None, customer: Optional[str] = Non
     try:
         refund_rows = con.execute(f"""
             SELECT asin, COUNT(*) AS refund_count,
-                   SUM(ABS(COALESCE(total_amount, 0))) AS refund_amount
+                   SUM(ABS(COALESCE(product_charges, 0))) AS refund_amount
             FROM financial_events
             WHERE event_type ILIKE '%refund%'
-              AND posted_date >= CURRENT_DATE - INTERVAL '90 days'
+              AND date >= CURRENT_DATE - INTERVAL '90 days'
             GROUP BY asin
         """).fetchall()
         refund_map = {r[0]: {"count": r[1], "amount": round(r[2] or 0, 2)} for r in refund_rows}

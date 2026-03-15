@@ -775,9 +775,14 @@ def sales_period_comparison(
                 o_row = con.execute(f"""
                     SELECT COUNT(DISTINCT order_id)
                     FROM orders
-                    WHERE purchase_date >= ? AND purchase_date <= ? {hw}
+                    WHERE purchase_date >= ? AND purchase_date <= ?
+                      AND (order_status IS NULL
+                           OR order_status NOT IN ('Cancelled','Canceled')) {hw}
                 """, [s_iso, e_iso] + hp).fetchone()
                 orders = int(o_row[0]) if o_row and o_row[0] else (units if units else 0)
+                # Orders can never exceed units — cap it
+                if units > 0 and orders > units:
+                    orders = units
             except Exception:
                 orders = units
             try:
@@ -785,9 +790,13 @@ def sales_period_comparison(
                 ly_o_row = con.execute(f"""
                     SELECT COUNT(DISTINCT order_id)
                     FROM orders
-                    WHERE purchase_date >= ? AND purchase_date <= ? {hw}
+                    WHERE purchase_date >= ? AND purchase_date <= ?
+                      AND (order_status IS NULL
+                           OR order_status NOT IN ('Cancelled','Canceled')) {hw}
                 """, [ly_s_iso, ly_e_iso] + hp).fetchone()
                 ly_orders = int(ly_o_row[0]) if ly_o_row and ly_o_row[0] else ly_units
+                if ly_units > 0 and ly_orders > ly_units:
+                    ly_orders = ly_units
             except Exception:
                 ly_orders = ly_units
             aur = round(float(sales) / units, 2) if units else 0
@@ -1952,13 +1961,18 @@ def period_comparison(
         """, [p["start"], p["end"]] + hp).fetchone()
 
         rev, units, sessions = row
-        # True order count from orders table
+        # True order count from orders table — exclude Cancelled
         try:
             o_row = con.execute(f"""
                 SELECT COUNT(DISTINCT order_id) FROM orders
-                WHERE purchase_date >= ? AND purchase_date < ?{hf}
+                WHERE purchase_date >= ? AND purchase_date < ?
+                  AND (order_status IS NULL
+                       OR order_status NOT IN ('Cancelled','Canceled')){hf}
             """, [p["start"], p["end"]] + hp).fetchone()
             orders = int(o_row[0]) if o_row and o_row[0] else units
+            # Orders can never exceed units — cap it
+            if units > 0 and orders > units:
+                orders = units
         except Exception:
             orders = units
         aur = round(float(rev) / units, 2) if units else 0
@@ -2023,9 +2037,13 @@ def period_comparison(
         try:
             ly_o_row = con.execute(f"""
                 SELECT COUNT(DISTINCT order_id) FROM orders
-                WHERE purchase_date >= ? AND purchase_date < ?{hf}
+                WHERE purchase_date >= ? AND purchase_date < ?
+                  AND (order_status IS NULL
+                       OR order_status NOT IN ('Cancelled','Canceled')){hf}
             """, [ly_start.strftime("%Y-%m-%d"), ly_end.strftime("%Y-%m-%d")] + hp).fetchone()
             ly_orders = int(ly_o_row[0]) if ly_o_row and ly_o_row[0] else ly_units
+            if ly_units > 0 and ly_orders > ly_units:
+                ly_orders = ly_units
         except Exception:
             ly_orders = ly_units
 

@@ -108,6 +108,18 @@ def _translate_sql_for_pg(sql: str) -> str:
         sql,
     )
 
+    # Also handle pre-written CURRENT_DATE - INTERVAL '...' that are NOT already
+    # wrapped in CAST.  These appear in inventory.py and other routers that were
+    # written with the INTERVAL syntax directly.  The result is a DATE which
+    # cannot be compared to VARCHAR date columns without a CAST.
+    # The lookbehind (?<!CAST\(\() prevents double-wrapping when the first regex
+    # above already produced CAST((CURRENT_DATE - INTERVAL '...) AS VARCHAR).
+    sql = re.sub(
+        r"(?<!CAST\(\()CURRENT_DATE\s*-\s*INTERVAL\s*'(\d+)\s+days?'",
+        r"CAST((CURRENT_DATE - INTERVAL '\1 days') AS VARCHAR)",
+        sql,
+    )
+
     # ── INSERT OR IGNORE → ON CONFLICT DO NOTHING ──────────
     if _RE_INSERT_OR_IGNORE.search(sql):
         sql = _RE_INSERT_OR_IGNORE.sub("INSERT INTO", sql)

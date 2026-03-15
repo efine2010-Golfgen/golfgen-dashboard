@@ -1028,8 +1028,24 @@ def _run_sp_api_sync_inner():
     # ── 4. SALES & TRAFFIC REPORT (slow, 2-5 min polling) ──────
     try:
         end_date = datetime.utcnow().date()
-        start_date = end_date - timedelta(days=3)
-        logger.info(f"  Requesting Sales report {start_date} to {end_date}...")
+        # Determine lookback: if we have fewer than 30 days of daily_sales data,
+        # do a 182-day (26-week) backfill so the heatmap & charts are populated.
+        # Otherwise, only refresh the last 3 days.
+        lookback_days = 3
+        try:
+            con_check = get_db()
+            days_count = con_check.execute(
+                "SELECT COUNT(DISTINCT date) FROM daily_sales WHERE asin = 'ALL'"
+            ).fetchone()
+            con_check.close()
+            existing_days = int(days_count[0]) if days_count else 0
+            if existing_days < 30:
+                lookback_days = 182  # 26 weeks for initial backfill
+                logger.info(f"  S&T backfill mode: only {existing_days} days in DB → requesting {lookback_days} days")
+        except Exception:
+            pass
+        start_date = end_date - timedelta(days=lookback_days)
+        logger.info(f"  Requesting Sales report {start_date} to {end_date} ({lookback_days}d lookback)...")
 
         reports = Reports(credentials=credentials, marketplace=Marketplaces.US)
         report_response = reports.create_report(
