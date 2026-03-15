@@ -481,8 +481,18 @@ def sales_summary(
             ly_orders = ly_units
         ty_aov = round(ty_sales / ty_orders, 2) if ty_orders else 0
         ly_aov = round(ly_sales / ly_orders, 2) if ly_orders else 0
-        ty_conv = round(ty_units / ty_sessions, 4) if ty_sessions else 0
-        ly_conv = round(ly_units / ly_sessions, 4) if ly_sessions else 0
+
+        # S&T report has 24hr+ lag — sessions/glance_views are unavailable for
+        # today and possibly yesterday. Return None so frontend shows "—".
+        if period == 'today':
+            ty_sessions = None
+            ty_gv = None
+        elif period == 'yesterday' and ty_sessions == 0:
+            ty_sessions = None
+            ty_gv = None
+
+        ty_conv = round(ty_units / ty_sessions, 4) if ty_sessions else None
+        ly_conv = round(ly_units / ly_sessions, 4) if ly_sessions else None
         # CTR from advertising table (clicks / impressions); 0 when ads data absent
         def _ads_ctr(s, e, extra_params):
             try:
@@ -522,11 +532,12 @@ def sales_summary(
         ly_fees = _sum_fees(ly_sd, ly_ed, hp)
 
         # financial_events stores PostedDate (settlement, ~14 days after order).
-        # Fall back to estimated 27% of sales ONLY when financial_events
-        # returned truly zero fees (no data for the period at all).
-        if ty_sales > 0 and ty_fees == 0:
+        # For longer periods (WTD, MTD, YTD), partial settlement data makes fees
+        # appear artificially low. If fee-to-revenue ratio < 20% (expected ~27%),
+        # settlement lag is likely the cause — use estimated 27% instead.
+        if ty_sales > 0 and ty_fees < ty_sales * 0.20:
             ty_fees = round(ty_sales * 0.27, 2)
-        if ly_sales > 0 and ly_fees == 0:
+        if ly_sales > 0 and ly_fees < ly_sales * 0.20:
             ly_fees = round(ly_sales * 0.27, 2)
 
         # Ad spend
@@ -829,11 +840,21 @@ def sales_period_comparison(
                 ly_orders = ly_units
             aur = round(float(sales) / units, 2) if units else 0
             aov = round(float(sales) / orders, 2) if orders else 0
-            conv = round(float(units) / sessions, 4) if sessions else 0
+
+            # S&T report has 24hr+ lag — null out sessions for today,
+            # and for yesterday if S&T hasn't synced yet (sessions=0).
+            if period_key == 'today':
+                sessions = None
+                glance_views = None
+            elif period_key == 'yesterday' and sessions == 0:
+                sessions = None
+                glance_views = None
+
+            conv = round(float(units) / sessions, 4) if sessions else None
             ctr = 0
             ly_aur = round(float(ly_sales) / ly_units, 2) if ly_units else 0
             ly_aov = round(float(ly_sales) / ly_orders, 2) if ly_orders else 0
-            ly_conv = round(float(ly_units) / ly_sessions, 4) if ly_sessions else 0
+            ly_conv = round(float(ly_units) / ly_sessions, 4) if ly_sessions else None
             result[label] = {
                 "sales": round(sales, 2), "units": units, "aur": aur,
                 "orders": orders, "aov": aov,
@@ -1235,19 +1256,22 @@ def sales_fee_breakdown(
         actual_total = fba + referral + other + promo + shipping
         estimated = False
 
-        # financial_events PostedDate lag — recent periods may return 0.
-        # Estimate from daily_sales revenue when actuals are suspiciously low.
-        if actual_total == 0:
-            sales_row = con.execute(f"""
-                SELECT COALESCE(SUM(ordered_product_sales), 0)
-                FROM daily_sales
-                WHERE asin = 'ALL' AND date >= ? AND date <= ? {hw}
-            """, [str(sd), str(ed)] + hp).fetchone()
-            est_sales = float(sales_row[0]) if sales_row else 0
-            if est_sales > 0:
-                fba = round(est_sales * 0.12, 2)
-                referral = round(est_sales * 0.15, 2)
-                estimated = True
+        # financial_events PostedDate lag — recent periods may return 0 or
+        # suspiciously low totals (< 20% of revenue) due to settlement lag.
+        # Estimate from daily_sales revenue when actuals are incomplete.
+        sales_row = con.execute(f"""
+            SELECT COALESCE(SUM(ordered_product_sales), 0)
+            FROM daily_sales
+            WHERE asin = 'ALL' AND date >= ? AND date <= ? {hw}
+        """, [str(sd), str(ed)] + hp).fetchone()
+        est_sales = float(sales_row[0]) if sales_row else 0
+        if est_sales > 0 and actual_total < est_sales * 0.20:
+            fba = round(est_sales * 0.12, 2)
+            referral = round(est_sales * 0.15, 2)
+            other = 0
+            promo = 0
+            shipping = 0
+            estimated = True
 
         con.close()
 
