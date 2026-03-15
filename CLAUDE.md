@@ -241,10 +241,11 @@ Accessible via GET /api/debug/logs for remote debugging without Railway CLI.
 - Pricing sync: every hour at :30
 - Docs update: 8am + 8pm Central
 - FBA inventory snapshot: 11pm Central (daily, captures inventory history)
-- Google Drive + GitHub backup: 2am Central
+- Google Drive + GitHub backup: every 6 hours (2am, 8am, 2pm, 8pm Central)
 - Nightly deep sync: 3am Central (fills all gaps + re-pulls last 30 days)
 - Gap-fill: every 2 hours at :45 (one 30-day chunk per run)
 - Analytics rollup: 2:30am Central (after backup)
+- Backup verification: weekly Sunday 4am Central (download + compare to live DB)
 ## Environment Variables (set in Railway)
 SP_API_CLIENT_ID, SP_API_CLIENT_SECRET, SP_API_REFRESH_TOKEN,
 SP_API_MARKETPLACE_ID (ATVPDKIKX0DER), SP_API_AWS_ACCESS_KEY,
@@ -378,9 +379,16 @@ Full mockup-aligned rebuild of the Profitability page (March 15, 2026):
 - Mockup reference: GolfGen_Profitability_v1.html (in uploads)
 - Key pattern: Backend returns camelCase, frontend reads camelCase, forms submit snake_case (Pydantic models)
 
-### Phase 3 — Redundancy + Backup Hardening: PARTIAL
-Done: Nightly Google Drive backup (2am), nightly GitHub backup.
-Remaining: Hot standby, weekly backup verification, 6-hour snapshots.
+### Phase 3 — Redundancy + Backup Hardening: COMPLETE ✓
+Done (March 15, 2026):
+- Google Drive + GitHub backup upgraded from nightly to every 6 hours (2am, 8am, 2pm, 8pm CT)
+- Weekly automated backup verification (Sundays 4am CT): downloads latest backup, extracts CSVs,
+  compares row counts table-by-table to live PostgreSQL (10% tolerance)
+- Manual verification trigger: POST /api/backup/verify
+- DR readiness dashboard: GET /api/backup/dr-status checks backup age, verification status,
+  PostgreSQL health (critical table row counts), DuckDB fallback file presence
+- System page: new DR Readiness card with green/yellow/red status, verify button, issue list
+- Failover path: DuckDB file on Railway volume as emergency fallback (remove DATABASE_URL → auto-switch)
 
 ### Phase 4 — File Upload + Store Channels: PARTIAL
 Done: Excel upload for warehouse data.
@@ -417,12 +425,15 @@ Custom date ranges, daily email summary, anomaly alerts, forecast tab, exec dash
 - COGS data requires manual CSV upload to COGS_PATH — no UI for COGS management yet
 
 ## Backup System
-- Google Drive: nightly 2am Central, 30-day retention
+- Google Drive: every 6 hours (2am, 8am, 2pm, 8pm Central), 30-day retention
   Manual trigger: POST /api/backup/trigger
-  List backups: GET /api/backup/list-drive
-- GitHub: nightly after Drive backup
+  List backups: GET /api/backup/status
+- GitHub: every 6 hours (runs after Drive backup)
   Repo: github.com/efine2010-Golfgen/golfgen-backups
   Manual trigger: POST /api/backup/github-trigger
+- Verification: weekly Sunday 4am CT (auto), or POST /api/backup/verify (manual)
+  Status: GET /api/backup/verification-status
+- DR readiness: GET /api/backup/dr-status (backup age, verification, DB health, DuckDB fallback)
 - Restore: Dashboard → System tab → Restore from Drive
   Or: POST /api/backup/restore (empty body = most recent)
 
