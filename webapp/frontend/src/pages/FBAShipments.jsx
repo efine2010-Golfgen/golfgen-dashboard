@@ -98,6 +98,299 @@ function MiniMetric({ label, value, valueColor, note, noteColor, last }) {
 }
 
 /* ══════════════════════════════════════════════════════════════════════════ */
+/* ── Create Shipment Modal ── */
+const DEFAULT_SHIP_FROM = {
+  Name: "GolfGen LLC",
+  AddressLine1: "1201 S Walton Blvd",
+  AddressLine2: "",
+  City: "Bentonville",
+  StateOrProvinceCode: "AR",
+  PostalCode: "72712",
+  CountryCode: "US",
+};
+
+function CreateShipmentModal({ onClose, onCreated }) {
+  const [step, setStep] = useState(1); // 1=items, 2=address, 3=review/plan, 4=confirmed
+  const [products, setProducts] = useState([]);
+  const [loadingProducts, setLoadingProducts] = useState(true);
+  const [selectedItems, setSelectedItems] = useState([]); // [{sku, asin, productName, quantity}]
+  const [shipFrom, setShipFrom] = useState({ ...DEFAULT_SHIP_FROM });
+  const [labelPref, setLabelPref] = useState("SELLER_LABEL");
+  const [plans, setPlans] = useState(null);
+  const [creating, setCreating] = useState(false);
+  const [confirming, setConfirming] = useState(false);
+  const [error, setError] = useState(null);
+  const [result, setResult] = useState(null);
+  const [searchQ, setSearchQ] = useState("");
+
+  useEffect(() => {
+    api.fbaShipmentProducts().then(d => { setProducts(d.products || []); setLoadingProducts(false); }).catch(() => setLoadingProducts(false));
+  }, []);
+
+  const addItem = (prod) => {
+    if (selectedItems.find(i => i.sku === prod.sku)) return;
+    setSelectedItems(prev => [...prev, { sku: prod.sku, asin: prod.asin, productName: prod.productName, quantity: 1 }]);
+  };
+  const removeItem = (sku) => setSelectedItems(prev => prev.filter(i => i.sku !== sku));
+  const updateQty = (sku, qty) => setSelectedItems(prev => prev.map(i => i.sku === sku ? { ...i, quantity: Math.max(1, parseInt(qty) || 1) } : i));
+
+  const handleCreatePlan = async () => {
+    setCreating(true);
+    setError(null);
+    try {
+      const res = await api.fbaCreatePlan({
+        shipFromAddress: shipFrom,
+        items: selectedItems.map(i => ({ SellerSKU: i.sku, ASIN: i.asin, Quantity: i.quantity, Condition: "NewItem" })),
+        labelPrepPreference: labelPref,
+      });
+      if (res.ok) { setPlans(res.plans); setStep(3); }
+      else setError(res.error || "Failed to create plan");
+    } catch (e) { setError(e.message); }
+    setCreating(false);
+  };
+
+  const handleConfirmPlan = async (plan) => {
+    setConfirming(true);
+    setError(null);
+    try {
+      const res = await api.fbaConfirmPlan({
+        shipmentId: plan.shipmentId,
+        shipmentName: `GolfGen ${new Date().toLocaleDateString()}`,
+        destinationFC: plan.destinationFC,
+        items: plan.items.map(i => ({ SellerSKU: i.SellerSKU, Quantity: i.Quantity })),
+        shipFromAddress: shipFrom,
+        labelPrepPreference: labelPref,
+      });
+      if (res.ok) { setResult(res); setStep(4); }
+      else setError(res.error || "Failed to confirm plan");
+    } catch (e) { setError(e.message); }
+    setConfirming(false);
+  };
+
+  const filteredProducts = searchQ.trim()
+    ? products.filter(p => (p.productName + p.sku + p.asin).toLowerCase().includes(searchQ.toLowerCase()))
+    : products;
+
+  const overlay = { position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, background: 'rgba(0,0,0,.6)', zIndex: 9999, display: 'flex', alignItems: 'center', justifyContent: 'center' };
+  const modal = { background: 'var(--card)', border: '1px solid var(--brd)', borderRadius: 16, width: '90vw', maxWidth: 860, maxHeight: '85vh', overflow: 'hidden', display: 'flex', flexDirection: 'column', boxShadow: '0 20px 60px rgba(0,0,0,.4)' };
+  const hdr = { padding: '14px 20px', borderBottom: '1px solid var(--brd)', display: 'flex', alignItems: 'center', justifyContent: 'space-between', background: 'var(--card2, var(--card))' };
+  const body = { padding: '16px 20px', overflowY: 'auto', flex: 1 };
+  const footer = { padding: '12px 20px', borderTop: '1px solid var(--brd)', display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8 };
+  const btnP = { display: 'inline-flex', alignItems: 'center', gap: 5, height: 34, padding: '0 18px', borderRadius: 8, ...SG({ fontSize: 11, fontWeight: 700 }), cursor: 'pointer', border: 'none', background: 'var(--acc1)', color: '#fff' };
+  const btnS = { ...btnP, background: 'transparent', border: '1px solid var(--brd2)', color: 'var(--txt2)' };
+  const inp = { height: 32, padding: '0 10px', borderRadius: 7, border: '1px solid var(--brd2)', background: 'var(--ibg)', color: 'var(--txt)', ...SG({ fontSize: 10 }), outline: 'none', width: '100%' };
+
+  return (
+    <div style={overlay} onClick={onClose}>
+      <div style={modal} onClick={e => e.stopPropagation()}>
+        {/* Header */}
+        <div style={hdr}>
+          <div>
+            <div style={{ fontSize: 14, fontWeight: 700, color: 'var(--txt)' }}>Create FBA Shipment</div>
+            <div style={{ ...SG({ fontSize: 9, color: 'var(--txt3)', marginTop: 2 }) }}>
+              Step {step} of 4 — {step === 1 ? "Select Products" : step === 2 ? "Ship From Address" : step === 3 ? "Review Amazon Plan" : "Confirmed"}
+            </div>
+          </div>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+            {[1,2,3,4].map(s => (
+              <div key={s} style={{ width: 24, height: 4, borderRadius: 2, background: s <= step ? 'var(--acc1)' : 'var(--brd)', transition: 'background .3s' }} />
+            ))}
+            <button onClick={onClose} style={{ width: 28, height: 28, borderRadius: 6, border: '1px solid var(--brd2)', background: 'transparent', color: 'var(--txt3)', fontSize: 14, cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', marginLeft: 8 }}>×</button>
+          </div>
+        </div>
+
+        {/* Body */}
+        <div style={body}>
+          {error && (
+            <div style={{ padding: '8px 12px', borderRadius: 8, background: 'rgba(248,113,113,.12)', border: '1px solid rgba(248,113,113,.3)', marginBottom: 12, ...SG({ fontSize: 10, color: '#f87171' }) }}>
+              {error}
+            </div>
+          )}
+
+          {/* Step 1: Select Products */}
+          {step === 1 && (
+            <>
+              {/* Selected items */}
+              {selectedItems.length > 0 && (
+                <div style={{ marginBottom: 14 }}>
+                  <div style={{ ...SG({ fontSize: 8, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '.1em', color: 'var(--txt3)', marginBottom: 6 }) }}>
+                    Selected ({selectedItems.length} items · {selectedItems.reduce((s, i) => s + i.quantity, 0)} units)
+                  </div>
+                  {selectedItems.map(item => (
+                    <div key={item.sku} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '6px 10px', borderRadius: 7, marginBottom: 4, background: 'rgba(46,207,170,.06)', border: '1px solid rgba(46,207,170,.2)' }}>
+                      <div style={{ flex: 1 }}>
+                        <span style={{ ...SG({ fontSize: 10, fontWeight: 700, color: 'var(--acc1)' }) }}>{item.asin}</span>
+                        <span style={{ ...SG({ fontSize: 9, color: 'var(--txt3)', marginLeft: 8 }) }}>{item.sku}</span>
+                        <div style={{ fontSize: 10, color: 'var(--txt2)', marginTop: 1 }}>{item.productName}</div>
+                      </div>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+                        <span style={{ ...SG({ fontSize: 8, color: 'var(--txt3)' }) }}>Qty:</span>
+                        <input type="number" min="1" value={item.quantity} onChange={e => updateQty(item.sku, e.target.value)}
+                          style={{ ...inp, width: 60, textAlign: 'center' }} />
+                      </div>
+                      <button onClick={() => removeItem(item.sku)} style={{ width: 22, height: 22, borderRadius: 4, border: '1px solid rgba(248,113,113,.3)', background: 'rgba(248,113,113,.08)', color: '#f87171', fontSize: 11, cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>×</button>
+                    </div>
+                  ))}
+                </div>
+              )}
+
+              {/* Product search */}
+              <input placeholder="Search products by name, SKU, or ASIN…" value={searchQ} onChange={e => setSearchQ(e.target.value)}
+                style={{ ...inp, marginBottom: 10 }} />
+
+              {loadingProducts ? (
+                <div style={{ padding: 20, textAlign: 'center', color: 'var(--txt3)', fontSize: 12 }}>Loading products…</div>
+              ) : (
+                <div style={{ maxHeight: 300, overflowY: 'auto', border: '1px solid var(--brd)', borderRadius: 8 }}>
+                  {filteredProducts.length === 0 ? (
+                    <div style={{ padding: 20, textAlign: 'center', color: 'var(--txt3)', fontSize: 11 }}>No products found.</div>
+                  ) : filteredProducts.slice(0, 50).map(p => {
+                    const isAdded = selectedItems.find(i => i.sku === p.sku);
+                    return (
+                      <div key={p.sku} onClick={() => !isAdded && addItem(p)}
+                        style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '7px 12px', borderBottom: '1px solid var(--brd)', cursor: isAdded ? 'default' : 'pointer', opacity: isAdded ? 0.5 : 1 }}
+                        onMouseEnter={e => { if (!isAdded) e.currentTarget.style.background = 'var(--ibg)'; }}
+                        onMouseLeave={e => e.currentTarget.style.background = ''}>
+                        <div style={{ flex: 1 }}>
+                          <div>
+                            <span style={{ ...SG({ fontSize: 10, fontWeight: 700, color: 'var(--acc1)' }) }}>{p.asin}</span>
+                            <span style={{ ...SG({ fontSize: 9, color: 'var(--txt3)', marginLeft: 8 }) }}>{p.sku}</span>
+                          </div>
+                          <div style={{ fontSize: 10, color: 'var(--txt2)', marginTop: 1 }}>{p.productName || "—"}</div>
+                        </div>
+                        <div style={{ textAlign: 'right' }}>
+                          <div style={{ ...SG({ fontSize: 9, color: 'var(--txt3)' }) }}>{p.division}</div>
+                          <div style={{ ...SG({ fontSize: 10, fontWeight: 700, color: p.currentStock > 0 ? 'var(--acc1)' : '#f87171' }) }}>{p.currentStock} in FBA</div>
+                        </div>
+                        {isAdded ? <Badge text="Added" type="ok" /> : <span style={{ ...SG({ fontSize: 9, color: 'var(--acc1)', fontWeight: 700 }) }}>+ Add</span>}
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </>
+          )}
+
+          {/* Step 2: Ship From Address */}
+          {step === 2 && (
+            <div style={{ maxWidth: 480 }}>
+              <div style={{ ...SG({ fontSize: 8, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '.1em', color: 'var(--txt3)', marginBottom: 10 }) }}>Ship From Address</div>
+              {[
+                { key: "Name", label: "Company / Name" },
+                { key: "AddressLine1", label: "Address Line 1" },
+                { key: "AddressLine2", label: "Address Line 2 (optional)" },
+                { key: "City", label: "City" },
+                { key: "StateOrProvinceCode", label: "State" },
+                { key: "PostalCode", label: "Zip Code" },
+                { key: "CountryCode", label: "Country Code" },
+              ].map(f => (
+                <div key={f.key} style={{ marginBottom: 8 }}>
+                  <label style={{ ...SG({ fontSize: 9, color: 'var(--txt3)', display: 'block', marginBottom: 3 }) }}>{f.label}</label>
+                  <input value={shipFrom[f.key] || ""} onChange={e => setShipFrom(prev => ({ ...prev, [f.key]: e.target.value }))} style={inp} />
+                </div>
+              ))}
+              <div style={{ marginTop: 12 }}>
+                <label style={{ ...SG({ fontSize: 9, color: 'var(--txt3)', display: 'block', marginBottom: 3 }) }}>Label Prep Preference</label>
+                <select value={labelPref} onChange={e => setLabelPref(e.target.value)} style={{ ...inp, appearance: 'auto' }}>
+                  <option value="SELLER_LABEL">Seller Label (you label items)</option>
+                  <option value="AMAZON_LABEL_ONLY">Amazon Label Only</option>
+                  <option value="AMAZON_LABEL_PREFERRED">Amazon Label Preferred</option>
+                </select>
+              </div>
+            </div>
+          )}
+
+          {/* Step 3: Review Amazon Plan */}
+          {step === 3 && plans && (
+            <>
+              <div style={{ ...SG({ fontSize: 8, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '.1em', color: 'var(--txt3)', marginBottom: 10 }) }}>
+                Amazon Proposed {plans.length} Shipment{plans.length !== 1 ? "s" : ""}
+              </div>
+              <div style={{ padding: '8px 12px', borderRadius: 8, background: 'rgba(123,174,208,.1)', border: '1px solid rgba(123,174,208,.25)', marginBottom: 14, ...SG({ fontSize: 10, color: '#7BAED0' }) }}>
+                Amazon splits your items across fulfillment centers for optimal placement. Each box below is a separate shipment you'll need to pack and ship.
+              </div>
+              {plans.map((plan, idx) => (
+                <Card key={idx} style={{ marginBottom: 10 }}>
+                  <div style={{ padding: '10px 14px', borderBottom: '1px solid var(--brd)', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                    <div>
+                      <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--txt)' }}>{plan.shipmentId}</div>
+                      <div style={{ ...SG({ fontSize: 9, color: 'var(--txt3)' }) }}>Destination: <span style={{ fontWeight: 700, color: 'var(--acc1)' }}>{plan.destinationFC}</span> · {plan.items.length} item{plan.items.length !== 1 ? "s" : ""}</div>
+                    </div>
+                    <button onClick={() => handleConfirmPlan(plan)} disabled={confirming}
+                      style={{ ...btnP, opacity: confirming ? 0.6 : 1, fontSize: 10, height: 30 }}>
+                      {confirming ? "Creating…" : "Confirm & Create"}
+                    </button>
+                  </div>
+                  <div style={{ padding: '8px 14px' }}>
+                    {plan.items.map((pi, j) => (
+                      <div key={j} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '5px 0', borderBottom: j < plan.items.length - 1 ? '1px solid var(--brd)' : 'none' }}>
+                        <div>
+                          <span style={{ ...SG({ fontSize: 10, fontWeight: 700, color: 'var(--txt)' }) }}>{pi.SellerSKU}</span>
+                          {pi.FulfillmentNetworkSKU && <span style={{ ...SG({ fontSize: 8, color: 'var(--txt3)', marginLeft: 6 }) }}>FNSKU: {pi.FulfillmentNetworkSKU}</span>}
+                        </div>
+                        <span style={{ ...SG({ fontSize: 11, fontWeight: 700, color: 'var(--acc1)' }) }}>{pi.Quantity} units</span>
+                      </div>
+                    ))}
+                  </div>
+                </Card>
+              ))}
+            </>
+          )}
+
+          {/* Step 4: Confirmed */}
+          {step === 4 && result && (
+            <div style={{ textAlign: 'center', padding: '30px 20px' }}>
+              <div style={{ fontSize: 40, marginBottom: 10 }}>✅</div>
+              <div style={{ fontSize: 16, fontWeight: 700, color: 'var(--acc1)', marginBottom: 6 }}>Shipment Created!</div>
+              <div style={{ ...SG({ fontSize: 12, color: 'var(--txt2)', marginBottom: 16 }) }}>{result.message}</div>
+              <div style={{ ...SG({ fontSize: 10, fontWeight: 700, color: 'var(--acc3, #3E658C)', marginBottom: 16 }) }}>
+                Shipment ID: {result.shipmentId}
+              </div>
+              {result.sellerCentralUrl && (
+                <a href={result.sellerCentralUrl} target="_blank" rel="noreferrer"
+                  style={{ ...btnP, textDecoration: 'none', display: 'inline-flex' }}>
+                  Open in Seller Central →
+                </a>
+              )}
+            </div>
+          )}
+        </div>
+
+        {/* Footer */}
+        {step < 4 && (
+          <div style={footer}>
+            <div>
+              {step > 1 && step < 3 && <button onClick={() => setStep(step - 1)} style={btnS}>← Back</button>}
+            </div>
+            <div style={{ display: 'flex', gap: 8 }}>
+              <button onClick={onClose} style={btnS}>Cancel</button>
+              {step === 1 && (
+                <button onClick={() => setStep(2)} disabled={selectedItems.length === 0}
+                  style={{ ...btnP, opacity: selectedItems.length === 0 ? 0.4 : 1 }}>
+                  Next: Ship From →
+                </button>
+              )}
+              {step === 2 && (
+                <button onClick={handleCreatePlan} disabled={creating}
+                  style={{ ...btnP, opacity: creating ? 0.6 : 1 }}>
+                  {creating ? "Submitting to Amazon…" : "Submit Plan to Amazon →"}
+                </button>
+              )}
+            </div>
+          </div>
+        )}
+        {step === 4 && (
+          <div style={footer}>
+            <div />
+            <button onClick={() => { onCreated?.(); onClose(); }} style={btnP}>Done — Refresh Shipments</button>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+/* ══════════════════════════════════════════════════════════════════════════ */
 
 export default function FBAShipments({ filters = {} }) {
   const [data, setData] = useState(null);
@@ -108,6 +401,7 @@ export default function FBAShipments({ filters = {} }) {
   const [itemsCache, setItemsCache] = useState({});
   const [loadingItems, setLoadingItems] = useState(null);
   const [search, setSearch] = useState("");
+  const [showCreate, setShowCreate] = useState(false);
 
   const load = (refresh = false) => {
     setLoading(true);
@@ -157,15 +451,17 @@ export default function FBAShipments({ filters = {} }) {
   const activeStatuses = ["WORKING", "SHIPPED", "RECEIVING", "IN_TRANSIT", "CHECKED_IN"];
   const activeShipments = shipments.filter(s => activeStatuses.includes(s.status));
   const closedShipments = shipments.filter(s => s.status === "CLOSED");
+  const cancelledShipments = shipments.filter(s => s.status === "CANCELLED");
+  // Exclude cancelled from all "good" metrics
+  const goodShipments = shipments.filter(s => s.status !== "CANCELLED");
 
-  // Get items for KPI calculations — combine server-provided totals + expanded items
+  // Get items for KPI calculations — exclude cancelled shipments
   const allItems = Object.values(itemsCache).flat();
   const itemsCacheSent = allItems.reduce((s, i) => s + (i.quantityShipped || 0), 0);
   const itemsCacheRecv = allItems.reduce((s, i) => s + (i.quantityReceived || 0), 0);
-  // Also sum server-provided totals for shipments not yet expanded
-  const serverSent = shipments.reduce((s, sh) => s + (sh.totalShipped || 0), 0);
-  const serverRecv = shipments.reduce((s, sh) => s + (sh.totalReceived || 0), 0);
-  // Use the larger of expanded-items vs server-provided (avoids double-counting)
+  // Sum server-provided totals for non-cancelled shipments only
+  const serverSent = goodShipments.reduce((s, sh) => s + (sh.totalShipped || 0), 0);
+  const serverRecv = goodShipments.reduce((s, sh) => s + (sh.totalReceived || 0), 0);
   const totalSent = Math.max(itemsCacheSent, serverSent);
   const totalRecv = Math.max(itemsCacheRecv, serverRecv);
   const netDisc = totalRecv - totalSent;
@@ -200,12 +496,12 @@ export default function FBAShipments({ filters = {} }) {
   const kpis = [
     { label: "Active Shipments", value: activeShipments.length, color: "#E87830", sub: `${pipeCount("SHIPPED")} in transit · ${pipeCount("RECEIVING")} receiving` },
     { label: "Units Inbound", value: activeShipments.reduce((s, sh) => s + ((sh.totalShipped || 0) - (sh.totalReceived || 0)), 0).toLocaleString(), color: "var(--acc1)", sub: "All open shipments" },
-    { label: "Shipped (All)", value: totalSent > 0 ? totalSent.toLocaleString() : "—", color: "#7BAED0", sub: "Total units sent" },
+    { label: "Expected (All)", value: totalSent > 0 ? totalSent.toLocaleString() : "—", color: "#7BAED0", sub: "Total units expected" },
     { label: "Received (All)", value: totalRecv > 0 ? totalRecv.toLocaleString() : "—", color: "var(--acc1)", sub: "Confirmed by FC" },
-    { label: "Net Discrepancy", value: netDisc !== 0 ? netDisc.toLocaleString() : totalSent > 0 ? "0" : "—", color: netDisc < 0 ? "#f87171" : "var(--acc1)", sub: "Sent vs received" },
-    { label: "Avg Lead Time", value: "—", color: "#F5B731", sub: "Ship → FC received" },
+    { label: "Variance", value: netDisc !== 0 ? netDisc.toLocaleString() : totalSent > 0 ? "0" : "—", color: netDisc < 0 ? "#f87171" : "var(--acc1)", sub: "Expected vs received" },
     { label: "Closed", value: closedShipments.length, color: "var(--acc1)", sub: "Fully received" },
-    { label: "On-Time Rate", value: "—", color: "var(--acc3, #3E658C)", sub: "Arrived by ETA" },
+    { label: "Cancelled", value: cancelledShipments.length, color: cancelledShipments.length > 0 ? "#4d6d8a" : "var(--txt3)", sub: "Not shipped" },
+    { label: "Receive Rate", value: recvRate === "—" ? "—" : `${recvRate}%`, color: parseFloat(recvRate) >= 99 ? "var(--acc1)" : parseFloat(recvRate) >= 95 ? "#F5B731" : "#f87171", sub: "Excl. cancelled" },
   ];
 
   /* ── Pipeline totals for proportional bar ── */
@@ -241,11 +537,11 @@ export default function FBAShipments({ filters = {} }) {
         </div>
         <div style={{ display: 'flex', alignItems: 'center', gap: 7 }}>
           <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
-            <a href="https://sellercentral.amazon.com/fba/sendtoamazon" target="_blank" rel="noreferrer"
-              style={{ display: 'inline-flex', alignItems: 'center', gap: 5, height: 30, padding: '0 12px', borderRadius: 8, ...SG({ fontSize: 10, fontWeight: 700 }), cursor: 'pointer', border: '1px solid var(--acc1)', background: 'rgba(46,207,170,.1)', color: 'var(--acc1)', textDecoration: 'none' }}>
+            <button onClick={() => setShowCreate(true)}
+              style={{ display: 'inline-flex', alignItems: 'center', gap: 5, height: 30, padding: '0 12px', borderRadius: 8, ...SG({ fontSize: 10, fontWeight: 700 }), cursor: 'pointer', border: '1px solid var(--acc1)', background: 'rgba(46,207,170,.1)', color: 'var(--acc1)' }}>
               📦 New Shipment Plan
-            </a>
-            <span style={{ ...SG({ fontSize: 8, color: 'var(--txt3)', marginTop: 1 }) }}>Opens Seller Central</span>
+            </button>
+            <span style={{ ...SG({ fontSize: 8, color: 'var(--txt3)', marginTop: 1 }) }}>Create via SP-API</span>
           </div>
           <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
             <button onClick={handleSync} disabled={syncing}
@@ -476,10 +772,10 @@ export default function FBAShipments({ filters = {} }) {
                   { label: "Shipment Name", w: 160 },
                   { label: "Status", w: 90 },
                   { label: "Dest FC", w: 64 },
-                  { label: "Sent", w: 58, r: true },
+                  { label: "Expected", w: 58, r: true },
                   { label: "Received", w: 62, r: true },
                   { label: "Recv %", w: 80 },
-                  { label: "Discrepancy", w: 72, r: true },
+                  { label: "Variance", w: 72, r: true },
                   { label: "Products", w: 54, r: true },
                 ].map((col, i) => (
                   <th key={i} style={{
@@ -509,10 +805,12 @@ export default function FBAShipments({ filters = {} }) {
                 const disc = (sent > 0 || recv > 0) ? recv - sent : null;
                 const discCol = disc === null ? 'var(--txt3)' : disc < 0 ? '#f87171' : disc > 0 ? '#2ECFAA' : 'var(--txt3)';
 
+                const isCancelled = s.status === "CANCELLED";
                 return (
                   <React.Fragment key={s.shipmentId}>
                     {/* Master row */}
-                    <tr onClick={() => toggleExpand(s.shipmentId)} style={{ cursor: 'pointer' }}
+                    <tr onClick={() => toggleExpand(s.shipmentId)}
+                      style={{ cursor: 'pointer', opacity: isCancelled ? 0.5 : 1 }}
                       onMouseEnter={e => e.currentTarget.style.background = 'var(--ibg)'}
                       onMouseLeave={e => e.currentTarget.style.background = ''}>
                       <td style={{ padding: '9px 8px' }}>
@@ -557,10 +855,10 @@ export default function FBAShipments({ filters = {} }) {
                                       { label: "Product / SKU", w: 160 },
                                       { label: "FNSKU", w: 90 },
                                       { label: "FC", w: 64 },
-                                      { label: "Sent", w: 58, r: true },
+                                      { label: "Expected", w: 58, r: true },
                                       { label: "Received", w: 62, r: true },
                                       { label: "Recv %", w: 80 },
-                                      { label: "Discrepancy", w: 72, r: true },
+                                      { label: "Variance", w: 72, r: true },
                                       { label: "", w: 54 },
                                     ].map((col, ci) => (
                                       <th key={ci} style={{
@@ -677,16 +975,25 @@ export default function FBAShipments({ filters = {} }) {
               <span style={{ fontSize: 11, fontWeight: 700, color: 'var(--txt)' }}>Shipment Health Summary</span>
             </div>
             <MiniMetric label="Receive Rate" value={recvRate === "—" ? "—" : `${recvRate}%`} valueColor="var(--acc1)" note={parseFloat(recvRate) >= 99 ? "Excellent" : parseFloat(recvRate) >= 95 ? "Good" : "Needs attention"} noteColor={parseFloat(recvRate) >= 99 ? "#2ECFAA" : parseFloat(recvRate) >= 95 ? "#F5B731" : "#f87171"} />
-            <MiniMetric label="Total Shipments" value={shipments.length} valueColor="#7BAED0" note="All time" />
+            <MiniMetric label="Total Shipments" value={goodShipments.length} valueColor="#7BAED0" note="Excl. cancelled" />
             <MiniMetric label="Active" value={activeShipments.length} valueColor="#E87830" note="In pipeline" />
             <MiniMetric label="Closed" value={closedShipments.length} valueColor="var(--acc1)" note="Fully received" />
-            <MiniMetric label="Avg Products / Shipment" value={shipments.length > 0 ? (shipments.reduce((s, sh) => s + (sh.itemCount || 0), 0) / shipments.length).toFixed(1) : "—"} valueColor="var(--txt2)" note="Avg" last />
+            <MiniMetric label="Cancelled" value={cancelledShipments.length} valueColor="#4d6d8a" note="Not shipped" />
+            <MiniMetric label="Avg Products / Shipment" value={goodShipments.length > 0 ? (goodShipments.reduce((s, sh) => s + (sh.itemCount || 0), 0) / goodShipments.length).toFixed(1) : "—"} valueColor="var(--txt2)" note="Avg (excl. cancelled)" last />
           </Card>
         </div>
       </div>
 
       {data?._note && (
         <p style={{ fontSize: 11, color: 'var(--acc2, #E87830)', marginTop: 12, textAlign: 'center' }}>{data._note}</p>
+      )}
+
+      {/* Create Shipment Modal */}
+      {showCreate && (
+        <CreateShipmentModal
+          onClose={() => setShowCreate(false)}
+          onCreated={() => load(true)}
+        />
       )}
     </div>
   );

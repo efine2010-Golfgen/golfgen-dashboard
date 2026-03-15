@@ -1036,7 +1036,7 @@ def _fetch_fba_shipments_from_api(statuses=None, days_back=90):
         return None
 
     if statuses is None:
-        statuses = ["WORKING", "SHIPPED", "RECEIVING", "CLOSED", "IN_TRANSIT"]
+        statuses = ["WORKING", "SHIPPED", "RECEIVING", "CLOSED", "IN_TRANSIT", "CANCELLED"]
 
     try:
         fba = FulfillmentInbound(
@@ -1197,19 +1197,64 @@ def _enrich_shipment_items(shipment_id):
                 })
             next_token = payload.get("NextToken")
 
-        # Enrich with product names + ASIN from item_master (DB)
+        # Enrich with product names + ASIN from item_master + fba_inventory (DB)
         if result:
             try:
                 con = get_db()
                 skus = [r["sku"] for r in result if r["sku"]]
                 if skus:
                     placeholders = ",".join(["?"] * len(skus))
+                    name_map = {}
+                    asin_map = {}
+
+                    # Source 1: item_master (primary — has curated product names)
                     rows = con.execute(
                         f"SELECT sku, product_name, asin FROM item_master WHERE sku IN ({placeholders})",
                         skus,
                     ).fetchall()
-                    name_map = {r[0]: r[1] for r in rows if r[1]}
-                    asin_map = {r[0]: r[2] for r in rows if r[2]}
+                    for r in rows:
+                        if r[1]:
+                            name_map[r[0]] = r[1]
+                        if r[2]:
+                            asin_map[r[0]] = r[2]
+
+                    # Also try base SKU without -CA/-FBM suffixes for partial matches
+                    missing_skus = [s for s in skus if s not in asin_map]
+                    if missing_skus:
+                        base_map = {}
+                        for ms in missing_skus:
+                            for suffix in ["-CA", "-FBM", "-FBA"]:
+                                if ms.endswith(suffix):
+                                    base_map[ms.rsplit(suffix, 1)[0]] = ms
+                                    break
+                        if base_map:
+                            bp = ",".join(["?"] * len(base_map))
+                            base_rows = con.execute(
+                                f"SELECT sku, product_name, asin FROM item_master WHERE sku IN ({bp})",
+                                list(base_map.keys()),
+                            ).fetchall()
+                            for r in base_rows:
+                                orig_sku = base_map.get(r[0])
+                                if orig_sku:
+                                    if r[1] and orig_sku not in name_map:
+                                        name_map[orig_sku] = r[1]
+                                    if r[2] and orig_sku not in asin_map:
+                                        asin_map[orig_sku] = r[2]
+
+                    # Source 2: fba_inventory fallback (has fresh SP-API data)
+                    still_missing = [s for s in skus if s not in asin_map]
+                    if still_missing:
+                        fp = ",".join(["?"] * len(still_missing))
+                        inv_rows = con.execute(
+                            f"SELECT DISTINCT sku, product_name, asin FROM fba_inventory WHERE sku IN ({fp}) AND asin IS NOT NULL AND asin != ''",
+                            still_missing,
+                        ).fetchall()
+                        for r in inv_rows:
+                            if r[1] and r[0] not in name_map:
+                                name_map[r[0]] = r[1]
+                            if r[2] and r[0] not in asin_map:
+                                asin_map[r[0]] = r[2]
+
                     for r in result:
                         r["productName"] = name_map.get(r["sku"], "")
                         r["asin"] = asin_map.get(r["sku"], "")
@@ -1299,6 +1344,267 @@ async def get_fba_shipment_items(request: Request, shipment_id: str):
     require_auth(request)
     items = _enrich_shipment_items(shipment_id)
     return {"shipmentId": shipment_id, "items": items, "totalItems": len(items)}
+
+
+@router.get("/api/fba-shipments/products")
+async def get_shipment_products(request: Request):
+    """Get available products for shipment creation — ASIN, SKU, product name from item_master + fba_inventory."""
+    from core.auth import require_auth
+    require_auth(request)
+    try:
+        con = get_db()
+        # Pull products from item_master that have both ASIN and SKU
+        rows = con.execute("""
+            SELECT DISTINCT im.asin, im.sku, im.product_name, im.division,
+                   COALESCE(inv.afn_fulfillable_quantity, 0) as current_stock
+            FROM item_master im
+            LEFT JOIN (
+                SELECT asin, afn_fulfillable_quantity
+                FROM fba_inventory
+                WHERE date = (SELECT MAX(date) FROM fba_inventory)
+            ) inv ON im.asin = inv.asin
+            WHERE im.asin IS NOT NULL AND im.asin != ''
+              AND im.sku IS NOT NULL AND im.sku != ''
+            ORDER BY im.division, im.product_name
+        """).fetchall()
+        products = []
+        for r in rows:
+            products.append({
+                "asin": r[0],
+                "sku": r[1],
+                "productName": r[2] or "",
+                "division": r[3] or "unknown",
+                "currentStock": _n(r[4]),
+            })
+        return {"products": products, "count": len(products)}
+    except Exception as e:
+        logger.error(f"Error fetching shipment products: {e}")
+        return JSONResponse(status_code=500, content={"error": str(e)})
+
+
+@router.post("/api/fba-shipments/create-plan")
+async def create_shipment_plan(request: Request):
+    """Create an inbound shipment plan via SP-API.
+
+    Expects JSON body:
+    {
+        "shipFromAddress": {
+            "Name": "GolfGen LLC",
+            "AddressLine1": "...",
+            "City": "Bentonville",
+            "StateOrProvinceCode": "AR",
+            "PostalCode": "72712",
+            "CountryCode": "US"
+        },
+        "items": [
+            {"SellerSKU": "GGRTNW222810", "ASIN": "B0DPBGG8GY", "Quantity": 100, "Condition": "NewItem"}
+        ],
+        "labelPrepPreference": "SELLER_LABEL"  // optional: SELLER_LABEL, AMAZON_LABEL_ONLY, AMAZON_LABEL_PREFERRED
+    }
+
+    Returns the shipment plan(s) proposed by Amazon.
+    """
+    from core.auth import require_auth
+    require_auth(request)
+
+    try:
+        body = await request.json()
+    except Exception:
+        return JSONResponse(status_code=400, content={"error": "Invalid JSON body"})
+
+    ship_from = body.get("shipFromAddress")
+    items = body.get("items", [])
+    label_pref = body.get("labelPrepPreference", "SELLER_LABEL")
+
+    if not ship_from:
+        return JSONResponse(status_code=400, content={"error": "shipFromAddress is required"})
+    if not items:
+        return JSONResponse(status_code=400, content={"error": "At least one item is required"})
+
+    # Validate required address fields
+    for field in ["Name", "AddressLine1", "City", "StateOrProvinceCode", "PostalCode", "CountryCode"]:
+        if not ship_from.get(field):
+            return JSONResponse(status_code=400, content={"error": f"shipFromAddress.{field} is required"})
+
+    # Validate items
+    for i, item in enumerate(items):
+        if not item.get("SellerSKU"):
+            return JSONResponse(status_code=400, content={"error": f"Item {i+1}: SellerSKU is required"})
+        if not item.get("Quantity") or int(item["Quantity"]) < 1:
+            return JSONResponse(status_code=400, content={"error": f"Item {i+1}: Quantity must be >= 1"})
+
+    try:
+        from sp_api.api import FulfillmentInbound
+        from sp_api.base import Marketplaces
+    except ImportError:
+        return JSONResponse(status_code=500, content={"error": "SP-API library not installed"})
+
+    credentials = _load_sp_api_credentials()
+    if not credentials:
+        return JSONResponse(status_code=500, content={"error": "SP-API credentials not configured"})
+
+    try:
+        fba = FulfillmentInbound(
+            credentials=credentials,
+            marketplace=Marketplaces.US,
+        )
+
+        # Build the inbound shipment plan items
+        plan_items = []
+        for item in items:
+            plan_item = {
+                "SellerSKU": item["SellerSKU"],
+                "Quantity": str(int(item["Quantity"])),
+                "Condition": item.get("Condition", "NewItem"),
+            }
+            if item.get("ASIN"):
+                plan_item["ASIN"] = item["ASIN"]
+            if item.get("QuantityInCase"):
+                plan_item["QuantityInCase"] = str(int(item["QuantityInCase"]))
+            plan_items.append(plan_item)
+
+        logger.info(f"Creating inbound shipment plan: {len(plan_items)} items from {ship_from.get('City', '?')}, {ship_from.get('StateOrProvinceCode', '?')}")
+
+        resp = fba.create_inbound_shipment_plan(
+            ShipFromAddress=ship_from,
+            InboundShipmentPlanRequestItems=plan_items,
+            LabelPrepPreference=label_pref,
+            MarketplaceId="ATVPDKIKX0DER",
+        )
+
+        payload = resp.payload or {}
+        plans = payload.get("InboundShipmentPlans", [])
+
+        # Normalize the plan data for frontend
+        normalized_plans = []
+        for plan in plans:
+            normalized_plans.append({
+                "shipmentId": plan.get("ShipmentId", ""),
+                "destinationFC": plan.get("DestinationFulfillmentCenterId", ""),
+                "labelPrepType": plan.get("LabelPrepType", ""),
+                "items": [
+                    {
+                        "SellerSKU": pi.get("SellerSKU", ""),
+                        "FulfillmentNetworkSKU": pi.get("FulfillmentNetworkSKU", ""),
+                        "Quantity": pi.get("Quantity", 0),
+                    }
+                    for pi in plan.get("Items", [])
+                ],
+                "estimatedBoxContentsFee": plan.get("EstimatedBoxContentsFee", {}),
+            })
+
+        logger.info(f"Shipment plan created: {len(normalized_plans)} shipment(s) proposed by Amazon")
+
+        return {
+            "ok": True,
+            "plans": normalized_plans,
+            "totalPlans": len(normalized_plans),
+            "message": f"Amazon proposed {len(normalized_plans)} shipment(s). Review and confirm to create.",
+        }
+
+    except Exception as e:
+        logger.error(f"Create shipment plan error: {e}")
+        import traceback
+        logger.error(traceback.format_exc())
+        return JSONResponse(status_code=500, content={"ok": False, "error": str(e)})
+
+
+@router.post("/api/fba-shipments/confirm-plan")
+async def confirm_shipment_plan(request: Request):
+    """Confirm and create an inbound shipment from a plan.
+
+    Expects JSON body:
+    {
+        "shipmentId": "FBA17ABCDEF",
+        "shipmentName": "My Shipment March 2026",
+        "destinationFC": "PHX3",
+        "items": [
+            {"SellerSKU": "GGRTNW222810", "Quantity": 100}
+        ],
+        "shipFromAddress": { ... same as create-plan ... },
+        "labelPrepPreference": "SELLER_LABEL"
+    }
+    """
+    from core.auth import require_auth
+    require_auth(request)
+
+    try:
+        body = await request.json()
+    except Exception:
+        return JSONResponse(status_code=400, content={"error": "Invalid JSON body"})
+
+    shipment_id = body.get("shipmentId")
+    shipment_name = body.get("shipmentName", f"GolfGen Shipment {datetime.now(TIMEZONE).strftime('%m/%d/%Y')}")
+    dest_fc = body.get("destinationFC")
+    items = body.get("items", [])
+    ship_from = body.get("shipFromAddress")
+    label_pref = body.get("labelPrepPreference", "SELLER_LABEL")
+
+    if not shipment_id:
+        return JSONResponse(status_code=400, content={"error": "shipmentId is required (from plan)"})
+    if not dest_fc:
+        return JSONResponse(status_code=400, content={"error": "destinationFC is required"})
+    if not items:
+        return JSONResponse(status_code=400, content={"error": "At least one item is required"})
+    if not ship_from:
+        return JSONResponse(status_code=400, content={"error": "shipFromAddress is required"})
+
+    try:
+        from sp_api.api import FulfillmentInbound
+        from sp_api.base import Marketplaces
+    except ImportError:
+        return JSONResponse(status_code=500, content={"error": "SP-API library not installed"})
+
+    credentials = _load_sp_api_credentials()
+    if not credentials:
+        return JSONResponse(status_code=500, content={"error": "SP-API credentials not configured"})
+
+    try:
+        fba = FulfillmentInbound(
+            credentials=credentials,
+            marketplace=Marketplaces.US,
+        )
+
+        shipment_items = []
+        for item in items:
+            shipment_items.append({
+                "SellerSKU": item["SellerSKU"],
+                "QuantityShipped": int(item.get("Quantity", item.get("QuantityShipped", 0))),
+            })
+
+        logger.info(f"Confirming shipment plan {shipment_id}: {len(shipment_items)} items → {dest_fc}")
+
+        resp = fba.create_inbound_shipment(
+            ShipmentId=shipment_id,
+            InboundShipmentHeader={
+                "ShipmentName": shipment_name,
+                "ShipFromAddress": ship_from,
+                "DestinationFulfillmentCenterId": dest_fc,
+                "LabelPrepPreference": label_pref,
+                "ShipmentStatus": "WORKING",
+            },
+            InboundShipmentItems=shipment_items,
+            MarketplaceId="ATVPDKIKX0DER",
+        )
+
+        logger.info(f"Shipment {shipment_id} confirmed and created in Seller Central")
+
+        # Refresh the shipments cache
+        _fetch_fba_shipments_from_api()
+
+        return {
+            "ok": True,
+            "shipmentId": shipment_id,
+            "status": "WORKING",
+            "message": f"Shipment {shipment_id} created! It will appear in Seller Central. Set it to SHIPPED when you hand it to the carrier.",
+            "sellerCentralUrl": f"https://sellercentral.amazon.com/fba/inbound-queue/package?shipmentId={shipment_id}",
+        }
+
+    except Exception as e:
+        logger.error(f"Confirm shipment error: {e}")
+        import traceback
+        logger.error(traceback.format_exc())
+        return JSONResponse(status_code=500, content={"ok": False, "error": str(e)})
 
 
 def _n(v, default=0):

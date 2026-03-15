@@ -157,6 +157,11 @@ export const api = {
   fbaShipmentsSync: () =>
     fetch(`${API_BASE}/api/fba-shipments/sync`, { method: "POST", credentials: "include" }).then(r => r.json()),
   fbaShipmentItems: (shipmentId) => fetchJSON(`/api/fba-shipments/${encodeURIComponent(shipmentId)}/items`),
+  fbaShipmentProducts: () => fetchJSON(`/api/fba-shipments/products`),
+  fbaCreatePlan: (data) =>
+    fetch(`${API_BASE}/api/fba-shipments/create-plan`, { method: "POST", credentials: "include", headers: { "Content-Type": "application/json" }, body: JSON.stringify(data) }).then(r => r.json()),
+  fbaConfirmPlan: (data) =>
+    fetch(`${API_BASE}/api/fba-shipments/confirm-plan`, { method: "POST", credentials: "include", headers: { "Content-Type": "application/json" }, body: JSON.stringify(data) }).then(r => r.json()),
 
   // Item Planning (legacy)
   itemPlanning: () => fetchJSON(`/api/item-planning`),
