@@ -327,9 +327,10 @@ def inventory_kpis(division: Optional[str] = None, customer: Optional[str] = Non
         units_90d = str_map.get(asin, 0)
         sell_through_rate = round(units_90d / fulfillable, 2) if fulfillable > 0 else None
 
-        # Return Rate
-        refunds = refund_map.get(asin, {"count": 0, "amount": 0})
-        total_units = total_units_90d.get(asin, 0)
+        # Return Rate — financial_events.asin may be SellerSKU, not B-ASIN
+        sku_key = inv.get("sku") or ""
+        refunds = refund_map.get(asin, None) or refund_map.get(sku_key, {"count": 0, "amount": 0})
+        total_units = total_units_90d.get(asin, 0) or total_units_90d.get(sku_key, 0)
         return_rate = round(refunds["count"] / total_units, 4) if total_units > 0 else None
 
         items.append({
@@ -1507,14 +1508,19 @@ def inventory_command_center(
             })
 
     # ── 10c. Return rate by SKU table ────────────────────────────────────────
+    # financial_events.asin may store SellerSKU (e.g. GGRTNW222810) instead of
+    # B-ASIN (e.g. B0B2YBWKL8) because the Finances API sometimes lacks ASIN.
+    # Check both the B-ASIN and the seller SKU when looking up refund/shipment data.
     return_rate_table = []
     for asin, inv in inv_map.items():
-        refund_count = _n(refund_map.get(asin, 0))
-        total_u = _n(total_units_map.get(asin, 0))
+        sku = inv.get("sku") or ""
+        # Try B-ASIN first, then seller SKU as fallback key
+        refund_count = _n(refund_map.get(asin, 0)) or _n(refund_map.get(sku, 0))
+        total_u = _n(total_units_map.get(asin, 0)) or _n(total_units_map.get(sku, 0))
         if total_u > 3:  # Lower threshold — include SKUs with at least a few sales
             rate = round(refund_count / total_u * 100, 1) if total_u > 0 else 0
             return_rate_table.append({
-                "sku": inv["sku"] or asin,
+                "sku": sku or asin,
                 "name": inv.get("name", asin),
                 "sold": int(total_u),
                 "returned": int(refund_count),
@@ -1522,12 +1528,13 @@ def inventory_command_center(
             })
     # Also include FBM items in return rate
     for asin, inv in fbm_map.items():
-        refund_count = _n(refund_map.get(asin, 0))
-        total_u = _n(total_units_map.get(asin, 0))
+        sku = inv.get("sku") or ""
+        refund_count = _n(refund_map.get(asin, 0)) or _n(refund_map.get(sku, 0))
+        total_u = _n(total_units_map.get(asin, 0)) or _n(total_units_map.get(sku, 0))
         if total_u > 3:
             rate = round(refund_count / total_u * 100, 1) if total_u > 0 else 0
             return_rate_table.append({
-                "sku": inv["sku"] or asin,
+                "sku": sku or asin,
                 "name": inv.get("name", asin),
                 "sold": int(total_u),
                 "returned": int(refund_count),
