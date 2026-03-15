@@ -481,7 +481,6 @@ def sales_summary(
             ly_orders = ly_units
         ty_aov = round(ty_sales / ty_orders, 2) if ty_orders else 0
         ly_aov = round(ly_sales / ly_orders, 2) if ly_orders else 0
-
         ty_conv = round(ty_units / ty_sessions, 4) if ty_sessions else 0
         ly_conv = round(ly_units / ly_sessions, 4) if ly_sessions else 0
         # CTR from advertising table (clicks / impressions); 0 when ads data absent
@@ -523,12 +522,11 @@ def sales_summary(
         ly_fees = _sum_fees(ly_sd, ly_ed, hp)
 
         # financial_events stores PostedDate (settlement, ~14 days after order).
-        # For longer periods (WTD, MTD, YTD), partial settlement data makes fees
-        # appear artificially low. If fee-to-revenue ratio < 20% (expected ~27%),
-        # settlement lag is likely the cause — use estimated 27% instead.
-        if ty_sales > 0 and ty_fees < ty_sales * 0.20:
+        # Fall back to estimated 27% of sales ONLY when financial_events
+        # returned truly zero fees (no data for the period at all).
+        if ty_sales > 0 and ty_fees == 0:
             ty_fees = round(ty_sales * 0.27, 2)
-        if ly_sales > 0 and ly_fees < ly_sales * 0.20:
+        if ly_sales > 0 and ly_fees == 0:
             ly_fees = round(ly_sales * 0.27, 2)
 
         # Ad spend
@@ -718,9 +716,6 @@ def sales_period_comparison(
             },
             "daily": {
                 "Today": "today", "Yesterday": "yesterday",
-                "2 Days Ago": "2_days_ago", "3 Days Ago": "3_days_ago",
-                "4 Days Ago": "4_days_ago", "5 Days Ago": "5_days_ago",
-                "6 Days Ago": "6_days_ago",
             },
             "weekly": {
                 "WTD": "wtd", "Last Week": "last_week",
@@ -729,7 +724,6 @@ def sales_period_comparison(
             },
             "monthly": {
                 "MTD": "mtd", "Last Month": "last_month",
-                "2 Months Ago": "2_months_ago", "3 Months Ago": "3_months_ago",
                 "Last 12 Months": "last_12m",
             },
             "yearly": {
@@ -806,11 +800,6 @@ def sales_period_comparison(
                 # Orders can never exceed units — cap it
                 if units > 0 and orders > units:
                     orders = units
-                # Orders table only has recent data (~30 days).
-                # If orders count is suspiciously low vs units, the table
-                # doesn't cover this period — fall back to units.
-                if units > 0 and orders > 0 and orders < units * 0.3:
-                    orders = units
             except Exception:
                 orders = units
             try:
@@ -825,13 +814,10 @@ def sales_period_comparison(
                 ly_orders = int(ly_o_row[0]) if ly_o_row and ly_o_row[0] else ly_units
                 if ly_units > 0 and ly_orders > ly_units:
                     ly_orders = ly_units
-                if ly_units > 0 and ly_orders > 0 and ly_orders < ly_units * 0.3:
-                    ly_orders = ly_units
             except Exception:
                 ly_orders = ly_units
             aur = round(float(sales) / units, 2) if units else 0
             aov = round(float(sales) / orders, 2) if orders else 0
-
             conv = round(float(units) / sessions, 4) if sessions else 0
             ctr = 0
             ly_aur = round(float(ly_sales) / ly_units, 2) if ly_units else 0
@@ -1238,22 +1224,19 @@ def sales_fee_breakdown(
         actual_total = fba + referral + other + promo + shipping
         estimated = False
 
-        # financial_events PostedDate lag — recent periods may return 0 or
-        # suspiciously low totals (< 20% of revenue) due to settlement lag.
-        # Estimate from daily_sales revenue when actuals are incomplete.
-        sales_row = con.execute(f"""
-            SELECT COALESCE(SUM(ordered_product_sales), 0)
-            FROM daily_sales
-            WHERE asin = 'ALL' AND date >= ? AND date <= ? {hw}
-        """, [str(sd), str(ed)] + hp).fetchone()
-        est_sales = float(sales_row[0]) if sales_row else 0
-        if est_sales > 0 and actual_total < est_sales * 0.20:
-            fba = round(est_sales * 0.12, 2)
-            referral = round(est_sales * 0.15, 2)
-            other = 0
-            promo = 0
-            shipping = 0
-            estimated = True
+        # financial_events PostedDate lag — recent periods may return 0.
+        # Estimate from daily_sales revenue when actuals are suspiciously low.
+        if actual_total == 0:
+            sales_row = con.execute(f"""
+                SELECT COALESCE(SUM(ordered_product_sales), 0)
+                FROM daily_sales
+                WHERE asin = 'ALL' AND date >= ? AND date <= ? {hw}
+            """, [str(sd), str(ed)] + hp).fetchone()
+            est_sales = float(sales_row[0]) if sales_row else 0
+            if est_sales > 0:
+                fba = round(est_sales * 0.12, 2)
+                referral = round(est_sales * 0.15, 2)
+                estimated = True
 
         con.close()
 
@@ -1589,11 +1572,12 @@ def summary(
     division: str | None = Query(None),
     customer: str | None = Query(None),
     platform: str | None = Query(None),
+    marketplace: str | None = Query(None),
 ):
     """High-level KPIs: revenue, units, orders, sessions, AUR, conv rate."""
     con = get_db()
     cutoff = (get_today(con) - timedelta(days=days)).strftime("%Y-%m-%d") if days > 0 else get_today(con).strftime("%Y-%m-%d")
-    hf, hp = _hierarchy_filter(division, customer, platform)
+    hf, hp = _hierarchy_filter(division, customer, platform, marketplace)
 
     revenue = 0
     units = 0
@@ -1680,7 +1664,7 @@ def summary(
             SELECT COALESCE(COUNT(*), 0),
                    COALESCE(SUM(ABS(product_charges)), 0)
             FROM financial_events
-            WHERE date >= ? AND (event_type ILIKE '%%refund%%' OR event_type ILIKE '%%return%%'){hf}
+            WHERE date >= ? AND event_type = 'Refund'{hf}
         """, [cutoff] + hp).fetchone()
         if ret_row:
             returns_units = int(ret_row[0])
@@ -1726,11 +1710,12 @@ def get_daily_sales(
     division: str | None = Query(None),
     customer: str | None = Query(None),
     platform: str | None = Query(None),
+    marketplace: str | None = Query(None),
 ):
     """Time-series sales data for charts."""
     con = get_db()
     cutoff = (get_today(con) - timedelta(days=days)).strftime("%Y-%m-%d")
-    hf, hp = _hierarchy_filter(division, customer, platform)
+    hf, hp = _hierarchy_filter(division, customer, platform, marketplace)
 
     analytics_data = {}
     try:
@@ -1822,6 +1807,7 @@ def products(
     division: str | None = Query(None),
     customer: str | None = Query(None),
     platform: str | None = Query(None),
+    marketplace: str | None = Query(None),
 ):
     """Product breakdown with profitability metrics."""
     con = get_db()
@@ -1884,6 +1870,7 @@ def period_comparison(
     division: str | None = Query(None),
     customer: str | None = Query(None),
     platform: str | None = Query(None),
+    marketplace: str | None = Query(None),
 ):
     """Return KPI comparison across multiple time periods (legacy)."""
     con = get_db()
@@ -1962,7 +1949,7 @@ def period_comparison(
             {"label": "YTD", "start": year_start.strftime("%Y-%m-%d"), "end": tomorrow},
         ]
 
-    hf, hp = _hierarchy_filter(division, customer, platform)
+    hf, hp = _hierarchy_filter(division, customer, platform, marketplace)
 
     def chg(cur, prev):
         if prev == 0:
@@ -2127,10 +2114,11 @@ def monthly_yoy(
     division: str | None = Query(None),
     customer: str | None = Query(None),
     platform: str | None = Query(None),
+    marketplace: str | None = Query(None),
 ):
     """Monthly revenue broken down by year for YoY comparison (legacy)."""
     con = get_db()
-    hf, hp = _hierarchy_filter(division, customer, platform)
+    hf, hp = _hierarchy_filter(division, customer, platform, marketplace)
     rows = None
 
     try:
@@ -2192,6 +2180,7 @@ def product_mix(
     division: str | None = Query(None),
     customer: str | None = Query(None),
     platform: str | None = Query(None),
+    marketplace: str | None = Query(None),
 ):
     """Top 10 products by revenue for donut chart."""
     con = get_db()
@@ -2216,6 +2205,7 @@ def color_mix(
     division: str | None = Query(None),
     customer: str | None = Query(None),
     platform: str | None = Query(None),
+    marketplace: str | None = Query(None),
 ):
     """Sales breakdown by color extracted from product names."""
     con = get_db()
@@ -2244,4 +2234,3 @@ def color_mix(
         result.append({"color": color, "revenue": round(rev, 2), "pct": pct})
 
     return {"colors": result, "total": round(total_rev, 2)}
-

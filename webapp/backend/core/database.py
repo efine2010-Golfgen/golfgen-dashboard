@@ -361,19 +361,6 @@ def _init_auth_tables():
         )
     """)
 
-    # ── Passkey / WebAuthn credentials table ───────────────
-    con.execute("""
-        CREATE TABLE IF NOT EXISTS passkey_credentials (
-            id              TEXT PRIMARY KEY,
-            user_key        TEXT NOT NULL,
-            credential_id   TEXT NOT NULL UNIQUE,
-            public_key      TEXT NOT NULL,
-            sign_count      INTEGER DEFAULT 0,
-            device_name     TEXT DEFAULT '',
-            created_at      TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-        )
-    """)
-
     # Seed default permissions for staff users (all enabled)
     for ukey, udata in USERS.items():
         if udata["role"] == "staff":
@@ -546,6 +533,19 @@ def _init_sales_tables():
                 con.execute(f"ALTER TABLE {tbl} ADD COLUMN {col} TEXT DEFAULT NULL")
             except Exception:
                 pass  # column already exists
+
+    # Add marketplace column to all transactional and analytics tables (safe ALTER for upgrades)
+    marketplace_tables = [
+        "orders", "daily_sales", "fba_inventory", "financial_events",
+        "advertising", "ads_campaigns", "ads_keywords", "ads_search_terms",
+        "ads_negative_keywords", "staging_orders", "staging_financial_events",
+        "analytics_daily", "analytics_sku", "analytics_ads"
+    ]
+    for tbl in marketplace_tables:
+        try:
+            con.execute(f"ALTER TABLE {tbl} ADD COLUMN marketplace VARCHAR DEFAULT 'US'")
+        except Exception:
+            pass  # column already exists
 
     # Also add product_name column to daily_sales if missing (used by reports)
     try:

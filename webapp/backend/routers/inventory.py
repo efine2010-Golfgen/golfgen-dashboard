@@ -152,12 +152,12 @@ def save_item_master(items: list):
 
 
 @router.get("/api/inventory")
-def inventory(division: Optional[str] = None, customer: Optional[str] = None, platform: Optional[str] = None):
+def inventory(division: Optional[str] = None, customer: Optional[str] = None, platform: Optional[str] = None, marketplace: Optional[str] = None):
     """Current FBA inventory with days-of-supply calculations."""
     con = get_db()
     cogs_data = load_cogs()
 
-    hf, hp = hierarchy_filter(division, customer, platform)
+    hf, hp = hierarchy_filter(division, customer, platform, marketplace)
     # For fba_inventory the hf starts with " AND ...", convert to WHERE if needed
     inv_where = (" WHERE " + hf.lstrip(" AND ")) if hf else ""
     inv_rows = con.execute(f"""
@@ -213,7 +213,7 @@ def inventory(division: Optional[str] = None, customer: Optional[str] = None, pl
 
 
 @router.get("/api/inventory/kpis")
-def inventory_kpis(division: Optional[str] = None, customer: Optional[str] = None, platform: Optional[str] = None):
+def inventory_kpis(division: Optional[str] = None, customer: Optional[str] = None, platform: Optional[str] = None, marketplace: Optional[str] = None):
     """Advanced inventory KPIs: Days of Cover, Weeks of Cover, Reorder Point,
     Sell-Through Rate, and Return Rate — per ASIN.
 
@@ -222,7 +222,7 @@ def inventory_kpis(division: Optional[str] = None, customer: Optional[str] = Non
     financial_events (refunds), and item_master (lead time / safety stock).
     """
     con = get_db()
-    hf, hp = hierarchy_filter(division, customer, platform)
+    hf, hp = hierarchy_filter(division, customer, platform, marketplace)
 
     # ── 1. Current FBA inventory ──────────────────────────────────────────────
     inv_where = (" WHERE " + hf.lstrip(" AND ")) if hf else ""
@@ -1720,6 +1720,7 @@ def inventory_command_center(
     division: Optional[str] = None,
     customer: Optional[str] = None,
     platform: Optional[str] = None,
+    marketplace: Optional[str] = None,
 ):
     """Comprehensive inventory command center data — serves all mockup sections.
 
@@ -1729,7 +1730,7 @@ def inventory_command_center(
     """
     con = get_db()
     cogs_data = load_cogs()
-    hf, hp = hierarchy_filter(division, customer, platform)
+    hf, hp = hierarchy_filter(division, customer, platform, marketplace)
     inv_where = (" WHERE " + hf.lstrip(" AND ")) if hf else ""
 
     # ── 1. Current FBA Inventory (latest snapshot date only) ─────────────────

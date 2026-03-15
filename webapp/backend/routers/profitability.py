@@ -15,16 +15,6 @@ logger = logging.getLogger("golfgen")
 router = APIRouter()
 
 
-def _n(v, default=0):
-    """Coerce Decimal / None to float for JSON-safe serialisation."""
-    if v is None:
-        return default
-    try:
-        return float(v)
-    except (TypeError, ValueError):
-        return default
-
-
 def get_today(con) -> datetime:
     """Get today's date from the latest row in database."""
     try:
@@ -61,9 +51,9 @@ def load_cogs() -> dict:
     return cogs
 
 
-def _build_product_list(con, cutoff: str, division: str = None, customer: str = None, platform: str = None) -> list:
+def _build_product_list(con, cutoff: str, division: str = None, customer: str = None, platform: str = None, marketplace: str = None) -> list:
     """Build per-ASIN product list with revenue, units, COGS, fees, and ad spend."""
-    hf, hp = hierarchy_filter(division, customer, platform)
+    hf, hp = hierarchy_filter(division, customer, platform, marketplace)
     filters = "WHERE date >= ? AND asin <> 'ALL'" + hf
     params = [cutoff] + hp
     asin_rows = con.execute(f"""
@@ -88,7 +78,7 @@ def _build_product_list(con, cutoff: str, division: str = None, customer: str = 
     products = []
 
     for r in asin_rows:
-        asin, rev, units = r[0], _n(r[1]), _n(r[2])
+        asin, rev, units = r[0], r[1], r[2]
         inv = inv_names.get(asin, {})
         sku = inv.get("sku", "")
         name = inv.get("product_name", "") or cogs_data.get(asin, {}).get("product_name", "")
@@ -113,7 +103,7 @@ def _build_product_list(con, cutoff: str, division: str = None, customer: str = 
             FROM financial_events
             {fin_filter}
         """, fin_params).fetchone()
-        fba_actual, comm_actual = (_n(fin_row[0]), _n(fin_row[1])) if fin_row else (0, 0)
+        fba_actual, comm_actual = fin_row if fin_row else (0, 0)
 
         fbaTotal = fba_actual if fba_actual > 0 else round(rev * 0.12, 2)
         referralTotal = comm_actual if comm_actual > 0 else round(rev * 0.15, 2)
@@ -134,7 +124,7 @@ def _build_product_list(con, cutoff: str, division: str = None, customer: str = 
                 FROM advertising
                 {ad_filter}
             """, ad_params).fetchone()
-            adSpend = _n(ad_row[0]) if ad_row else 0
+            adSpend = ad_row[0] if ad_row else 0
         except Exception:
             pass
 
@@ -144,15 +134,15 @@ def _build_product_list(con, cutoff: str, division: str = None, customer: str = 
             "asin": asin,
             "sku": sku,
             "name": name,
-            "units": _n(units),
-            "rev": _n(rev),
-            "price": _n(aur),
-            "cogsPerUnit": _n(cogsPerUnit),
-            "cogsTotal": _n(cogsTotal),
-            "fbaTotal": _n(fbaTotal),
-            "referralTotal": _n(referralTotal),
-            "adSpend": _n(adSpend),
-            "net": _n(net),
+            "units": units,
+            "rev": rev,
+            "price": aur,
+            "cogsPerUnit": cogsPerUnit,
+            "cogsTotal": cogsTotal,
+            "fbaTotal": fbaTotal,
+            "referralTotal": referralTotal,
+            "adSpend": adSpend,
+            "net": net,
         })
 
     return products
@@ -219,31 +209,22 @@ def _ensure_today_data():
 
 
 @router.get("/api/pnl")
-def pnl_waterfall(days: int = Query(365), division: Optional[str] = None, customer: Optional[str] = None, platform: Optional[str] = None):
+def pnl_waterfall(days: int = Query(365), division: Optional[str] = None, customer: Optional[str] = None, platform: Optional[str] = None, marketplace: Optional[str] = None):
     """Profit & Loss waterfall data, scaled to actual revenue from ALL rows."""
-    import traceback
-    try:
-        return _pnl_waterfall_inner(days, division, customer, platform)
-    except Exception as e:
-        logger.error(f"PNL endpoint error: {traceback.format_exc()}")
-        raise
-
-
-def _pnl_waterfall_inner(days, division, customer, platform):
     con = get_db()
     cutoff = (datetime.now(ZoneInfo("America/Chicago")) - timedelta(days=days)).strftime("%Y-%m-%d")
 
     # Actual revenue from 'ALL' daily rows
-    hf, hp = hierarchy_filter(division, customer, platform)
+    hf, hp = hierarchy_filter(division, customer, platform, marketplace)
     rev_filter = "WHERE date >= ? AND asin = 'ALL'" + hf
     rev_params = [cutoff] + hp
-    actual_rev = _n(con.execute(f"""
+    actual_rev = con.execute(f"""
         SELECT COALESCE(SUM(ordered_product_sales), 0)
         FROM daily_sales {rev_filter}
-    """, rev_params).fetchone()[0])
+    """, rev_params).fetchone()[0]
 
     # Cost breakdown from per-ASIN data
-    products = _build_product_list(con, cutoff, division, customer, platform)
+    products = _build_product_list(con, cutoff, division, customer, platform, marketplace)
 
     prod_rev = sum(p["rev"] for p in products)
     prod_cogs = sum(p["cogsTotal"] for p in products)
@@ -289,31 +270,22 @@ def _pnl_waterfall_inner(days, division, customer, platform):
 
     return {
         "days": days,
-        "revenue": _n(round(actual_rev, 2)),
-        "cogs": _n(cogs),
-        "fbaFees": _n(fba),
-        "referralFees": _n(referral),
-        "adSpend": _n(ad_spend),
-        "netProfit": _n(net),
+        "revenue": round(actual_rev, 2),
+        "cogs": cogs,
+        "fbaFees": fba,
+        "referralFees": referral,
+        "adSpend": ad_spend,
+        "netProfit": net,
     }
 
 
 @router.get("/api/profitability")
-def profitability(view: str = Query("realtime"), division: Optional[str] = None, customer: Optional[str] = None, platform: Optional[str] = None):
+def profitability(view: str = Query("realtime"), division: Optional[str] = None, customer: Optional[str] = None, platform: Optional[str] = None, marketplace: Optional[str] = None):
     """Sellerboard-style profit waterfall with same period views as comparison.
 
     Waterfall: Sales - Promo - Ads - Shipping - Refunds - Amazon Fees - COGS - Indirect = Net Profit
     Returns both account-level waterfall and per-ASIN item breakdown.
     """
-    import traceback
-    try:
-        return _profitability_inner(view, division, customer, platform)
-    except Exception as e:
-        logger.error(f"Profitability endpoint error: {traceback.format_exc()}")
-        raise
-
-
-def _profitability_inner(view, division, customer, platform):
     # Ensure today has live data before building the response
     _ensure_today_data()
 
@@ -394,7 +366,7 @@ def _profitability_inner(view, division, customer, platform):
 
     results = []
     for p in periods:
-        wf = _build_waterfall(con, cogs_data, p["start"], p["end"], division, customer, platform)
+        wf = _build_waterfall(con, cogs_data, p["start"], p["end"], division, customer, platform, marketplace)
         wf["label"] = p["label"]
         wf["sub"] = p.get("sub", "")
         results.append(wf)
@@ -404,23 +376,14 @@ def _profitability_inner(view, division, customer, platform):
 
 
 @router.get("/api/profitability/items")
-def profitability_items(days: int = Query(365), division: Optional[str] = None, customer: Optional[str] = None, platform: Optional[str] = None):
+def profitability_items(days: int = Query(365), division: Optional[str] = None, customer: Optional[str] = None, platform: Optional[str] = None, marketplace: Optional[str] = None):
     """Per-ASIN profitability breakdown matching Sellerboard item view."""
-    import traceback
-    try:
-        return _profitability_items_inner(days, division, customer, platform)
-    except Exception as e:
-        logger.error(f"Profitability items endpoint error: {traceback.format_exc()}")
-        raise
-
-
-def _profitability_items_inner(days, division, customer, platform):
     con = get_db()
     cutoff = (datetime.now(ZoneInfo("America/Chicago")) - timedelta(days=days)).strftime("%Y-%m-%d")
-    products = _build_product_list(con, cutoff, division, customer, platform)
+    products = _build_product_list(con, cutoff, division, customer, platform, marketplace)
 
     # Get per-ASIN financial event data for the period
-    hf, hp = hierarchy_filter(division, customer, platform)
+    hf, hp = hierarchy_filter(division, customer, platform, marketplace)
     fin_filter = "WHERE date >= ?" + hf
     fin_params = [cutoff] + hp
     fin_by_asin = {}
@@ -438,8 +401,8 @@ def _profitability_items_inner(days, division, customer, platform):
             {fin_filter}
             GROUP BY asin
         """, fin_params).fetchall()
-        fin_by_asin = {r[0]: {"promo": _n(r[1]), "shipping": _n(r[2]), "other": _n(r[3]),
-                                "refund_amt": _n(r[4]), "refund_count": _n(r[5])} for r in fin_rows}
+        fin_by_asin = {r[0]: {"promo": r[1], "shipping": r[2], "other": r[3],
+                                "refund_amt": r[4], "refund_count": r[5]} for r in fin_rows}
     except Exception:
         pass
 
@@ -454,7 +417,7 @@ def _profitability_items_inner(days, division, customer, platform):
             {ad_filter}
             GROUP BY asin
         """, ad_params).fetchall()
-        ad_by_asin = {r[0]: _n(r[1]) for r in ad_rows}
+        ad_by_asin = {r[0]: r[1] for r in ad_rows}
     except Exception:
         pass
 
@@ -524,32 +487,32 @@ def _profitability_items_inner(days, division, customer, platform):
             "asin": asin,
             "sku": p["sku"],
             "name": p["name"],
-            "units": _n(p["units"]),
-            "sales": _n(rev),
-            "promo": _n(round(fin.get("promo", 0), 2)),
-            "adSpend": _n(round(ad_spend, 2)),
-            "shipping": _n(round(fin.get("shipping", 0), 2)),
-            "refunds": _n(round(fin.get("refund_amt", 0), 2)),
-            "refundUnits": _n(refund_units),
-            "returnPct": _n(return_pct),
-            "amazonFees": _n(round(amazon_fees, 2)),
-            "fbaFees": _n(p["fbaTotal"]),
-            "referralFees": _n(p["referralTotal"]),
-            "otherFees": _n(round(fin.get("other", 0), 2)),
-            "cogs": _n(cogs_total),
-            "cogsPerUnit": _n(p["cogsPerUnit"]),
+            "units": p["units"],
+            "sales": rev,
+            "promo": round(fin.get("promo", 0), 2),
+            "adSpend": round(ad_spend, 2),
+            "shipping": round(fin.get("shipping", 0), 2),
+            "refunds": round(fin.get("refund_amt", 0), 2),
+            "refundUnits": refund_units,
+            "returnPct": return_pct,
+            "amazonFees": round(amazon_fees, 2),
+            "fbaFees": p["fbaTotal"],
+            "referralFees": p["referralTotal"],
+            "otherFees": round(fin.get("other", 0), 2),
+            "cogs": cogs_total,
+            "cogsPerUnit": p["cogsPerUnit"],
             "indirect": 0,
-            "netProfit": _n(net),
-            "margin": _n(margin),
-            "roi": _n(roi),
-            "aur": _n(p["price"]),
+            "netProfit": net,
+            "margin": margin,
+            "roi": roi,
+            "aur": p["price"],
             # New coupon/pricing fields
             "couponStatus": coupon_status,
             "couponEndDate": coupon_end_date,
-            "couponDiscount": _n(coupon_discount) if coupon_discount is not None else None,
+            "couponDiscount": coupon_discount,
             "couponType": coupon_type,
-            "salePrice": _n(sale_price) if sale_price is not None else None,
-            "listPrice": _n(list_price) if list_price is not None else None,
+            "salePrice": sale_price,
+            "listPrice": list_price,
             "salePriceStartDate": sale_price_start_date,
             "salePriceEndDate": sale_price_end_date,
         })
@@ -559,10 +522,10 @@ def _profitability_items_inner(days, division, customer, platform):
     return {"days": days, "items": items}
 
 
-def _build_waterfall(con, cogs_data, start: str, end: str, division: str = None, customer: str = None, platform: str = None) -> dict:
+def _build_waterfall(con, cogs_data, start: str, end: str, division: str = None, customer: str = None, platform: str = None, marketplace: str = None) -> dict:
     """Build Sellerboard-style waterfall for a single period."""
     # Build dynamic filter fragments
-    div_cust_sql, div_cust_params = hierarchy_filter(division, customer, platform)
+    div_cust_sql, div_cust_params = hierarchy_filter(division, customer, platform, marketplace)
 
     # Account-level revenue
     row = con.execute(f"""
@@ -571,7 +534,7 @@ def _build_waterfall(con, cogs_data, start: str, end: str, division: str = None,
         FROM daily_sales
         WHERE date >= ? AND date < ? AND asin = 'ALL'{div_cust_sql}
     """, [start, end] + div_cust_params).fetchone()
-    sales, units = _n(row[0]), _n(row[1])
+    sales, units = row[0], row[1]
 
     # Per-ASIN cost breakdown
     asin_rows = con.execute(f"""
@@ -623,9 +586,9 @@ def _build_waterfall(con, cogs_data, start: str, end: str, division: str = None,
         raw_key = r[0]
         # Try to resolve SKU to real ASIN
         resolved = sku_to_asin.get(raw_key, raw_key)
-        entry = {"fba": _n(r[1]), "comm": _n(r[2]), "promo": _n(r[3]),
-                 "shipping": _n(r[4]), "other": _n(r[5]),
-                 "refund_amt": _n(r[6]), "refund_count": _n(r[7])}
+        entry = {"fba": r[1], "comm": r[2], "promo": r[3],
+                 "shipping": r[4], "other": r[5],
+                 "refund_amt": r[6], "refund_count": r[7]}
         if resolved in fin_by_asin:
             # Merge if multiple SKUs map to same ASIN
             for k in entry:
@@ -651,9 +614,9 @@ def _build_waterfall(con, cogs_data, start: str, end: str, division: str = None,
             WHERE date >= ? AND date < ?{div_cust_sql}
         """, [start, end] + div_cust_params).fetchone()
         if acct_row and acct_row[0] is not None:
-            acct_fin = {"fba": _n(acct_row[0]), "comm": _n(acct_row[1]), "promo": _n(acct_row[2]),
-                        "shipping": _n(acct_row[3]), "other": _n(acct_row[4]),
-                        "refund_amt": _n(acct_row[5]), "refund_count": _n(acct_row[6])}
+            acct_fin = {"fba": acct_row[0], "comm": acct_row[1], "promo": acct_row[2],
+                        "shipping": acct_row[3], "other": acct_row[4],
+                        "refund_amt": acct_row[5], "refund_count": acct_row[6]}
     except Exception:
         pass
 
@@ -665,7 +628,7 @@ def _build_waterfall(con, cogs_data, start: str, end: str, division: str = None,
             FROM advertising
             WHERE date >= ? AND date < ?{div_cust_sql}
         """, [start, end] + div_cust_params).fetchone()
-        total_ad = _n(ad_row[0]) if ad_row else 0
+        total_ad = ad_row[0] if ad_row else 0
     except Exception:
         pass
 
@@ -681,7 +644,7 @@ def _build_waterfall(con, cogs_data, start: str, end: str, division: str = None,
     prod_rev = 0
 
     for ar in asin_rows:
-        asin, rev, u = ar[0], _n(ar[1]), _n(ar[2])
+        asin, rev, u = ar[0], ar[1], ar[2]
         sku = ""
         if u == 0:
             continue
@@ -748,7 +711,7 @@ def _build_waterfall(con, cogs_data, start: str, end: str, division: str = None,
     elif sales > 0:
         # No per-ASIN data for this period — use global cost ratios
         # This happens when SP-API per-ASIN report data has different dates
-        all_products = _build_product_list(con, "2020-01-01", division, customer, platform)
+        all_products = _build_product_list(con, "2020-01-01", division, customer, platform, marketplace)
         total_prd_rev = sum(p["rev"] for p in all_products)
         if total_prd_rev > 0:
             cogs_pct = sum(p["cogsTotal"] for p in all_products) / total_prd_rev
@@ -779,23 +742,23 @@ def _build_waterfall(con, cogs_data, start: str, end: str, division: str = None,
     real_acos = round(ad_spend / sales * 100, 1) if sales > 0 else 0
 
     return {
-        "sales": _n(round(sales, 2)),
-        "units": _n(units),
-        "promo": _n(promo),
-        "adSpend": _n(ad_spend),
-        "shipping": _n(shipping),
-        "refunds": _n(refunds),
-        "refundUnits": _n(refund_units),
-        "returnPct": _n(return_pct),
-        "amazonFees": _n(amazon_fees),
-        "fbaFees": _n(fba_fees),
-        "referralFees": _n(referral_fees),
-        "otherFees": _n(other_fees),
-        "cogs": _n(cogs),
-        "indirect": _n(indirect),
-        "grossProfit": _n(gross_profit),
-        "netProfit": _n(net_profit),
-        "margin": _n(margin),
-        "roi": _n(roi),
-        "realAcos": _n(real_acos),
+        "sales": round(sales, 2),
+        "units": units,
+        "promo": promo,
+        "adSpend": ad_spend,
+        "shipping": shipping,
+        "refunds": refunds,
+        "refundUnits": refund_units,
+        "returnPct": return_pct,
+        "amazonFees": amazon_fees,
+        "fbaFees": fba_fees,
+        "referralFees": referral_fees,
+        "otherFees": other_fees,
+        "cogs": cogs,
+        "indirect": indirect,
+        "grossProfit": gross_profit,
+        "netProfit": net_profit,
+        "margin": margin,
+        "roi": roi,
+        "realAcos": real_acos,
     }

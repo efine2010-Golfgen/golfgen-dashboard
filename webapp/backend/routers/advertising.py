@@ -40,12 +40,12 @@ def _safe_ads_query(con, query, params=None):
 
 
 @router.get("/api/ads/summary")
-def ads_summary(days: int = Query(30), division: Optional[str] = None, customer: Optional[str] = None, platform: Optional[str] = None):
+def ads_summary(days: int = Query(30), division: Optional[str] = None, customer: Optional[str] = None, platform: Optional[str] = None, marketplace: Optional[str] = None):
     """Ads KPIs: total spend, sales, ACOS, ROAS, TACOS, CPC, CTR."""
     con = get_db()
     cutoff = (datetime.now(ZoneInfo("America/Chicago")) - timedelta(days=days)).strftime("%Y-%m-%d")
 
-    div_cust_sql, div_cust_params = hierarchy_filter(division, customer, platform)
+    div_cust_sql, div_cust_params = hierarchy_filter(division, customer, platform, marketplace)
 
     row = _safe_ads_query(con, f"""
         SELECT
@@ -105,12 +105,12 @@ def ads_summary(days: int = Query(30), division: Optional[str] = None, customer:
 
 
 @router.get("/api/ads/daily")
-def ads_daily(days: int = Query(30), division: Optional[str] = None, customer: Optional[str] = None, platform: Optional[str] = None):
+def ads_daily(days: int = Query(30), division: Optional[str] = None, customer: Optional[str] = None, platform: Optional[str] = None, marketplace: Optional[str] = None):
     """Daily ads performance time series."""
     con = get_db()
     cutoff = (datetime.now(ZoneInfo("America/Chicago")) - timedelta(days=days)).strftime("%Y-%m-%d")
 
-    div_cust_sql, div_cust_params = hierarchy_filter(division, customer, platform)
+    div_cust_sql, div_cust_params = hierarchy_filter(division, customer, platform, marketplace)
 
     rows = _safe_ads_query(con, f"""
         SELECT date,
@@ -151,11 +151,11 @@ def ads_daily(days: int = Query(30), division: Optional[str] = None, customer: O
 
 
 @router.get("/api/ads/campaigns")
-def ads_campaigns(days: int = Query(30), division: Optional[str] = None, customer: Optional[str] = None, platform: Optional[str] = None):
+def ads_campaigns(days: int = Query(30), division: Optional[str] = None, customer: Optional[str] = None, platform: Optional[str] = None, marketplace: Optional[str] = None):
     """Campaign-level performance."""
     con = get_db()
     cutoff = (datetime.now(ZoneInfo("America/Chicago")) - timedelta(days=days)).strftime("%Y-%m-%d")
-    hf, hp = hierarchy_filter(division, customer, platform)
+    hf, hp = hierarchy_filter(division, customer, platform, marketplace)
 
     rows = _safe_ads_query(con, f"""
         SELECT
@@ -206,11 +206,11 @@ def ads_campaigns(days: int = Query(30), division: Optional[str] = None, custome
 
 
 @router.get("/api/ads/keywords")
-def ads_keywords(days: int = Query(30), sort: str = Query("spend"), limit: int = Query(50), division: Optional[str] = None, customer: Optional[str] = None, platform: Optional[str] = None):
+def ads_keywords(days: int = Query(30), sort: str = Query("spend"), limit: int = Query(50), division: Optional[str] = None, customer: Optional[str] = None, platform: Optional[str] = None, marketplace: Optional[str] = None):
     """Top keywords by spend, sales, or ACOS."""
     con = get_db()
     cutoff = (datetime.now(ZoneInfo("America/Chicago")) - timedelta(days=days)).strftime("%Y-%m-%d")
-    hf, hp = hierarchy_filter(division, customer, platform)
+    hf, hp = hierarchy_filter(division, customer, platform, marketplace)
 
     rows = _safe_ads_query(con, f"""
         SELECT
@@ -260,11 +260,11 @@ def ads_keywords(days: int = Query(30), sort: str = Query("spend"), limit: int =
 
 
 @router.get("/api/ads/search-terms")
-def ads_search_terms(days: int = Query(30), limit: int = Query(50), division: Optional[str] = None, customer: Optional[str] = None, platform: Optional[str] = None):
+def ads_search_terms(days: int = Query(30), limit: int = Query(50), division: Optional[str] = None, customer: Optional[str] = None, platform: Optional[str] = None, marketplace: Optional[str] = None):
     """Top search terms by spend."""
     con = get_db()
     cutoff = (datetime.now(ZoneInfo("America/Chicago")) - timedelta(days=days)).strftime("%Y-%m-%d")
-    hf, hp = hierarchy_filter(division, customer, platform)
+    hf, hp = hierarchy_filter(division, customer, platform, marketplace)
 
     rows = _safe_ads_query(con, f"""
         SELECT
@@ -313,10 +313,10 @@ def ads_search_terms(days: int = Query(30), limit: int = Query(50), division: Op
 
 
 @router.get("/api/ads/negative-keywords")
-def ads_negative_keywords(division: Optional[str] = None, customer: Optional[str] = None, platform: Optional[str] = None):
+def ads_negative_keywords(division: Optional[str] = None, customer: Optional[str] = None, platform: Optional[str] = None, marketplace: Optional[str] = None):
     """List all negative keywords."""
     con = get_db()
-    hf, hp = hierarchy_filter(division, customer, platform)
+    hf, hp = hierarchy_filter(division, customer, platform, marketplace)
     where_clause = (" WHERE " + hf.lstrip(" AND ")) if hf else ""
 
     rows = _safe_ads_query(con, f"""

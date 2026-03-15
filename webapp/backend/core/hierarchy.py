@@ -6,9 +6,10 @@ def hierarchy_filter(
     division: Optional[str] = None,
     customer: Optional[str] = None,
     platform: Optional[str] = None,
+    marketplace: Optional[str] = None,
     table_alias: str = "",
 ) -> tuple[str, list]:
-    """Build optional WHERE clause fragments for division/customer/platform.
+    """Build optional WHERE clause fragments for division/customer/platform/marketplace.
 
     Returns (sql_fragment, params_list).
     sql_fragment starts with " AND ..." if any filters active, or "" if none.
@@ -25,5 +26,8 @@ def hierarchy_filter(
     if platform:
         clauses.append(f"{prefix}platform = ?")
         params.append(platform)
+    if marketplace:
+        clauses.append(f"{prefix}marketplace = ?")
+        params.append(marketplace.upper())
     sql = (" AND " + " AND ".join(clauses)) if clauses else ""
     return sql, params
