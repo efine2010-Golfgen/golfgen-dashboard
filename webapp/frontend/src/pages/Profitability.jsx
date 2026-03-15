@@ -46,6 +46,7 @@ const WF_COLORS = {
   revenue: "#2ECFAA", referral: "#f87171", fba: "#f87171",
   storage: "#F5B731", other: "#A26BE1", netRev: "#3E658C",
   cogs: "#E87830", shipping: "#7BAED0", coupon: "#8B5CF6",
+  refund: "#D946EF", promo: "#8B5CF6", adSpend: "#F59E0B",
   nop: "#2ECFAA", nopNeg: "#f87171",
 };
 
@@ -158,12 +159,15 @@ function PnlOverview({ filters, days, showToast }) {
   const grossRev0 = wf.sales || 0;
   const waterfall = [
     { label: "Gross Revenue", value: grossRev0 },
+    { label: "Returns / Refunds", value: -(wf.refunds || 0) },
+    { label: "Promotions", value: -(wf.promo || 0) },
     { label: "Referral Fees", value: -(wf.referralFees || 0) },
     { label: "FBA Fulfillment", value: -(wf.fbaFees || 0) },
     { label: "Storage Fees", value: -(wf.storageFees || 0) },
     { label: "Other Fees", value: -((wf.otherFees || 0) - (wf.storageFees || 0)) },
-    { label: "Net Revenue", value: grossRev0 - (wf.amazonFees || 0) },
+    { label: "Net Revenue", value: grossRev0 - (wf.amazonFees || 0) - (wf.refunds || 0) - (wf.promo || 0) },
     { label: "COGS", value: -(wf.cogs || 0) },
+    { label: "Ad Spend", value: -(wf.adSpend || 0) },
     { label: "Shipping", value: -(wf.shipping || 0) },
     { label: "Net Operating Profit", value: wf.netProfit || 0 },
   ].filter(w => Math.abs(w.value) > 0.01 || w.label === "Net Operating Profit" || w.label === "Gross Revenue");
@@ -173,12 +177,15 @@ function PnlOverview({ filters, days, showToast }) {
     name: w.label,
     value: w.value,
     fill: w.label.includes("Gross Rev") ? WF_COLORS.revenue :
+          w.label.includes("Return") || w.label.includes("Refund") ? WF_COLORS.refund :
+          w.label.includes("Promo") ? WF_COLORS.promo :
           w.label.includes("Referral") ? WF_COLORS.referral :
           w.label.includes("FBA") ? WF_COLORS.fba :
           w.label.includes("Storage") ? WF_COLORS.storage :
           w.label.includes("Other") ? WF_COLORS.other :
           w.label.includes("Net Rev") ? WF_COLORS.netRev :
           w.label.includes("COGS") ? WF_COLORS.cogs :
+          w.label.includes("Ad Spend") ? WF_COLORS.adSpend :
           w.label.includes("Ship") ? WF_COLORS.shipping :
           w.label.includes("Coupon") ? WF_COLORS.coupon :
           (w.value >= 0 ? WF_COLORS.nop : WF_COLORS.nopNeg),
@@ -196,7 +203,7 @@ function PnlOverview({ filters, days, showToast }) {
         <KpiCard label="Total Amazon Fees" value={fmt$2(kpis.totalFees)} color="#f87171" sub={`${kpis.feePct || 0}% of gross rev`} />
         <KpiCard label="Total COGS" value={fmt$2(kpis.totalCogs)} color="#F5B731" sub={`${kpis.cogsPct || 0}% of gross rev`} />
         <KpiCard label="Net Operating Profit" value={fmt$2(kpis.netProfit)} color="#7BAED0" sub="After COGS + all fees" />
-        <KpiCard label="Avg Unit Cost" value={`$${round(kpis.avgUnitCost || 0, 2)}`} color="#A26BE1" sub="Blended landed COGS" />
+        <KpiCard label="Returns / Refunds" value={fmt$2(wf.refunds || 0)} color="#D946EF" sub={`${wf.returnPct || 0}% return rate · ${wf.refundUnits || 0} units`} />
         <KpiCard label="Contribution / Unit" value={`$${round(kpis.contributionPerUnit || 0, 2)}`} color="#2ECFAA" sub="Rev less COGS + fees" />
       </div>
 

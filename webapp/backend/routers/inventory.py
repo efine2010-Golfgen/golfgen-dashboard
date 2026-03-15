@@ -285,8 +285,8 @@ def inventory_kpis(division: Optional[str] = None, customer: Optional[str] = Non
             return fe_asin
         return _sku_to_asin.get(fe_asin, fe_asin)
 
-    from datetime import date as _date, timedelta as _td
-    _cutoff_90d = str(_date.today() - _td(days=90))
+    from datetime import timedelta as _td
+    _cutoff_90d = (datetime.now(ZoneInfo("America/Chicago")).date() - _td(days=90)).isoformat()
 
     refund_map = {}
     try:
@@ -1984,8 +1984,7 @@ def inventory_command_center(
                 return fe_asin  # Already a B-ASIN
             return sku_to_asin.get(fe_asin, fe_asin)
 
-        from datetime import date as _date, timedelta
-        _cutoff = str(_date.today() - timedelta(days=90))
+        _cutoff = (datetime.now(ZoneInfo("America/Chicago")).date() - timedelta(days=90)).isoformat()
 
         refund_rows = con.execute("""
             SELECT asin, COUNT(*) AS cnt

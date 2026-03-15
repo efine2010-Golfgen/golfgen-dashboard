@@ -561,6 +561,22 @@ def sales_summary(
         ty_gm_pct = round(ty_gm / ty_sales, 4) if ty_sales else 0
         ly_gm_pct = round(ly_gm / ly_sales, 4) if ly_sales else 0
 
+        # Returns/refunds from financial_events
+        def _sum_refunds(s, e, extra_params):
+            try:
+                r = con.execute(f"""
+                    SELECT COALESCE(COUNT(*), 0),
+                           COALESCE(SUM(ABS(product_charges)), 0)
+                    FROM financial_events
+                    WHERE date >= ? AND date <= ? AND event_type ILIKE '%%refund%%' {hw}
+                """, [str(s), str(e)] + extra_params).fetchone()
+                return int(r[0]) if r else 0, round(float(r[1]), 2) if r else 0
+            except Exception:
+                return 0, 0
+
+        ty_return_units, ty_return_amt = _sum_refunds(sd, ed, hp)
+        ly_return_units, ly_return_amt = _sum_refunds(ly_sd, ly_ed, hp)
+
         # Inventory: current stock and days of supply
         try:
             inv_row = con.execute("""
@@ -615,6 +631,8 @@ def sales_summary(
             "ly_orders": ly_orders, "ly_aov": ly_aov,
             "ly_ad_spend": round(ly_ad_spend, 2), "ly_roas": ly_roas, "ly_tacos": ly_tacos,
             "dos": dos, "stock_units": stock_units,
+            "returns": ty_return_units, "returns_amount": round(ty_return_amt, 2),
+            "ly_returns": ly_return_units, "ly_returns_amount": round(ly_return_amt, 2),
             "fell_back": fell_back,
             "period_label": f"Yesterday ({sd.strftime('%b %d')})" if fell_back else None,
         }
