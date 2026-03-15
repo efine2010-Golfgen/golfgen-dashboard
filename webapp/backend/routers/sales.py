@@ -396,8 +396,8 @@ def _period_to_dates(period: str, start: str = None, end: str = None):
         return today - timedelta(days=30), today
 
 
-def _hier_where(division=None, customer=None, table_alias=''):
-    """Build division/customer WHERE clause for new sales endpoints."""
+def _hier_where(division=None, customer=None, table_alias='', marketplace=None):
+    """Build division/customer/marketplace WHERE clause for new sales endpoints."""
     prefix = table_alias + '.' if table_alias else ''
     clauses, params = [], []
     if division and division != 'all':
@@ -406,6 +406,9 @@ def _hier_where(division=None, customer=None, table_alias=''):
     if customer and customer != 'all' and customer != 'All Channels':
         clauses.append(f"{prefix}customer = ?")
         params.append(customer)
+    if marketplace:
+        clauses.append(f"{prefix}marketplace = ?")
+        params.append(marketplace.upper())
     return ('AND ' + ' AND '.join(clauses) if clauses else ''), params
 
 
@@ -415,6 +418,7 @@ def sales_summary(
     period: str = Query("last_30d"),
     division: str | None = Query(None),
     customer: str | None = Query(None),
+    marketplace: str | None = Query(None),
     start: str | None = Query(None),
     end: str | None = Query(None),
 ):
@@ -422,7 +426,7 @@ def sales_summary(
     try:
         con = get_db()
         sd, ed = _period_to_dates(period, start, end)
-        hw, hp = _hier_where(division, customer)
+        hw, hp = _hier_where(division, customer, marketplace=marketplace)
 
         # LY: shift back 364 days for weekday alignment
         ly_sd = sd - timedelta(days=364)
@@ -625,6 +629,7 @@ def sales_trend(
     period: str = Query("last_30d"),
     division: str | None = Query(None),
     customer: str | None = Query(None),
+    marketplace: str | None = Query(None),
     start: str | None = Query(None),
     end: str | None = Query(None),
 ):
@@ -632,7 +637,7 @@ def sales_trend(
     try:
         con = get_db()
         sd, ed = _period_to_dates(period, start, end)
-        hw, hp = _hier_where(division, customer)
+        hw, hp = _hier_where(division, customer, marketplace=marketplace)
 
         rows = con.execute(f"""
             SELECT date,
@@ -703,11 +708,12 @@ def sales_period_comparison(
     view: str = Query("exec"),
     division: str | None = Query(None),
     customer: str | None = Query(None),
+    marketplace: str | None = Query(None),
 ):
     """Return KPI columns for the selected view tab."""
     try:
         con = get_db()
-        hw, hp = _hier_where(division, customer)
+        hw, hp = _hier_where(division, customer, marketplace=marketplace)
 
         view_periods = {
             "exec": {
@@ -846,11 +852,12 @@ def sales_period_comparison(
 def sales_monthly_yoy(
     division: str | None = Query(None),
     customer: str | None = Query(None),
+    marketplace: str | None = Query(None),
 ):
     """12 months x 3 years for YOY grouped bar chart."""
     try:
         con = get_db()
-        hw, hp = _hier_where(division, customer)
+        hw, hp = _hier_where(division, customer, marketplace=marketplace)
         month_names = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec']
 
         rows = con.execute(f"""
@@ -894,6 +901,7 @@ def sales_monthly_yoy(
 def sales_by_channel(
     period: str = Query("last_30d"),
     division: str | None = Query(None),
+    marketplace: str | None = Query(None),
     start: str | None = Query(None),
     end: str | None = Query(None),
 ):
@@ -901,18 +909,19 @@ def sales_by_channel(
     try:
         con = get_db()
         sd, ed = _period_to_dates(period, start, end)
+        hw, hp = _hier_where(division, None, marketplace=marketplace)
 
         # Get weekly revenue by customer
-        rows = con.execute("""
+        rows = con.execute(f"""
             SELECT customer,
                    date,
                    COALESCE(SUM(ordered_product_sales), 0) AS revenue
             FROM daily_sales
             WHERE asin = 'ALL' AND date >= ? AND date <= ?
-              AND date IS NOT NULL
+              AND date IS NOT NULL {hw}
             GROUP BY customer, date
             ORDER BY date
-        """, [str(sd), str(ed)]).fetchall()
+        """, [str(sd), str(ed)] + hp).fetchall()
         con.close()
 
         # Bucket into weeks
@@ -956,6 +965,7 @@ def sales_rolling(
     period: str = Query("last_30d"),
     division: str | None = Query(None),
     customer: str | None = Query(None),
+    marketplace: str | None = Query(None),
     start: str | None = Query(None),
     end: str | None = Query(None),
 ):
@@ -963,7 +973,7 @@ def sales_rolling(
     try:
         con = get_db()
         sd, ed = _period_to_dates(period, start, end)
-        hw, hp = _hier_where(division, customer)
+        hw, hp = _hier_where(division, customer, marketplace=marketplace)
         # Extend window 4 weeks back for rolling calc
         ext_sd = sd - timedelta(weeks=4)
         ly_ext_sd = ext_sd - timedelta(days=364)
@@ -1022,11 +1032,12 @@ def sales_rolling(
 def sales_heatmap(
     division: str | None = Query(None),
     customer: str | None = Query(None),
+    marketplace: str | None = Query(None),
 ):
     """26 weeks x 7 days heatmap of units sold."""
     try:
         con = get_db()
-        hw, hp = _hier_where(division, customer)
+        hw, hp = _hier_where(division, customer, marketplace=marketplace)
         today = _today_central()
         start_date = today - timedelta(weeks=26)
         expected_days = (today - start_date).days + 1
@@ -1092,6 +1103,7 @@ def sales_funnel(
     period: str = Query("last_30d"),
     division: str | None = Query(None),
     customer: str | None = Query(None),
+    marketplace: str | None = Query(None),
     start: str | None = Query(None),
     end: str | None = Query(None),
 ):
@@ -1099,7 +1111,7 @@ def sales_funnel(
     try:
         con = get_db()
         sd, ed = _period_to_dates(period, start, end)
-        hw, hp = _hier_where(division, customer)
+        hw, hp = _hier_where(division, customer, marketplace=marketplace)
         ly_sd = sd - timedelta(days=364)
         ly_ed = ed - timedelta(days=364)
 
@@ -1139,6 +1151,7 @@ def sales_ad_efficiency(
     period: str = Query("last_30d"),
     division: str | None = Query(None),
     customer: str | None = Query(None),
+    marketplace: str | None = Query(None),
     start: str | None = Query(None),
     end: str | None = Query(None),
 ):
@@ -1148,15 +1161,16 @@ def sales_ad_efficiency(
         sd, ed = _period_to_dates(period, start, end)
         ly_sd = sd - timedelta(days=364)
         ly_ed = ed - timedelta(days=364)
+        hw, hp = _hier_where(division, customer, marketplace=marketplace)
 
         def _ad_metrics(s, e):
             try:
-                row = con.execute("""
+                row = con.execute(f"""
                     SELECT COALESCE(SUM(spend), 0),
                            COALESCE(SUM(sales), 0)
                     FROM advertising
-                    WHERE date >= ? AND date <= ?
-                """, [str(s), str(e)]).fetchone()
+                    WHERE date >= ? AND date <= ? {hw}
+                """, [str(s), str(e)] + hp).fetchone()
                 spend = float(row[0])
                 sales = float(row[1])
             except Exception:
@@ -1166,8 +1180,8 @@ def sales_ad_efficiency(
                 rev_row = con.execute(f"""
                     SELECT COALESCE(SUM(ordered_product_sales), 0)
                     FROM daily_sales
-                    WHERE asin = 'ALL' AND date >= ? AND date <= ?
-                """, [str(s), str(e)]).fetchone()
+                    WHERE asin = 'ALL' AND date >= ? AND date <= ? {hw}
+                """, [str(s), str(e)] + hp).fetchone()
                 total_rev = float(rev_row[0]) if rev_row else 0
             except Exception:
                 total_rev = 0
@@ -1195,6 +1209,7 @@ def sales_fee_breakdown(
     period: str = Query("last_30d"),
     division: str | None = Query(None),
     customer: str | None = Query(None),
+    marketplace: str | None = Query(None),
     start: str | None = Query(None),
     end: str | None = Query(None),
 ):
@@ -1202,7 +1217,7 @@ def sales_fee_breakdown(
     try:
         con = get_db()
         sd, ed = _period_to_dates(period, start, end)
-        hw, hp = _hier_where(division, customer)
+        hw, hp = _hier_where(division, customer, marketplace=marketplace)
 
         # Sum every fee column separately for granular breakdown
         row = con.execute(f"""
@@ -1261,6 +1276,7 @@ def sales_ad_breakdown(
     period: str = Query("last_30d"),
     division: str | None = Query(None),
     customer: str | None = Query(None),
+    marketplace: str | None = Query(None),
     start: str | None = Query(None),
     end: str | None = Query(None),
 ):
@@ -1268,17 +1284,18 @@ def sales_ad_breakdown(
     try:
         con = get_db()
         sd, ed = _period_to_dates(period, start, end)
+        hw, hp = _hier_where(division, customer, marketplace=marketplace)
 
         # Try ads_campaigns which has campaign_type
         try:
-            rows = con.execute("""
+            rows = con.execute(f"""
                 SELECT COALESCE(campaign_type, 'SP') AS ctype,
                        COALESCE(SUM(spend), 0),
                        COALESCE(SUM(sales), 0)
                 FROM ads_campaigns
-                WHERE date >= ? AND date <= ?
+                WHERE date >= ? AND date <= ? {hw}
                 GROUP BY COALESCE(campaign_type, 'SP')
-            """, [str(sd), str(ed)]).fetchall()
+            """, [str(sd), str(ed)] + hp).fetchall()
         except Exception:
             rows = []
 
@@ -1308,11 +1325,11 @@ def sales_ad_breakdown(
         if not result:
             try:
                 con2 = get_db()
-                row = con2.execute("""
+                row = con2.execute(f"""
                     SELECT COALESCE(SUM(spend), 0), COALESCE(SUM(sales), 0)
                     FROM advertising
-                    WHERE date >= ? AND date <= ?
-                """, [str(sd), str(ed)]).fetchone()
+                    WHERE date >= ? AND date <= ? {hw}
+                """, [str(sd), str(ed)] + hp).fetchone()
                 con2.close()
                 if row:
                     spend = round(float(row[0]), 2)

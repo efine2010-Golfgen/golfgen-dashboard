@@ -516,6 +516,7 @@ export default function Sales({ filters = {} }) {
   const baseParams = {
     division: divRaw  || null,
     customer: custRaw || null,
+    marketplace: mpRaw || null,
   };
 
   const setLoad = (key, val) => setLoading(l => ({...l, [key]: val}));
