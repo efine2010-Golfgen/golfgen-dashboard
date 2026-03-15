@@ -29,19 +29,22 @@ writing any new query, router, or frontend calculation:
 ## Project Overview
 GolfGen Commerce Dashboard — internal tool for GolfGen LLC /
 Elite Global Brands, Bentonville AR.
-Live URL: https://golfgen-dashboard-production.up.railway.app
+Live URL: https://golfgen-dashboard-production-ce30.up.railway.app
 GitHub: https://github.com/efine2010-Golfgen/golfgen-dashboard
 Backup Repo: https://github.com/efine2010-Golfgen/golfgen-backups
 
 ## How Deployment Works
 Auto-deploys to Railway when code is pushed to main branch on GitHub.
+CRITICAL: Dockerfile copies from webapp/backend/dist/ — NOT webapp/frontend/dist/.
 1. Make code changes
 2. cd webapp/frontend && npm run build
-3. cp -r webapp/frontend/dist webapp/backend/dist
-4. git add relevant files && git commit -m "your message"
+3. rm -rf webapp/backend/dist && cp -r webapp/frontend/dist webapp/backend/dist
+4. git add -f webapp/backend/dist webapp/frontend/src/... && git commit -m "your message"
 5. git push origin main
-6. Railway auto-deploys within 2 minutes7. Verify: curl -s https://golfgen-dashboard-production.up.railway.app/api/health | python3 -m json.tool
+6. Railway auto-deploys within 2 minutes
+7. Verify live site in browser at https://golfgen-dashboard-production-ce30.up.railway.app
 
+IMPORTANT: webapp/frontend/dist is in .gitignore — must use `git add -f webapp/backend/dist`
 NEVER manually restart Railway. NEVER use Railway CLI.
 
 ## Business Structure — TOP LEVEL HIERARCHY
@@ -148,7 +151,7 @@ webapp/
 ```
 
 ## Database
-- Engine: PostgreSQL (LIVE on Railway as of March 14, 2026)
+- Engine: PostgreSQL (LIVE on Railway since March 14, 2026)
 - Previous engine: DuckDB (file still on Railway volume as fallback at /app/data/golfgen_amazon.duckdb)
 - Dual-mode wrapper: core/database.py DbConnection class auto-detects DuckDB vs PostgreSQL
 - When DATABASE_URL env var is set → uses PostgreSQL; otherwise → uses DuckDB
@@ -158,6 +161,7 @@ webapp/
 - SQL translator: _translate_sql_for_pg() converts ? → %s, INSERT OR IGNORE → ON CONFLICT DO NOTHING, DOUBLE → DOUBLE PRECISION, etc.
 - Auto-migration: auto_migrate_from_duckdb() in database.py runs on startup if Postgres is empty and DuckDB file exists — copies all 26 tables
 - Health endpoint (/api/health) still shows DB_PATH in "path" field even in Postgres mode — this is cosmetic only, queries go to PostgreSQL
+- All Decimal/float type mismatches fixed: _n() helper coerces Decimal to float for JSON serialization
 ### All Tables (27 total)
 Transactional (all have division + customer + platform):
   orders, daily_sales, financial_events, fba_inventory, advertising,
@@ -281,7 +285,7 @@ DATABASE_URL (${{Postgres.DATABASE_URL}} — LIVE, references Railway Postgres s
 16. SQL must be dialect-aware — use DbConnection wrapper which auto-translates for PostgreSQL
 17. Never modify _sync_lock or _sync_running outside the established mutex pattern in sp_api.py
 
-## Roadmap Status (as of March 13, 2026)
+## Roadmap Status (as of March 15, 2026)
 
 ### Phase 1 — Stability + Security: COMPLETE ✓
 All 10 items done: returns bug, YOY bug, SKU bug, ads sync, sync mutex,
@@ -295,6 +299,36 @@ nightly analytics rollup at 2:30am, PostgreSQL dual-mode wrapper (DbConnection),
 SQL translator for DuckDB↔PostgreSQL (including DOUBLE→DOUBLE PRECISION),
 all 56+ duckdb.connect() calls eliminated, PostgreSQL provisioned on Railway,
 DATABASE_URL set, auto-migration from DuckDB completed, all 29 tables live in Postgres.
+
+### Phase 2b — Inventory Command Center Overhaul: COMPLETE ✓
+Full mockup-aligned rebuild of the Inventory page (March 15, 2026):
+- Backend: /api/inventory/command-center endpoint serves all data
+  - Pipeline with 5 stages: Sellable, Inbound, Reserved, FC Transfer, Unfulfillable
+  - Reserved Breakdown (Customer Orders, FC Transfer, FC Processing)
+  - Unfulfillable Breakdown (Customer Dmg, Warehouse Dmg, Defective, Carrier Dmg)
+  - FC Distribution (8 FCs: PHX3, LAS2, ONT8, DFW7, MDW6, BDL1, SDF8, Other)
+  - Return Rate by SKU table (top 10 by return rate, 90-day window)
+  - Storage Fee Forecast (6-month projection with Q3 surcharges)
+  - KPI Deltas (7d avg vs 30d avg velocity comparison)
+  - Expanded Health Metrics (turnover, stranded, researching, reserved%, defect rate, cancellation rate)
+  - Stranded Inventory data + Recent Reimbursements
+- Frontend: Inventory.jsx full mockup alignment
+  - 5 sub-nav tabs: GolfGen Inventory, Amazon Inventory, Shipments to FBA, Stranded & Suppressed, Inventory Ledger
+  - Action buttons: Sync FBA, Create Shipment, Export, Alerts
+  - 8 KPI cards with delta indicators (▲/▼ percentages)
+  - 30-Day Trends: Daily Sales Velocity + Buy Box % charts
+  - 90-Day View: FBA Sellable vs Daily Sales Velocity overlay
+  - Pipeline card with 5 stages, Reserved + Unfulfillable breakdowns, progress bar
+  - Aging Distribution with Monthly Storage Fee Forecast bar chart
+  - FC Distribution & Health 3-column grid (FC bars, Return Rate table, Health Metrics with score circle)
+  - Replenishment Forecast + Reorder Timeline cards
+  - SKU Command Center in grid-main-side layout (1fr 320px)
+    - Main: SKU table with risk filters + search
+    - Side: Stranded Inventory card + Recent Reimbursements card
+- Mockup reference: GolfGen_Amazon_Inventory_v2.html (in uploads)
+- Key helpers: SG() / DM() for font styles, Card/CardHdr/SecDiv/Badge/LegItem components
+- _n() helper in backend coerces Decimal/None to float for safe JSON serialization
+
 ### Phase 3 — Redundancy + Backup Hardening: PARTIAL
 Done: Nightly Google Drive backup (2am), nightly GitHub backup.
 Remaining: Hot standby, weekly backup verification, 6-hour snapshots.
@@ -309,6 +343,15 @@ Walmart Marketplace API, Shopify API, cross-platform views.
 
 ### Phase 6 — Intelligence + Forecasting: PLANNED
 Custom date ranges, daily email summary, anomaly alerts, forecast tab, exec dashboard.
+
+### Known Issues / Future Work
+- Stranded & Suppressed tab (/stranded) — links exist but no dedicated page built yet
+- Inventory Ledger tab (/inventory-ledger) — links exist but no dedicated page built yet
+- FC Distribution data is estimated (percentages), not from per-FC SP-API data
+- Return Rate uses financial_events refund count as proxy for actual returns
+- Storage Fee Forecast uses base LTSF × seasonal multiplier (estimated)
+- KPI deltas compare 7d vs 30d velocity — not true YoY comparison
+- Daily/weekly unit sales by day may still have data gaps
 
 ## Backup System
 - Google Drive: nightly 2am Central, 30-day retention

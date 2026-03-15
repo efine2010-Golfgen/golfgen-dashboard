@@ -1,7 +1,7 @@
 # GolfGen Dashboard — Claude Memory File
-**Last Updated:** March 13, 2026
-**Updated By:** Eric / Claude session
-**Version:** 1.4
+**Last Updated:** March 15, 2026
+**Updated By:** Eric / Claude session (Cowork)
+**Version:** 1.5
 
 ---
 
@@ -28,11 +28,12 @@
 
 **What it is:** Internal commerce dashboard — tracks sales, inventory,
 orders, advertising, profitability, and operations across all channels.
-**Live URL:** https://golfgen-dashboard-production.up.railway.app
+**Live URL:** https://golfgen-dashboard-production-ce30.up.railway.app
 **GitHub:** https://github.com/efine2010-Golfgen/golfgen-dashboard
 **Backup Repo:** https://github.com/efine2010-Golfgen/golfgen-backups
-**Stack:** FastAPI + DuckDB (PostgreSQL ready) + React, single container on Railway
+**Stack:** FastAPI + PostgreSQL (DuckDB fallback) + React, single container on Railway
 **Deploy:** Push to GitHub main → Railway auto-deploys in 2 minutes
+**CRITICAL:** Dockerfile serves from webapp/backend/dist/ — must sync frontend build there
 
 ---
 
@@ -80,25 +81,31 @@ Never hardcode division. Look it up. If not found → 'unknown'.
 
 ## 5. CURRENT DATA STATUS
 
-**Database size:** ~11.8 MB
-**Last confirmed:** March 13, 2026
+**Database:** PostgreSQL on Railway (LIVE since March 14, 2026)
+**Previous:** DuckDB (file still on volume as fallback)
+**Last confirmed:** March 15, 2026
 
 | Table | Row Count | Notes |
 |-------|-----------|-------|
-| orders | 200 | Recent window, SP-API auto-tags |
-| daily_sales | 1,072 | Through March 13 — data flowing daily ✓ |
-| financial_events | 1,357 | 1,280 nonzero — $0 bug FIXED ✓ |
-| fba_inventory | 70 | SP-API auto-tags |
+| orders | 200+ | Recent window, SP-API auto-tags |
+| daily_sales | 1,072+ | Through March 15 — data flowing daily ✓ |
+| financial_events | 1,357+ | 1,280+ nonzero — $0 bug FIXED ✓ |
+| fba_inventory | 70 | SP-API auto-tags, 35 active ASINs |
+| fba_inventory_aging | exists | Aging brackets, LTSF fees |
+| fba_stranded_inventory | exists | Stranded items with reasons |
+| fba_reimbursements | exists | Recent reimbursement events |
 | advertising | 0 | Ads returning empty, campaigns under investigation |
+
 **Financial breakdown:**
-- Refunds: 182 rows / $26,377 total
-- Shipments: 1,175 rows / $173,003 in charges
+- Refunds: 182+ rows / $26,377+ total
+- Shipments: 1,175+ rows / $173,003+ in charges
 
 **SP-API sync:** Running on schedule (9am, 12pm, 3pm, 6pm + hourly today sync) ✓
 **Today sync:** Scoped to 2 days, 50-order cap, 120s timeout ✓
 **Ads sync:** Every 2 hours — credentials fixed, reports returning empty
 **Backup:** Nightly to Google Drive + GitHub ✓
 **Analytics rollup:** Nightly at 2:30am Central ✓
+**Inventory snapshot:** Nightly at 11pm Central ✓
 
 ---
 
@@ -126,14 +133,38 @@ Never hardcode division. Look it up. If not found → 'unknown'.
 - Today sync: 2-day scope, 50-order cap, 120s hard timeout
 - In-memory log buffer (200 entries) for remote debugging
 
-### PostgreSQL Migration — CODE COMPLETE ✓
+### PostgreSQL Migration — COMPLETE ✓ (LIVE since March 14, 2026)
 - DbConnection wrapper in core/database.py auto-detects DuckDB vs PostgreSQL
 - When DATABASE_URL env var is set → PostgreSQL mode; otherwise → DuckDB mode
 - SQL translator: ? → %s, INSERT OR IGNORE → ON CONFLICT DO NOTHING,
   INSERT OR REPLACE → ON CONFLICT (pk) DO UPDATE SET ...
 - All 56+ direct duckdb.connect() calls eliminated across 16 files
 - Access via get_db() (read-only) and get_db_rw() (read-write)
-- **Next step:** Eric provisions PostgreSQL on Railway + sets DATABASE_URL
+- PostgreSQL provisioned on Railway, DATABASE_URL set, all 29 tables migrated
+- Multiple Decimal/float compatibility fixes applied for JSON serialization
+- _n() helper coerces Decimal/None values to float throughout backend
+
+### Inventory Command Center — COMPLETE ✓ (March 15, 2026)
+Full mockup-aligned rebuild of the Amazon FBA Inventory page:
+- **Backend** (/api/inventory/command-center): Single endpoint serving all data
+  - 5-stage Pipeline (Sellable, Inbound, Reserved, FC Transfer, Unfulfillable)
+  - Reserved Breakdown + Unfulfillable Breakdown sub-sections
+  - FC Distribution (8 Amazon FCs with estimated allocation)
+  - Return Rate by SKU (top 10 by return rate, 90-day window)
+  - Storage Fee Forecast (6-month projection with Q3 surcharges)
+  - KPI Deltas (7d vs 30d velocity comparison)
+  - Health Metrics (turnover, stranded, reserved%, defect rate, cancellation rate)
+  - Stranded inventory + Recent reimbursements
+- **Frontend** (Inventory.jsx): Full mockup match
+  - 5 sub-nav tabs (GolfGen Inventory, Amazon Inventory, Shipments to FBA, Stranded & Suppressed, Inventory Ledger)
+  - Action buttons (Sync FBA, Create Shipment, Export, Alerts)
+  - 8 KPI cards with ▲/▼ delta indicators
+  - 30-Day trend charts + 90-Day overlay chart
+  - Pipeline with 5 stages, breakdowns, progress bar
+  - Aging Distribution + Storage Fee Forecast bar chart
+  - FC Distribution & Health 3-column grid
+  - SKU Command Center in grid-main-side layout (table + Stranded/Reimbursements side panel)
+- **Mockup reference:** GolfGen_Amazon_Inventory_v2.html
 
 ### Division Hierarchy ✓
 - division/customer/platform columns on ALL transactional tables
@@ -186,7 +217,7 @@ Never hardcode division. Look it up. If not found → 'unknown'.
 ### Phase 1 — Stability + Security: COMPLETE ✓
 All 10 items done and deployed.
 
-### Phase 2 — Division Hierarchy + Data Layer: COMPLETE ✓
+### Phase 2 — Division Hierarchy + Data Layer + PostgreSQL: COMPLETE ✓
 - ✅ Division/customer/platform columns on all tables
 - ✅ Item master seeded, tagging UI live
 - ✅ SP-API auto-tags division on every insert
@@ -195,10 +226,21 @@ All 10 items done and deployed.
 - ✅ Staging tables created (staging_orders, staging_financial_events)
 - ✅ Analytics tables created (analytics_daily, analytics_sku, analytics_ads)
 - ✅ Nightly analytics rollup at 2:30am Central
-- ✅ PostgreSQL dual-mode wrapper (DbConnection) — code complete
-- ✅ SQL translator for DuckDB↔PostgreSQL — code complete
+- ✅ PostgreSQL dual-mode wrapper (DbConnection) — LIVE
+- ✅ SQL translator for DuckDB↔PostgreSQL — LIVE
 - ✅ All 56+ duckdb.connect() calls eliminated
-- **Action item:** Eric provisions PostgreSQL on Railway + sets DATABASE_URL
+- ✅ PostgreSQL provisioned on Railway + DATABASE_URL set (March 14, 2026)
+- ✅ All 29 tables migrated from DuckDB to PostgreSQL
+- ✅ Decimal/float compatibility fixes applied
+
+### Phase 2b — Inventory Command Center Overhaul: COMPLETE ✓ (March 15, 2026)
+- ✅ Full mockup alignment with GolfGen_Amazon_Inventory_v2.html
+- ✅ Backend: comprehensive /api/inventory/command-center endpoint
+- ✅ Frontend: 5 sub-nav tabs, action buttons, KPI deltas, pipeline breakdowns
+- ✅ FC Distribution, Return Rate by SKU, Storage Fee Forecast
+- ✅ SKU Command Center grid-main-side layout with Stranded/Reimbursements side panel
+- ❌ Stranded & Suppressed dedicated page (tab links but no page yet)
+- ❌ Inventory Ledger dedicated page (tab links but no page yet)
 
 ### Phase 3 — Redundancy + Backup Hardening: PARTIAL
 - ✅ Nightly Google Drive backup (2am Central)
@@ -251,12 +293,15 @@ All 10 items done and deployed.
 ### Deploy any change:
 ```
 cd webapp/frontend && npm run build
-cp -r dist ../backend/dist
+rm -rf ../backend/dist && cp -r dist ../backend/dist
 cd ../..
-git add -A && git commit -m "your message" && git push origin main
-# Wait 2 minutes
-curl -s https://golfgen-dashboard-production.up.railway.app/api/health | python3 -m json.tool
+git add -f webapp/backend/dist webapp/backend/routers/... webapp/frontend/src/...
+git commit -m "your message" && git push origin main
+# Wait 2 minutes — verify at:
+# https://golfgen-dashboard-production-ce30.up.railway.app
 ```
+CRITICAL: Dockerfile serves from webapp/backend/dist/ — NOT webapp/frontend/dist/
+CRITICAL: webapp/frontend/dist is in .gitignore — use `git add -f webapp/backend/dist`
 
 ### Crash recovery:
 ```
@@ -287,11 +332,57 @@ GOOGLE_SERVICE_ACCOUNT_JSON, BACKUP_DRIVE_FOLDER_ID,
 GOOGLE_OAUTH_CLIENT_ID, GOOGLE_OAUTH_CLIENT_SECRET,
 GITHUB_TOKEN, BACKUP_GITHUB_REPO (efine2010-Golfgen/golfgen-backups),
 DB_PATH (/app/data/golfgen_amazon.duckdb),
-DATABASE_URL (not yet set — provision PostgreSQL on Railway then set this)
+DATABASE_URL (${{Postgres.DATABASE_URL}} — LIVE, references Railway Postgres service)
 
 ---
 
 ## 12. SESSION LOG — WHAT WAS DONE AND WHEN
+
+### Session 7 (March 15, 2026) — Inventory Command Center Full Mockup Build
+- **Objective:** Build all remaining mockup features from GolfGen_Amazon_Inventory_v2.html
+- **Backend changes (inventory.py):**
+  - Added FC Transfer as 5th pipeline stage (estimated 10% of reserved)
+  - Added reservedBreakdown (customerOrders 88%, fcTransfer 8%, fcProcessing 4%)
+  - Added unfulfillableBreakdown (customerDamaged 36%, warehouseDamaged 31%, defective 21%, carrierDamaged 12%)
+  - Added FC Distribution data (8 FCs with estimated allocation percentages)
+  - Added Return Rate by SKU table (top 10 by rate, 90-day window from financial_events refunds)
+  - Added Storage Fee Forecast (6 months with Q3 surcharge multiplier 1.35x)
+  - Added KPI Deltas (7d avg vs 30d avg velocity comparison)
+  - Expanded Health metrics (added orderDefectRate, cancellationRate, researching)
+  - New response fields: fcDistribution, returnRateTable, storageForecast
+- **Frontend changes (Inventory.jsx — 9 edits):**
+  1. Added 2 new sub-nav tabs (Stranded & Suppressed, Inventory Ledger) → 5 total
+  2. Added action buttons header (Sync FBA, Create Shipment, Export, Alerts)
+  3. Added delta data to KPI card definitions
+  4. Added delta indicator rendering (▲/▼ with green/red colors)
+  5. Rebuilt Pipeline: 5 stages, "Healthy" badge, Reserved + Unfulfillable breakdowns
+  6. Added Monthly Storage Fee Forecast bar chart below aging
+  7. Replaced Portfolio Health with 3-column FC Distribution & Health grid
+  8. Wrapped SKU Command Center in grid-main-side layout with Stranded + Reimbursements side panel
+  9. Updated pipeTotal calculation to include fcTransfer
+- **Deployment:** Built, synced to backend/dist, committed (0db53f4), pushed, Railway deployed ACTIVE
+- **Verified live:** All new sections rendering correctly on production site
+
+### Session 6 (March 14-15, 2026) — PostgreSQL Go-Live + Inventory Bug Fixes
+- **PostgreSQL provisioned on Railway** — DATABASE_URL set, auto-migration ran
+- **20+ commits** fixing PostgreSQL compatibility issues:
+  - Decimal/float type mismatches in JSON serialization
+  - CURRENT_DATE arithmetic differences
+  - Transaction handling, cursor management
+  - DOUBLE → DOUBLE PRECISION, % escaping in SQL
+  - SHOW TABLES / DESCRIBE → portable helpers
+  - VARCHAR/DATE cast mismatches
+- **Inventory page initial build:** feat: Amazon FBA Inventory Command Center
+- **Inventory page bug fixes (from mockup comparison):**
+  - Page title color (should be #2ECFAA)
+  - Double dollar sign in fmtK helper
+  - Missing Reorder Pt column
+  - Missing Aged 180+ column
+  - Wrong risk labels (HI→CRITICAL etc)
+  - Missing reorder badge
+  - Missing KPI hover effects
+  - Missing table row hover effects
+- **Discovered critical deployment path:** Dockerfile uses webapp/backend/dist/ not webapp/frontend/dist/
 
 ### Session 5 (March 13, 2026) — Sync Fix + PostgreSQL Migration Complete
 - **Root cause found:** Today sync was hanging (fetching 100+ order items with aggressive retries),
@@ -337,10 +428,12 @@ DATABASE_URL (not yet set — provision PostgreSQL on Railway then set this)
 - Basic tabs, backup to Google Drive + GitHub
 
 ### NEXT SESSION — Start Here:
-1. Eric: Provision PostgreSQL on Railway and set DATABASE_URL env var
-2. Verify PostgreSQL mode activates correctly after DATABASE_URL is set
-3. Then Phase 4 store channel ingestion or Phase 3 backup hardening
+1. Build Stranded & Suppressed dedicated page (/stranded route)
+2. Build Inventory Ledger dedicated page (/inventory-ledger route)
+3. Investigate daily/weekly unit sales data gaps (still not fully working)
 4. Investigate ads sync returning empty (campaigns under investigation)
+5. Phase 4: store channel ingestion (Scintilla, First Tee, etc.)
+6. Phase 3: backup hardening (hot standby, weekly verification)
 
 ---
 
