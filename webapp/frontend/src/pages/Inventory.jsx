@@ -242,7 +242,7 @@ export default function Inventory({ filters = {} }) {
             <span style={{ ...SG({ fontSize: 8, color: "var(--txt3)", marginTop: 1, textAlign: "center" }) }}>Auto every 4hr</span>
           </div>
           <div style={{ display: "flex", flexDirection: "column", alignItems: "center" }}>
-            <button style={{ display: "inline-flex", alignItems: "center", gap: 5, height: 30, padding: "0 12px", borderRadius: 8, ...SG({ fontSize: 10, fontWeight: 700 }), cursor: "pointer", whiteSpace: "nowrap", border: "1px solid var(--acc2, #E87830)", background: "rgba(232,120,48,.1)", color: "var(--acc2, #E87830)" }}>📦 Create Shipment</button>
+            <a href="/fba-shipments" style={{ display: "inline-flex", alignItems: "center", gap: 5, height: 30, padding: "0 12px", borderRadius: 8, ...SG({ fontSize: 10, fontWeight: 700 }), cursor: "pointer", whiteSpace: "nowrap", border: "1px solid var(--acc2, #E87830)", background: "rgba(232,120,48,.1)", color: "var(--acc2, #E87830)", textDecoration: "none" }}>📦 Create Shipment</a>
             <span style={{ ...SG({ fontSize: 8, color: "var(--txt3)", marginTop: 1, textAlign: "center" }) }}>Send to FBA</span>
           </div>
           <button style={{ display: "inline-flex", alignItems: "center", gap: 5, height: 30, padding: "0 12px", borderRadius: 8, ...SG({ fontSize: 10, fontWeight: 700 }), cursor: "pointer", whiteSpace: "nowrap", border: "1px solid var(--brd2)", background: "var(--ibg, rgba(255,255,255,.05))", color: "var(--txt2)" }}>⬇ Export</button>
