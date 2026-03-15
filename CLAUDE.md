@@ -129,6 +129,7 @@ webapp/
       mfa.py             ← /api/mfa/*
       supply_chain.py    ← /api/supply-chain/*
       ask_claude.py      ← /api/ask-claude (AI assistant)
+      retail.py          ← /api/retail/* (Walmart POS upload + query endpoints)
       system.py          ← /api/sync/*, /api/backup/*, /api/docs/*, /api/debug/*    services/
       __init__.py
       sync_engine.py     ← sync orchestration, _write_sync_log
@@ -183,6 +184,10 @@ Pricing/Coupons:
 Planning/Operations:
   monthly_sales_history, item_plan_overrides, item_plan_curve_selection,
   item_plan_factory_orders, item_plan_factory_order_items, item_plan_settings
+
+Retail POS (Walmart/Scintilla — all have division + customer + platform):
+  walmart_store_weekly, walmart_item_weekly, walmart_scorecard,
+  walmart_ecomm_weekly, walmart_order_forecast, retail_upload_log
 
 System:
   sessions, user_permissions, audit_log, sync_log, docs_update_log
@@ -390,10 +395,12 @@ Done (March 15, 2026):
 - System page: new DR Readiness card with green/yellow/red status, verify button, issue list
 - Failover path: DuckDB file on Railway volume as emergency fallback (remove DATABASE_URL → auto-switch)
 
-### Phase 4 — File Upload + Store Channels: PARTIAL
-Done: Excel upload for warehouse data.
-Remaining: Scintilla, First Tee, Belk, Hobby Lobby, Albertsons, Family Dollar
-ingestion. Google Drive watched folder. Email ingestion.
+### Phase 4 — File Upload + Store Channels: IN PROGRESS
+Done: Excel upload for warehouse data. Walmart Scintilla report ingestion (6 new tables,
+5 report type parsers, auto-detect upload, Retail Reporting nav + page with 5 sub-tabs).
+Architecture doc: Walmart_Retail_Data_Architecture.md.
+Remaining: First Tee, Belk, Hobby Lobby, Albertsons, Family Dollar
+ingestion (same table schemas, different channel value). Google Drive watched folder. Email ingestion.
 
 ### Phase 5 — Multi-Platform APIs: PLANNED
 Walmart Marketplace API, Shopify API, cross-platform views.
