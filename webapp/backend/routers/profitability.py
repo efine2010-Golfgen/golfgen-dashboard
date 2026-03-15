@@ -88,7 +88,7 @@ def _build_product_list(con, cutoff: str, division: str = None, customer: str = 
     products = []
 
     for r in asin_rows:
-        asin, rev, units = r[0], r[1], r[2]
+        asin, rev, units = r[0], _n(r[1]), _n(r[2])
         inv = inv_names.get(asin, {})
         sku = inv.get("sku", "")
         name = inv.get("product_name", "") or cogs_data.get(asin, {}).get("product_name", "")
@@ -113,7 +113,7 @@ def _build_product_list(con, cutoff: str, division: str = None, customer: str = 
             FROM financial_events
             {fin_filter}
         """, fin_params).fetchone()
-        fba_actual, comm_actual = fin_row if fin_row else (0, 0)
+        fba_actual, comm_actual = (_n(fin_row[0]), _n(fin_row[1])) if fin_row else (0, 0)
 
         fbaTotal = fba_actual if fba_actual > 0 else round(rev * 0.12, 2)
         referralTotal = comm_actual if comm_actual > 0 else round(rev * 0.15, 2)
@@ -134,7 +134,7 @@ def _build_product_list(con, cutoff: str, division: str = None, customer: str = 
                 FROM advertising
                 {ad_filter}
             """, ad_params).fetchone()
-            adSpend = ad_row[0] if ad_row else 0
+            adSpend = _n(ad_row[0]) if ad_row else 0
         except Exception:
             pass
 
@@ -237,10 +237,10 @@ def _pnl_waterfall_inner(days, division, customer, platform):
     hf, hp = hierarchy_filter(division, customer, platform)
     rev_filter = "WHERE date >= ? AND asin = 'ALL'" + hf
     rev_params = [cutoff] + hp
-    actual_rev = con.execute(f"""
+    actual_rev = _n(con.execute(f"""
         SELECT COALESCE(SUM(ordered_product_sales), 0)
         FROM daily_sales {rev_filter}
-    """, rev_params).fetchone()[0]
+    """, rev_params).fetchone()[0])
 
     # Cost breakdown from per-ASIN data
     products = _build_product_list(con, cutoff, division, customer, platform)
@@ -438,8 +438,8 @@ def _profitability_items_inner(days, division, customer, platform):
             {fin_filter}
             GROUP BY asin
         """, fin_params).fetchall()
-        fin_by_asin = {r[0]: {"promo": r[1], "shipping": r[2], "other": r[3],
-                                "refund_amt": r[4], "refund_count": r[5]} for r in fin_rows}
+        fin_by_asin = {r[0]: {"promo": _n(r[1]), "shipping": _n(r[2]), "other": _n(r[3]),
+                                "refund_amt": _n(r[4]), "refund_count": _n(r[5])} for r in fin_rows}
     except Exception:
         pass
 
@@ -454,7 +454,7 @@ def _profitability_items_inner(days, division, customer, platform):
             {ad_filter}
             GROUP BY asin
         """, ad_params).fetchall()
-        ad_by_asin = {r[0]: r[1] for r in ad_rows}
+        ad_by_asin = {r[0]: _n(r[1]) for r in ad_rows}
     except Exception:
         pass
 
@@ -571,7 +571,7 @@ def _build_waterfall(con, cogs_data, start: str, end: str, division: str = None,
         FROM daily_sales
         WHERE date >= ? AND date < ? AND asin = 'ALL'{div_cust_sql}
     """, [start, end] + div_cust_params).fetchone()
-    sales, units = row[0], row[1]
+    sales, units = _n(row[0]), _n(row[1])
 
     # Per-ASIN cost breakdown
     asin_rows = con.execute(f"""
@@ -623,9 +623,9 @@ def _build_waterfall(con, cogs_data, start: str, end: str, division: str = None,
         raw_key = r[0]
         # Try to resolve SKU to real ASIN
         resolved = sku_to_asin.get(raw_key, raw_key)
-        entry = {"fba": r[1], "comm": r[2], "promo": r[3],
-                 "shipping": r[4], "other": r[5],
-                 "refund_amt": r[6], "refund_count": r[7]}
+        entry = {"fba": _n(r[1]), "comm": _n(r[2]), "promo": _n(r[3]),
+                 "shipping": _n(r[4]), "other": _n(r[5]),
+                 "refund_amt": _n(r[6]), "refund_count": _n(r[7])}
         if resolved in fin_by_asin:
             # Merge if multiple SKUs map to same ASIN
             for k in entry:
@@ -651,9 +651,9 @@ def _build_waterfall(con, cogs_data, start: str, end: str, division: str = None,
             WHERE date >= ? AND date < ?{div_cust_sql}
         """, [start, end] + div_cust_params).fetchone()
         if acct_row and acct_row[0] is not None:
-            acct_fin = {"fba": acct_row[0], "comm": acct_row[1], "promo": acct_row[2],
-                        "shipping": acct_row[3], "other": acct_row[4],
-                        "refund_amt": acct_row[5], "refund_count": acct_row[6]}
+            acct_fin = {"fba": _n(acct_row[0]), "comm": _n(acct_row[1]), "promo": _n(acct_row[2]),
+                        "shipping": _n(acct_row[3]), "other": _n(acct_row[4]),
+                        "refund_amt": _n(acct_row[5]), "refund_count": _n(acct_row[6])}
     except Exception:
         pass
 
@@ -665,7 +665,7 @@ def _build_waterfall(con, cogs_data, start: str, end: str, division: str = None,
             FROM advertising
             WHERE date >= ? AND date < ?{div_cust_sql}
         """, [start, end] + div_cust_params).fetchone()
-        total_ad = ad_row[0] if ad_row else 0
+        total_ad = _n(ad_row[0]) if ad_row else 0
     except Exception:
         pass
 
@@ -681,7 +681,7 @@ def _build_waterfall(con, cogs_data, start: str, end: str, division: str = None,
     prod_rev = 0
 
     for ar in asin_rows:
-        asin, rev, u = ar[0], ar[1], ar[2]
+        asin, rev, u = ar[0], _n(ar[1]), _n(ar[2])
         sku = ""
         if u == 0:
             continue
