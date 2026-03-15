@@ -268,7 +268,7 @@ function AppShell({ user, isAdmin, allowed, mfaProtected, userMfaEnabled, filter
           <span className="filter-lbl">View:</span>
           <HierarchyFilter division={division} customer={customer} onChange={handleFilterChange} compact />
           {/* Marketplace toggle — show on relevant Amazon pages */}
-          {["exec-summary", "sales", "inventory"].includes(activeTab) && (
+          {["exec-summary", "sales", "profitability", "inventory", "advertising"].includes(activeTab) && (
             <div style={{ display: 'flex', alignItems: 'center', gap: 0, marginLeft: 4 }}>
               <button
                 onClick={() => handleMarketplaceChange("US")}
