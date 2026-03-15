@@ -157,14 +157,16 @@ function heatmapSVG(data, W=1100) {
   let s = `<svg width="100%" viewBox="0 0 ${svgW} ${svgH}" style="overflow:visible;display:block">`;
   Array.from({length:WEEKS},(_,w) => { if(w%4===0||w===WEEKS-1) s+=`<text x="${padL+(w+.5)*cellW}" y="${padT-5}" text-anchor="middle" font-size="8" fill="${B.sub}">W${WEEKS-w}</text>`; });
   DAYS.forEach((d,i) => s+=`<text x="${padL-3}" y="${padT+(i+.5)*cellH+4}" text-anchor="end" font-size="9" fill="${B.sub}">${d}</text>`);
-  // Draw full 26×7 grid — background cells always visible, data cells scaled by max
+  // Draw full 26×7 grid — sqrt scale so low-volume weeks stay visible
+  const sqrtMx = mx > 0 ? Math.sqrt(mx) : 1;
   for (let w=0; w<WEEKS; w++) {
     for (let d=0; d<7; d++) {
       const units = lookup[`${w},${d}`] || 0;
-      const alpha = mx > 0 ? Math.max(0.05, Math.min(0.9, units/mx)).toFixed(2) : '0.05';
+      const ratio = mx > 0 ? Math.sqrt(units) / sqrtMx : 0;
+      const alpha = units > 0 ? Math.max(0.12, Math.min(0.92, ratio)).toFixed(2) : '0.05';
       const c = d >= 5 ? B.o2 : B.b2;
       s += `<rect x="${(padL+w*cellW+2).toFixed(1)}" y="${(padT+d*cellH+2).toFixed(1)}" width="${(cellW-4).toFixed(1)}" height="${(cellH-4).toFixed(1)}" rx="3" fill="${c}" fill-opacity="${alpha}"/>`;
-      if (mx > 0 && units/mx > 0.68) s += `<text x="${(padL+(w+.5)*cellW).toFixed(1)}" y="${(padT+(d+.5)*cellH+3.5).toFixed(1)}" text-anchor="middle" font-size="7" fill="white" opacity=".85">${units}</text>`;
+      if (mx > 0 && ratio > 0.55) s += `<text x="${(padL+(w+.5)*cellW).toFixed(1)}" y="${(padT+(d+.5)*cellH+3.5).toFixed(1)}" text-anchor="middle" font-size="7" fill="white" opacity=".85">${units}</text>`;
     }
   }
   return s + '</svg>';
