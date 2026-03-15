@@ -157,23 +157,39 @@ function heatmapSVG(data, W=1100) {
   let s = `<svg width="100%" viewBox="0 0 ${svgW} ${svgH}" style="overflow:visible;display:block">`;
   Array.from({length:WEEKS},(_,w) => { if(w%4===0||w===WEEKS-1) s+=`<text x="${padL+(w+.5)*cellW}" y="${padT-5}" text-anchor="middle" font-size="8" fill="${B.sub}">W${WEEKS-w}</text>`; });
   DAYS.forEach((d,i) => s+=`<text x="${padL-3}" y="${padT+(i+.5)*cellH+4}" text-anchor="end" font-size="9" fill="${B.sub}">${d}</text>`);
-  // Log-based color scaling — gives clear visual heat differences.
-  // Low values get cool/light cells, high values get intense/dark cells.
-  const logMax = Math.log1p(mx);
+  // Full-spectrum heatmap: cool→warm color gradient based on value intensity
+  // Color stops: dark navy → blue → teal → green → yellow → orange → red
+  const stops = [
+    [21,37,62],    // 0.00 dark navy
+    [15,82,115],   // 0.17 deep blue
+    [13,115,119],  // 0.33 teal
+    [34,139,34],   // 0.50 green
+    [218,165,32],  // 0.67 golden yellow
+    [230,101,30],  // 0.83 orange
+    [214,40,57],   // 1.00 red
+  ];
+  const heatColor = (t) => {
+    if (t <= 0) return 'rgb(21,37,62)';
+    if (t >= 1) return 'rgb(214,40,57)';
+    const seg = t * (stops.length - 1);
+    const i = Math.floor(seg);
+    const f = seg - i;
+    const a = stops[i], b = stops[Math.min(i+1, stops.length-1)];
+    return `rgb(${Math.round(a[0]+(b[0]-a[0])*f)},${Math.round(a[1]+(b[1]-a[1])*f)},${Math.round(a[2]+(b[2]-a[2])*f)})`;
+  };
+  // Power scaling (sqrt) — spreads values more than log, clear peaks vs valleys
+  const sqrtMax = Math.sqrt(mx || 1);
   for (let w=0; w<WEEKS; w++) {
     for (let d=0; d<7; d++) {
       const units = lookup[`${WEEKS-1-w},${d}`] || 0;
-      // Log scale maps small values to lower alphas and large values to higher
-      const pct = units > 0 && logMax > 0 ? Math.log1p(units) / logMax : 0;
-      // Alpha range: 0.12 (lowest) to 0.92 (highest), 0.04 for empty
-      const alpha = units > 0 ? (0.12 + pct * 0.80).toFixed(2) : '0.04';
-      const c = d >= 5 ? B.o2 : B.b2;
-      s += `<rect x="${(padL+w*cellW+2).toFixed(1)}" y="${(padT+d*cellH+2).toFixed(1)}" width="${(cellW-4).toFixed(1)}" height="${(cellH-4).toFixed(1)}" rx="3" fill="${c}" fill-opacity="${alpha}"/>`;
-      // Show numeric value on EVERY cell that has data
+      const pct = units > 0 ? Math.sqrt(units) / sqrtMax : 0;
+      const fill = units > 0 ? heatColor(pct) : 'rgb(21,37,62)';
+      const opacity = units > 0 ? (0.55 + pct * 0.45).toFixed(2) : '0.18';
+      s += `<rect x="${(padL+w*cellW+2).toFixed(1)}" y="${(padT+d*cellH+2).toFixed(1)}" width="${(cellW-4).toFixed(1)}" height="${(cellH-4).toFixed(1)}" rx="3" fill="${fill}" opacity="${opacity}"/>`;
       if (units > 0) {
         const fs = units >= 100 ? 6 : 7;
-        const txtAlpha = pct > 0.4 ? '.95' : '.75';
-        s += `<text x="${(padL+(w+.5)*cellW).toFixed(1)}" y="${(padT+(d+.5)*cellH+3.5).toFixed(1)}" text-anchor="middle" font-size="${fs}" fill="white" opacity="${txtAlpha}">${units}</text>`;
+        const txtFill = pct > 0.5 ? '#fff' : '#c8d6e5';
+        s += `<text x="${(padL+(w+.5)*cellW).toFixed(1)}" y="${(padT+(d+.5)*cellH+3.5).toFixed(1)}" text-anchor="middle" font-size="${fs}" font-weight="600" fill="${txtFill}">${units}</text>`;
       }
     }
   }
