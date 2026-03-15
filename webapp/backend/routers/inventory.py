@@ -1207,7 +1207,9 @@ def _enrich_shipment_items(shipment_id, marketplace="US"):
                 "quantityInCase": item.get("QuantityInCase", 0),
             })
 
-        # Handle pagination
+        # Handle pagination — deduplicate by SKU to prevent inflated counts
+        # (Amazon's API sometimes returns duplicate pages with the same NextToken)
+        seen_skus = {item.get("SellerSKU", "") for item in items}
         next_token = payload.get("NextToken")
         page = 1
         while next_token and page < 10:
@@ -1218,14 +1220,25 @@ def _enrich_shipment_items(shipment_id, marketplace="US"):
                 NextToken=next_token,
             )
             payload = resp.payload or {}
-            for item in payload.get("ItemData", []):
-                result.append({
-                    "sku": item.get("SellerSKU", ""),
-                    "fnsku": item.get("FulfillmentNetworkSKU", ""),
-                    "quantityShipped": item.get("QuantityShipped", 0),
-                    "quantityReceived": item.get("QuantityReceived", 0),
-                    "quantityInCase": item.get("QuantityInCase", 0),
-                })
+            new_items = payload.get("ItemData", [])
+            new_skus = {item.get("SellerSKU", "") for item in new_items}
+
+            # If this page's SKUs are all already seen, we're getting duplicate data — stop
+            if new_skus and new_skus.issubset(seen_skus):
+                logger.info(f"FBA shipment {shipment_id}: page {page} returned duplicate SKUs, stopping pagination")
+                break
+
+            for item in new_items:
+                sku = item.get("SellerSKU", "")
+                if sku not in seen_skus:
+                    seen_skus.add(sku)
+                    result.append({
+                        "sku": sku,
+                        "fnsku": item.get("FulfillmentNetworkSKU", ""),
+                        "quantityShipped": item.get("QuantityShipped", 0),
+                        "quantityReceived": item.get("QuantityReceived", 0),
+                        "quantityInCase": item.get("QuantityInCase", 0),
+                    })
             next_token = payload.get("NextToken")
 
         # Enrich with product names + ASIN from item_master + fba_inventory (DB)
