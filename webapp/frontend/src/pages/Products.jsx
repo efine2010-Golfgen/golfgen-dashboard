@@ -448,7 +448,7 @@ export default function Products({ filters = {} }) {
               </CardHdr>
               <div style={{ padding: "10px 14px", overflowX: "auto" }}>
                 {/* Column headers */}
-                <div style={{ display: "flex", gap: 2, marginLeft: 120, marginBottom: 4 }}>
+                <div style={{ display: "flex", gap: 2, marginLeft: 142, marginBottom: 4 }}>
                   {WEEKS.map((w, i) => (
                     <div key={w} style={{ flex: 1, textAlign: "center", minWidth: 46, ...SG(), fontSize: 7.5, fontWeight: 700, textTransform: "uppercase", color: i === 7 ? "#2ECFAA" : "var(--txt3)" }}>{w}</div>
                   ))}
@@ -456,10 +456,10 @@ export default function Products({ filters = {} }) {
                 {/* Rows */}
                 {hmProducts.map(p => {
                   const cd = p.cvrData || [];
-                  const sName = shortName(p.name, 18);
+                  const sName = shortName(p.name, 22);
                   return (
                     <div key={p.asin + "-cvrhm"} style={{ display: "flex", alignItems: "center", gap: 2, marginBottom: 2 }}>
-                      <span style={{ ...SG(), fontSize: 8, color: "var(--txt2)", width: 118, flexShrink: 0, textAlign: "right", paddingRight: 8, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{sName}</span>
+                      <span style={{ ...SG(), fontSize: 8, color: "var(--txt2)", width: 140, flexShrink: 0, textAlign: "right", paddingRight: 8, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{sName}</span>
                       {cd.map((v, i) => {
                         const { bg, fg } = cvrHmBgFg(v);
                         return <HmCell key={i} value={v} fmt={v => `${v.toFixed(1)}%`} bg={bg} fg={fg} />;
@@ -485,18 +485,18 @@ export default function Products({ filters = {} }) {
                 <CBadge color="blue">Velocity trend</CBadge>
               </CardHdr>
               <div style={{ padding: "10px 14px", overflowX: "auto" }}>
-                <div style={{ display: "flex", gap: 2, marginLeft: 120, marginBottom: 4 }}>
+                <div style={{ display: "flex", gap: 2, marginLeft: 142, marginBottom: 4 }}>
                   {WEEKS.map((w, i) => (
                     <div key={w} style={{ flex: 1, textAlign: "center", minWidth: 46, ...SG(), fontSize: 7.5, fontWeight: 700, textTransform: "uppercase", color: i === 7 ? "#2ECFAA" : "var(--txt3)" }}>{w}</div>
                   ))}
                 </div>
                 {hmProducts.map(p => {
                   const vd = p.velData || [];
-                  const sName = shortName(p.name, 18);
+                  const sName = shortName(p.name, 22);
                   const isDeclining = vd.length >= 2 && vd[vd.length - 1] < vd[0] * 0.85;
                   return (
                     <div key={p.asin + "-unithm"} style={{ display: "flex", alignItems: "center", gap: 2, marginBottom: 2 }}>
-                      <span style={{ ...SG(), fontSize: 8, color: "var(--txt2)", width: 118, flexShrink: 0, textAlign: "right", paddingRight: 8, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{sName}</span>
+                      <span style={{ ...SG(), fontSize: 8, color: "var(--txt2)", width: 140, flexShrink: 0, textAlign: "right", paddingRight: 8, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{sName}</span>
                       {vd.map((v, i) => {
                         const { bg, fg } = unitsHmBgFg(v, maxUnitsAll, isDeclining && i >= vd.length - 3, p.isHW);
                         return <HmCell key={i} value={v} fmt={v => Math.round(v)} bg={bg} fg={fg} />;
