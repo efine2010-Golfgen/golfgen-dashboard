@@ -158,10 +158,16 @@ export default function FBAShipments({ filters = {} }) {
   const activeShipments = shipments.filter(s => activeStatuses.includes(s.status));
   const closedShipments = shipments.filter(s => s.status === "CLOSED");
 
-  // Get items for KPI calculations
+  // Get items for KPI calculations — combine server-provided totals + expanded items
   const allItems = Object.values(itemsCache).flat();
-  const totalSent = allItems.reduce((s, i) => s + (i.quantityShipped || 0), 0);
-  const totalRecv = allItems.reduce((s, i) => s + (i.quantityReceived || 0), 0);
+  const itemsCacheSent = allItems.reduce((s, i) => s + (i.quantityShipped || 0), 0);
+  const itemsCacheRecv = allItems.reduce((s, i) => s + (i.quantityReceived || 0), 0);
+  // Also sum server-provided totals for shipments not yet expanded
+  const serverSent = shipments.reduce((s, sh) => s + (sh.totalShipped || 0), 0);
+  const serverRecv = shipments.reduce((s, sh) => s + (sh.totalReceived || 0), 0);
+  // Use the larger of expanded-items vs server-provided (avoids double-counting)
+  const totalSent = Math.max(itemsCacheSent, serverSent);
+  const totalRecv = Math.max(itemsCacheRecv, serverRecv);
   const netDisc = totalRecv - totalSent;
 
   // Receive rate
@@ -193,8 +199,8 @@ export default function FBAShipments({ filters = {} }) {
   /* ── KPI card definitions ── */
   const kpis = [
     { label: "Active Shipments", value: activeShipments.length, color: "#E87830", sub: `${pipeCount("SHIPPED")} in transit · ${pipeCount("RECEIVING")} receiving` },
-    { label: "Units Inbound", value: activeShipments.reduce((s, sh) => s + (sh.itemCount || 0), 0).toLocaleString(), color: "var(--acc1)", sub: "All open shipments" },
-    { label: "Shipped (All)", value: totalSent > 0 ? totalSent.toLocaleString() : shipments.length.toString(), color: "#7BAED0", sub: "Total units sent" },
+    { label: "Units Inbound", value: activeShipments.reduce((s, sh) => s + ((sh.totalShipped || 0) - (sh.totalReceived || 0)), 0).toLocaleString(), color: "var(--acc1)", sub: "All open shipments" },
+    { label: "Shipped (All)", value: totalSent > 0 ? totalSent.toLocaleString() : "—", color: "#7BAED0", sub: "Total units sent" },
     { label: "Received (All)", value: totalRecv > 0 ? totalRecv.toLocaleString() : "—", color: "var(--acc1)", sub: "Confirmed by FC" },
     { label: "Net Discrepancy", value: netDisc !== 0 ? netDisc.toLocaleString() : totalSent > 0 ? "0" : "—", color: netDisc < 0 ? "#f87171" : "var(--acc1)", sub: "Sent vs received" },
     { label: "Avg Lead Time", value: "—", color: "#F5B731", sub: "Ship → FC received" },
@@ -444,9 +450,14 @@ export default function FBAShipments({ filters = {} }) {
               {filtered.map(s => {
                 const isExp = expandedId === s.shipmentId;
                 const items = itemsCache[s.shipmentId] || [];
-                const sent = items.reduce((sum, it) => sum + (it.quantityShipped || 0), 0);
-                const recv = items.reduce((sum, it) => sum + (it.quantityReceived || 0), 0);
-                const disc = items.length > 0 ? recv - sent : null;
+                // Use server-provided totals for active shipments; compute from items if expanded
+                const sent = items.length > 0
+                  ? items.reduce((sum, it) => sum + (it.quantityShipped || 0), 0)
+                  : (s.totalShipped || 0);
+                const recv = items.length > 0
+                  ? items.reduce((sum, it) => sum + (it.quantityReceived || 0), 0)
+                  : (s.totalReceived || 0);
+                const disc = (sent > 0 || recv > 0) ? recv - sent : null;
                 const discCol = disc === null ? 'var(--txt3)' : disc < 0 ? '#f87171' : disc > 0 ? '#2ECFAA' : 'var(--txt3)';
 
                 return (
@@ -465,7 +476,7 @@ export default function FBAShipments({ filters = {} }) {
                       </td>
                       <td style={{ padding: '9px 10px' }}>
                         <div style={{ fontSize: 11, fontWeight: 600, color: 'var(--txt)' }}>{s.shipmentName || s.shipmentId}</div>
-                        <div style={{ ...SG({ fontSize: 8, color: 'var(--txt3)', marginTop: 1 }) }}>{s.shipmentId} · {s.itemCount || '?'} ASINs</div>
+                        <div style={{ ...SG({ fontSize: 8, color: 'var(--txt3)', marginTop: 1 }) }}>{s.shipmentId}{s.itemCount ? ` · ${s.itemCount} ASINs` : ""}</div>
                       </td>
                       <td style={{ padding: '9px 10px' }}><StatusPill status={s.status} /></td>
                       <td style={{ padding: '9px 10px', ...SG({ fontSize: 10, fontWeight: 700, color: 'var(--txt2)' }) }}>{s.destination || "—"}</td>
@@ -488,11 +499,11 @@ export default function FBAShipments({ filters = {} }) {
                             ) : items.length > 0 ? (
                               <>
                                 <div style={{
-                                  display: 'grid', gridTemplateColumns: '32px 1fr 70px 70px 76px 70px', gap: 6,
+                                  display: 'grid', gridTemplateColumns: '32px 1.2fr 1.5fr 70px 70px 76px 70px', gap: 6,
                                   padding: '6px 14px 6px 40px', background: 'var(--card)', borderBottom: '1px solid var(--brd2)',
                                 }}>
-                                  {["", "SKU / FNSKU", "Sent", "Received", "Discrepancy", "Recv %"].map((h, i) => (
-                                    <span key={i} style={{ ...SG({ fontSize: 7, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '.07em', color: 'var(--txt3)', textAlign: i > 1 ? 'right' : 'left' }) }}>{h}</span>
+                                  {["", "SKU / FNSKU", "Description", "Sent", "Received", "Discrepancy", "Recv %"].map((h, i) => (
+                                    <span key={i} style={{ ...SG({ fontSize: 7, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '.07em', color: 'var(--txt3)', textAlign: i > 2 ? 'right' : 'left' }) }}>{h}</span>
                                   ))}
                                 </div>
                                 {items.map((it, idx) => {
@@ -504,7 +515,7 @@ export default function FBAShipments({ filters = {} }) {
                                   const iPctCol = iPct >= 99 ? '#2ECFAA' : iPct >= 90 ? '#F5B731' : '#f87171';
                                   return (
                                     <div key={idx} style={{
-                                      display: 'grid', gridTemplateColumns: '32px 1fr 70px 70px 76px 70px', gap: 6,
+                                      display: 'grid', gridTemplateColumns: '32px 1.2fr 1.5fr 70px 70px 76px 70px', gap: 6,
                                       padding: '7px 14px 7px 40px', borderBottom: '1px solid var(--brd)', alignItems: 'center',
                                     }}>
                                       <div style={{ ...SG({ fontSize: 9, color: 'var(--txt3)', fontWeight: 700 }) }}>{idx + 1}</div>
@@ -512,6 +523,7 @@ export default function FBAShipments({ filters = {} }) {
                                         <div style={{ ...SG({ fontSize: 8, color: 'var(--acc3, #3E658C)', fontWeight: 700 }) }}>{it.sku}</div>
                                         <div style={{ fontSize: 10, color: 'var(--txt)', fontWeight: 600, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{it.fnsku || "—"}</div>
                                       </div>
+                                      <div style={{ fontSize: 10, color: 'var(--txt2)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }} title={it.productName || ""}>{it.productName || "—"}</div>
                                       <div style={{ ...SG({ fontSize: 10, textAlign: 'right' }) }}>{iSent.toLocaleString()}</div>
                                       <div style={{ ...SG({ fontSize: 10, textAlign: 'right', color: iRecv > 0 ? '#2ECFAA' : 'var(--txt3)' }) }}>{iRecv > 0 ? iRecv.toLocaleString() : "—"}</div>
                                       <div style={{ textAlign: 'right' }}>

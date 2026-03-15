@@ -1680,7 +1680,7 @@ def summary(
             SELECT COALESCE(COUNT(*), 0),
                    COALESCE(SUM(ABS(product_charges)), 0)
             FROM financial_events
-            WHERE date >= ? AND event_type = 'Refund'{hf}
+            WHERE date >= ? AND (event_type ILIKE '%%refund%%' OR event_type ILIKE '%%return%%'){hf}
         """, [cutoff] + hp).fetchone()
         if ret_row:
             returns_units = int(ret_row[0])

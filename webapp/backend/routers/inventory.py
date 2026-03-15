@@ -1076,6 +1076,7 @@ def _fetch_fba_shipments_from_api(statuses=None, days_back=90):
 
         # Normalize shipment data for frontend
         normalized = []
+        active_ids = []  # collect active shipment IDs for item pre-fetch
         for s in all_shipments:
             ship_id = s.get("ShipmentId", "")
             ship_name = s.get("ShipmentName", "")
@@ -1091,9 +1092,6 @@ def _fetch_fba_shipments_from_api(statuses=None, days_back=90):
                 parts = [ship_from.get("City", ""), ship_from.get("StateOrProvinceCode", "")]
                 ship_from_str = ", ".join(p for p in parts if p)
 
-            # Items count from InboundShipmentInfo
-            items = s.get("Items", [])
-
             normalized.append({
                 "shipmentId": ship_id,
                 "shipmentName": ship_name,
@@ -1102,8 +1100,28 @@ def _fetch_fba_shipments_from_api(statuses=None, days_back=90):
                 "labelPrep": label_prep,
                 "casesRequired": are_cases_required,
                 "shipFrom": ship_from_str,
-                "itemCount": len(items) if items else 0,
+                "itemCount": 0,
+                "totalShipped": 0,
+                "totalReceived": 0,
             })
+
+            # Track active shipments for item pre-fetch
+            if status in ("WORKING", "SHIPPED", "RECEIVING", "IN_TRANSIT", "CHECKED_IN"):
+                active_ids.append(ship_id)
+
+        # Pre-fetch items for active shipments to populate sent/received/itemCount
+        if active_ids:
+            logger.info(f"FBA Shipments: pre-fetching items for {len(active_ids)} active shipments")
+            ship_lookup = {n["shipmentId"]: n for n in normalized}
+            for sid in active_ids:
+                try:
+                    items = _enrich_shipment_items(sid)
+                    if items and sid in ship_lookup:
+                        ship_lookup[sid]["itemCount"] = len(items)
+                        ship_lookup[sid]["totalShipped"] = sum(i.get("quantityShipped", 0) for i in items)
+                        ship_lookup[sid]["totalReceived"] = sum(i.get("quantityReceived", 0) for i in items)
+                except Exception as e:
+                    logger.warning(f"Failed to pre-fetch items for {sid}: {e}")
 
         result = {
             "shipments": normalized,
@@ -1122,7 +1140,7 @@ def _fetch_fba_shipments_from_api(statuses=None, days_back=90):
 
 
 def _enrich_shipment_items(shipment_id):
-    """Fetch items for a specific shipment from SP-API."""
+    """Fetch items for a specific shipment from SP-API, enriched with product names."""
     try:
         from sp_api.api import FulfillmentInbound
         from sp_api.base import Marketplaces
@@ -1172,6 +1190,23 @@ def _enrich_shipment_items(shipment_id):
                     "quantityInCase": item.get("QuantityInCase", 0),
                 })
             next_token = payload.get("NextToken")
+
+        # Enrich with product names from item_master (DB)
+        if result:
+            try:
+                con = get_db()
+                skus = [r["sku"] for r in result if r["sku"]]
+                if skus:
+                    placeholders = ",".join(["?"] * len(skus))
+                    rows = con.execute(
+                        f"SELECT sku, product_name FROM item_master WHERE sku IN ({placeholders})",
+                        skus,
+                    ).fetchall()
+                    name_map = {r[0]: r[1] for r in rows if r[1]}
+                    for r in result:
+                        r["productName"] = name_map.get(r["sku"], "")
+            except Exception as e:
+                logger.warning(f"Could not enrich item names for {shipment_id}: {e}")
 
         return result
     except Exception as e:
