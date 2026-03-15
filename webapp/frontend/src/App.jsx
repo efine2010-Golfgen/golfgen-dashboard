@@ -206,7 +206,7 @@ function NavSystem({ permissions, mfaProtected, userMfaEnabled }) {
 }
 
 /* ── App Shell ── */
-function AppShell({ user, isAdmin, allowed, mfaProtected, userMfaEnabled, filters, division, customer, handleFilterChange, handleLogout }) {
+function AppShell({ user, isAdmin, allowed, mfaProtected, userMfaEnabled, filters, division, customer, marketplace, handleFilterChange, handleMarketplaceChange, handleLogout }) {
   const location = useLocation();
   const activeTab = detectCategory(location.pathname);
   return (
@@ -267,6 +267,41 @@ function AppShell({ user, isAdmin, allowed, mfaProtected, userMfaEnabled, filter
         <div className="filter-bar">
           <span className="filter-lbl">View:</span>
           <HierarchyFilter division={division} customer={customer} onChange={handleFilterChange} compact />
+          {/* Marketplace toggle — show on relevant Amazon pages */}
+          {["exec-summary", "sales", "inventory"].includes(activeTab) && (
+            <div style={{ display: 'flex', alignItems: 'center', gap: 0, marginLeft: 4 }}>
+              <button
+                onClick={() => handleMarketplaceChange("US")}
+                className={`mp-toggle${marketplace === "US" ? " mp-active" : ""}`}
+                style={{
+                  height: 28, padding: '0 10px', borderRadius: '6px 0 0 6px',
+                  border: '1px solid var(--brd)', borderRight: 'none',
+                  background: marketplace === "US" ? 'var(--acc1)' : 'var(--ibg)',
+                  color: marketplace === "US" ? '#fff' : 'var(--txt3)',
+                  fontSize: 10, fontWeight: 700, fontFamily: "'Space Grotesk',monospace",
+                  cursor: 'pointer', transition: 'all .2s', letterSpacing: '.03em',
+                  display: 'inline-flex', alignItems: 'center', gap: 4,
+                }}
+              >
+                <span style={{ fontSize: 11 }}>🇺🇸</span> US
+              </button>
+              <button
+                onClick={() => handleMarketplaceChange("CA")}
+                className={`mp-toggle${marketplace === "CA" ? " mp-active" : ""}`}
+                style={{
+                  height: 28, padding: '0 10px', borderRadius: '0 6px 6px 0',
+                  border: '1px solid var(--brd)',
+                  background: marketplace === "CA" ? 'var(--acc1)' : 'var(--ibg)',
+                  color: marketplace === "CA" ? '#fff' : 'var(--txt3)',
+                  fontSize: 10, fontWeight: 700, fontFamily: "'Space Grotesk',monospace",
+                  cursor: 'pointer', transition: 'all .2s', letterSpacing: '.03em',
+                  display: 'inline-flex', alignItems: 'center', gap: 4,
+                }}
+              >
+                <span style={{ fontSize: 11 }}>🇨🇦</span> CA
+              </button>
+            </div>
+          )}
           <AskClaude activeTab={activeTab} division={division} customer={customer} />
           <ThemeSelector />
         </div>
@@ -317,11 +352,13 @@ export default function App() {
 
   const [division, setDivision] = useState("");
   const [customer, setCustomer] = useState("");
+  const [marketplace, setMarketplace] = useState("US");
   const handleFilterChange = ({ division: d, customer: c }) => {
     setDivision(d);
     setCustomer(c);
   };
-  const filters = { division, customer };
+  const handleMarketplaceChange = (mp) => setMarketplace(mp);
+  const filters = { division, customer, marketplace };
 
   const loadMfaState = async () => {
     try {
@@ -414,7 +451,9 @@ export default function App() {
           filters={filters}
           division={division}
           customer={customer}
+          marketplace={marketplace}
           handleFilterChange={handleFilterChange}
+          handleMarketplaceChange={handleMarketplaceChange}
           handleLogout={handleLogout}
         />
       </BrowserRouter>

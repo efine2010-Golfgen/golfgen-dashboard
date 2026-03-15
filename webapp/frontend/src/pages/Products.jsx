@@ -69,7 +69,7 @@ export default function Products({ filters = {} }) {
     <>
       <div className="page-header">
         <h1>Product Breakdown</h1>
-        <p>{products.length} products &middot; Full P&L by SKU</p>
+        <p>{(filters.marketplace || "US") === "CA" ? "Amazon.ca (Canada)" : "Amazon.com (US)"} &middot; {products.length} products &middot; Full P&L by SKU</p>
       </div>
 
       <div style={{ display: "flex", gap: 12, alignItems: "center", marginBottom: 24 }}>

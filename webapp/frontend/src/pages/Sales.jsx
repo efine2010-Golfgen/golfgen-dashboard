@@ -484,6 +484,7 @@ export default function Sales({ filters = {} }) {
   // Division/customer come from the global filter bar (App.jsx HierarchyFilter)
   const divRaw  = filters.division  || '';   // 'golf' | 'housewares' | ''
   const custRaw = filters.customer  || '';   // 'amazon' | '' etc.
+  const mpRaw   = filters.marketplace || 'US'; // 'US' | 'CA'
 
   const [viewTab,     setViewTab]     = useState('Exec');
   const [activePeriod,setActivePeriod]= useState('MTD');
@@ -577,6 +578,8 @@ export default function Sales({ filters = {} }) {
       <div style={{marginBottom:20}}>
         <h2 style={{fontFamily:"'DM Serif Display',Georgia,serif",fontSize:22,fontWeight:400,margin:0,color:'var(--txt)'}}>Performance Snapshot</h2>
         <div style={{fontSize:12,color:'var(--txt3)',marginTop:3,fontFamily:"'Space Grotesk',monospace"}}>
+          {mpRaw === 'CA' ? 'Amazon.ca (Canada)' : 'Amazon.com (US)'}
+          {' \u00B7 '}
           {!divRaw ? 'All Divisions' : divRaw === 'golf' ? 'Golf (PGAT)' : 'Housewares'}
           {custRaw ? ` \u00B7 ${custRaw.replace(/_/g,' ').replace(/\b\w/g,l=>l.toUpperCase())}` : ''}
           {fellBack && <span style={{marginLeft:8,color:B.o3,fontStyle:'italic'}}>{m.period_label}</span>}

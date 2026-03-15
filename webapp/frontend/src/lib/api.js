@@ -1,11 +1,12 @@
 const API_BASE = import.meta.env.VITE_API_URL || "";
 
-// Build hierarchy query string fragment from {division, customer, platform}
+// Build hierarchy query string fragment from {division, customer, platform, marketplace}
 function _hq(h = {}) {
   let q = "";
   if (h.division) q += `&division=${encodeURIComponent(h.division)}`;
   if (h.customer) q += `&customer=${encodeURIComponent(h.customer)}`;
   if (h.platform) q += `&platform=${encodeURIComponent(h.platform)}`;
+  if (h.marketplace) q += `&marketplace=${encodeURIComponent(h.marketplace)}`;
   return q;
 }
 
@@ -152,11 +153,18 @@ export const api = {
     return fetch(`${API_BASE}/api/supply-chain/upload`, { method: "POST", body: fd, credentials: "include" }).then(r => r.json());
   },
 
-  // FBA Shipments (SP-API)
-  fbaShipments: (refresh = false) => fetchJSON(`/api/fba-shipments${refresh ? "?refresh=true" : ""}`),
-  fbaShipmentsSync: () =>
-    fetch(`${API_BASE}/api/fba-shipments/sync`, { method: "POST", credentials: "include" }).then(r => r.json()),
-  fbaShipmentItems: (shipmentId) => fetchJSON(`/api/fba-shipments/${encodeURIComponent(shipmentId)}/items`),
+  // FBA Shipments (SP-API) — marketplace: "US" | "CA"
+  fbaShipments: (refresh = false, marketplace = "US") => {
+    const params = [];
+    if (refresh) params.push("refresh=true");
+    if (marketplace && marketplace !== "US") params.push(`marketplace=${marketplace}`);
+    const qs = params.length ? `?${params.join("&")}` : "";
+    return fetchJSON(`/api/fba-shipments${qs}`);
+  },
+  fbaShipmentsSync: (marketplace = "US") =>
+    fetch(`${API_BASE}/api/fba-shipments/sync${marketplace && marketplace !== "US" ? `?marketplace=${marketplace}` : ""}`, { method: "POST", credentials: "include" }).then(r => r.json()),
+  fbaShipmentItems: (shipmentId, marketplace = "US") =>
+    fetchJSON(`/api/fba-shipments/${encodeURIComponent(shipmentId)}/items${marketplace && marketplace !== "US" ? `?marketplace=${marketplace}` : ""}`),
   fbaShipmentProducts: () => fetchJSON(`/api/fba-shipments/products`),
   fbaCreatePlan: (data) =>
     fetch(`${API_BASE}/api/fba-shipments/create-plan`, { method: "POST", credentials: "include", headers: { "Content-Type": "application/json" }, body: JSON.stringify(data) }).then(r => r.json()),

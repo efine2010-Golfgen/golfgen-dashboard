@@ -1009,19 +1009,42 @@ def warehouse_summary():
 
 # ── FBA Shipments ──────────────────────────────────────────────
 
-def _load_fba_shipments_cache():
-    if _FBA_SHIPMENTS_CACHE_PATH.exists():
-        with open(_FBA_SHIPMENTS_CACHE_PATH) as f:
+def _fba_cache_path(marketplace="US"):
+    """Return cache file path for given marketplace."""
+    suffix = f"_{marketplace.lower()}" if marketplace != "US" else ""
+    return DB_DIR / f"fba_shipments_cache{suffix}.json"
+
+
+def _load_fba_shipments_cache(marketplace="US"):
+    path = _fba_cache_path(marketplace)
+    if path.exists():
+        with open(path) as f:
             return json.load(f)
     return None
 
 
-def _save_fba_shipments_cache(data):
-    with open(_FBA_SHIPMENTS_CACHE_PATH, "w") as f:
+def _save_fba_shipments_cache(data, marketplace="US"):
+    path = _fba_cache_path(marketplace)
+    with open(path, "w") as f:
         json.dump(data, f, indent=2)
 
 
-def _fetch_fba_shipments_from_api(statuses=None, days_back=90):
+MARKETPLACE_IDS = {
+    "US": "ATVPDKIKX0DER",
+    "CA": "A2EUQ1WTGCTBG2",
+}
+
+def _get_marketplace_enum(marketplace="US"):
+    """Return sp_api Marketplaces enum for given marketplace key."""
+    from sp_api.base import Marketplaces
+    return Marketplaces.CA if marketplace == "CA" else Marketplaces.US
+
+def _get_marketplace_id(marketplace="US"):
+    """Return Amazon MarketplaceId string for given marketplace key."""
+    return MARKETPLACE_IDS.get(marketplace, MARKETPLACE_IDS["US"])
+
+
+def _fetch_fba_shipments_from_api(statuses=None, days_back=90, marketplace="US"):
     """Fetch FBA inbound shipments from Amazon SP-API."""
     try:
         from sp_api.api import FulfillmentInbound
@@ -1038,10 +1061,13 @@ def _fetch_fba_shipments_from_api(statuses=None, days_back=90):
     if statuses is None:
         statuses = ["WORKING", "SHIPPED", "RECEIVING", "CLOSED", "IN_TRANSIT", "CANCELLED"]
 
+    mp_enum = _get_marketplace_enum(marketplace)
+    mp_id = _get_marketplace_id(marketplace)
+
     try:
         fba = FulfillmentInbound(
             credentials=credentials,
-            marketplace=Marketplaces.US,
+            marketplace=mp_enum,
         )
 
         all_shipments = []
@@ -1050,7 +1076,7 @@ def _fetch_fba_shipments_from_api(statuses=None, days_back=90):
         resp = fba.get_shipments(
             QueryType="SHIPMENT_STATUS",
             ShipmentStatusList=",".join(statuses),
-            MarketplaceId="ATVPDKIKX0DER",
+            MarketplaceId=mp_id,
         )
 
         payload = resp.payload or {}
@@ -1065,7 +1091,7 @@ def _fetch_fba_shipments_from_api(statuses=None, days_back=90):
             resp = fba.get_shipments(
                 QueryType="NEXT_TOKEN",
                 NextToken=next_token,
-                MarketplaceId="ATVPDKIKX0DER",
+                MarketplaceId=mp_id,
             )
             payload = resp.payload or {}
             shipment_data = payload.get("ShipmentData", [])
@@ -1100,6 +1126,7 @@ def _fetch_fba_shipments_from_api(statuses=None, days_back=90):
                 "labelPrep": label_prep,
                 "casesRequired": are_cases_required,
                 "shipFrom": ship_from_str,
+                "marketplace": marketplace,
                 "itemCount": 0,
                 "totalShipped": 0,
                 "totalReceived": 0,
@@ -1121,7 +1148,7 @@ def _fetch_fba_shipments_from_api(statuses=None, days_back=90):
             ship_lookup = {n["shipmentId"]: n for n in normalized}
             for sid in prefetch_ids:
                 try:
-                    items = _enrich_shipment_items(sid)
+                    items = _enrich_shipment_items(sid, marketplace=marketplace)
                     if items and sid in ship_lookup:
                         ship_lookup[sid]["itemCount"] = len(items)
                         ship_lookup[sid]["totalShipped"] = sum(i.get("quantityShipped", 0) for i in items)
@@ -1133,9 +1160,10 @@ def _fetch_fba_shipments_from_api(statuses=None, days_back=90):
             "shipments": normalized,
             "lastSync": datetime.now(TIMEZONE).strftime("%m/%d/%Y %I:%M %p"),
             "totalShipments": len(normalized),
+            "marketplace": marketplace,
         }
 
-        _save_fba_shipments_cache(result)
+        _save_fba_shipments_cache(result, marketplace=marketplace)
         return result
 
     except Exception as e:
@@ -1145,7 +1173,7 @@ def _fetch_fba_shipments_from_api(statuses=None, days_back=90):
         return None
 
 
-def _enrich_shipment_items(shipment_id):
+def _enrich_shipment_items(shipment_id, marketplace="US"):
     """Fetch items for a specific shipment from SP-API, enriched with product names."""
     try:
         from sp_api.api import FulfillmentInbound
@@ -1157,12 +1185,15 @@ def _enrich_shipment_items(shipment_id):
     if not credentials:
         return []
 
+    mp_enum = _get_marketplace_enum(marketplace)
+    mp_id = _get_marketplace_id(marketplace)
+
     try:
         fba = FulfillmentInbound(
             credentials=credentials,
-            marketplace=Marketplaces.US,
+            marketplace=mp_enum,
         )
-        resp = fba.shipment_items_by_shipment(shipment_id, MarketplaceId="ATVPDKIKX0DER")
+        resp = fba.shipment_items_by_shipment(shipment_id, MarketplaceId=mp_id)
         payload = resp.payload or {}
         items = payload.get("ItemData", [])
 
@@ -1183,7 +1214,7 @@ def _enrich_shipment_items(shipment_id):
             page += 1
             resp = fba.shipment_items_by_shipment(
                 shipment_id,
-                MarketplaceId="ATVPDKIKX0DER",
+                MarketplaceId=mp_id,
                 NextToken=next_token,
             )
             payload = resp.payload or {}
@@ -1302,47 +1333,57 @@ def _load_sp_api_credentials() -> dict | None:
 
 
 @router.get("/api/fba-shipments")
-async def get_fba_shipments(request: Request, refresh: bool = False):
+async def get_fba_shipments(request: Request, refresh: bool = False, marketplace: str = "US"):
     """Get FBA inbound shipments. Uses cache unless refresh=true."""
     from core.auth import require_auth
     require_auth(request)
 
+    mp = marketplace.upper() if marketplace else "US"
+    if mp not in ("US", "CA"):
+        mp = "US"
+
     if not refresh:
-        cached = _load_fba_shipments_cache()
+        cached = _load_fba_shipments_cache(marketplace=mp)
         if cached:
             return cached
 
     # Try fetching fresh data from SP-API
-    data = _fetch_fba_shipments_from_api()
+    data = _fetch_fba_shipments_from_api(marketplace=mp)
     if data:
         return data
 
     # Fall back to cache even if refresh was requested
-    cached = _load_fba_shipments_cache()
+    cached = _load_fba_shipments_cache(marketplace=mp)
     if cached:
         cached["_note"] = "Using cached data — SP-API sync failed"
         return cached
 
-    return {"shipments": [], "lastSync": None, "totalShipments": 0}
+    return {"shipments": [], "lastSync": None, "totalShipments": 0, "marketplace": mp}
 
 
 @router.post("/api/fba-shipments/sync")
-async def sync_fba_shipments(request: Request):
+async def sync_fba_shipments(request: Request, marketplace: str = "US"):
     """Force refresh of FBA shipment data from SP-API."""
     from core.auth import require_auth
     require_auth(request)
-    data = _fetch_fba_shipments_from_api()
+    mp = marketplace.upper() if marketplace else "US"
+    if mp not in ("US", "CA"):
+        mp = "US"
+    data = _fetch_fba_shipments_from_api(marketplace=mp)
     if data:
         return {"ok": True, "totalShipments": data["totalShipments"], "lastSync": data["lastSync"]}
     return JSONResponse(status_code=500, content={"ok": False, "error": "SP-API sync failed. Check credentials."})
 
 
 @router.get("/api/fba-shipments/{shipment_id}/items")
-async def get_fba_shipment_items(request: Request, shipment_id: str):
+async def get_fba_shipment_items(request: Request, shipment_id: str, marketplace: str = "US"):
     """Get items for a specific FBA inbound shipment."""
     from core.auth import require_auth
     require_auth(request)
-    items = _enrich_shipment_items(shipment_id)
+    mp = marketplace.upper() if marketplace else "US"
+    if mp not in ("US", "CA"):
+        mp = "US"
+    items = _enrich_shipment_items(shipment_id, marketplace=mp)
     return {"shipmentId": shipment_id, "items": items, "totalItems": len(items)}
 
 

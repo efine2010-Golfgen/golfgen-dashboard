@@ -393,6 +393,7 @@ function CreateShipmentModal({ onClose, onCreated }) {
 /* ══════════════════════════════════════════════════════════════════════════ */
 
 export default function FBAShipments({ filters = {} }) {
+  const mp = filters.marketplace || "US";
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
   const [syncing, setSyncing] = useState(false);
@@ -405,16 +406,17 @@ export default function FBAShipments({ filters = {} }) {
 
   const load = (refresh = false) => {
     setLoading(true);
-    api.fbaShipments(refresh)
+    api.fbaShipments(refresh, mp)
       .then(d => { setData(d); setLoading(false); })
       .catch(() => setLoading(false));
   };
-  useEffect(() => load(), []);
+  // Reload when marketplace changes
+  useEffect(() => { setItemsCache({}); setExpandedId(null); load(); }, [mp]);
 
   const handleSync = async () => {
     setSyncing(true);
     try {
-      const res = await api.fbaShipmentsSync();
+      const res = await api.fbaShipmentsSync(mp);
       if (res.ok) load(false);
       else alert("Sync failed: " + (res.error || "Unknown error"));
     } catch (err) { alert("Sync failed: " + err.message); }
@@ -427,7 +429,7 @@ export default function FBAShipments({ filters = {} }) {
     if (!itemsCache[shipmentId]) {
       setLoadingItems(shipmentId);
       try {
-        const res = await api.fbaShipmentItems(shipmentId);
+        const res = await api.fbaShipmentItems(shipmentId, mp);
         setItemsCache(prev => ({ ...prev, [shipmentId]: res.items || [] }));
       } catch { setItemsCache(prev => ({ ...prev, [shipmentId]: [] })); }
       setLoadingItems(null);
@@ -491,6 +493,7 @@ export default function FBAShipments({ filters = {} }) {
   const divRaw = (filters.division || "").toLowerCase();
   const divLabel = !divRaw ? "All Divisions" : divRaw === "golf" ? "Golf Division" : "Housewares";
   const custLabel = filters.customer ? ` · ${filters.customer.replace(/_/g, " ").replace(/\b\w/g, l => l.toUpperCase())}` : "";
+  const mpLabel = mp === "CA" ? "Amazon.ca (Canada)" : "Amazon.com (US)";
 
   /* ── KPI card definitions ── */
   const kpis = [
@@ -532,7 +535,7 @@ export default function FBAShipments({ filters = {} }) {
         <div>
           <div style={{ ...DM({ fontSize: 22, color: 'var(--acc1)' }) }}>Shipments</div>
           <div style={{ ...SG({ fontSize: 11, color: 'var(--txt3)', marginTop: 2 }) }}>
-            {divLabel}{custLabel} · SP-API Fulfillment Inbound{data?.lastSync ? ` · Last sync: ${data.lastSync}` : ""} · {shipments.length} total shipments
+            {mpLabel} · {divLabel}{custLabel} · SP-API Fulfillment Inbound{data?.lastSync ? ` · Last sync: ${data.lastSync}` : ""} · {shipments.length} total shipments
           </div>
         </div>
         <div style={{ display: 'flex', alignItems: 'center', gap: 7 }}>
