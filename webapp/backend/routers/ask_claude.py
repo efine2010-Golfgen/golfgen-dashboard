@@ -218,25 +218,26 @@ def _build_snapshot(con, active_tab: str, division: str | None, customer: str | 
 @router.post("/api/ask-claude")
 async def ask_claude(req: AskClaudeRequest, request: Request):
     """Tab-aware AI assistant powered by Claude."""
-    # ── Auth check ──
-    session = request.cookies.get("session_id")
-    if not session:
+    # ── Auth check (same pattern as core.auth) ──
+    session_token = request.cookies.get("golfgen_session")
+    if not session_token:
         return JSONResponse(status_code=401, content={"answer": "Please log in to use Ask Claude."})
 
     try:
         con_auth = get_db()
         sess_row = con_auth.execute(
-            "SELECT user_email, role FROM sessions WHERE session_id = ? AND expires_at > ?",
-            [session, datetime.now(CENTRAL).isoformat()]
+            "SELECT user_email, user_name, role FROM sessions WHERE token = ?",
+            [session_token]
         ).fetchone()
         con_auth.close()
         if not sess_row:
             return JSONResponse(status_code=401, content={"answer": "Session expired. Please log in again."})
         user_email = sess_row[0]
-        role = sess_row[1] or "staff"
+        role = sess_row[2] or "staff"
         if role.lower() == "viewer":
             return {"answer": "Ask Claude is not available for Viewer accounts."}
-    except Exception:
+    except Exception as auth_err:
+        logger.error(f"ask_claude auth error: {auth_err}")
         return JSONResponse(status_code=401, content={"answer": "Authentication error."})
 
     # ── Check API key ──
