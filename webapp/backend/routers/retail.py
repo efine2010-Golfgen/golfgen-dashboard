@@ -405,12 +405,16 @@ def _parse_scorecard(ws, upload_id):
         pname = period_row[i]
         if pname:
             prange = range_row[i] if i < len(range_row) else None
-            periods.append((pname, _safe_str(prange), i))
+            periods.append((_safe_str(pname, 20), _safe_str(prange, 60), i))
 
     con = get_db_rw()
     count = 0
     current_vendor = "All Vendors"
     current_group = ""
+
+    # Collect all rows first, then batch insert for reliability
+    batch = []
+    report_date = datetime.now(CT).date().isoformat()
 
     for row in all_rows[3:]:
         label = _safe_str(row[0]) if row[0] else None
@@ -420,6 +424,8 @@ def _parse_scorecard(ws, upload_id):
         # Detect vendor section header
         if label.startswith("Vendor Scorecard"):
             current_vendor = label.replace("Vendor Scorecard  - ", "").replace("Vendor Scorecard - ", "").strip()
+            if len(current_vendor) > 120:
+                current_vendor = current_vendor[:120]
             continue
 
         # Detect metric group
@@ -427,6 +433,9 @@ def _parse_scorecard(ws, upload_id):
                       "Store Turns / GMROII", "eCommerce", "Supply Chain"):
             current_group = label
             continue
+
+        # Truncate metric name to fit VARCHAR(60)
+        metric_name = label[:60] if len(label) > 60 else label
 
         # Otherwise it's a metric row
         for pname, prange, col_start in periods:
@@ -437,21 +446,28 @@ def _parse_scorecard(ws, upload_id):
             if ty_val is None and ly_val is None:
                 continue
 
+            batch.append([
+                current_vendor, current_group, metric_name, pname, prange,
+                _n(ty_val) if ty_val is not None else None,
+                _n(ly_val) if ly_val is not None else None,
+                _n(diff_val) if diff_val is not None else None,
+                report_date,
+                upload_id,
+            ])
+
+    # Batch insert with error handling per row
+    for params in batch:
+        try:
             con.execute("""
                 INSERT OR IGNORE INTO walmart_scorecard
                     (vendor_section, metric_group, metric_name, period, period_range,
                      value_ty, value_ly, value_diff, report_date, upload_id,
                      division, customer, platform)
                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'golf', 'walmart_stores', 'scintilla')
-            """, [
-                current_vendor, current_group, label, pname, prange,
-                _n(ty_val) if ty_val is not None else None,
-                _n(ly_val) if ly_val is not None else None,
-                _n(diff_val) if diff_val is not None else None,
-                datetime.now(CT).date().isoformat(),
-                upload_id,
-            ])
+            """, params)
             count += 1
+        except Exception as e:
+            logger.error(f"Scorecard insert error: {e} | params={params}")
 
     con.close()
     return count
@@ -1219,6 +1235,58 @@ def get_walmart_analytics(division: str = None, customer: str = None):
         "orderForecast": order_forecast,
         "latestWeek": latest_week,
         "dataAvailable": data_available,
+    }
+
+
+@router.post("/api/retail/import-scorecard")
+async def import_scorecard_json(request_body: dict):
+    """Import pre-parsed scorecard data as JSON.
+
+    Accepts: { "rows": [ { "vendor_section", "metric_group", "metric_name",
+        "period", "period_range", "value_ty", "value_ly", "value_diff" }, ... ] }
+    This bypasses Excel parsing — useful when file upload has issues.
+    """
+    rows = request_body.get("rows", [])
+    if not rows:
+        raise HTTPException(400, "No rows provided")
+
+    upload_id = str(uuid.uuid4())[:8]
+    report_date = datetime.now(CT).date().isoformat()
+    con = get_db_rw()
+    count = 0
+
+    for r in rows:
+        try:
+            con.execute("""
+                INSERT OR IGNORE INTO walmart_scorecard
+                    (vendor_section, metric_group, metric_name, period, period_range,
+                     value_ty, value_ly, value_diff, report_date, upload_id,
+                     division, customer, platform)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'golf', 'walmart_stores', 'scintilla')
+            """, [
+                str(r.get("vendor_section", ""))[:120],
+                str(r.get("metric_group", ""))[:40],
+                str(r.get("metric_name", ""))[:60],
+                str(r.get("period", ""))[:20],
+                str(r.get("period_range", ""))[:60] if r.get("period_range") else None,
+                _n(r.get("value_ty")),
+                _n(r.get("value_ly")),
+                _n(r.get("value_diff")),
+                report_date,
+                upload_id,
+            ])
+            count += 1
+        except Exception as e:
+            logger.error(f"Scorecard JSON insert error: {e} | row={r}")
+
+    con.close()
+    _log_upload(upload_id, "json_import", "scorecard", count, "SUCCESS", None)
+
+    return {
+        "status": "ok",
+        "upload_id": upload_id,
+        "rows_loaded": count,
+        "total_submitted": len(rows),
     }
 
 
