@@ -1255,3 +1255,51 @@ def debug_daily_sales_coverage():
     except Exception as e:
         import traceback
         return {"error": str(e), "traceback": traceback.format_exc()}
+
+
+@router.get("/api/debug/heatmap-raw")
+def debug_heatmap_raw():
+    """Return raw heatmap data for debugging."""
+    from datetime import datetime, timedelta
+    from zoneinfo import ZoneInfo
+    try:
+        con = get_db()
+        today = datetime.now(ZoneInfo("America/Chicago")).date()
+        start_date = today - timedelta(weeks=26)
+        
+        # Get ALL rows with units
+        rows = con.execute("""
+            SELECT date, units_ordered, ordered_product_sales, asin
+            FROM daily_sales
+            WHERE asin = 'ALL' AND date >= ? AND date <= ?
+            ORDER BY date DESC
+            LIMIT 50
+        """, [str(start_date), str(today)]).fetchall()
+        
+        # Also check per-ASIN aggregate for recent dates
+        per_asin = con.execute("""
+            SELECT date, SUM(units_ordered) as total_units, COUNT(DISTINCT asin) as asin_count
+            FROM daily_sales
+            WHERE asin != 'ALL' AND date >= ? AND date <= ?
+            GROUP BY date
+            ORDER BY date DESC
+            LIMIT 20
+        """, [str(today - timedelta(days=30)), str(today)]).fetchall()
+        
+        con.close()
+        
+        return {
+            "today": str(today),
+            "start_26w": str(start_date),
+            "all_rows_recent_50": [
+                {"date": str(r[0]), "units_ordered": float(r[1] or 0), "sales": float(r[2] or 0), "asin": r[3]}
+                for r in rows
+            ],
+            "per_asin_aggregate_30d": [
+                {"date": str(r[0]), "total_units": int(r[1] or 0), "asin_count": int(r[2])}
+                for r in per_asin
+            ]
+        }
+    except Exception as e:
+        import traceback
+        return {"error": str(e), "tb": traceback.format_exc()}
