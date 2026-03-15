@@ -215,6 +215,32 @@ def _build_snapshot(con, active_tab: str, division: str | None, customer: str | 
     return "\n".join(lines) if lines else "No data available for this tab."
 
 
+@router.get("/api/debug/test-claude")
+async def test_claude():
+    """Debug endpoint — test Anthropic API connectivity (no auth required)."""
+    result = {"key_present": bool(ANTHROPIC_API_KEY), "key_length": len(ANTHROPIC_API_KEY)}
+    if ANTHROPIC_API_KEY:
+        result["key_prefix"] = ANTHROPIC_API_KEY[:7] + "..."
+    try:
+        import anthropic
+        result["sdk_version"] = anthropic.__version__
+        client = anthropic.Anthropic(api_key=ANTHROPIC_API_KEY)
+        message = client.messages.create(
+            model="claude-sonnet-4-6",
+            max_tokens=50,
+            messages=[{"role": "user", "content": "Say hello in one word."}]
+        )
+        result["status"] = "ok"
+        result["response"] = message.content[0].text
+    except Exception as e:
+        import traceback
+        result["status"] = "error"
+        result["error_type"] = type(e).__name__
+        result["error"] = str(e)
+        result["traceback"] = traceback.format_exc()
+    return result
+
+
 @router.post("/api/ask-claude")
 async def ask_claude(req: AskClaudeRequest, request: Request):
     """Tab-aware AI assistant powered by Claude."""
@@ -278,6 +304,7 @@ Customer filter: {req.customer or 'All'}"""
 
     try:
         import anthropic
+        logger.info(f"ask_claude: SDK version={anthropic.__version__}, key_len={len(ANTHROPIC_API_KEY)}, key_prefix={ANTHROPIC_API_KEY[:7]}...")
         client = anthropic.Anthropic(api_key=ANTHROPIC_API_KEY)
         message = client.messages.create(
             model="claude-sonnet-4-6",
@@ -290,7 +317,9 @@ Customer filter: {req.customer or 'All'}"""
         )
         answer = message.content[0].text
     except Exception as e:
-        logger.error(f"ask_claude API error: {e}")
+        logger.error(f"ask_claude API error [{type(e).__name__}]: {e}")
+        import traceback
+        logger.error(f"ask_claude traceback: {traceback.format_exc()}")
         answer = "Claude is temporarily unavailable. Please try again in a moment."
 
     # ── Audit log ──
