@@ -13,6 +13,7 @@ from fastapi import APIRouter, Query
 from core.config import DB_PATH, DB_DIR, COGS_PATH
 from core.database import get_db
 from core.hierarchy import hierarchy_filter as _hierarchy_filter
+from routers._cogs_helper import compute_cogs_for_range, load_unit_costs
 
 logger = logging.getLogger("golfgen")
 router = APIRouter()
@@ -155,6 +156,8 @@ def get_today(con) -> datetime:
 def _build_product_list(con, cutoff: str) -> list:
     """Build product-level P&L. Core business logic."""
     cogs_data = load_cogs()
+    # Prefer item_master unit_cost over cogs.csv values
+    _unit_costs = load_unit_costs()
     inv_names = {}
     try:
         inv_rows = con.execute(
@@ -204,7 +207,8 @@ def _build_product_list(con, cutoff: str) -> list:
         aur = round(float(revenue) / units, 2)
 
         cogs_info = cogs_data.get(asin) or {}
-        cogs_per_unit = cogs_info.get("cogs", 0)
+        # Priority: item_master unit_cost > cogs.csv > 35% of AUR estimate
+        cogs_per_unit = _unit_costs.get(asin, 0) or cogs_info.get("cogs", 0)
         if cogs_per_unit == 0:
             cogs_per_unit = round(aur * 0.35, 2)
 
@@ -541,9 +545,9 @@ def sales_summary(
         ty_tacos = round(ty_ad_spend / ty_sales, 4) if ty_sales else 0
         ly_tacos = round(ly_ad_spend / ly_sales, 4) if ly_sales else 0
 
-        # COGS: Phase 6 — return 0 for now
-        ty_cogs = 0
-        ly_cogs = 0
+        # COGS: computed from item_master unit_cost per ASIN × units sold
+        ty_cogs = compute_cogs_for_range(con, sd, ed, hw, hp)
+        ly_cogs = compute_cogs_for_range(con, ly_sd, ly_ed, hw, hp)
         ty_gm = round(ty_sales - ty_fees - ty_cogs, 2)
         ly_gm = round(ly_sales - ly_fees - ly_cogs, 2)
         ty_gm_pct = round(ty_gm / ty_sales, 4) if ty_sales else 0
