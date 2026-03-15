@@ -128,6 +128,7 @@ webapp/
       permissions.py     ← /api/permissions/*
       mfa.py             ← /api/mfa/*
       supply_chain.py    ← /api/supply-chain/*
+      ask_claude.py      ← /api/ask-claude (AI assistant)
       system.py          ← /api/sync/*, /api/backup/*, /api/docs/*, /api/debug/*    services/
       __init__.py
       sync_engine.py     ← sync orchestration, _write_sync_log
@@ -266,6 +267,19 @@ DATABASE_URL (${{Postgres.DATABASE_URL}} — LIVE, references Railway Postgres s
 - 18hr session expiry + 2hr idle timeout
 - User permissions per tab
 - Audit log table + viewer
+
+## Ask Claude — AI Assistant (LIVE)
+- Header search bar integrated into filter-bar row on every tab
+- Backend: routers/ask_claude.py → POST /api/ask-claude
+- Frontend: components/AskClaude.jsx
+- Tab-aware: builds data snapshot from PostgreSQL based on active_tab parameter
+- Supported tabs: inventory, sales, exec-summary, advertising, profitability, supply-chain/otw
+- Auth: requires valid session, Admin + Staff only (Viewer denied)
+- Audit: every question logged to audit_log table
+- API key: ANTHROPIC_API_KEY env var on Railway (claude-sonnet-4-6 model, max_tokens=1000)
+- System prompt includes today's date, active tab, division/customer filters
+- Returns {answer, tab_context, data_snapshot_summary}
+- Graceful fallback if API key missing or API call fails
 
 ## Critical Rules — Follow in Every Session
 1. Database access via get_db() / get_db_rw() from core.database ONLY — never call duckdb.connect() directly
