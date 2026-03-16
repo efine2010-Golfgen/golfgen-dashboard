@@ -1,4 +1,4 @@
-import { Fragment, useState, useEffect, useRef } from "react";
+import { Fragment, useState, useEffect } from "react";
 import { api } from "../../lib/api";
 import {
   SG,
@@ -24,7 +24,7 @@ const getMetricFormat = (name) => {
   if (NUMBER_1D_METRICS.some((m) => n.includes(m))) return "number1d";
   if (DOLLAR_OVERRIDE_METRICS.some((m) => n.includes(m))) return "dollar";
   if (n.includes("returns") && !n.includes("%") && !n.includes("$")) return "dollar";
-  if (n.includes("%") || n.includes("instock") || n.includes("gim") || n.includes("margin") || n.includes("gmroii") || n.includes("aur")) return "pct";
+  if (n.includes("%") || n.includes("instock") || n.includes("gim") || n.includes("margin") || n.includes("aur")) return "pct";
   if (n.includes("dollar") || n.includes("sales") || n.includes("$") || n.includes("mumd dol") || n.includes("cost") || n.includes("retail") || n.includes("receipt") || n.includes("ships")) return "dollar";
   if (n.includes("unit") || n.includes("qty")) return "number";
   return "number";
@@ -56,7 +56,8 @@ const fDiff = (v) => {
 };
 
 // ── Period definitions ────────────────────────────────────
-const ALL_PERIODS = ["Last Week", "Current Month", "Last Month", "Year", "Q1", "Q2", "Q3", "Q4"];
+// Year moved to end (after Q4)
+const ALL_PERIODS = ["Last Week", "Current Month", "Last Month", "Q1", "Q2", "Q3", "Q4", "Year"];
 
 const SHORT_PERIOD = {
   "Last Week": "LW", "Current Month": "Cur Mo", "Last Month": "Lst Mo",
@@ -64,7 +65,7 @@ const SHORT_PERIOD = {
 };
 
 const PERIOD_VIEWS = [
-  { key: "all", label: "All Periods" },
+  { key: "all", label: "All" },
   { key: "recent", label: "Recent" },
   { key: "quarterly", label: "Quarterly" },
 ];
@@ -85,20 +86,21 @@ const GROUP_ORDER = ["Store Sales", "Store Inventory", "DC Inventory", "Margins 
 
 const PIE_COLORS = ["#2ecf99", "#f97316", "#3b82f6", "#a78bfa", "#ef4444", "#f59e0b", "#ec4899", "#14b8a6"];
 
-// ── KPI Period buttons ────────────────────────────────────
+// ── KPI Period buttons — Year after Q4 ───────────────────
 const KPI_PERIOD_BTNS = [
   { key: "Last Week", label: "LW" },
   { key: "Current Month", label: "Cur Mo" },
   { key: "Last Month", label: "Lst Mo" },
-  { key: "Year", label: "Year" },
   { key: "Q1", label: "Q1" },
   { key: "Q2", label: "Q2" },
   { key: "Q3", label: "Q3" },
   { key: "Q4", label: "Q4" },
+  { key: "Year", label: "Year" },
 ];
 
 // ── Bar chart view periods ────────────────────────────────
-const BAR_DEFAULT_PERIODS = ["Last Week", "Current Month", "Last Month", "Year"];
+const BAR_ALL_PERIODS = ["Last Week", "Current Month", "Last Month", "Q1", "Q2", "Q3", "Q4", "Year"];
+const BAR_RECENT_PERIODS = ["Last Week", "Current Month", "Last Month", "Year"];
 const BAR_QUARTERLY_PERIODS = ["Q1", "Q2", "Q3", "Q4"];
 
 // ── Doughnut % label plugin ───────────────────────────────
@@ -146,15 +148,26 @@ const smallTab = (active, onClick, label) => (
   </span>
 );
 
+// ── KPI metrics (no GMROII) ──────────────────────────────
+const KPI_METRICS = ["POS Sales $", "POS Units", "Comp Sales $", "Returns $", "Returns %", "GIM%", "Repl Instock %", "AUR"];
+
+// ── Wide chart metrics: dollar + unit metrics for TY vs LY bar chart ──
+const WIDE_CHART_METRICS = [
+  { key: "POS Sales $", label: "POS Sales $", fmt: "dollar" },
+  { key: "POS Units", label: "POS Units", fmt: "number" },
+  { key: "Comp Sales $", label: "Comp Sales $", fmt: "dollar" },
+  { key: "Returns $", label: "Returns $", fmt: "dollar" },
+];
+
 // ═══════════════════════════════════════════════════════════
 export function WalmartScorecard({ filters }) {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [data, setData] = useState(null);
   const [kpiPeriod, setKpiPeriod] = useState("Last Week");
-  const [periodView, setPeriodView] = useState("all");
+  const [periodView, setPeriodView] = useState("recent");
   const [activeVendor, setActiveVendor] = useState("All Vendors");
-  const [barView, setBarView] = useState("default");
+  const [barView, setBarView] = useState("recent");
   const [freezeHeaders, setFreezeHeaders] = useState(false);
   const [hideZeros, setHideZeros] = useState(false);
   const [showComparison, setShowComparison] = useState(false);
@@ -205,15 +218,11 @@ export function WalmartScorecard({ filters }) {
   };
 
   // ── KPI data for selected period ──
-  const kpiMetrics = ["POS Sales $", "POS Units", "Comp Sales $", "Returns $", "Returns %", "GIM%", "GMROII", "Repl Instock %", "AUR"];
   const displayKpis = [];
-  kpiMetrics.forEach((metric) => {
+  KPI_METRICS.forEach((metric) => {
     const row = scorecard.find((r) => r.vendorSection === "All Vendors" && r.period === kpiPeriod && r.metricName === metric);
     if (row) {
-      const tyVal = row.valueTy;
-      const lyVal = row.valueLy;
-      const diffVal = row.valueDiff;
-      displayKpis.push({ label: metric, ty: tyVal, ly: lyVal, diff: diffVal });
+      displayKpis.push({ label: metric, ty: row.valueTy, ly: row.valueLy, diff: row.valueDiff });
     }
   });
 
@@ -236,9 +245,8 @@ export function WalmartScorecard({ filters }) {
   const quarterPeriods = ["Q1", "Q2", "Q3", "Q4"].filter((p) => periodsInData.includes(p));
 
   // ── Bar chart periods based on view ──
-  const barPeriods = barView === "default"
-    ? BAR_DEFAULT_PERIODS.filter((p) => periodsInData.includes(p))
-    : BAR_QUARTERLY_PERIODS.filter((p) => periodsInData.includes(p));
+  const barPeriodsSource = barView === "all" ? BAR_ALL_PERIODS : barView === "recent" ? BAR_RECENT_PERIODS : BAR_QUARTERLY_PERIODS;
+  const barPeriods = barPeriodsSource.filter((p) => periodsInData.includes(p));
   const barLabels = barPeriods.map((p) => SHORT_PERIOD[p] || p);
 
   // ── Check if a metric row has all zeros across displayed periods ──
@@ -253,6 +261,11 @@ export function WalmartScorecard({ filters }) {
   // ── Vendor short name helper ──
   const vendorShort = (v) =>
     v === "All Vendors" ? "All Vendors" : v.includes("77893") ? "Vendor 77893" : v.includes("79010") ? "Vendor 79010" : v;
+
+  // ── Wide chart data: TY vs LY for key dollar/unit metrics at selected kpiPeriod ──
+  const wideChartLabels = WIDE_CHART_METRICS.map((m) => m.label);
+  const wideChartTY = WIDE_CHART_METRICS.map((m) => Math.abs(getNum("All Vendors", m.key, kpiPeriod)));
+  const wideChartLY = WIDE_CHART_METRICS.map((m) => Math.abs(getNum("All Vendors", m.key, kpiPeriod, "valueLy")));
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 20 }}>
@@ -279,9 +292,9 @@ export function WalmartScorecard({ filters }) {
         ))}
       </div>
 
-      {/* ═══ KPI Cards — TY | LY | %Chg in single row ═══ */}
+      {/* ═══ KPI Cards — all fit across screen ═══ */}
       {displayKpis.length > 0 && (
-        <div style={{ display: "grid", gridTemplateColumns: `repeat(${Math.min(5, displayKpis.length)}, 1fr)`, gap: 10 }}>
+        <div style={{ display: "grid", gridTemplateColumns: `repeat(${displayKpis.length}, 1fr)`, gap: 8 }}>
           {displayKpis.map((kpi) => {
             const d = fDiff(kpi.diff);
             return (
@@ -292,22 +305,79 @@ export function WalmartScorecard({ filters }) {
                   borderRadius: 10,
                   border: "1px solid var(--brd)",
                   borderTop: `3px solid ${COLORS.teal}`,
-                  padding: "12px 14px",
+                  padding: "10px 10px",
+                  minWidth: 0,
                 }}
               >
-                <div style={{ ...SG(8, 700), color: "var(--txt3)", textTransform: "uppercase", letterSpacing: ".08em", marginBottom: 8 }}>
+                <div style={{ ...SG(7, 700), color: "var(--txt3)", textTransform: "uppercase", letterSpacing: ".06em", marginBottom: 6, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
                   {kpi.label}
                 </div>
-                <div style={{ display: "flex", alignItems: "baseline", gap: 8, flexWrap: "wrap" }}>
-                  <span style={{ ...DM(18), color: "var(--txt)" }}>{fMetric(kpi.ty, kpi.label)}</span>
-                  <span style={{ ...SG(9), color: "var(--txt3)" }}>LY {fMetric(kpi.ly, kpi.label)}</span>
-                  <span style={{ ...SG(9, 600), color: d.color }}>{d.text}</span>
+                <div style={{ display: "flex", alignItems: "baseline", gap: 6, flexWrap: "wrap" }}>
+                  <span style={{ ...DM(16), color: "var(--txt)" }}>{fMetric(kpi.ty, kpi.label)}</span>
+                  <span style={{ ...SG(8), color: "var(--txt3)" }}>LY {fMetric(kpi.ly, kpi.label)}</span>
+                  <span style={{ ...SG(8, 600), color: d.color }}>{d.text}</span>
                 </div>
               </div>
             );
           })}
         </div>
       )}
+
+      {/* ═══ Wide Summary Chart — TY vs LY for selected period ═══ */}
+      <Card>
+        <CardHdr title={`Performance Summary — ${SHORT_PERIOD[kpiPeriod] || kpiPeriod}`} />
+        <ChartCanvas
+          type="bar"
+          labels={wideChartLabels}
+          configKey={`sc-wide-${kpiPeriod}-${activeVendor}`}
+          height={200}
+          datasets={[
+            {
+              label: "This Year (TY)",
+              data: wideChartTY,
+              backgroundColor: COLORS.teal,
+              borderColor: COLORS.teal,
+              borderWidth: 1,
+            },
+            {
+              label: "Last Year (LY)",
+              data: wideChartLY,
+              backgroundColor: "rgba(249,115,22,0.6)",
+              borderColor: "#f97316",
+              borderWidth: 1,
+            },
+          ]}
+          options={{
+            scales: {
+              y: {
+                beginAtZero: true,
+                ticks: {
+                  callback: (v) => v >= 1000 ? "$" + (v / 1000).toFixed(0) + "k" : "$" + v.toLocaleString(),
+                  color: "rgba(255,255,255,0.7)",
+                },
+                grid: { color: "rgba(255,255,255,0.08)" },
+              },
+              x: {
+                ticks: { color: "rgba(255,255,255,0.7)", font: { size: 11 } },
+                grid: { display: false },
+              },
+            },
+            plugins: {
+              legend: { labels: { color: "rgba(255,255,255,0.7)", font: { size: 10 } } },
+              tooltip: {
+                callbacks: {
+                  label: (ctx) => {
+                    const v = ctx.raw || 0;
+                    const metric = WIDE_CHART_METRICS[ctx.dataIndex];
+                    const formatted = metric && metric.fmt === "number" ? v.toLocaleString() + " units" : "$" + v.toLocaleString();
+                    return `${ctx.dataset.label}: ${formatted}`;
+                  },
+                },
+              },
+            },
+          }}
+        />
+      </Card>
 
       {/* ═══ Pie Charts: Quarterly Breakdown ═══ */}
       {quarterPeriods.length > 0 && (
@@ -379,13 +449,14 @@ export function WalmartScorecard({ filters }) {
         <>
           <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
             <span style={{ ...SG(9, 600), color: "var(--txt3)" }}>Chart View:</span>
-            {smallTab(barView === "default", () => setBarView("default"), "Default")}
+            {smallTab(barView === "all", () => setBarView("all"), "All")}
+            {smallTab(barView === "recent", () => setBarView("recent"), "Recent")}
             {smallTab(barView === "quarterly", () => setBarView("quarterly"), "Quarterly")}
           </div>
           <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16 }}>
             {/* Maintained Margin vs Gross Margin */}
             <Card>
-              <CardHdr title={`Maintained Margin vs Gross Margin — ${barView === "default" ? "Recent" : "Quarterly"}`} />
+              <CardHdr title={`Maintained Margin vs Gross Margin`} />
               <ChartCanvas
                 type="bar"
                 labels={barLabels}
@@ -427,7 +498,7 @@ export function WalmartScorecard({ filters }) {
 
             {/* Replenishment In Stock % */}
             <Card>
-              <CardHdr title={`Replenishment In Stock % — ${barView === "default" ? "Recent" : "Quarterly"}`} />
+              <CardHdr title={`Replenishment In Stock %`} />
               <ChartCanvas
                 type="bar"
                 labels={barLabels}
@@ -516,16 +587,23 @@ export function WalmartScorecard({ filters }) {
         const groupMap = buildSectionMap(activeVendor);
         if (Object.keys(groupMap).length === 0) return null;
 
-        const tableMaxH = freezeHeaders ? 600 : "none";
+        // Frozen: use viewport-height container so you can scroll the full table
+        const containerStyle = freezeHeaders
+          ? { overflowX: "auto", overflowY: "auto", maxHeight: "calc(100vh - 180px)", position: "relative" }
+          : { overflowX: "auto" };
+
+        const stickyHead = freezeHeaders
+          ? { position: "sticky", top: 0, zIndex: 10 }
+          : {};
 
         return (
-          <Card>
+          <Card style={freezeHeaders ? { padding: "10px 12px" } : undefined}>
             <CardHdr
               title={activeVendor === "All Vendors" ? "All Vendors — Full Scorecard" : activeVendor}
             />
-            <div style={{ overflowX: "auto", overflowY: freezeHeaders ? "auto" : "visible", maxHeight: tableMaxH, position: "relative" }}>
+            <div style={containerStyle}>
               <table style={{ width: "100%", borderCollapse: "collapse", ...SG(10) }}>
-                <thead style={freezeHeaders ? { position: "sticky", top: 0, zIndex: 10 } : {}}>
+                <thead style={stickyHead}>
                   {/* Row 1: Time period names (green font, spans 3 cols each) */}
                   <tr style={{ background: "var(--card)" }}>
                     <th
@@ -668,7 +746,7 @@ export function WalmartScorecard({ filters }) {
                   <tbody>
                     {[
                       "POS Sales $", "Comp Sales $", "POS Units", "AUR", "Returns $", "Returns %",
-                      "GIM%", "GMROII", "Repl Instock %", "Weeks of Supply", "Unit Turns", "Cost On Order", "Ships At Cost WHSE",
+                      "GIM%", "Repl Instock %", "Weeks of Supply", "Unit Turns", "Cost On Order", "Ships At Cost WHSE",
                     ].map((metric, mi) => {
                       if (hideZeros && allVendors.every((v) => {
                         const ty = getVal(v, metric, "Year", "valueTy");
