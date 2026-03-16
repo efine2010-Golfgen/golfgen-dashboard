@@ -21,7 +21,7 @@ from collections import defaultdict
 
 from fastapi import APIRouter, Query
 
-from core.database import get_db, get_db_rw
+from core.database import get_db
 from core.hierarchy import hierarchy_filter
 
 logger = logging.getLogger("golfgen")
@@ -691,123 +691,6 @@ def get_store_analytics(
         con.close()
 
 
-# ═════════════════════════════════════════════════════════════════════════════
-#  DEBUG: Table counts (no auth required)
-# ═════════════════════════════════════════════════════════════════════════════
-
-
-@router.get("/api/debug/walmart-counts")
-def debug_counts():
-    """Quick row count check for all Walmart tables (no auth)."""
-    con = get_db()
-    try:
-        counts = {}
-        for tbl in [
-            "walmart_item_weekly", "walmart_scorecard", "walmart_store_weekly",
-            "walmart_ecomm_weekly", "walmart_order_forecast",
-        ]:
-            try:
-                r = con.execute(f"SELECT COUNT(*) FROM {tbl}").fetchone()
-                counts[tbl] = int(r[0]) if r else 0
-            except Exception as e:
-                counts[tbl] = f"ERROR: {e}"
-        # Also check period_type values in item_weekly
-        try:
-            ptypes = con.execute(
-                "SELECT period_type, COUNT(*) FROM walmart_item_weekly GROUP BY period_type ORDER BY period_type"
-            ).fetchall()
-            counts["item_weekly_periods"] = {str(r[0]): int(r[1]) for r in ptypes}
-        except Exception:
-            counts["item_weekly_periods"] = "N/A"
-        return counts
-    finally:
-        con.close()
-
-
-@router.post("/api/debug/walmart-fix-scorecard-constraint")
-def debug_fix_scorecard_constraint():
-    """Drop old unique constraint, add new one with metric_group, clear + re-import."""
-    con = get_db_rw()
-    try:
-        results = {}
-        # Find and drop existing constraint
-        try:
-            con.execute("""
-                DO $$ BEGIN
-                    -- Drop all unique constraints on walmart_scorecard
-                    EXECUTE (
-                        SELECT string_agg('ALTER TABLE walmart_scorecard DROP CONSTRAINT ' || conname, '; ')
-                        FROM pg_constraint
-                        WHERE conrelid = 'walmart_scorecard'::regclass AND contype = 'u'
-                    );
-                EXCEPTION WHEN OTHERS THEN NULL;
-                END $$
-            """)
-            results["drop_old_constraint"] = "ok"
-        except Exception as e:
-            results["drop_old_constraint"] = f"ERROR: {e}"
-        # Add new constraint with metric_group
-        try:
-            con.execute("""
-                ALTER TABLE walmart_scorecard
-                ADD CONSTRAINT walmart_scorecard_unique
-                UNIQUE(vendor_section, metric_group, metric_name, period, upload_id)
-            """)
-            results["add_new_constraint"] = "ok"
-        except Exception as e:
-            results["add_new_constraint"] = f"ERROR: {e}"
-        # Clear table for fresh import
-        try:
-            con.execute("DELETE FROM walmart_scorecard")
-            results["cleared"] = True
-        except Exception as e:
-            results["cleared"] = f"ERROR: {e}"
-        return results
-    finally:
-        con.close()
-
-
-@router.post("/api/debug/walmart-import-scorecard")
-async def debug_import_scorecard(request_body: dict):
-    """Import scorecard JSON data (no auth, for data loading)."""
-    from fastapi import HTTPException
-    rows = request_body.get("rows", [])
-    if not rows:
-        raise HTTPException(status_code=400, detail="No rows provided")
-
-    con = get_db_rw()
-    count = 0
-    errors = []
-    report_date = datetime.now(CT).date().isoformat()
-
-    for r in rows:
-        try:
-            con.execute("""
-                INSERT INTO walmart_scorecard
-                    (vendor_section, metric_group, metric_name, period, period_range,
-                     value_ty, value_ly, value_diff, report_date, upload_id,
-                     division, customer, platform)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'golf', 'walmart_stores', 'scintilla')
-            """, [
-                r.get("vendor_section", ""),
-                r.get("metric_group", ""),
-                r.get("metric_name", ""),
-                r.get("period", ""),
-                r.get("period_range"),
-                r.get("value_ty"),
-                r.get("value_ly"),
-                r.get("value_diff"),
-                report_date,
-                "debug-import",
-            ])
-            count += 1
-        except Exception as e:
-            errors.append(str(e)[:100])
-            if len(errors) > 5:
-                break
-
-    con.close()
-    return {"imported": count, "errors": errors[:5], "total_submitted": len(rows)}
 
 
 
