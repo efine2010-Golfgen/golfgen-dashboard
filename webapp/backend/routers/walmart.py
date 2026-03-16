@@ -738,3 +738,84 @@ def get_weekly_trend(division: str = None, customer: str = None):
     finally:
         con.close()
 
+
+# ═════════════════════════════════════════════════════════════════════════════
+#  ENDPOINT 9: Store Geography — All stores for latest week (geography page)
+# ═════════════════════════════════════════════════════════════════════════════
+
+
+@router.get("/api/walmart/store-geography")
+def get_store_geography(division: str = None, customer: str = None):
+    """
+    Returns all store rows for the latest week to power the geography page.
+    Frontend handles state/city/region mapping via its own lookup tables.
+    """
+    con = get_db()
+    try:
+        hw, hp = hierarchy_filter(division=division, customer=customer or "walmart_stores")
+
+        # Find latest week
+        wk_row = con.execute(
+            f"SELECT MAX(walmart_week) FROM walmart_store_weekly WHERE 1=1 {hw}", hp
+        ).fetchone()
+        latest_week = str(wk_row[0]) if wk_row and wk_row[0] else None
+        if not latest_week:
+            return {"stores": [], "latestWeek": None, "totalPosSales": 0,
+                    "totalStores": 0, "traitedCount": 0}
+
+        # Fetch all stores for latest week
+        query = f"""
+            SELECT store_number, store_name,
+                   COALESCE(pos_sales_ty, 0), COALESCE(pos_sales_ly, 0),
+                   COALESCE(pos_qty_ty, 0), COALESCE(pos_qty_ly, 0),
+                   COALESCE(on_hand_qty_ty, 0), COALESCE(on_hand_qty_ly, 0),
+                   COALESCE(in_transit_qty_ty, 0), COALESCE(in_warehouse_qty_ty, 0),
+                   COALESCE(instock_pct_ty, 0), COALESCE(instock_pct_ly, 0),
+                   COALESCE(returns_qty_ty, 0), COALESCE(returns_qty_ly, 0),
+                   COALESCE(traited_store_count_ty, 0)
+            FROM walmart_store_weekly
+            WHERE walmart_week = ? {hw}
+            ORDER BY pos_sales_ty DESC
+        """
+        rows = con.execute(query, [latest_week] + hp).fetchall()
+
+        stores = []
+        total_pos = 0.0
+        for r in rows:
+            pos = _n(r[2])
+            total_pos += pos
+            stores.append({
+                "storeNumber": str(r[0]),
+                "storeName": r[1] or "",
+                "posSalesTy": pos,
+                "posSalesLy": _n(r[3]),
+                "posQtyTy": _n(r[4]),
+                "posQtyLy": _n(r[5]),
+                "ohTy": _n(r[6]),
+                "ohLy": _n(r[7]),
+                "inTransitTy": _n(r[8]),
+                "inWarehouseTy": _n(r[9]),
+                "instockPctTy": _n(r[10]),
+                "instockPctLy": _n(r[11]),
+                "returnsQtyTy": _n(r[12]),
+                "returnsQtyLy": _n(r[13]),
+                "traitedCount": _safe_int(r[14]),
+            })
+
+        # Get traited store count (first non-zero value)
+        traited = 0
+        for s in stores:
+            if s["traitedCount"] > 0:
+                traited = s["traitedCount"]
+                break
+
+        return {
+            "stores": stores,
+            "latestWeek": latest_week,
+            "totalPosSales": round(total_pos, 2),
+            "totalStores": len(stores),
+            "traitedCount": traited or len(stores),
+        }
+    finally:
+        con.close()
+

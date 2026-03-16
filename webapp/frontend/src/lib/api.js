@@ -347,6 +347,7 @@ export const api = {
     if (offset) q += `&offset=${offset}`;
     return fetchJSON('/api/walmart/store-analytics' + q);
   },
+  walmartStoreGeography: (h = {}) => fetchJSON('/api/walmart/store-geography' + (_hq(h) ? '?' + _hq(h).slice(1) : '')),
 
   retailUpload: (file) => {
     const fd = new FormData();
