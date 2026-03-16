@@ -581,38 +581,69 @@ def _pull_ads_report(creds, report_type_id, columns, start_date, end_date, handl
         logger.info(f"Ads sync: creating {report_type_id} report ({start_date} to {end_date})...")
         reports_api = ads_reports.Reports(credentials=creds)
 
-        # Try v3 reporting API call — pass body as JSON string
-        try:
-            result = reports_api.post_report(body=json.dumps(body))
-            logger.info(f"Ads sync: post_report response: status_code={getattr(result, 'status_code', '?')}, payload={str(getattr(result, 'payload', '?'))[:300]}")
-        except Exception as create_err:
-            logger.error(f"Ads sync: post_report call failed for {report_type_id}: {type(create_err).__name__}: {create_err}")
-            # Try with dict body instead of JSON string
-            try:
-                result = reports_api.post_report(body=body)
-                logger.info(f"Ads sync: post_report (dict body) response: status_code={getattr(result, 'status_code', '?')}, payload={str(getattr(result, 'payload', '?'))[:300]}")
-            except Exception as create_err2:
-                logger.error(f"Ads sync: post_report (dict body) also failed: {type(create_err2).__name__}: {create_err2}")
-                return
+        # Use direct HTTP for v3 reporting API (library has JSON parse issues)
+        # First get an access token
+        token_resp = req.post("https://api.amazon.com/auth/o2/token", data={
+            "grant_type": "refresh_token",
+            "refresh_token": creds["refresh_token"],
+            "client_id": creds["client_id"],
+            "client_secret": creds["client_secret"],
+        }, timeout=30)
+        token_data = token_resp.json()
+        access_token = token_data.get("access_token", "")
+        if not access_token:
+            logger.error(f"Ads sync: token refresh failed: {token_data}")
+            return
 
-        report_id = result.payload.get("reportId") if isinstance(result.payload, dict) else None
+        headers = {
+            "Authorization": f"Bearer {access_token}",
+            "Amazon-Advertising-API-ClientId": creds["client_id"],
+            "Amazon-Advertising-API-Scope": str(creds["profile_id"]),
+            "Content-Type": "application/vnd.createasyncreportrequest.v3+json",
+            "Accept": "application/vnd.createasyncreportrequest.v3+json",
+        }
+
+        create_resp = req.post(
+            "https://advertising-api.amazon.com/reporting/reports",
+            headers=headers,
+            json=body,
+            timeout=30,
+        )
+        logger.info(f"Ads sync: create report response: {create_resp.status_code} {create_resp.text[:300]}")
+
+        if create_resp.status_code not in (200, 202):
+            logger.error(f"Ads sync: create report failed for {report_type_id}: {create_resp.status_code} {create_resp.text[:500]}")
+            return
+
+        create_data = create_resp.json()
+        report_id = create_data.get("reportId")
 
         if not report_id:
-            logger.error(f"Ads sync: no reportId returned for {report_type_id}, payload: {str(getattr(result, 'payload', '?'))[:500]}")
+            logger.error(f"Ads sync: no reportId returned for {report_type_id}, response: {create_data}")
             return
 
         # Poll for completion (max ~5 min)
         download_url = None
         for attempt in range(30):
             _time.sleep(10)
-            status_result = reports_api.get_report(reportId=report_id)
-            status = status_result.payload.get("status")
+            poll_resp = req.get(
+                f"https://advertising-api.amazon.com/reporting/reports/{report_id}",
+                headers={
+                    "Authorization": f"Bearer {access_token}",
+                    "Amazon-Advertising-API-ClientId": creds["client_id"],
+                    "Amazon-Advertising-API-Scope": str(creds["profile_id"]),
+                },
+                timeout=30,
+            )
+            poll_data = poll_resp.json()
+            status = poll_data.get("status")
+            logger.info(f"Ads sync: poll {report_type_id} attempt {attempt+1}: {status}")
 
             if status == "COMPLETED":
-                download_url = status_result.payload.get("url")
+                download_url = poll_data.get("url")
                 break
             elif status in ("FAILED", "CANCELLED"):
-                logger.error(f"Ads sync: {report_type_id} report {status}")
+                logger.error(f"Ads sync: {report_type_id} report {status}: {poll_data.get('failureReason', '')}")
                 return
 
         if not download_url:
