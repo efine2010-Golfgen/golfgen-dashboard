@@ -871,15 +871,34 @@ def get_walmart_analytics(division: str = None, customer: str = None):
     from core.hierarchy import hierarchy_filter
     hw, hp = hierarchy_filter(division=division, customer=customer or "walmart_stores")
 
-    # Determine if data is available
-    data_available = True
+    # Determine if data is available (check multiple tables)
+    data_available = False
     try:
         total_items = con.execute(
             f"SELECT COUNT(*) FROM walmart_item_weekly WHERE 1=1 {hw}", hp
         ).fetchone()
-        data_available = total_items and total_items[0] > 0
+        if total_items and total_items[0] > 0:
+            data_available = True
     except Exception:
-        data_available = False
+        pass
+    if not data_available:
+        try:
+            total_sc = con.execute(
+                f"SELECT COUNT(*) FROM walmart_scorecard WHERE 1=1 {hw}", hp
+            ).fetchone()
+            if total_sc and total_sc[0] > 0:
+                data_available = True
+        except Exception:
+            pass
+    if not data_available:
+        try:
+            total_store = con.execute(
+                f"SELECT COUNT(*) FROM walmart_store_weekly WHERE 1=1 {hw}", hp
+            ).fetchone()
+            if total_store and total_store[0] > 0:
+                data_available = True
+        except Exception:
+            pass
 
     # ── 1. SALES PERFORMANCE ─────────────────────────────────────────────
 
