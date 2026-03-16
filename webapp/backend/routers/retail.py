@@ -262,7 +262,10 @@ def _parse_item_weekly(ws, headers, period_type=None):
 
         # Determine period_type
         pt = period_type or wk_val  # Report 1: wk_val is 'L13W', 'L4W', etc.
-        if pt not in ("weekly", "L1W", "L4W", "L13W", "L52W"):
+        # Normalize LW → L1W (Scintilla uses both)
+        if pt == "LW":
+            pt = "L1W"
+        if pt not in ("weekly", "L1W", "L4W", "L13W", "L26W", "L52W"):
             if wk_val and len(wk_val) >= 6 and wk_val[:4].isdigit():
                 pt = "weekly"  # numeric week like 202507
             else:

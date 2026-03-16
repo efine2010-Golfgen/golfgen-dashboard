@@ -21,7 +21,7 @@ from collections import defaultdict
 
 from fastapi import APIRouter, Query
 
-from core.database import get_db
+from core.database import get_db, get_db_rw
 from core.hierarchy import hierarchy_filter
 
 logger = logging.getLogger("golfgen")
@@ -720,6 +720,31 @@ def debug_counts():
         except Exception:
             counts["item_weekly_periods"] = "N/A"
         return counts
+    finally:
+        con.close()
+
+
+@router.post("/api/debug/walmart-fix-lw")
+def debug_fix_lw():
+    """Fix LW period_type → L1W in walmart_item_weekly and walmart_store_weekly."""
+    con = get_db_rw()
+    try:
+        results = {}
+        for tbl in ["walmart_item_weekly", "walmart_store_weekly"]:
+            try:
+                r = con.execute(f"UPDATE {tbl} SET period_type = 'L1W' WHERE period_type = 'LW'")
+                results[f"{tbl}_updated"] = r.rowcount if hasattr(r, 'rowcount') else "executed"
+            except Exception as e:
+                results[f"{tbl}_updated"] = f"ERROR: {e}"
+        # Verify
+        try:
+            ptypes = con.execute(
+                "SELECT period_type, COUNT(*) FROM walmart_item_weekly GROUP BY period_type ORDER BY period_type"
+            ).fetchall()
+            results["item_weekly_periods_after"] = {str(r[0]): int(r[1]) for r in ptypes}
+        except Exception as e:
+            results["item_weekly_periods_after"] = f"ERROR: {e}"
+        return results
     finally:
         con.close()
 
