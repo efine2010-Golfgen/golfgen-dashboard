@@ -108,20 +108,20 @@ function PasskeySection() {
       <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 16 }}>
         <div style={{
           width: 40, height: 40, borderRadius: "50%",
-          background: passkeys.length > 0 ? "var(--teal)" : "var(--border)",
+          background: passkeys.length > 0 ? "var(--acc1, #2ECFAA)" : "var(--brd, rgba(255,255,255,0.1))",
           display: "flex", alignItems: "center", justifyContent: "center",
-          color: passkeys.length > 0 ? "#fff" : "var(--muted)", fontSize: 18,
+          color: passkeys.length > 0 ? "#fff" : "var(--txt3)", fontSize: 18,
         }}>🔑</div>
         <div>
-          <div style={{ fontWeight: 600, fontSize: 16, color: "var(--navy)" }}>Passkeys</div>
-          <div style={{ fontSize: 13, color: "var(--muted)" }}>
+          <div style={{ fontWeight: 600, fontSize: 16, color: "var(--txt, #fff)" }}>Passkeys</div>
+          <div style={{ fontSize: 13, color: "var(--txt3, #6B8090)" }}>
             Sign in with Face ID, Touch ID, or Windows Hello — no password needed
           </div>
         </div>
       </div>
 
       {!supportsWebAuthn && (
-        <div style={{ padding: "10px 14px", background: "#FFF8F0", border: "1px solid var(--orange)", borderRadius: 8, marginBottom: 12, fontSize: 13, color: "var(--orange)" }}>
+        <div style={{ padding: "10px 14px", background: "rgba(232,120,48,0.1)", border: "1px solid var(--orange, #E87830)", borderRadius: 8, marginBottom: 12, fontSize: 13, color: "var(--orange, #E87830)" }}>
           Your browser doesn't support passkeys. Try Chrome, Safari, or Edge on a modern device.
         </div>
       )}
@@ -133,21 +133,21 @@ function PasskeySection() {
             <div key={pk.id} style={{
               display: "flex", alignItems: "center", justifyContent: "space-between",
               padding: "10px 14px", borderRadius: 8,
-              border: "1px solid var(--border)", marginBottom: 6,
-              background: "var(--off-white, rgba(0,0,0,.03))",
+              border: "1px solid var(--brd, rgba(255,255,255,0.1))", marginBottom: 6,
+              background: "rgba(255,255,255,0.03)",
             }}>
               <div>
-                <div style={{ fontSize: 14, fontWeight: 600, color: "var(--navy)" }}>
+                <div style={{ fontSize: 14, fontWeight: 600, color: "var(--txt, #fff)" }}>
                   🔐 {pk.device_name || "Passkey"}
                 </div>
-                <div style={{ fontSize: 12, color: "var(--muted)" }}>
+                <div style={{ fontSize: 12, color: "var(--txt3, #6B8090)" }}>
                   Added {new Date(pk.created_at).toLocaleDateString()}
                 </div>
               </div>
               <button onClick={() => handleDelete(pk.id)} style={{
                 padding: "4px 12px", borderRadius: 6, fontSize: 12, fontWeight: 600,
-                border: "1px solid var(--orange)", background: "transparent",
-                color: "var(--orange)", cursor: "pointer",
+                border: "1px solid var(--orange, #E87830)", background: "transparent",
+                color: "var(--orange, #E87830)", cursor: "pointer",
               }}>Remove</button>
             </div>
           ))}
@@ -174,7 +174,7 @@ function PasskeySection() {
               {registering ? "Registering…" : "+ Add Passkey"}
             </button>
           </div>
-          <div style={{ fontSize: 12, color: "var(--muted)" }}>
+          <div style={{ fontSize: 12, color: "var(--txt3, #6B8090)" }}>
             Your device will prompt you to verify with biometrics or a PIN.
           </div>
         </div>
@@ -268,8 +268,8 @@ export default function MfaSetup() {
   return (
     <div className="page-content" style={{ maxWidth: 600, margin: "0 auto" }}>
       <div className="page-header">
-        <h2>Account Security</h2>
-        <p style={{ color: "var(--muted)", margin: "4px 0 0" }}>
+        <h2 style={{ color: "var(--txt, #fff)" }}>Account Security</h2>
+        <p style={{ color: "var(--txt3, #6B8090)", margin: "4px 0 0" }}>
           Manage passkeys, two-factor authentication, and account security
         </p>
       </div>
@@ -279,19 +279,19 @@ export default function MfaSetup() {
           <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 20 }}>
             <div style={{
               width: 40, height: 40, borderRadius: "50%",
-              background: status.mfa_enabled ? "var(--teal)" : "var(--border)",
+              background: status.mfa_enabled ? "var(--acc1, #2ECFAA)" : "var(--brd, rgba(255,255,255,0.1))",
               display: "flex", alignItems: "center", justifyContent: "center",
-              color: status.mfa_enabled ? "#fff" : "var(--muted)",
+              color: status.mfa_enabled ? "#fff" : "var(--txt3)",
               fontSize: 18, fontWeight: 600,
             }}>
               {status.mfa_enabled ? "\u2713" : "\u2715"}
             </div>
             <div>
-              <div style={{ fontWeight: 600, fontSize: 16, color: "var(--navy)" }}>
+              <div style={{ fontWeight: 600, fontSize: 16, color: "var(--txt, #fff)" }}>
                 {status.mfa_enabled ? "MFA is enabled" : "MFA is not enabled"}
               </div>
               {status.enrolled_at && (
-                <div style={{ fontSize: 13, color: "var(--muted)" }}>
+                <div style={{ fontSize: 13, color: "var(--txt3, #6B8090)" }}>
                   Enrolled {new Date(status.enrolled_at).toLocaleDateString()}
                 </div>
               )}
@@ -300,11 +300,12 @@ export default function MfaSetup() {
 
           {status.mfa_enabled && codesCount !== null && (
             <div style={{
-              padding: "12px 16px", background: "var(--off-white)",
+              padding: "12px 16px", background: "rgba(255,255,255,0.04)",
               borderRadius: 10, marginBottom: 16, fontSize: 14,
+              border: "1px solid var(--brd, rgba(255,255,255,0.1))",
             }}>
-              <span style={{ color: "var(--muted)" }}>Backup codes remaining: </span>
-              <strong style={{ color: codesCount <= 2 ? "var(--orange)" : "var(--navy)" }}>
+              <span style={{ color: "var(--txt3, #6B8090)" }}>Backup codes remaining: </span>
+              <strong style={{ color: codesCount <= 2 ? "var(--orange, #E87830)" : "var(--txt, #fff)" }}>
                 {codesCount}
               </strong>
             </div>
@@ -319,8 +320,8 @@ export default function MfaSetup() {
             <div style={{ display: "flex", gap: 10 }}>
               <button className="login-btn" onClick={() => setShowDisable(!showDisable)}
                 style={{
-                  flex: 1, background: "transparent", color: "var(--orange)",
-                  border: "1px solid var(--orange)",
+                  flex: 1, background: "transparent", color: "var(--orange, #E87830)",
+                  border: "1px solid var(--orange, #E87830)",
                 }}>
                 Disable MFA
               </button>
@@ -329,18 +330,19 @@ export default function MfaSetup() {
 
           {showDisable && (
             <div style={{ marginTop: 16 }}>
-              <label style={{ fontSize: 13, color: "var(--muted)", display: "block", marginBottom: 6 }}>
+              <label style={{ fontSize: 13, color: "var(--txt3, #6B8090)", display: "block", marginBottom: 6 }}>
                 Enter your current authenticator code to disable MFA
               </label>
               <div style={{ display: "flex", gap: 10 }}>
                 <input className="login-input" value={disableCode}
                   onChange={e => setDisableCode(e.target.value)}
                   placeholder="6-digit code" maxLength={6}
-                  style={{ flex: 1, letterSpacing: 6, textAlign: "center", fontFamily: "'Space Grotesk', monospace" }}
+                  style={{ flex: 1, letterSpacing: 6, textAlign: "center", fontSize: 20,
+                           fontFamily: "'Space Grotesk', monospace", margin: 0 }}
                 />
                 <button className="login-btn" onClick={handleDisable}
                   disabled={loading || disableCode.length < 6}
-                  style={{ background: "var(--orange)", whiteSpace: "nowrap" }}>
+                  style={{ background: "var(--orange, #E87830)", whiteSpace: "nowrap" }}>
                   Confirm
                 </button>
               </div>
@@ -353,49 +355,51 @@ export default function MfaSetup() {
 
       {step === "scanning" && qrData && (
         <div className="section-card" style={{ textAlign: "center" }}>
-          <h3 style={{ fontFamily: "'Space Grotesk', sans-serif", color: "var(--navy)", marginBottom: 8 }}>
+          <h3 style={{ fontFamily: "'Space Grotesk', sans-serif", color: "var(--txt, #fff)", marginBottom: 8 }}>
             Scan with your authenticator app
           </h3>
-          <p style={{ fontSize: 14, color: "var(--muted)", marginBottom: 20 }}>
+          <p style={{ fontSize: 14, color: "var(--txt3, #6B8090)", marginBottom: 20 }}>
             Open Microsoft Authenticator (or any TOTP app), tap +, and scan this QR code.
           </p>
 
           <div style={{
             display: "inline-block", padding: 16, background: "#fff",
-            borderRadius: 12, border: "1px solid var(--border)",
-            boxShadow: "var(--card-shadow)",
+            borderRadius: 12, border: "1px solid var(--brd)",
           }}>
             <img src={qrData.qr_code} alt="MFA QR Code"
               style={{ width: 200, height: 200, display: "block" }} />
           </div>
 
           <details style={{ marginTop: 16, textAlign: "left" }}>
-            <summary style={{ cursor: "pointer", fontSize: 13, color: "var(--blue)" }}>
+            <summary style={{ cursor: "pointer", fontSize: 13, color: "var(--acc1, #2ECFAA)" }}>
               Can't scan? Enter key manually
             </summary>
             <div style={{
-              marginTop: 8, padding: "10px 14px", background: "var(--off-white)",
+              marginTop: 8, padding: "10px 14px", background: "rgba(255,255,255,0.04)",
               borderRadius: 8, fontFamily: "'Space Grotesk', monospace",
               fontSize: 14, wordBreak: "break-all", letterSpacing: 2,
+              color: "var(--txt, #fff)", border: "1px solid var(--brd, rgba(255,255,255,0.1))",
             }}>
               {qrData.secret}
             </div>
           </details>
 
           <div style={{ marginTop: 24, textAlign: "left" }}>
-            <label style={{ fontSize: 13, color: "var(--muted)", display: "block", marginBottom: 6 }}>
+            <label style={{ fontSize: 13, color: "var(--txt3, #6B8090)", display: "block", marginBottom: 6 }}>
               Enter the 6-digit code from your app to confirm setup
             </label>
             <div style={{ display: "flex", gap: 10 }}>
               <input className="login-input" value={code}
                 onChange={e => setCode(e.target.value.replace(/\D/g, ""))}
                 placeholder="000000" maxLength={6}
-                style={{ flex: 1, letterSpacing: 8, textAlign: "center", fontSize: 22,
-                         fontFamily: "'Space Grotesk', monospace" }}
+                style={{ flex: 1, letterSpacing: 8, textAlign: "center", fontSize: 24,
+                         fontFamily: "'Space Grotesk', monospace", margin: 0,
+                         padding: "14px 16px", minHeight: 52 }}
                 onKeyDown={e => e.key === "Enter" && code.length === 6 && confirmSetup()}
               />
               <button className="login-btn" onClick={confirmSetup}
-                disabled={loading || code.length < 6}>
+                disabled={loading || code.length < 6}
+                style={{ flexShrink: 0 }}>
                 {loading ? "Verifying\u2026" : "Verify"}
               </button>
             </div>
@@ -408,23 +412,23 @@ export default function MfaSetup() {
         <div className="section-card">
           <div style={{ textAlign: "center", marginBottom: 20 }}>
             <div style={{
-              width: 56, height: 56, borderRadius: "50%", background: "var(--teal)",
+              width: 56, height: 56, borderRadius: "50%", background: "var(--acc1, #2ECFAA)",
               display: "inline-flex", alignItems: "center", justifyContent: "center",
               color: "#fff", fontSize: 28, marginBottom: 12,
             }}>{"\u2713"}</div>
-            <h3 style={{ fontFamily: "'Space Grotesk', sans-serif", color: "var(--navy)" }}>
+            <h3 style={{ fontFamily: "'Space Grotesk', sans-serif", color: "var(--txt, #fff)" }}>
               MFA Enabled Successfully
             </h3>
           </div>
 
           <div style={{
-            padding: 16, background: "#FFF8F0",
-            border: "1px solid var(--orange)", borderRadius: 10, marginBottom: 16,
+            padding: 16, background: "rgba(232,120,48,0.1)",
+            border: "1px solid var(--orange, #E87830)", borderRadius: 10, marginBottom: 16,
           }}>
-            <strong style={{ color: "var(--orange)", fontSize: 14 }}>
+            <strong style={{ color: "var(--orange, #E87830)", fontSize: 14 }}>
               Save your backup codes now
             </strong>
-            <p style={{ fontSize: 13, color: "var(--navy)", margin: "6px 0 0" }}>
+            <p style={{ fontSize: 13, color: "var(--txt, #fff)", margin: "6px 0 0" }}>
               These codes are single-use and will not be shown again. Store them securely.
             </p>
           </div>
@@ -435,9 +439,11 @@ export default function MfaSetup() {
           }}>
             {backupCodes.map((c, i) => (
               <div key={i} style={{
-                padding: "8px 12px", background: "var(--off-white)",
+                padding: "8px 12px", background: "rgba(255,255,255,0.05)",
                 borderRadius: 8, fontFamily: "'Space Grotesk', monospace",
                 fontSize: 15, textAlign: "center", letterSpacing: 2,
+                color: "var(--txt, #fff)",
+                border: "1px solid var(--brd, rgba(255,255,255,0.1))",
               }}>{c}</div>
             ))}
           </div>
@@ -450,7 +456,7 @@ export default function MfaSetup() {
             Copy Codes to Clipboard
           </button>
           <button className="login-btn"
-            style={{ width: "100%", marginTop: 10, background: "var(--blue)" }}
+            style={{ width: "100%", marginTop: 10, background: "var(--acc1, #2ECFAA)" }}
             onClick={() => { setStep("overview"); loadStatus(); }}>
             Done
           </button>

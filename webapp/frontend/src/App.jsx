@@ -227,7 +227,7 @@ function AppShell({ user, isAdmin, allowed, mfaProtected, userMfaEnabled, filter
             {/* RIGHT: 2×3 button grid only */}
             <div className="hdr-right">
               <div className="hdr-btn-grid">
-                <a href="/account/security/mfa-setup" className="hnav">MFA Setup</a>
+                <a href="/account/security/mfa-setup" className="hnav">Security</a>
                 {isAdmin
                   ? <a href="/permissions" className="hnav">Permissions</a>
                   : <span className="hnav hnav-hidden" />
