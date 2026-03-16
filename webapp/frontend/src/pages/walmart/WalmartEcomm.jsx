@@ -122,7 +122,7 @@ export function WalmartEcomm({ filters }) {
             data={{
               labels: items.slice(0, 8).map((item) => {
                 const n = item.productName || "";
-                return n.length > 20 ? n.substring(0, 20) + "…" : n;
+                return n.length > 40 ? n.substring(0, 40) + "…" : n;
               }),
               datasets: [
                 {
@@ -137,7 +137,14 @@ export function WalmartEcomm({ filters }) {
                 },
               ],
             }}
-            height={250}
+            height={320}
+            options={{
+              indexAxis: "y",
+              scales: {
+                x: { ticks: { callback: (v) => "$" + (v / 1000).toFixed(0) + "k" } },
+                y: { ticks: { font: { size: 9 }, autoSkip: false } },
+              },
+            }}
           />
         </Card>
       </div>

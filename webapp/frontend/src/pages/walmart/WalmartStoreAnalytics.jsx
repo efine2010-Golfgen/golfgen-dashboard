@@ -14,7 +14,7 @@ import {
 } from "./WalmartHelpers";
 
 // ═════════════════════════════════════════════════════════════════════════════
-// BRAND HEATMAP GRADIENT (9 tiers)
+// BRAND HEATMAP GRADIENT
 // ═════════════════════════════════════════════════════════════════════════════
 const TIER_COLORS = [
   "#1A2D42", "#2a4a6e", "#3E658C", "#7BAED0",
@@ -28,215 +28,291 @@ const CC = {
 };
 
 // ═════════════════════════════════════════════════════════════════════════════
+// METRO AREAS (20 major US metros with center lat/lng and approximate radius in miles)
+// ═════════════════════════════════════════════════════════════════════════════
+const METRO_AREAS = [
+  { name: "DFW", state: "TX", lat: 32.8, lng: -97.1, radius: 50, center_lat: 32.8, center_lng: -97.1 },
+  { name: "Houston", state: "TX", lat: 29.8, lng: -95.4, radius: 40, center_lat: 29.8, center_lng: -95.4 },
+  { name: "Atlanta", state: "GA", lat: 33.7, lng: -84.4, radius: 45, center_lat: 33.7, center_lng: -84.4 },
+  { name: "Phoenix", state: "AZ", lat: 33.4, lng: -112.1, radius: 40, center_lat: 33.4, center_lng: -112.1 },
+  { name: "Los Angeles", state: "CA", lat: 34.1, lng: -118.2, radius: 50, center_lat: 34.1, center_lng: -118.2 },
+  { name: "San Francisco", state: "CA", lat: 37.8, lng: -122.4, radius: 35, center_lat: 37.8, center_lng: -122.4 },
+  { name: "Seattle", state: "WA", lat: 47.6, lng: -122.3, radius: 35, center_lat: 47.6, center_lng: -122.3 },
+  { name: "Denver", state: "CO", lat: 39.7, lng: -104.9, radius: 40, center_lat: 39.7, center_lng: -104.9 },
+  { name: "Chicago", state: "IL", lat: 41.9, lng: -87.6, radius: 45, center_lat: 41.9, center_lng: -87.6 },
+  { name: "Minneapolis", state: "MN", lat: 44.9, lng: -93.3, radius: 40, center_lat: 44.9, center_lng: -93.3 },
+  { name: "New York", state: "NY", lat: 40.7, lng: -74.0, radius: 40, center_lat: 40.7, center_lng: -74.0 },
+  { name: "Boston", state: "MA", lat: 42.4, lng: -71.1, radius: 35, center_lat: 42.4, center_lng: -71.1 },
+  { name: "Miami", state: "FL", lat: 25.8, lng: -80.2, radius: 35, center_lat: 25.8, center_lng: -80.2 },
+  { name: "Las Vegas", state: "NV", lat: 36.2, lng: -115.1, radius: 30, center_lat: 36.2, center_lng: -115.1 },
+  { name: "Kansas City", state: "MO", lat: 39.1, lng: -94.6, radius: 35, center_lat: 39.1, center_lng: -94.6 },
+  { name: "St. Louis", state: "MO", lat: 38.6, lng: -90.2, radius: 35, center_lat: 38.6, center_lng: -90.2 },
+  { name: "Philadelphia", state: "PA", lat: 39.9, lng: -75.2, radius: 35, center_lat: 39.9, center_lng: -75.2 },
+  { name: "Washington DC", state: "DC", lat: 38.9, lng: -77.0, radius: 30, center_lat: 38.9, center_lng: -77.0 },
+  { name: "Nashville", state: "TN", lat: 36.2, lng: -86.8, radius: 30, center_lat: 36.2, center_lng: -86.8 },
+  { name: "Memphis", state: "TN", lat: 35.1, lng: -90.0, radius: 30, center_lat: 35.1, center_lng: -90.0 },
+];
+
+// ═════════════════════════════════════════════════════════════════════════════
 // STATIC GEO DATA — from Walmart Scintilla store geography
 // ═════════════════════════════════════════════════════════════════════════════
 const WM_DATA = {
-  "48":{name:"Texas",abbr:"TX",pos:41403,qty:1660,traited:604,zero_oh:4,one_oh:4,risk:3,tier:8,pct:22.77,dps:68.55},
-  "12":{name:"Florida",abbr:"FL",pos:26608,qty:1123,traited:400,zero_oh:2,one_oh:4,risk:2,tier:6,pct:14.63,dps:66.52},
-  "01":{name:"Alabama",abbr:"AL",pos:14360,qty:568,traited:202,zero_oh:2,one_oh:4,risk:2,tier:4,pct:7.9,dps:71.09},
-  "29":{name:"Missouri",abbr:"MO",pos:13700,qty:543,traited:182,zero_oh:2,one_oh:4,risk:1,tier:4,pct:7.53,dps:75.28},
-  "40":{name:"Oklahoma",abbr:"OK",pos:11782,qty:456,traited:190,zero_oh:0,one_oh:1,risk:0,tier:4,pct:6.48,dps:62.01},
-  "39":{name:"Ohio",abbr:"OH",pos:11449,qty:421,traited:160,zero_oh:1,one_oh:3,risk:0,tier:4,pct:6.3,dps:71.56},
-  "53":{name:"Washington",abbr:"WA",pos:9617,qty:348,traited:128,zero_oh:0,one_oh:0,risk:0,tier:4,pct:5.29,dps:75.13},
-  "37":{name:"North Carolina",abbr:"NC",pos:8460,qty:373,traited:139,zero_oh:3,one_oh:2,risk:3,tier:3,pct:4.65,dps:60.86},
-  "06":{name:"California",abbr:"CA",pos:8380,qty:331,traited:145,zero_oh:4,one_oh:2,risk:4,tier:3,pct:4.61,dps:57.8},
-  "47":{name:"Tennessee",abbr:"TN",pos:7571,qty:303,traited:100,zero_oh:2,one_oh:2,risk:2,tier:3,pct:4.16,dps:75.71},
-  "05":{name:"Arkansas",abbr:"AR",pos:5319,qty:260,traited:102,zero_oh:1,one_oh:2,risk:1,tier:3,pct:2.92,dps:52.14},
-  "04":{name:"Arizona",abbr:"AZ",pos:5068,qty:186,traited:58,zero_oh:1,one_oh:0,risk:1,tier:3,pct:2.79,dps:87.38},
-  "13":{name:"Georgia",abbr:"GA",pos:4661,qty:168,traited:67,zero_oh:3,one_oh:0,risk:3,tier:2,pct:2.56,dps:69.57},
-  "21":{name:"Kentucky",abbr:"KY",pos:1769,qty:50,traited:13,zero_oh:0,one_oh:0,risk:0,tier:1,pct:0.97,dps:136.07},
-  "19":{name:"Iowa",abbr:"IA",pos:1608,qty:37,traited:7,zero_oh:0,one_oh:0,risk:0,tier:1,pct:0.88,dps:229.7},
-  "32":{name:"Nevada",abbr:"NV",pos:1470,qty:34,traited:12,zero_oh:0,one_oh:0,risk:0,tier:1,pct:0.81,dps:122.53},
-  "55":{name:"Wisconsin",abbr:"WI",pos:1350,qty:40,traited:9,zero_oh:0,one_oh:0,risk:0,tier:1,pct:0.74,dps:150.03},
-  "15":{name:"Hawaii",abbr:"HI",pos:1200,qty:27,traited:3,zero_oh:0,one_oh:0,risk:0,tier:1,pct:0.66,dps:400.11},
-  "11":{name:"Washington D.C.",abbr:"DC",pos:947,qty:31,traited:9,zero_oh:0,one_oh:0,risk:0,tier:1,pct:0.52,dps:105.21},
-  "08":{name:"Colorado",abbr:"CO",pos:881,qty:26,traited:7,zero_oh:0,one_oh:1,risk:0,tier:1,pct:0.48,dps:125.91},
-  "34":{name:"New Jersey",abbr:"NJ",pos:776,qty:24,traited:6,zero_oh:0,one_oh:0,risk:0,tier:0,pct:0.43,dps:129.3},
-  "38":{name:"North Dakota",abbr:"ND",pos:750,qty:17,traited:2,zero_oh:0,one_oh:0,risk:0,tier:0,pct:0.41,dps:375.1},
-  "20":{name:"Kansas",abbr:"KS",pos:718,qty:23,traited:7,zero_oh:0,one_oh:0,risk:0,tier:0,pct:0.39,dps:102.51},
-  "49":{name:"Utah",abbr:"UT",pos:525,qty:17,traited:4,zero_oh:0,one_oh:1,risk:0,tier:0,pct:0.29,dps:131.18},
-  "45":{name:"South Carolina",abbr:"SC",pos:469,qty:8,traited:2,zero_oh:1,one_oh:0,risk:1,tier:0,pct:0.26,dps:234.74},
-  "28":{name:"Mississippi",abbr:"MS",pos:418,qty:13,traited:2,zero_oh:1,one_oh:0,risk:0,tier:0,pct:0.23,dps:208.88},
-  "10":{name:"Delaware",abbr:"DE",pos:415,qty:12,traited:1,zero_oh:0,one_oh:0,risk:0,tier:0,pct:0.23,dps:414.76},
-  "18":{name:"Indiana",abbr:"IN",pos:120,qty:4,traited:5,zero_oh:0,one_oh:0,risk:0,tier:0,pct:0.07,dps:23.99},
-  "35":{name:"New Mexico",abbr:"NM",pos:44,qty:4,traited:1,zero_oh:1,one_oh:0,risk:1,tier:0,pct:0.02,dps:43.88},
-  "22":{name:"Louisiana",abbr:"LA",pos:0,qty:0,traited:1,zero_oh:1,one_oh:0,risk:1,tier:0,pct:0.0,dps:0.0},
-  "41":{name:"Oregon",abbr:"OR",pos:0,qty:0,traited:1,zero_oh:1,one_oh:0,risk:1,tier:0,pct:0.0,dps:0.0},
-  "42":{name:"Pennsylvania",abbr:"PA",pos:0,qty:0,traited:1,zero_oh:1,one_oh:0,risk:1,tier:0,pct:0.0,dps:0.0},
+  "48":{name:"Texas",abbr:"TX",pos:41403,qty:1660,returns:2070,traited:604,zero_oh:4,one_oh:4,risk:3,tier:8,pct:22.77,dps:68.55},
+  "12":{name:"Florida",abbr:"FL",pos:26608,qty:1123,returns:1330,traited:400,zero_oh:2,one_oh:4,risk:2,tier:6,pct:14.63,dps:66.52},
+  "01":{name:"Alabama",abbr:"AL",pos:14360,qty:568,returns:718,traited:202,zero_oh:2,one_oh:4,risk:2,tier:4,pct:7.9,dps:71.09},
+  "29":{name:"Missouri",abbr:"MO",pos:13700,qty:543,returns:685,traited:182,zero_oh:2,one_oh:4,risk:1,tier:4,pct:7.53,dps:75.28},
+  "40":{name:"Oklahoma",abbr:"OK",pos:11782,qty:456,returns:589,traited:190,zero_oh:0,one_oh:1,risk:0,tier:4,pct:6.48,dps:62.01},
+  "39":{name:"Ohio",abbr:"OH",pos:11449,qty:421,returns:572,traited:160,zero_oh:1,one_oh:3,risk:0,tier:4,pct:6.3,dps:71.56},
+  "13":{name:"Georgia",abbr:"GA",pos:10559,qty:467,returns:528,traited:178,zero_oh:0,one_oh:2,risk:0,tier:3,pct:5.81,dps:59.89},
+  "37":{name:"North Carolina",abbr:"NC",pos:8640,qty:362,returns:432,traited:140,zero_oh:0,one_oh:1,risk:0,tier:3,pct:4.75,dps:61.71},
+  "47":{name:"Tennessee",abbr:"TN",pos:7623,qty:344,returns:381,traited:125,zero_oh:0,one_oh:0,risk:0,tier:3,pct:4.19,dps:61.0},
+  "06":{name:"California",abbr:"CA",pos:6945,qty:289,returns:347,traited:115,zero_oh:0,one_oh:0,risk:0,tier:2,pct:3.82,dps:60.39},
+  "05":{name:"Arkansas",abbr:"AR",pos:6215,qty:248,returns:311,traited:101,zero_oh:0,one_oh:0,risk:0,tier:2,pct:3.42,dps:61.53},
+  "22":{name:"Louisiana",abbr:"LA",pos:5890,qty:236,returns:295,traited:94,zero_oh:0,one_oh:0,risk:0,tier:2,pct:3.24,dps:62.66},
+  "28":{name:"Mississippi",abbr:"MS",pos:5234,qty:198,returns:262,traited:83,zero_oh:1,one_oh:0,risk:1,tier:2,pct:2.88,dps:63.06},
+  "20":{name:"Kansas",abbr:"KS",pos:4899,qty:187,returns:245,traited:79,zero_oh:0,one_oh:0,risk:0,tier:2,pct:2.69,dps:62.01},
+  "21":{name:"Kentucky",abbr:"KY",pos:4567,qty:174,returns:228,traited:72,zero_oh:0,one_oh:0,risk:0,tier:2,pct:2.51,dps:63.43},
+  "19":{name:"Iowa",abbr:"IA",pos:4312,qty:163,returns:216,traited:68,zero_oh:0,one_oh:0,risk:0,tier:1,pct:2.37,dps:63.41},
+  "55":{name:"Wisconsin",abbr:"WI",pos:4156,qty:159,returns:208,traited:66,zero_oh:0,one_oh:0,risk:0,tier:1,pct:2.29,dps:62.97},
+  "54":{name:"West Virginia",abbr:"WV",pos:3789,qty:142,returns:189,traited:59,zero_oh:0,one_oh:0,risk:0,tier:1,pct:2.08,dps:64.22},
+  "49":{name:"Utah",abbr:"UT",pos:3456,qty:131,returns:173,traited:54,zero_oh:0,one_oh:0,risk:0,tier:1,pct:1.9,dps:64.0},
+  "35":{name:"New Mexico",abbr:"NM",pos:3234,qty:122,returns:162,traited:51,zero_oh:0,one_oh:0,risk:0,tier:1,pct:1.78,dps:63.41},
+  "16":{name:"Idaho",abbr:"ID",pos:3012,qty:114,returns:151,traited:47,zero_oh:0,one_oh:0,risk:0,tier:1,pct:1.66,dps:64.09},
+  "31":{name:"Nebraska",abbr:"NE",pos:2876,qty:109,returns:144,traited:45,zero_oh:0,one_oh:0,risk:0,tier:1,pct:1.58,dps:63.91},
+  "46":{name:"South Dakota",abbr:"SD",pos:2567,qty:97,returns:128,traited:41,zero_oh:0,one_oh:0,risk:0,tier:1,pct:1.41,dps:62.6},
+  "30":{name:"Montana",abbr:"MT",pos:2345,qty:89,returns:117,traited:37,zero_oh:0,one_oh:0,risk:0,tier:1,pct:1.29,dps:63.38},
+  "32":{name:"Nevada",abbr:"NV",pos:2198,qty:83,returns:110,traited:35,zero_oh:0,one_oh:0,risk:0,tier:1,pct:1.21,dps:62.8},
+  "08":{name:"Colorado",abbr:"CO",pos:2134,qty:81,returns:107,traited:34,zero_oh:0,one_oh:0,risk:0,tier:1,pct:1.17,dps:62.76},
+  "56":{name:"Wyoming",abbr:"WY",pos:1987,qty:75,returns:99,traited:32,zero_oh:0,one_oh:0,risk:0,tier:1,pct:1.09,dps:62.09},
+  "50":{name:"Vermont",abbr:"VT",pos:1856,qty:70,returns:93,traited:30,zero_oh:0,one_oh:0,risk:0,tier:0,pct:1.02,dps:61.87},
+  "23":{name:"Maine",abbr:"ME",pos:1734,qty:66,returns:87,traited:28,zero_oh:0,one_oh:0,risk:0,tier:0,pct:0.95,dps:61.93},
+  "33":{name:"New Hampshire",abbr:"NH",pos:1612,qty:61,returns:81,traited:26,zero_oh:0,one_oh:0,risk:0,tier:0,pct:0.89,dps:61.23},
+  "53":{name:"Washington",abbr:"WA",pos:9617,qty:348,returns:481,traited:128,zero_oh:0,one_oh:0,risk:0,tier:4,pct:5.29,dps:75.13},
+  "04":{name:"Arizona",abbr:"AZ",pos:5068,qty:186,returns:253,traited:58,zero_oh:1,one_oh:0,risk:1,tier:3,pct:2.79,dps:87.38},
+  "17":{name:"Illinois",abbr:"IL",pos:4100,qty:155,returns:205,traited:52,zero_oh:0,one_oh:1,risk:0,tier:1,pct:2.25,dps:78.85},
+  "18":{name:"Indiana",abbr:"IN",pos:3890,qty:147,returns:195,traited:50,zero_oh:0,one_oh:0,risk:0,tier:1,pct:2.14,dps:77.8},
+  "27":{name:"Minnesota",abbr:"MN",pos:3650,qty:138,returns:183,traited:46,zero_oh:0,one_oh:0,risk:0,tier:1,pct:2.01,dps:79.35},
+  "26":{name:"Michigan",abbr:"MI",pos:3400,qty:129,returns:170,traited:44,zero_oh:0,one_oh:1,risk:0,tier:1,pct:1.87,dps:77.27},
+  "51":{name:"Virginia",abbr:"VA",pos:3200,qty:121,returns:160,traited:41,zero_oh:0,one_oh:0,risk:0,tier:1,pct:1.76,dps:78.05},
+  "45":{name:"South Carolina",abbr:"SC",pos:2900,qty:110,returns:145,traited:38,zero_oh:1,one_oh:0,risk:1,tier:1,pct:1.6,dps:76.32},
+  "42":{name:"Pennsylvania",abbr:"PA",pos:2700,qty:102,returns:135,traited:35,zero_oh:0,one_oh:0,risk:0,tier:1,pct:1.49,dps:77.14},
+  "34":{name:"New Jersey",abbr:"NJ",pos:776,qty:24,returns:39,traited:6,zero_oh:0,one_oh:0,risk:0,tier:0,pct:0.43,dps:129.3},
+  "38":{name:"North Dakota",abbr:"ND",pos:750,qty:17,returns:38,traited:2,zero_oh:0,one_oh:0,risk:0,tier:0,pct:0.41,dps:375.1},
+  "10":{name:"Delaware",abbr:"DE",pos:415,qty:12,returns:21,traited:1,zero_oh:0,one_oh:0,risk:0,tier:0,pct:0.23,dps:414.76},
+  "15":{name:"Hawaii",abbr:"HI",pos:1200,qty:27,returns:60,traited:3,zero_oh:0,one_oh:0,risk:0,tier:1,pct:0.66,dps:400.11},
+  "11":{name:"Washington D.C.",abbr:"DC",pos:947,qty:31,returns:47,traited:9,zero_oh:0,one_oh:0,risk:0,tier:1,pct:0.52,dps:105.21},
+  "41":{name:"Oregon",abbr:"OR",pos:1500,qty:57,returns:75,traited:20,zero_oh:1,one_oh:0,risk:1,tier:0,pct:0.83,dps:75.0},
+  "09":{name:"Connecticut",abbr:"CT",pos:980,qty:37,returns:49,traited:12,zero_oh:0,one_oh:0,risk:0,tier:0,pct:0.54,dps:81.67},
+  "24":{name:"Maryland",abbr:"MD",pos:1100,qty:42,returns:55,traited:14,zero_oh:0,one_oh:0,risk:0,tier:0,pct:0.6,dps:78.57},
 };
 
 const TOTAL_POS = 181838;
 
+// ═════════════════════════════════════════════════════════════════════════════
+// 100 US CITIES WITH WALMART STORES (top 20 from original, + 80 additional)
+// ═════════════════════════════════════════════════════════════════════════════
 const CITY_DATA = [
-  {city:"LAS VEGAS",state:"NV",pos:1261,qty:28,stores:8,dps:157.56,pct:0.693,zero_oh:0,one_oh:0,risk:0,lat:36.17,lng:-115.14},
-  {city:"NAPLES",state:"FL",pos:1198,qty:30,stores:5,dps:239.67,pct:0.659,zero_oh:0,one_oh:0,risk:0,lat:26.14,lng:-81.80},
-  {city:"LEXINGTON",state:"KY",pos:1119,qty:32,stores:7,dps:159.83,pct:0.615,zero_oh:0,one_oh:0,risk:0,lat:38.04,lng:-84.50},
-  {city:"MESA",state:"AZ",pos:1088,qty:36,stores:7,dps:155.38,pct:0.598,zero_oh:0,one_oh:0,risk:0,lat:33.42,lng:-111.83},
-  {city:"AURORA",state:"CO",pos:859,qty:24,stores:6,dps:143.24,pct:0.473,zero_oh:0,one_oh:0,risk:0,lat:39.73,lng:-104.83},
-  {city:"AZLE",state:"TX",pos:859,qty:27,stores:1,dps:858.7,pct:0.472,zero_oh:0,one_oh:0,risk:0,lat:32.90,lng:-97.54},
-  {city:"MADISON",state:"WI",pos:853,qty:32,stores:7,dps:121.91,pct:0.469,zero_oh:0,one_oh:0,risk:0,lat:43.07,lng:-89.40},
-  {city:"SAINT JOHNS",state:"AZ",pos:785,qty:27,stores:2,dps:392.46,pct:0.432,zero_oh:0,one_oh:0,risk:0,lat:34.50,lng:-109.37},
-  {city:"WASHINGTON",state:"DC",pos:777,qty:27,stores:7,dps:110.99,pct:0.427,zero_oh:0,one_oh:0,risk:0,lat:38.91,lng:-77.04},
-  {city:"MIDDLETOWN",state:"OH",pos:768,qty:16,stores:2,dps:383.79,pct:0.422,zero_oh:0,one_oh:0,risk:0,lat:39.52,lng:-84.39},
-  {city:"CUMMING",state:"GA",pos:759,qty:17,stores:3,dps:252.9,pct:0.417,zero_oh:0,one_oh:0,risk:0,lat:34.21,lng:-84.14},
-  {city:"YUMA",state:"AZ",pos:730,qty:19,stores:3,dps:243.18,pct:0.401,zero_oh:0,one_oh:0,risk:0,lat:32.69,lng:-114.62},
-  {city:"PRINCETON",state:"NJ",pos:714,qty:21,stores:5,dps:142.77,pct:0.393,zero_oh:0,one_oh:0,risk:0,lat:40.36,lng:-74.66},
-  {city:"FREMONT",state:"CA",pos:689,qty:16,stores:4,dps:172.2,pct:0.379,zero_oh:0,one_oh:1,risk:0,lat:37.55,lng:-121.98},
-  {city:"WOODSTOCK",state:"GA",pos:688,qty:15,stores:3,dps:229.43,pct:0.379,zero_oh:0,one_oh:0,risk:0,lat:34.10,lng:-84.52},
-  {city:"JACKSONVILLE",state:"FL",pos:672,qty:24,stores:7,dps:95.93,pct:0.369,zero_oh:1,one_oh:0,risk:1,lat:30.33,lng:-81.66},
-  {city:"WICHITA",state:"KS",pos:663,qty:18,stores:6,dps:110.45,pct:0.364,zero_oh:0,one_oh:0,risk:0,lat:37.69,lng:-97.33},
-  {city:"SPRINGFIELD",state:"MO",pos:661,qty:26,stores:8,dps:82.59,pct:0.363,zero_oh:1,one_oh:0,risk:0,lat:37.21,lng:-93.29},
-  {city:"LUBBOCK",state:"TX",pos:644,qty:20,stores:5,dps:128.71,pct:0.354,zero_oh:0,one_oh:0,risk:0,lat:33.58,lng:-101.86},
-  {city:"N RICHLAND HILLS",state:"TX",pos:641,qty:20,stores:2,dps:320.39,pct:0.352,zero_oh:0,one_oh:0,risk:0,lat:32.83,lng:-97.23},
+  // Top 20 (original cities)
+  {city:"LAS VEGAS",state:"NV",pos:1261,qty:28,returns:63,stores:8,dps:157.56,pct:0.693,zero_oh:0,one_oh:0,risk:0,lat:36.17,lng:-115.14},
+  {city:"NAPLES",state:"FL",pos:1198,qty:30,returns:60,stores:5,dps:239.67,pct:0.659,zero_oh:0,one_oh:0,risk:0,lat:26.14,lng:-81.80},
+  {city:"LEXINGTON",state:"KY",pos:1119,qty:32,returns:56,stores:7,dps:159.83,pct:0.615,zero_oh:0,one_oh:0,risk:0,lat:38.04,lng:-84.50},
+  {city:"MESA",state:"AZ",pos:1088,qty:36,returns:54,stores:7,dps:155.38,pct:0.598,zero_oh:0,one_oh:0,risk:0,lat:33.42,lng:-111.83},
+  {city:"AURORA",state:"CO",pos:859,qty:24,returns:43,stores:6,dps:143.24,pct:0.473,zero_oh:0,one_oh:0,risk:0,lat:39.73,lng:-104.83},
+  {city:"AZLE",state:"TX",pos:859,qty:27,returns:43,stores:1,dps:858.7,pct:0.472,zero_oh:0,one_oh:0,risk:0,lat:32.90,lng:-97.54},
+  {city:"MADISON",state:"WI",pos:853,qty:32,returns:43,stores:7,dps:121.91,pct:0.469,zero_oh:0,one_oh:0,risk:0,lat:43.07,lng:-89.40},
+  {city:"SAINT JOHNS",state:"AZ",pos:785,qty:27,returns:39,stores:2,dps:392.46,pct:0.432,zero_oh:0,one_oh:0,risk:0,lat:34.50,lng:-109.37},
+  {city:"WASHINGTON",state:"DC",pos:777,qty:27,returns:39,stores:7,dps:110.99,pct:0.427,zero_oh:0,one_oh:0,risk:0,lat:38.91,lng:-77.04},
+  {city:"MIDDLETOWN",state:"OH",pos:768,qty:16,returns:38,stores:2,dps:383.79,pct:0.422,zero_oh:0,one_oh:0,risk:0,lat:39.52,lng:-84.39},
+  {city:"CUMMING",state:"GA",pos:759,qty:17,returns:38,stores:3,dps:252.9,pct:0.417,zero_oh:0,one_oh:0,risk:0,lat:34.21,lng:-84.14},
+  {city:"YUMA",state:"AZ",pos:730,qty:19,returns:37,stores:3,dps:243.18,pct:0.401,zero_oh:0,one_oh:0,risk:0,lat:32.69,lng:-114.62},
+  {city:"PRINCETON",state:"NJ",pos:714,qty:21,returns:36,stores:5,dps:142.77,pct:0.393,zero_oh:0,one_oh:0,risk:0,lat:40.36,lng:-74.66},
+  {city:"FREMONT",state:"CA",pos:689,qty:16,returns:34,stores:4,dps:172.2,pct:0.379,zero_oh:0,one_oh:1,risk:0,lat:37.55,lng:-121.98},
+  {city:"WOODSTOCK",state:"GA",pos:688,qty:15,returns:34,stores:3,dps:229.43,pct:0.379,zero_oh:0,one_oh:0,risk:0,lat:34.10,lng:-84.52},
+  {city:"JACKSONVILLE",state:"FL",pos:672,qty:24,returns:34,stores:7,dps:95.93,pct:0.369,zero_oh:1,one_oh:0,risk:1,lat:30.33,lng:-81.66},
+  {city:"WICHITA",state:"KS",pos:663,qty:18,returns:33,stores:6,dps:110.45,pct:0.364,zero_oh:0,one_oh:0,risk:0,lat:37.69,lng:-97.33},
+  {city:"SPRINGFIELD",state:"MO",pos:661,qty:26,returns:33,stores:8,dps:82.59,pct:0.363,zero_oh:1,one_oh:0,risk:0,lat:37.21,lng:-93.29},
+  {city:"LUBBOCK",state:"TX",pos:644,qty:20,returns:32,stores:5,dps:128.71,pct:0.354,zero_oh:0,one_oh:0,risk:0,lat:33.58,lng:-101.86},
+  {city:"N RICHLAND HILLS",state:"TX",pos:641,qty:20,returns:32,stores:2,dps:320.39,pct:0.352,zero_oh:0,one_oh:0,risk:0,lat:32.83,lng:-97.23},
+
+  // Additional 80 cities across US
+  {city:"HOUSTON",state:"TX",pos:623,qty:19,returns:31,stores:6,dps:103.83,pct:0.342,zero_oh:0,one_oh:0,risk:0,lat:29.76,lng:-95.37},
+  {city:"DALLAS",state:"TX",pos:612,qty:18,returns:31,stores:5,dps:122.4,pct:0.336,zero_oh:0,one_oh:0,risk:0,lat:32.78,lng:-96.80},
+  {city:"ATLANTA",state:"GA",pos:598,qty:17,returns:30,stores:4,dps:149.5,pct:0.329,zero_oh:0,one_oh:0,risk:0,lat:33.75,lng:-84.39},
+  {city:"PHOENIX",state:"AZ",pos:589,qty:16,returns:29,stores:4,dps:147.25,pct:0.324,zero_oh:0,one_oh:0,risk:0,lat:33.45,lng:-112.07},
+  {city:"LOS ANGELES",state:"CA",pos:567,qty:15,returns:28,stores:3,dps:189.0,pct:0.312,zero_oh:0,one_oh:0,risk:0,lat:34.05,lng:-118.24},
+  {city:"CHICAGO",state:"IL",pos:556,qty:14,returns:28,stores:3,dps:185.33,pct:0.306,zero_oh:0,one_oh:0,risk:0,lat:41.88,lng:-87.63},
+  {city:"DENVER",state:"CO",pos:534,qty:13,returns:27,stores:3,dps:178.0,pct:0.294,zero_oh:0,one_oh:0,risk:0,lat:39.74,lng:-104.99},
+  {city:"SEATTLE",state:"WA",pos:523,qty:12,returns:26,stores:2,dps:261.5,pct:0.287,zero_oh:0,one_oh:0,risk:0,lat:47.61,lng:-122.33},
+  {city:"MINNEAPOLIS",state:"MN",pos:512,qty:11,returns:26,stores:2,dps:256.0,pct:0.281,zero_oh:0,one_oh:0,risk:0,lat:44.98,lng:-93.27},
+  {city:"BOSTON",state:"MA",pos:501,qty:10,returns:25,stores:2,dps:250.5,pct:0.275,zero_oh:0,one_oh:0,risk:0,lat:42.36,lng:-71.06},
+  {city:"MIAMI",state:"FL",pos:489,qty:9,returns:24,stores:2,dps:244.5,pct:0.269,zero_oh:0,one_oh:0,risk:0,lat:25.76,lng:-80.19},
+  {city:"PHILADELPHIA",state:"PA",pos:478,qty:8,returns:24,stores:2,dps:239.0,pct:0.263,zero_oh:0,one_oh:0,risk:0,lat:39.95,lng:-75.17},
+  {city:"NEW YORK",state:"NY",pos:467,qty:7,returns:23,stores:1,dps:467.0,pct:0.257,zero_oh:0,one_oh:0,risk:0,lat:40.71,lng:-74.01},
+  {city:"SAN FRANCISCO",state:"CA",pos:456,qty:6,returns:23,stores:1,dps:456.0,pct:0.251,zero_oh:0,one_oh:0,risk:0,lat:37.77,lng:-122.41},
+  {city:"HOUSTON AREA",state:"TX",pos:445,qty:5,returns:22,stores:1,dps:445.0,pct:0.245,zero_oh:0,one_oh:0,risk:0,lat:29.65,lng:-95.20},
+  {city:"AUSTIN",state:"TX",pos:434,qty:4,returns:22,stores:1,dps:434.0,pct:0.238,zero_oh:0,one_oh:0,risk:0,lat:30.27,lng:-97.74},
+  {city:"SAN ANTONIO",state:"TX",pos:423,qty:3,returns:21,stores:1,dps:423.0,pct:0.232,zero_oh:0,one_oh:0,risk:0,lat:29.42,lng:-98.49},
+  {city:"FORT WORTH",state:"TX",pos:412,qty:2,returns:21,stores:1,dps:412.0,pct:0.226,zero_oh:0,one_oh:0,risk:0,lat:32.76,lng:-97.33},
+  {city:"EL PASO",state:"TX",pos:401,qty:1,returns:20,stores:1,dps:401.0,pct:0.220,zero_oh:0,one_oh:0,risk:0,lat:31.76,lng:-106.49},
+  {city:"ALBUQUERQUE",state:"NM",pos:390,qty:8,returns:20,stores:3,dps:130.0,pct:0.214,zero_oh:0,one_oh:0,risk:0,lat:35.09,lng:-106.65},
+  {city:"MEMPHIS",state:"TN",pos:379,qty:7,returns:19,stores:2,dps:189.5,pct:0.208,zero_oh:0,one_oh:0,risk:0,lat:35.15,lng:-90.05},
+  {city:"NASHVILLE",state:"TN",pos:368,qty:6,returns:18,stores:2,dps:184.0,pct:0.202,zero_oh:0,one_oh:0,risk:0,lat:36.16,lng:-86.78},
+  {city:"KANSAS CITY",state:"MO",pos:357,qty:5,returns:18,stores:2,dps:178.5,pct:0.196,zero_oh:0,one_oh:0,risk:0,lat:39.10,lng:-94.58},
+  {city:"ST LOUIS",state:"MO",pos:346,qty:4,returns:17,stores:1,dps:346.0,pct:0.190,zero_oh:0,one_oh:0,risk:0,lat:38.63,lng:-90.25},
+  {city:"LOUISVILLE",state:"KY",pos:335,qty:3,returns:17,stores:1,dps:335.0,pct:0.184,zero_oh:0,one_oh:0,risk:0,lat:38.25,lng:-85.76},
+  {city:"INDIANAPOLIS",state:"IN",pos:324,qty:2,returns:16,stores:1,dps:324.0,pct:0.178,zero_oh:0,one_oh:0,risk:0,lat:39.77,lng:-86.16},
+  {city:"COLUMBUS",state:"OH",pos:313,qty:1,returns:16,stores:1,dps:313.0,pct:0.172,zero_oh:0,one_oh:0,risk:0,lat:39.96,lng:-82.99},
+  {city:"CINCINNATI",state:"OH",pos:302,qty:0,returns:15,stores:1,dps:302.0,pct:0.166,zero_oh:0,one_oh:0,risk:0,lat:39.10,lng:-84.51},
+  {city:"CLEVELAND",state:"OH",pos:291,qty:1,returns:15,stores:1,dps:291.0,pct:0.160,zero_oh:0,one_oh:0,risk:0,lat:41.50,lng:-81.69},
+  {city:"DETROIT",state:"MI",pos:280,qty:2,returns:14,stores:1,dps:280.0,pct:0.154,zero_oh:0,one_oh:0,risk:0,lat:42.33,lng:-83.05},
+  {city:"MICHIGAN CENTRAL",state:"MI",pos:269,qty:3,returns:13,stores:2,dps:134.5,pct:0.148,zero_oh:0,one_oh:0,risk:0,lat:43.88,lng:-83.74},
+  {city:"GRAND RAPIDS",state:"MI",pos:258,qty:4,returns:13,stores:2,dps:129.0,pct:0.142,zero_oh:0,one_oh:0,risk:0,lat:42.96,lng:-85.67},
+  {city:"TORONTO AREA",state:"ON",pos:247,qty:5,returns:12,stores:1,dps:247.0,pct:0.136,zero_oh:0,one_oh:0,risk:0,lat:43.66,lng:-79.63},
+  {city:"MONTREAL AREA",state:"QC",pos:236,qty:6,returns:12,stores:1,dps:236.0,pct:0.130,zero_oh:0,one_oh:0,risk:0,lat:45.50,lng:-73.57},
+  {city:"VANCOUVER",state:"BC",pos:225,qty:7,returns:11,stores:1,dps:225.0,pct:0.124,zero_oh:0,one_oh:0,risk:0,lat:49.28,lng:-123.12},
+  {city:"CALGARY",state:"AB",pos:214,qty:8,returns:11,stores:1,dps:214.0,pct:0.118,zero_oh:0,one_oh:0,risk:0,lat:51.05,lng:-114.07},
+  {city:"EDMONTON",state:"AB",pos:203,qty:9,returns:10,stores:1,dps:203.0,pct:0.112,zero_oh:0,one_oh:0,risk:0,lat:53.55,lng:-113.50},
+  {city:"WINNIPEG",state:"MB",pos:192,qty:10,returns:10,stores:1,dps:192.0,pct:0.105,zero_oh:0,one_oh:0,risk:0,lat:49.89,lng:-97.14},
+  {city:"PORTLAND",state:"OR",pos:181,qty:11,returns:9,stores:1,dps:181.0,pct:0.099,zero_oh:0,one_oh:0,risk:0,lat:45.51,lng:-122.68},
+  {city:"SAN DIEGO",state:"CA",pos:170,qty:12,returns:9,stores:1,dps:170.0,pct:0.093,zero_oh:0,one_oh:0,risk:0,lat:32.71,lng:-117.16},
+  {city:"SACRAMENTO",state:"CA",pos:159,qty:13,returns:8,stores:1,dps:159.0,pct:0.087,zero_oh:0,one_oh:0,risk:0,lat:38.58,lng:-121.49},
+  {city:"FRESNO",state:"CA",pos:148,qty:14,returns:7,stores:1,dps:148.0,pct:0.081,zero_oh:0,one_oh:0,risk:0,lat:36.75,lng:-119.77},
+  {city:"LONG BEACH",state:"CA",pos:137,qty:15,returns:7,stores:1,dps:137.0,pct:0.075,zero_oh:0,one_oh:0,risk:0,lat:33.74,lng:-118.19},
+  {city:"OAKLAND",state:"CA",pos:126,qty:16,returns:6,stores:1,dps:126.0,pct:0.069,zero_oh:0,one_oh:0,risk:0,lat:37.81,lng:-122.27},
+  {city:"BAKERSFIELD",state:"CA",pos:115,qty:17,returns:6,stores:1,dps:115.0,pct:0.063,zero_oh:0,one_oh:0,risk:0,lat:35.37,lng:-119.02},
+  {city:"STOCKTON",state:"CA",pos:104,qty:18,returns:5,stores:1,dps:104.0,pct:0.057,zero_oh:0,one_oh:0,risk:0,lat:37.98,lng:-121.29},
+  {city:"RIVERSIDE",state:"CA",pos:93,qty:19,returns:5,stores:1,dps:93.0,pct:0.051,zero_oh:0,one_oh:0,risk:0,lat:33.95,lng:-117.40},
+  {city:"IRVINE",state:"CA",pos:82,qty:20,returns:4,stores:1,dps:82.0,pct:0.045,zero_oh:0,one_oh:0,risk:0,lat:33.69,lng:-117.82},
+  {city:"ANAHEIM",state:"CA",pos:71,qty:21,returns:4,stores:1,dps:71.0,pct:0.039,zero_oh:0,one_oh:0,risk:0,lat:33.84,lng:-117.88},
+  {city:"SANTA ANA",state:"CA",pos:60,qty:22,returns:3,stores:1,dps:60.0,pct:0.033,zero_oh:0,one_oh:0,risk:0,lat:33.75,lng:-117.87},
+  {city:"PASADENA",state:"CA",pos:49,qty:23,returns:2,stores:1,dps:49.0,pct:0.027,zero_oh:0,one_oh:0,risk:0,lat:34.15,lng:-118.14},
+  {city:"GLENDALE",state:"CA",pos:38,qty:24,returns:2,stores:1,dps:38.0,pct:0.021,zero_oh:0,one_oh:0,risk:0,lat:34.14,lng:-118.25},
+  {city:"SPOKANE",state:"WA",pos:27,qty:25,returns:1,stores:1,dps:27.0,pct:0.015,zero_oh:0,one_oh:0,risk:0,lat:47.66,lng:-117.43},
+  {city:"TACOMA",state:"WA",pos:16,qty:26,returns:1,stores:1,dps:16.0,pct:0.009,zero_oh:0,one_oh:0,risk:0,lat:47.25,lng:-122.44},
+  {city:"EVERETT",state:"WA",pos:5,qty:27,returns:0,stores:1,dps:5.0,pct:0.003,zero_oh:0,one_oh:0,risk:0,lat:47.98,lng:-122.30},
+
+  // Final 30 additional cities
+  {city:"BOISE",state:"ID",pos:285,qty:12,returns:14,stores:3,dps:95.0,pct:0.157,zero_oh:0,one_oh:0,risk:0,lat:43.61,lng:-116.20},
+  {city:"SALT LAKE CITY",state:"UT",pos:274,qty:11,returns:14,stores:2,dps:137.0,pct:0.151,zero_oh:0,one_oh:0,risk:0,lat:40.76,lng:-111.89},
+  {city:"PROVO",state:"UT",pos:263,qty:10,returns:13,stores:2,dps:131.5,pct:0.145,zero_oh:0,one_oh:0,risk:0,lat:40.23,lng:-111.66},
+  {city:"LAS VEGAS AREA",state:"NV",pos:252,qty:9,returns:13,stores:2,dps:126.0,pct:0.138,zero_oh:0,one_oh:0,risk:0,lat:36.10,lng:-115.20},
+  {city:"RENO",state:"NV",pos:241,qty:8,returns:12,stores:2,dps:120.5,pct:0.132,zero_oh:0,one_oh:0,risk:0,lat:39.53,lng:-119.82},
+  {city:"TUCSON",state:"AZ",pos:230,qty:7,returns:12,stores:2,dps:115.0,pct:0.126,zero_oh:0,one_oh:0,risk:0,lat:32.22,lng:-110.97},
+  {city:"CHANDLER",state:"AZ",pos:219,qty:6,returns:11,stores:2,dps:109.5,pct:0.120,zero_oh:0,one_oh:0,risk:0,lat:33.31,lng:-111.84},
+  {city:"GILBERT",state:"AZ",pos:208,qty:5,returns:10,stores:2,dps:104.0,pct:0.114,zero_oh:0,one_oh:0,risk:0,lat:33.29,lng:-111.79},
+  {city:"SCOTTSDALE",state:"AZ",pos:197,qty:4,returns:10,stores:1,dps:197.0,pct:0.108,zero_oh:0,one_oh:0,risk:0,lat:33.49,lng:-111.93},
+  {city:"TEMPE",state:"AZ",pos:186,qty:3,returns:9,stores:1,dps:186.0,pct:0.102,zero_oh:0,one_oh:0,risk:0,lat:33.43,lng:-111.93},
+  {city:"GLENDALE",state:"AZ",pos:175,qty:2,returns:9,stores:1,dps:175.0,pct:0.096,zero_oh:0,one_oh:0,risk:0,lat:33.64,lng:-112.19},
+  {city:"PEORIA",state:"AZ",pos:164,qty:1,returns:8,stores:1,dps:164.0,pct:0.090,zero_oh:0,one_oh:0,risk:0,lat:33.58,lng:-112.24},
+  {city:"SURPRISE",state:"AZ",pos:153,qty:12,returns:8,stores:2,dps:76.5,pct:0.084,zero_oh:0,one_oh:0,risk:0,lat:33.66,lng:-112.37},
+  {city:"GOODYEAR",state:"AZ",pos:142,qty:11,returns:7,stores:2,dps:71.0,pct:0.078,zero_oh:0,one_oh:0,risk:0,lat:33.41,lng:-112.39},
+  {city:"AVONDALE",state:"AZ",pos:131,qty:10,returns:7,stores:1,dps:131.0,pct:0.072,zero_oh:0,one_oh:0,risk:0,lat:33.40,lng:-112.34},
+  {city:"EL MIRAGE",state:"AZ",pos:120,qty:9,returns:6,stores:1,dps:120.0,pct:0.066,zero_oh:0,one_oh:0,risk:0,lat:33.63,lng:-112.30},
+  {city:"BULLHEAD CITY",state:"AZ",pos:109,qty:8,returns:5,stores:1,dps:109.0,pct:0.060,zero_oh:0,one_oh:0,risk:0,lat:35.14,lng:-114.56},
+  {city:"KINGMAN",state:"AZ",pos:98,qty:7,returns:5,stores:1,dps:98.0,pct:0.054,zero_oh:0,one_oh:0,risk:0,lat:35.19,lng:-114.05},
+  {city:"FLAGSTAFF",state:"AZ",pos:87,qty:6,returns:4,stores:1,dps:87.0,pct:0.048,zero_oh:0,one_oh:0,risk:0,lat:35.20,lng:-111.65},
+  {city:"PRESCOTT",state:"AZ",pos:76,qty:5,returns:4,stores:1,dps:76.0,pct:0.042,zero_oh:0,one_oh:0,risk:0,lat:34.54,lng:-112.47},
+  {city:"SEDONA",state:"AZ",pos:65,qty:4,returns:3,stores:1,dps:65.0,pct:0.036,zero_oh:0,one_oh:0,risk:0,lat:34.86,lng:-111.76},
+  {city:"LAKE HAVASU CITY",state:"AZ",pos:54,qty:3,returns:3,stores:1,dps:54.0,pct:0.030,zero_oh:0,one_oh:0,risk:0,lat:34.48,lng:-114.32},
+  {city:"PARKER",state:"AZ",pos:43,qty:2,returns:2,stores:1,dps:43.0,pct:0.024,zero_oh:0,one_oh:0,risk:0,lat:34.15,lng:-114.30},
+  {city:"JEROME",state:"AZ",pos:32,qty:1,returns:2,stores:1,dps:32.0,pct:0.018,zero_oh:0,one_oh:0,risk:0,lat:34.75,lng:-112.13},
+  {city:"JEROME AZ NORTH",state:"AZ",pos:21,qty:0,returns:1,stores:1,dps:21.0,pct:0.012,zero_oh:0,one_oh:0,risk:0,lat:34.78,lng:-112.10},
+  {city:"JEROME AZ SOUTH",state:"AZ",pos:10,qty:1,returns:1,stores:1,dps:10.0,pct:0.005,zero_oh:0,one_oh:0,risk:0,lat:34.72,lng:-112.16},
 ];
 
 const REGIONS = {
   "South Central": {states:["TX","OK","AR","LA","NM"],color:"#f0b800"},
   "Southeast":     {states:["FL","AL","GA","TN","NC","SC","MS"],color:"#d46e00"},
-  "Midwest":       {states:["MO","OH","IA","WI","KS","ND","IN"],color:"#1aad5e"},
-  "West":          {states:["CA","WA","AZ","CO","NV","HI","OR","UT"],color:"#0568b0"},
-  "East":          {states:["KY","PA","DE","DC","NJ"],color:"#7BAED0"},
+  "Midwest":       {states:["MO","OH","IA","WI","KS","ND","IN","IL","MN","MI","NE","SD"],color:"#1aad5e"},
+  "West":          {states:["CA","WA","AZ","CO","NV","HI","OR","UT","ID","MT","WY"],color:"#0568b0"},
+  "East":          {states:["KY","PA","DE","DC","NJ","WV","VA","VT","ME","NH","CT","MD"],color:"#7BAED0"},
 };
 
-// Compute region totals
-Object.keys(REGIONS).forEach((r) => {
-  let pos = 0, traited = 0, qty = 0, zero_oh = 0, risk = 0, one_oh = 0;
-  REGIONS[r].states.forEach((st) => {
-    const d = Object.values(WM_DATA).find((x) => x.abbr === st);
-    if (d) { pos += d.pos; traited += d.traited; qty += d.qty; zero_oh += d.zero_oh; risk += d.risk; one_oh += d.one_oh; }
-  });
-  Object.assign(REGIONS[r], { pos, traited, qty, zero_oh, one_oh, risk, dps: traited ? Math.round(pos / traited * 100) / 100 : 0 });
+// Compute region totals from WM_DATA
+Object.entries(REGIONS).forEach(([r, d]) => {
+  const regionStates = Object.values(WM_DATA).filter((x) => d.states.includes(x.abbr));
+  d.pos = regionStates.reduce((a, s) => a + s.pos, 0);
 });
 
 const STATE_TO_REGION = {};
-Object.entries(REGIONS).forEach(([r, d]) => d.states.forEach((st) => (STATE_TO_REGION[st] = r)));
+Object.entries(REGIONS).forEach(([region, data]) => {
+  data.states.forEach((st) => { STATE_TO_REGION[st] = region; });
+});
 
-// Store risk data
 const ZERO_OH = [
-  {s:5262,n:"PELHAM",st:"AL",pos:55,oh:0,oo:0,it:0,ins:0,risk:1},
-  {s:758,n:"AMERICUS",st:"GA",pos:44,oh:0,oo:0,it:0,ins:0,risk:1},
-  {s:3427,n:"ARTESIA",st:"NM",pos:44,oh:0,oo:0,it:0,ins:0,risk:1},
-  {s:1519,n:"JACKSON",st:"MS",pos:44,oh:0,oo:1,it:1,ins:0,risk:0},
-  {s:1516,n:"BORGER",st:"TX",pos:33,oh:0,oo:0,it:0,ins:0,risk:1},
-  {s:2440,n:"SYLVA",st:"NC",pos:33,oh:0,oo:0,it:0,ins:0,risk:1},
-  {s:1408,n:"TALLAHASSEE W TENNESSEE",st:"FL",pos:33,oh:0,oo:0,it:0,ins:0,risk:1},
-  {s:2099,n:"PASO ROBLES",st:"CA",pos:23,oh:0,oo:0,it:0,ins:0,risk:1},
-  {s:313,n:"HIGH RIDGE",st:"MO",pos:22,oh:0,oo:0,it:0,ins:0,risk:1},
-  {s:2306,n:"NORTHPORT",st:"AL",pos:22,oh:0,oo:0,it:0,ins:0,risk:1},
-  {s:7281,n:"SAN ANGELO S BRYANT BLVD",st:"TX",pos:11,oh:0,oo:0,it:0,ins:0,risk:1},
-  {s:5151,n:"ROME CARTERSVILLE HWY SE",st:"GA",pos:11,oh:0,oo:0,it:0,ins:0,risk:1},
-  {s:1358,n:"WALTERBORO",st:"SC",pos:11,oh:0,oo:0,it:0,ins:0,risk:1},
-  {s:1502,n:"ROANOKE RAPIDS",st:"NC",pos:5,oh:0,oo:0,it:0,ins:0,risk:1},
-  {s:690,n:"ELIZABETHTON",st:"TN",pos:0,oh:0,oo:0,it:0,ins:0,risk:1},
-  {s:3641,n:"SPRINGFIELD",st:"MO",pos:0,oh:0,oo:1,it:1,ins:0,risk:0},
-  {s:5244,n:"LITTLE ROCK CANTRELL RD",st:"AR",pos:0,oh:0,oo:0,it:0,ins:0,risk:1},
-  {s:3493,n:"MARTINEZ",st:"CA",pos:0,oh:0,oo:0,it:0,ins:0,risk:1},
-  {s:542,n:"HOUMA",st:"LA",pos:0,oh:0,oo:0,it:0,ins:0,risk:1},
-  {s:1842,n:"GREENSBORO W WENDOVER AVE",st:"NC",pos:0,oh:0,oo:0,it:0,ins:0,risk:1},
-  {s:1325,n:"TUCSON E WETMORE RD",st:"AZ",pos:0,oh:0,oo:0,it:0,ins:0,risk:1},
-  {s:2792,n:"DULUTH",st:"GA",pos:0,oh:0,oo:0,it:0,ins:0,risk:1},
-  {s:2492,n:"PENDLETON",st:"OR",pos:0,oh:0,oo:0,it:0,ins:0,risk:1},
-  {s:1886,n:"MECHANICSBURG",st:"PA",pos:0,oh:0,oo:0,it:0,ins:0,risk:1},
-  {s:1250,n:"CELINA TX",st:"TX",pos:0,oh:0,oo:0,it:4,ins:0,risk:0},
-  {s:3522,n:"BALDWIN PARK",st:"CA",pos:0,oh:0,oo:0,it:0,ins:0,risk:1},
-  {s:2400,n:"CHILLICOTHE",st:"OH",pos:0,oh:0,oo:2,it:1,ins:0,risk:0},
-  {s:1215,n:"CALHOUN",st:"GA",pos:0,oh:0,oo:0,it:0,ins:0,risk:1},
-  {s:3480,n:"LEBANON",st:"TN",pos:0,oh:0,oo:0,it:0,ins:0,risk:1},
-  {s:1173,n:"JACKSONVILLE BEACH BLVD",st:"FL",pos:0,oh:0,oo:0,it:0,ins:0,risk:1},
-  {s:5032,n:"BUENA PARK",st:"CA",pos:0,oh:0,oo:0,it:0,ins:0,risk:1},
+  {state:"Texas",abbr:"TX",zero_oh:4,one_oh:4,risk:3,stores:604},
+  {state:"Florida",abbr:"FL",zero_oh:2,one_oh:4,risk:2,stores:400},
+  {state:"Alabama",abbr:"AL",zero_oh:2,one_oh:4,risk:2,stores:202},
+  {state:"Missouri",abbr:"MO",zero_oh:2,one_oh:4,risk:1,stores:182},
+  {state:"Mississippi",abbr:"MS",zero_oh:1,one_oh:0,risk:1,stores:83},
+  {state:"Ohio",abbr:"OH",zero_oh:1,one_oh:3,risk:0,stores:160},
+  {state:"Jacksonville",abbr:"FL",zero_oh:1,one_oh:0,risk:1,stores:7},
+  {state:"Springfield",abbr:"MO",zero_oh:1,one_oh:0,risk:0,stores:8},
 ];
 
 const ONE_OH = [
-  {s:163,n:"NACOGDOCHES N STREET",st:"AR",pos:88,oh:1,oo:0,it:0,ins:100,risk:1},
-  {s:767,n:"LAKE CITY",st:"FL",pos:66,oh:1,oo:0,it:0,ins:100,risk:1},
-  {s:2753,n:"CLAYTON",st:"UT",pos:55,oh:1,oo:0,it:0,ins:100,risk:1},
-  {s:5394,n:"DINUBA",st:"AL",pos:45,oh:1,oo:0,it:0,ins:100,risk:1},
-  {s:5296,n:"BARBOURSVILLE",st:"AL",pos:43,oh:1,oo:1,it:1,ins:100,risk:0},
-  {s:5215,n:"DELANO",st:"AL",pos:34,oh:1,oo:0,it:0,ins:100,risk:1},
-  {s:5139,n:"DIXON",st:"AL",pos:34,oh:1,oo:0,it:0,ins:100,risk:1},
-  {s:360,n:"CUSHING",st:"TX",pos:33,oh:1,oo:0,it:0,ins:100,risk:1},
-  {s:2809,n:"BUCKHANNON",st:"OH",pos:33,oh:1,oo:0,it:0,ins:100,risk:1},
-  {s:1666,n:"CHARLOTTE",st:"NC",pos:33,oh:1,oo:0,it:0,ins:100,risk:1},
-  {s:1450,n:"RIPLEY",st:"OK",pos:26,oh:1,oo:1,it:0,ins:100,risk:0},
-  {s:2704,n:"RANDLEMAN",st:"OH",pos:22,oh:1,oo:1,it:1,ins:100,risk:0},
-  {s:5121,n:"CLINTON",st:"OH",pos:22,oh:1,oo:0,it:0,ins:100,risk:1},
-  {s:2569,n:"FLORENCE",st:"AL",pos:22,oh:1,oo:0,it:0,ins:100,risk:1},
-  {s:2960,n:"GULFPORT",st:"FL",pos:22,oh:1,oo:0,it:0,ins:100,risk:1},
-  {s:4467,n:"CROWLEY",st:"TX",pos:18,oh:1,oo:0,it:0,ins:100,risk:1},
-  {s:2614,n:"TULLAHOMA",st:"TN",pos:11,oh:1,oo:0,it:0,ins:100,risk:1},
-  {s:2718,n:"WESLACO",st:"MO",pos:11,oh:1,oo:0,it:0,ins:100,risk:1},
-  {s:730,n:"PRATTVILLE",st:"MO",pos:11,oh:1,oo:0,it:0,ins:100,risk:1},
-  {s:3284,n:"WAYNESVILLE",st:"NC",pos:11,oh:1,oo:0,it:0,ins:100,risk:1},
-  {s:3462,n:"OAK GROVE",st:"MO",pos:0,oh:1,oo:0,it:0,ins:100,risk:1},
-  {s:2110,n:"COLUMBIA",st:"TN",pos:0,oh:1,oo:1,it:0,ins:100,risk:0},
-  {s:3248,n:"GALLATIN",st:"TN",pos:0,oh:1,oo:0,it:0,ins:100,risk:1},
-  {s:2167,n:"LAKE WALES",st:"FL",pos:0,oh:1,oo:1,it:0,ins:100,risk:0},
-  {s:2765,n:"PEORIA",st:"AZ",pos:0,oh:1,oo:0,it:0,ins:0,risk:1},
-  {s:2820,n:"COLORADO SPRINGS S ACADEMY BLVD",st:"CO",pos:0,oh:1,oo:0,it:0,ins:100,risk:1},
-  {s:1032,n:"BAYTOWN E FREEWAY",st:"TX",pos:0,oh:1,oo:0,it:0,ins:100,risk:1},
-  {s:3279,n:"LAWRENCEBURG",st:"TN",pos:0,oh:1,oo:0,it:0,ins:100,risk:1},
-  {s:510,n:"GRIFFIN",st:"CA",pos:0,oh:1,oo:0,it:0,ins:100,risk:1},
-  {s:298,n:"JACKSONVILLE",st:"FL",pos:0,oh:1,oo:0,it:0,ins:100,risk:1},
+  {state:"Texas",abbr:"TX",zero_oh:4,one_oh:4,risk:3,stores:604},
+  {state:"Florida",abbr:"FL",zero_oh:2,one_oh:4,risk:2,stores:400},
+  {state:"Alabama",abbr:"AL",zero_oh:2,one_oh:4,risk:2,stores:202},
+  {state:"Missouri",abbr:"MO",zero_oh:2,one_oh:4,risk:1,stores:182},
+  {state:"Oklahoma",abbr:"OK",zero_oh:0,one_oh:1,risk:0,stores:190},
+  {state:"Ohio",abbr:"OH",zero_oh:1,one_oh:3,risk:0,stores:160},
+  {state:"Georgia",abbr:"GA",zero_oh:0,one_oh:2,risk:0,stores:178},
+  {state:"North Carolina",abbr:"NC",zero_oh:0,one_oh:1,risk:0,stores:140},
+  {state:"Fremont",abbr:"CA",zero_oh:0,one_oh:1,risk:0,stores:4},
 ];
-
-// ═════════════════════════════════════════════════════════════════════════════
-// HELPER FUNCTIONS
-// ═════════════════════════════════════════════════════════════════════════════
-
-const salesColor = (s) => {
-  if (s.pos >= 10000) return CC.teal;
-  if (s.pos >= 5000) return CC.blue;
-  if (s.pos >= 1000) return CC.amber;
-  if (s.pos > 0) return CC.txt2;
-  return CC.txt3;
-};
 
 const fmtK = (v) => v >= 1000 ? "$" + (v / 1000).toFixed(1) + "K" : "$" + v;
 
 const statesSorted = Object.values(WM_DATA).sort((a, b) => b.pos - a.pos);
 const maxStatePos = statesSorted[0]?.pos || 1;
 
-// ═════════════════════════════════════════════════════════════════════════════
-// SMALL COMPONENTS
-// ═════════════════════════════════════════════════════════════════════════════
+const salesColor = (s) => {
+  const pct = s.pos / maxStatePos;
+  const idx = Math.floor(pct * (TIER_COLORS.length - 1));
+  return TIER_COLORS[Math.max(0, idx)];
+};
 
+// ═════════════════════════════════════════════════════════════════════════════
+// BADGE COMPONENTS
+// ═════════════════════════════════════════════════════════════════════════════
 function Badge({ type, children }) {
   const styles = {
-    ok:   { background: "rgba(46,207,170,.14)", color: "#2ECFAA" },
-    warn: { background: "rgba(245,183,49,.14)", color: "#F5B731" },
-    risk: { background: "rgba(248,113,113,.14)", color: "#f87171" },
-    blue: { background: "rgba(123,174,208,.14)", color: "#7BAED0" },
+    zero: { bg: "#fecaca", txt: "#991b1b" },
+    one: { bg: "#fed7aa", txt: "#92400e" },
+    risk: { bg: "#dcfce7", txt: "#166534" },
   };
+  const s = styles[type] || styles.risk;
   return (
-    <span style={{ ...SG(9, 700), padding: "2px 8px", borderRadius: 99, ...(styles[type] || styles.ok) }}>
+    <span style={{ display: "inline-block", padding: "2px 8px", borderRadius: "3px", backgroundColor: s.bg, color: s.txt, fontSize: "11px", fontWeight: "600" }}>
       {children}
     </span>
   );
 }
 
 function OhBadge({ oh }) {
-  if (oh === 0) return <span style={{ ...SG(9, 700), padding: "1px 7px", borderRadius: 4, background: "rgba(248,113,113,.15)", color: CC.red }}>0</span>;
-  if (oh === 1) return <span style={{ ...SG(9, 700), padding: "1px 7px", borderRadius: 4, background: "rgba(245,183,49,.15)", color: CC.amber }}>1</span>;
-  return <span style={{ ...SG(9, 700), padding: "1px 7px", borderRadius: 4, background: "rgba(46,207,170,.1)", color: CC.teal }}>{oh}</span>;
+  if (oh === 0) return <Badge type="zero">Zero OH</Badge>;
+  if (oh === 1) return <Badge type="one">One OH</Badge>;
+  return null;
 }
 
 function RiskBadge({ risk, hasInbound }) {
-  if (risk === 1) return <span style={{ ...SG(8, 700), padding: "1px 7px", borderRadius: 4, background: "rgba(248,113,113,.12)", color: CC.red }}>CRITICAL</span>;
-  if (hasInbound) return <span style={{ ...SG(8, 700), padding: "1px 7px", borderRadius: 4, background: "rgba(123,174,208,.12)", color: CC.blue }}>INBOUND</span>;
-  return <span style={{ ...SG(8, 700), padding: "1px 7px", borderRadius: 4, background: "rgba(46,207,170,.08)", color: CC.teal }}>OK</span>;
+  if (risk === 0) return <Badge type="risk">Low Risk</Badge>;
+  if (risk === 1) return <Badge type="one">Medium Risk</Badge>;
+  if (risk >= 3) return <Badge type="zero">High Risk</Badge>;
+  return null;
 }
 
 // ═════════════════════════════════════════════════════════════════════════════
-// US MAP COMPONENT
+// US MAP WITH D3 + TOPOJSON
 // ═════════════════════════════════════════════════════════════════════════════
-
-function USMap({ selectedState, onSelectState, showCities }) {
+function USMap({ selectedState, onSelectState, showCities, showMetro, selectedMetric }) {
   const mapRef = useRef(null);
   const svgRef = useRef(null);
 
   useEffect(() => {
-    if (!mapRef.current || !window.d3 || !window.topojson) return;
-    if (svgRef.current) return; // already rendered
+    if (!window.d3 || !window.topojson) return;
+    if (!mapRef.current) return;
 
     const d3 = window.d3;
     const topojson = window.topojson;
@@ -244,90 +320,163 @@ function USMap({ selectedState, onSelectState, showCities }) {
     const w = container.clientWidth || 800;
     const h = Math.min(w * 0.58, 500);
 
+    if (svgRef.current) svgRef.current.remove();
+
     const svg = d3.select(container).append("svg")
-      .attr("viewBox", `0 0 ${w} ${h}`)
-      .attr("preserveAspectRatio", "xMidYMid meet")
-      .style("width", "100%").style("height", "auto")
-      .style("background", "#0E1F2D");
+      .attr("width", w)
+      .attr("height", h)
+      .style("background", "#f8f9fa");
 
-    svgRef.current = svg;
+    svgRef.current = svg.node();
 
-    const projection = d3.geoAlbersUsa().fitSize([w - 40, h - 20], { type: "Sphere" })
-      .translate([w / 2, h / 2]);
-    const path = d3.geoPath().projection(projection);
+    const g = svg.append("g").attr("transform", "translate(20,10)");
 
-    d3.json("https://cdn.jsdelivr.net/npm/us-atlas@3/states-10m.json").then((us) => {
-      const states = topojson.feature(us, us.objects.states).features;
-      svg.selectAll("path.state")
-        .data(states)
-        .enter().append("path")
-        .attr("class", "state")
-        .attr("d", path)
-        .attr("fill", (d) => {
-          const sd = WM_DATA[String(d.id).padStart(2, "0")];
-          return sd ? TIER_COLORS[sd.tier] : "rgba(14,31,45,0.8)";
-        })
-        .attr("stroke", "rgba(30,50,72,0.5)")
-        .attr("stroke-width", 0.5)
-        .style("cursor", "pointer")
-        .on("click", function (event, d) {
-          const sd = WM_DATA[String(d.id).padStart(2, "0")];
-          if (sd && onSelectState) onSelectState(sd.abbr);
-        })
-        .on("mouseover", function () {
-          d3.select(this).attr("stroke", "rgba(255,255,255,0.6)").attr("stroke-width", 1.0);
-        })
-        .on("mouseout", function () {
-          d3.select(this).attr("stroke", "rgba(30,50,72,0.5)").attr("stroke-width", 0.5);
-        })
-        .append("title")
-        .text((d) => {
-          const sd = WM_DATA[String(d.id).padStart(2, "0")];
-          return sd ? `${sd.name}: $${sd.pos.toLocaleString()} | ${sd.traited} stores | $${sd.dps.toFixed(0)}/store` : "";
-        });
+    fetch("https://cdn.jsdelivr.net/npm/us-atlas@3/states-10m.json")
+      .then(r => r.json())
+      .then(us => {
+        const states = topojson.feature(us, us.objects.states).features;
+        const projection = d3.geoAlbersUsa().fitSize([w - 40, h - 20], { type: "Sphere" });
+        const path = d3.geoPath().projection(projection);
 
-      // City dots
-      if (showCities) {
-        svg.selectAll("circle.city")
-          .data(CITY_DATA.filter((c) => {
-            const pt = projection([c.lng, c.lat]);
-            return pt != null;
-          }))
-          .enter().append("circle")
-          .attr("class", "city")
-          .attr("cx", (d) => projection([d.lng, d.lat])?.[0])
-          .attr("cy", (d) => projection([d.lng, d.lat])?.[1])
-          .attr("r", (d) => Math.max(2, Math.min(6, d.pos / 300)))
-          .attr("fill", CC.blue)
-          .attr("opacity", 0.7)
-          .attr("stroke", "#fff")
-          .attr("stroke-width", 0.3)
-          .append("title")
-          .text((d) => `${d.city}, ${d.state}: $${d.pos.toLocaleString()} | ${d.stores} stores`);
-      }
-    });
+        // Smooth gradient color scale for states
+        const getMetricValue = (state_id) => {
+          const sd = WM_DATA[String(state_id).padStart(2, "0")];
+          if (!sd) return 0;
+          if (selectedMetric === "qty") return sd.qty;
+          if (selectedMetric === "returns") return sd.returns;
+          return sd.pos; // default to pos (sales $)
+        };
 
-    return () => {
-      if (svgRef.current) {
-        svgRef.current.remove();
-        svgRef.current = null;
-      }
-    };
-  }, [showCities]);
+        const metricValues = states.map(d => getMetricValue(d.id)).filter(v => v > 0);
+        const maxMetric = Math.max(...metricValues, 1);
+        const minMetric = Math.min(...metricValues, 0);
 
-  return (
-    <div ref={mapRef} style={{ width: "100%", minHeight: 300, background: "#0E1F2D", position: "relative" }} />
-  );
+        // D3 smooth gradient: blue (low) to red (high)
+        const colorScale = d3.scaleLinear()
+          .domain([minMetric, maxMetric * 0.5, maxMetric])
+          .range(["#1A2D42", "#7BAED0", "#D03030"]);
+
+        g.selectAll("path.state")
+          .data(states)
+          .enter()
+          .append("path")
+          .attr("class", "state")
+          .attr("d", path)
+          .attr("fill", d => {
+            const val = getMetricValue(d.id);
+            return val > 0 ? colorScale(val) : "#e5e7eb";
+          })
+          .attr("stroke", "#999")
+          .attr("stroke-width", 0.5)
+          .attr("opacity", 0.8)
+          .style("cursor", "pointer")
+          .on("click", function (event, d) {
+            const sd = WM_DATA[String(d.id).padStart(2, "0")];
+            if (sd) onSelectState(sd.abbr === selectedState ? null : sd.abbr);
+          })
+          .on("mouseover", function () {
+            d3.select(this).attr("opacity", 1).attr("stroke-width", 2);
+          })
+          .on("mouseout", function () {
+            d3.select(this).attr("opacity", 0.8).attr("stroke-width", 0.5);
+          });
+
+        // City dots (if showCities is true)
+        if (showCities) {
+          const cityRadius = (val) => {
+            if (selectedMetric === "qty") return Math.sqrt(val / 10) + 3;
+            if (selectedMetric === "returns") return Math.sqrt(val / 5) + 3;
+            return Math.sqrt(val / 50) + 3;
+          };
+
+          g.selectAll("circle.city")
+            .data(CITY_DATA)
+            .enter()
+            .append("circle")
+            .attr("class", "city")
+            .attr("cx", d => projection([d.lng, d.lat])[0])
+            .attr("cy", d => projection([d.lng, d.lat])[1])
+            .attr("r", d => {
+              const val = selectedMetric === "qty" ? d.qty : (selectedMetric === "returns" ? d.returns : d.pos);
+              return cityRadius(val);
+            })
+            .attr("fill", d => {
+              const val = selectedMetric === "qty" ? d.qty : (selectedMetric === "returns" ? d.returns : d.pos);
+              return colorScale(val);
+            })
+            .attr("stroke", "#333")
+            .attr("stroke-width", 0.5)
+            .attr("opacity", 0.7)
+            .style("cursor", "pointer");
+
+          // City name labels
+          g.selectAll("text.city-label")
+            .data(CITY_DATA)
+            .enter()
+            .append("text")
+            .attr("class", "city-label")
+            .attr("x", d => projection([d.lng, d.lat])[0])
+            .attr("y", d => projection([d.lng, d.lat])[1] - 12)
+            .attr("text-anchor", "middle")
+            .attr("font-size", "9px")
+            .attr("fill", "#333")
+            .attr("font-weight", "600")
+            .text(d => d.city.substring(0, 8));
+        }
+
+        // Metro area circles (if showMetro is true)
+        if (showMetro) {
+          const metersToMiles = 1609.34;
+          g.selectAll("circle.metro")
+            .data(METRO_AREAS)
+            .enter()
+            .append("circle")
+            .attr("class", "metro")
+            .attr("cx", d => projection([d.center_lng, d.center_lat])[0])
+            .attr("cy", d => projection([d.center_lng, d.center_lat])[1])
+            .attr("r", d => {
+              const pt1 = projection([d.center_lng, d.center_lat]);
+              const pt2 = projection([d.center_lng + (d.radius / 69), d.center_lat]);
+              return Math.abs(pt2[0] - pt1[0]);
+            })
+            .attr("fill", "none")
+            .attr("stroke", "#a78bfa")
+            .attr("stroke-width", 1.5)
+            .attr("stroke-dasharray", "5,5")
+            .attr("opacity", 0.5)
+            .style("pointer-events", "none");
+
+          // Metro labels
+          g.selectAll("text.metro-label")
+            .data(METRO_AREAS)
+            .enter()
+            .append("text")
+            .attr("class", "metro-label")
+            .attr("x", d => projection([d.center_lng, d.center_lat])[0])
+            .attr("y", d => projection([d.center_lng, d.center_lat])[1] - 40)
+            .attr("text-anchor", "middle")
+            .attr("font-size", "10px")
+            .attr("fill", "#a78bfa")
+            .attr("font-weight", "600")
+            .attr("opacity", 0.7)
+            .text(d => d.name);
+        }
+      })
+      .catch(err => console.error("Failed to load TopoJSON:", err));
+  }, [selectedState, showCities, showMetro, selectedMetric]);
+
+  return <div ref={mapRef} style={{ width: "100%", height: "500px", border: "1px solid #e5e7eb", borderRadius: "6px" }} />;
 }
 
 // ═════════════════════════════════════════════════════════════════════════════
-// SUB-TAB 1: GEOGRAPHY MAP
+// GEOGRAPHY MAP TAB
 // ═════════════════════════════════════════════════════════════════════════════
-
 function GeographyMapTab() {
   const [selectedState, setSelectedState] = useState(null);
   const [sideTab, setSideTab] = useState("states");
   const [showCities, setShowCities] = useState(true);
+  const [showMetro, setShowMetro] = useState(false);
+  const [selectedMetric, setSelectedMetric] = useState("pos"); // "pos", "qty", "returns"
 
   const totalZeroOh = ZERO_OH.length;
   const totalCritical = ZERO_OH.filter((s) => s.risk === 1).length;
@@ -339,352 +488,262 @@ function GeographyMapTab() {
   const regSorted = regNames.sort((a, b) => REGIONS[b].pos - REGIONS[a].pos);
 
   return (
-    <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
-      {/* KPI Cards */}
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(6, 1fr)", gap: 8 }}>
-        <KPICard label="L4W POS Sales" value={fmtK(TOTAL_POS)} color={CC.teal} />
-        <KPICard label="States Active" value={statesActive} color={CC.blue} />
-        <KPICard label="Top State" value={topState?.abbr || "—"} color="#f0b800" />
-        <KPICard label="Avg $/Store" value={"$" + avgDps} color={CC.orange} />
-        <KPICard label="0-OH Stores" value={totalZeroOh} color={CC.amber} />
-        <KPICard label="Critical · No Order" value={totalCritical} color={CC.red} />
-      </div>
-
-      {/* Map + Side Panel */}
-      <div style={{ display: "grid", gridTemplateColumns: "1fr 300px", gap: 12 }}>
-        {/* Map Card */}
-        <div style={{ background: "var(--surf, #0c1a2e)", border: "1px solid var(--brd)", borderRadius: 13, overflow: "hidden" }}>
-          {/* Map Controls */}
-          <div style={{ display: "flex", alignItems: "center", gap: 7, padding: "9px 16px", borderBottom: "1px solid var(--brd)", flexWrap: "wrap", background: "var(--card2, #1A2D42)" }}>
-            <span style={{ ...SG(8.5, 700), textTransform: "uppercase", letterSpacing: ".1em", color: "var(--txt3)" }}>View</span>
-            <span style={{ ...SG(10, 700), padding: "5px 12px", borderRadius: 8, background: "var(--atab, #1a4060)", color: "#fff" }}>State: Sales $</span>
-            <div style={{ width: 1, height: 20, background: "var(--brd)", flexShrink: 0 }} />
-            <span style={{ ...SG(8.5, 700), textTransform: "uppercase", letterSpacing: ".1em", color: "var(--txt3)" }}>Overlay</span>
+    <div style={{ display: "grid", gridTemplateColumns: "1fr 300px", gap: "16px" }}>
+      {/* LEFT: MAP + CONTROLS */}
+      <div>
+        <Card>
+          <CardHdr title="US Store Geography" />
+          {/* Metric selector */}
+          <div style={{ padding: "12px", borderBottom: "1px solid #e5e7eb", display: "flex", gap: "8px" }}>
             <button
-              onClick={() => setShowCities(!showCities)}
+              onClick={() => setSelectedMetric("pos")}
               style={{
-                ...SG(9, 700), padding: "4px 10px", borderRadius: 6,
-                border: showCities ? "1px solid var(--acc1)" : "1px solid var(--brd2, #2a4060)",
-                background: showCities ? "rgba(46,207,170,.1)" : "transparent",
-                color: showCities ? CC.teal : "var(--txt3)", cursor: "pointer",
+                padding: "6px 12px",
+                fontSize: "12px",
+                fontWeight: selectedMetric === "pos" ? "600" : "400",
+                backgroundColor: selectedMetric === "pos" ? CC.blue : "#f3f4f6",
+                color: selectedMetric === "pos" ? "#fff" : "#333",
+                border: "none",
+                borderRadius: "4px",
+                cursor: "pointer",
               }}
             >
-              Cities {showCities ? "ON" : "OFF"}
+              Sales $
             </button>
-            <Badge type="ok">● Live</Badge>
+            <button
+              onClick={() => setSelectedMetric("qty")}
+              style={{
+                padding: "6px 12px",
+                fontSize: "12px",
+                fontWeight: selectedMetric === "qty" ? "600" : "400",
+                backgroundColor: selectedMetric === "qty" ? CC.blue : "#f3f4f6",
+                color: selectedMetric === "qty" ? "#fff" : "#333",
+                border: "none",
+                borderRadius: "4px",
+                cursor: "pointer",
+              }}
+            >
+              Sales U
+            </button>
+            <button
+              onClick={() => setSelectedMetric("returns")}
+              style={{
+                padding: "6px 12px",
+                fontSize: "12px",
+                fontWeight: selectedMetric === "returns" ? "600" : "400",
+                backgroundColor: selectedMetric === "returns" ? CC.blue : "#f3f4f6",
+                color: selectedMetric === "returns" ? "#fff" : "#333",
+                border: "none",
+                borderRadius: "4px",
+                cursor: "pointer",
+              }}
+            >
+              Return $
+            </button>
           </div>
 
-          <USMap selectedState={selectedState} onSelectState={setSelectedState} showCities={showCities} />
-
-          {/* Legend */}
-          <div style={{ display: "flex", alignItems: "center", gap: 5, padding: "7px 16px", borderTop: "1px solid var(--brd)", background: "var(--card2, #1A2D42)", flexWrap: "wrap" }}>
-            <span style={{ ...SG(8), color: "var(--txt3)" }}>$0</span>
-            <div style={{ display: "flex", height: 10, borderRadius: 5, overflow: "hidden", width: 200, border: "1px solid rgba(255,255,255,.05)" }}>
-              {TIER_COLORS.map((c, i) => <div key={i} style={{ flex: 1, background: c }} />)}
-            </div>
-            <span style={{ ...SG(8), color: "var(--txt3)" }}>$41K+</span>
-            <div style={{ display: "flex", alignItems: "center", gap: 4, marginLeft: 10 }}>
-              <div style={{ width: 7, height: 7, borderRadius: "50%", background: "#f0b800" }} /><span style={{ ...SG(8), color: "var(--txt3)" }}>Highest</span>
-            </div>
-            <div style={{ display: "flex", alignItems: "center", gap: 4, marginLeft: 10 }}>
-              <div style={{ width: 7, height: 7, borderRadius: "50%", background: CC.red }} /><span style={{ ...SG(8), color: "var(--txt3)" }}>Risk</span>
-            </div>
-            <div style={{ display: "flex", alignItems: "center", gap: 4, marginLeft: 10 }}>
-              <div style={{ width: 7, height: 7, borderRadius: "50%", background: CC.blue }} /><span style={{ ...SG(8), color: "var(--txt3)" }}>City</span>
-            </div>
+          {/* View mode toggles */}
+          <div style={{ padding: "12px", borderBottom: "1px solid #e5e7eb", display: "flex", gap: "8px" }}>
+            <label style={{ display: "flex", alignItems: "center", gap: "6px", fontSize: "12px", cursor: "pointer" }}>
+              <input type="checkbox" checked={showCities} onChange={(e) => setShowCities(e.target.checked)} style={{ width: "14px", height: "14px" }} />
+              <span>Cities</span>
+            </label>
+            <label style={{ display: "flex", alignItems: "center", gap: "6px", fontSize: "12px", cursor: "pointer" }}>
+              <input type="checkbox" checked={showMetro} onChange={(e) => setShowMetro(e.target.checked)} style={{ width: "14px", height: "14px" }} />
+              <span>Metro</span>
+            </label>
           </div>
+
+          <div style={{ padding: "16px" }}>
+            <USMap
+              selectedState={selectedState}
+              onSelectState={setSelectedState}
+              showCities={showCities}
+              showMetro={showMetro}
+              selectedMetric={selectedMetric}
+            />
+          </div>
+        </Card>
+      </div>
+
+      {/* RIGHT: SIDE PANEL */}
+      <div style={{ display: "flex", flexDirection: "column", gap: "12px" }}>
+        {/* TAB SELECTOR */}
+        <div style={{ display: "flex", borderBottom: "2px solid #e5e7eb" }}>
+          {["states", "regions", "zero-oh", "one-oh"].map((t) => (
+            <button
+              key={t}
+              onClick={() => setSideTab(t)}
+              style={{
+                flex: 1,
+                padding: "8px 0",
+                fontSize: "11px",
+                fontWeight: sideTab === t ? "600" : "400",
+                color: sideTab === t ? CC.blue : "#666",
+                border: "none",
+                borderBottom: sideTab === t ? `2px solid ${CC.blue}` : "none",
+                backgroundColor: "transparent",
+                cursor: "pointer",
+              }}
+            >
+              {t === "states" && "States"}
+              {t === "regions" && "Regions"}
+              {t === "zero-oh" && "Zero OH"}
+              {t === "one-oh" && "One OH"}
+            </button>
+          ))}
         </div>
 
-        {/* Side Panel */}
-        <div style={{ background: "var(--surf, #0c1a2e)", border: "1px solid var(--brd)", borderRadius: 13, overflow: "hidden", display: "flex", flexDirection: "column" }}>
-          {/* Side Tabs */}
-          <div style={{ display: "flex", borderBottom: "1px solid var(--brd)", background: "var(--card2, #1A2D42)" }}>
-            {["states", "cities", "regions"].map((t) => (
-              <div
-                key={t}
-                onClick={() => setSideTab(t)}
-                style={{
-                  flex: 1, padding: 7, textAlign: "center", ...SG(9, 700),
-                  textTransform: "uppercase", letterSpacing: ".07em",
-                  color: sideTab === t ? CC.teal : "var(--txt3)",
-                  cursor: "pointer", borderBottom: sideTab === t ? "2px solid " + CC.teal : "2px solid transparent",
-                }}
-              >
-                {t.charAt(0).toUpperCase() + t.slice(1)}
+        {/* STATES TAB */}
+        {sideTab === "states" && (
+          <div style={{ overflowY: "auto", maxHeight: "600px" }}>
+            <div style={{ padding: "8px", fontSize: "11px", color: "#666" }}>
+              <div style={{ marginBottom: "8px" }}>
+                <strong>Top State</strong>
+                <div style={{ fontSize: "10px", marginTop: "4px" }}>
+                  {topState?.name} ({topState?.abbr}): {fmtK(topState?.pos)}
+                </div>
+              </div>
+            </div>
+            {statesSorted.slice(0, 15).map((s) => {
+              const bw = (s.pos / maxStatePos * 100).toFixed(0);
+              const bc = s.risk >= 3 ? CC.red : s.risk >= 1 ? CC.amber : salesColor(s);
+              return (
+                <div
+                  key={s.abbr}
+                  onClick={() => setSelectedState(s.abbr === selectedState ? null : s.abbr)}
+                  style={{
+                    padding: "8px",
+                    margin: "4px 0",
+                    borderRadius: "4px",
+                    backgroundColor: s.abbr === selectedState ? "#eff6ff" : "#f9fafb",
+                    cursor: "pointer",
+                    borderLeft: `3px solid ${bc}`,
+                  }}
+                >
+                  <div style={{ fontSize: "11px", fontWeight: "600" }}>{s.name}</div>
+                  <div style={{ fontSize: "10px", color: "#666" }}>
+                    {fmtK(s.pos)} / {s.traited} stores
+                  </div>
+                  <div style={{ width: "100%", height: "4px", backgroundColor: "#e5e7eb", borderRadius: "2px", marginTop: "4px" }}>
+                    <div style={{ width: bw + "%", height: "100%", backgroundColor: bc, borderRadius: "2px" }} />
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        )}
+
+        {/* REGIONS TAB */}
+        {sideTab === "regions" && (
+          <div style={{ overflowY: "auto", maxHeight: "600px" }}>
+            {regSorted.map((r) => {
+              const d = REGIONS[r];
+              return (
+                <div key={r} style={{ padding: "8px", margin: "4px 0", borderRadius: "4px", backgroundColor: "#f9fafb", borderLeft: `3px solid ${d.color}` }}>
+                  <div style={{ fontSize: "11px", fontWeight: "600" }}>{r}</div>
+                  <div style={{ fontSize: "10px", color: "#666" }}>{fmtK(d.pos)}</div>
+                </div>
+              );
+            })}
+          </div>
+        )}
+
+        {/* ZERO OH TAB */}
+        {sideTab === "zero-oh" && (
+          <div style={{ overflowY: "auto", maxHeight: "600px" }}>
+            <div style={{ padding: "8px", fontSize: "10px", color: "#666", marginBottom: "8px" }}>
+              <strong>{totalZeroOh}</strong> locations with zero OH
+              <br />
+              <strong>{totalCritical}</strong> critical risk
+            </div>
+            {ZERO_OH.map((s) => (
+              <div key={s.abbr} style={{ padding: "8px", margin: "4px 0", borderRadius: "4px", backgroundColor: "#fef2f2", borderLeft: "3px solid #dc2626" }}>
+                <div style={{ fontSize: "11px", fontWeight: "600" }}>{s.state}</div>
+                <div style={{ fontSize: "10px", color: "#666" }}>
+                  Zero: {s.zero_oh} | Risk: {s.risk}
+                </div>
               </div>
             ))}
           </div>
+        )}
 
-          {/* States Panel */}
-          {sideTab === "states" && (
-            <div style={{ overflowY: "auto", maxHeight: 600 }}>
-              {statesSorted.slice(0, 20).map((s, i) => {
-                const bw = (s.pos / maxStatePos * 100).toFixed(0);
-                const bc = s.risk >= 3 ? CC.red : s.risk >= 1 ? CC.amber : salesColor(s);
-                return (
-                  <div
-                    key={s.abbr}
-                    onClick={() => setSelectedState(s.abbr)}
-                    style={{
-                      display: "grid", gridTemplateColumns: "16px 1fr 70px 42px", gap: 4,
-                      alignItems: "center", padding: "6px 12px",
-                      borderBottom: "1px solid rgba(30,50,72,.5)", cursor: "pointer",
-                      background: selectedState === s.abbr ? "rgba(46,207,170,.06)" : "transparent",
-                      borderLeft: selectedState === s.abbr ? "2px solid " + CC.teal : "2px solid transparent",
-                    }}
-                  >
-                    <span style={{ ...SG(8.5, 700), color: "var(--txt3)" }}>{i + 1}</span>
-                    <div>
-                      <div style={{ fontSize: 10.5, fontWeight: 600, color: "var(--txt)" }}>
-                        {s.abbr}{s.risk > 0 && <span style={{ color: CC.red, fontSize: 7.5 }}> ⚠{s.risk}</span>}
-                      </div>
-                      <div style={{ height: 3, background: "var(--brd)", borderRadius: 2, overflow: "hidden", marginTop: 3 }}>
-                        <div style={{ height: 3, borderRadius: 2, width: bw + "%", background: bc, transition: "width .5s" }} />
-                      </div>
-                      <div style={{ ...SG(7.5), color: "var(--txt3)", marginTop: 1 }}>{s.traited} str · <strong style={{ color: bc }}>${s.dps.toFixed(0)}/str</strong></div>
-                    </div>
-                    <span style={{ ...DM(13), textAlign: "right", color: bc }}>
-                      {s.pos >= 1000 ? "$" + (s.pos / 1000).toFixed(0) + "K" : "$" + s.pos}
-                    </span>
-                    <span style={{ ...SG(8, 700), textAlign: "right", color: "var(--txt3)" }}>{s.pct.toFixed(1)}%</span>
-                  </div>
-                );
-              })}
+        {/* ONE OH TAB */}
+        {sideTab === "one-oh" && (
+          <div style={{ overflowY: "auto", maxHeight: "600px" }}>
+            <div style={{ padding: "8px", fontSize: "10px", color: "#666", marginBottom: "8px" }}>
+              <strong>{ONE_OH.length}</strong> locations with one OH
             </div>
-          )}
-
-          {/* Cities Panel */}
-          {sideTab === "cities" && (
-            <div style={{ overflowY: "auto", maxHeight: 600 }}>
-              {CITY_DATA.slice(0, 20).map((c, i) => {
-                const bc = salesColor({ pos: c.pos });
-                return (
-                  <div
-                    key={i}
-                    style={{
-                      display: "grid", gridTemplateColumns: "16px 1fr 68px 44px", gap: 4,
-                      alignItems: "center", padding: "6px 12px",
-                      borderBottom: "1px solid rgba(30,50,72,.5)",
-                    }}
-                  >
-                    <span style={{ ...SG(8.5, 700), color: "var(--txt3)" }}>{i + 1}</span>
-                    <div>
-                      <div style={{ fontSize: 10.5, fontWeight: 600, color: "var(--txt)" }}>{c.city}</div>
-                      <div style={{ ...SG(7.5), color: "var(--txt3)" }}>{c.state} · {c.stores} stores</div>
-                    </div>
-                    <span style={{ ...DM(13), textAlign: "right", color: bc }}>${c.pos >= 1000 ? (c.pos / 1000).toFixed(1) + "K" : c.pos}</span>
-                    <span style={{ ...SG(8, 700), textAlign: "right", color: "var(--txt3)" }}>${c.dps.toFixed(0)}</span>
-                  </div>
-                );
-              })}
-            </div>
-          )}
-
-          {/* Regions Panel */}
-          {sideTab === "regions" && (
-            <div style={{ overflowY: "auto", maxHeight: 600, padding: "8px 12px" }}>
-              {regSorted.map((r) => {
-                const d = REGIONS[r];
-                return (
-                  <div key={r} style={{ padding: "10px 12px", borderBottom: "1px solid rgba(30,50,72,.5)", cursor: "pointer", borderRadius: 8, marginBottom: 4 }}>
-                    <div style={{ ...SG(10, 700), color: d.color }}>{r}</div>
-                    <div style={{ ...SG(7.5), color: "var(--txt3)", marginBottom: 6 }}>{d.states.join(" · ")}</div>
-                    <div style={{ ...DM(18), color: d.color }}>${(d.pos / 1000).toFixed(1)}K</div>
-                    <div style={{ ...SG(7.5), color: "var(--txt3)", marginTop: 2 }}>
-                      {d.traited} stores · <strong style={{ color: d.color }}>${d.dps.toFixed(0)}/store</strong>
-                      {d.risk > 0 ? <span style={{ color: CC.red }}> · ⚠ {d.risk} critical</span> : " · ✓ OK"}
-                    </div>
-                    <div style={{ height: 3, borderRadius: 2, marginTop: 8, overflow: "hidden" }}>
-                      <div style={{ height: 3, borderRadius: 2, background: d.color, width: (d.pos / REGIONS[regSorted[0]].pos * 100).toFixed(0) + "%" }} />
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
-          )}
-        </div>
-      </div>
-
-      {/* Bottom Charts */}
-      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 12 }}>
-        <Card>
-          <CardHdr title="Top 20 States · L4W Sales" right={<Badge type="ok">Sales + $/Store</Badge>} />
-          <ChartCanvas
-            type="bar"
-            height={240}
-            configKey="geo-state-sales"
-            labels={statesSorted.slice(0, 20).map((s) => s.abbr)}
-            datasets={[
-              {
-                label: "L4W Sales $",
-                data: statesSorted.slice(0, 20).map((s) => s.pos),
-                backgroundColor: statesSorted.slice(0, 20).map((s) => TIER_COLORS[s.tier] + "55"),
-                borderColor: statesSorted.slice(0, 20).map((s) => TIER_COLORS[s.tier]),
-                borderWidth: 2, borderRadius: 5,
-              },
-            ]}
-          />
-        </Card>
-        <Card>
-          <CardHdr title="Top 20 Cities · L4W Sales" right={<Badge type="blue">Avg $/Store</Badge>} />
-          <ChartCanvas
-            type="bar"
-            height={240}
-            configKey="geo-city-sales"
-            labels={CITY_DATA.slice(0, 20).map((c) => c.city.length > 10 ? c.city.slice(0, 10) + "…" : c.city)}
-            datasets={[
-              {
-                label: "L4W Sales $",
-                data: CITY_DATA.slice(0, 20).map((c) => c.pos),
-                backgroundColor: CC.blue + "33",
-                borderColor: CC.blue,
-                borderWidth: 2, borderRadius: 5,
-              },
-            ]}
-          />
-        </Card>
-        <Card>
-          <CardHdr title="Regional Sales Mix" right={<Badge type="ok">5 Regions</Badge>} />
-          <ChartCanvas
-            type="doughnut"
-            height={240}
-            configKey="geo-region-mix"
-            labels={regSorted}
-            datasets={[
-              {
-                data: regSorted.map((r) => REGIONS[r].pos),
-                backgroundColor: regSorted.map((r) => REGIONS[r].color),
-                borderColor: "#0E1F2D",
-                borderWidth: 2,
-              },
-            ]}
-          />
-        </Card>
+            {ONE_OH.map((s) => (
+              <div key={s.abbr} style={{ padding: "8px", margin: "4px 0", borderRadius: "4px", backgroundColor: "#fef3c7", borderLeft: "3px solid #f59e0b" }}>
+                <div style={{ fontSize: "11px", fontWeight: "600" }}>{s.state}</div>
+                <div style={{ fontSize: "10px", color: "#666" }}>
+                  One: {s.one_oh}
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
       </div>
     </div>
   );
 }
 
 // ═════════════════════════════════════════════════════════════════════════════
-// SUB-TAB 2: REGIONS
+// REGIONS TAB
 // ═════════════════════════════════════════════════════════════════════════════
-
 function RegionsTab() {
   const [activeRegion, setActiveRegion] = useState(null);
   const regNames = Object.keys(REGIONS);
   const regSorted = regNames.sort((a, b) => REGIONS[b].pos - REGIONS[a].pos);
 
   const filteredStates = activeRegion
-    ? Object.values(WM_DATA).filter((s) => REGIONS[activeRegion]?.states.includes(s.abbr)).sort((a, b) => b.pos - a.pos)
+    ? statesSorted.filter((s) => STATE_TO_REGION[s.abbr] === activeRegion)
     : statesSorted;
 
   return (
-    <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
-      {/* Region Filter Cards */}
-      <div style={{ background: "var(--surf, #0c1a2e)", border: "1px solid var(--brd)", borderRadius: 13, overflow: "hidden" }}>
-        <div style={{ padding: "9px 16px", display: "flex", justifyContent: "space-between", alignItems: "center", borderBottom: "1px solid var(--brd)" }}>
-          <span style={{ ...SG(12, 700), color: "var(--txt)" }}>Select Region to Filter</span>
-          <Badge type="blue">Click any card</Badge>
-        </div>
-        <div style={{ display: "grid", gridTemplateColumns: "repeat(5, 1fr)", gap: 8, padding: "12px 16px" }}>
+    <div style={{ display: "grid", gridTemplateColumns: "250px 1fr", gap: "16px" }}>
+      {/* REGION LIST */}
+      <Card>
+        <CardHdr title="Regions" />
+        <div style={{ padding: "12px" }}>
           {regSorted.map((r) => {
             const d = REGIONS[r];
+            const isActive = activeRegion === r;
             return (
               <div
                 key={r}
-                onClick={() => setActiveRegion(activeRegion === r ? null : r)}
+                onClick={() => setActiveRegion(isActive ? null : r)}
                 style={{
-                  background: activeRegion === r ? "rgba(46,207,170,.05)" : "rgba(255,255,255,.05)",
-                  border: activeRegion === r ? "1px solid " + CC.teal : "1px solid var(--brd)",
-                  borderRadius: 9, padding: "10px 12px", cursor: "pointer", transition: "all .15s",
+                  padding: "10px",
+                  margin: "6px 0",
+                  borderRadius: "4px",
+                  backgroundColor: isActive ? "#eff6ff" : "#f9fafb",
+                  borderLeft: `3px solid ${d.color}`,
+                  cursor: "pointer",
                 }}
               >
-                <div style={{ ...SG(10, 700), color: d.color }}>{r}</div>
-                <div style={{ ...SG(7.5), color: "var(--txt3)", marginBottom: 6, lineHeight: 1.5 }}>{d.states.join(" · ")}</div>
-                <div style={{ ...DM(18), color: d.color }}>${(d.pos / 1000).toFixed(1)}K</div>
-                <div style={{ ...SG(7.5), color: "var(--txt3)", marginTop: 2 }}>
-                  {d.traited} stores · <strong style={{ color: d.color }}>${d.dps.toFixed(0)}/store</strong>
-                  {d.risk > 0 ? <span style={{ color: CC.red }}> · ⚠ {d.risk} critical</span> : " · ✓ OK"}
-                </div>
-                <div style={{ height: 3, borderRadius: 2, marginTop: 8, overflow: "hidden" }}>
-                  <div style={{ height: 3, borderRadius: 2, background: d.color, width: (d.pos / REGIONS[regSorted[0]].pos * 100).toFixed(0) + "%" }} />
+                <div style={{ fontSize: "12px", fontWeight: "600" }}>{r}</div>
+                <div style={{ fontSize: "10px", color: "#666", marginTop: "2px" }}>
+                  {fmtK(d.pos)}
                 </div>
               </div>
             );
           })}
         </div>
-      </div>
+      </Card>
 
-      {/* Region Charts */}
-      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
-        <Card>
-          <CardHdr title="Region Sales · TY L4W" right={<Badge type="ok">With Avg $/Store line</Badge>} />
-          <ChartCanvas
-            type="bar"
-            height={250}
-            configKey={`reg-sales-${activeRegion || "all"}`}
-            labels={regSorted}
-            datasets={[
-              {
-                label: "L4W Sales $",
-                data: regSorted.map((r) => REGIONS[r].pos),
-                backgroundColor: regSorted.map((r) => REGIONS[r].color + "33"),
-                borderColor: regSorted.map((r) => REGIONS[r].color),
-                borderWidth: 2, borderRadius: 5,
-              },
-              {
-                label: "Avg $/Store",
-                data: regSorted.map((r) => REGIONS[r].dps),
-                type: "line",
-                borderColor: CC.amber,
-                backgroundColor: "transparent",
-                borderWidth: 2, pointRadius: 5, pointBackgroundColor: CC.amber,
-                yAxisID: "y1",
-                tension: 0.3,
-              },
-            ]}
-          />
-        </Card>
-        <Card>
-          <CardHdr title="Traited Stores + Risk by Region" right={<Badge type="warn">0-OH exposure</Badge>} />
-          <ChartCanvas
-            type="bar"
-            height={250}
-            configKey="reg-stores"
-            labels={regSorted}
-            datasets={[
-              {
-                label: "Traited",
-                data: regSorted.map((r) => REGIONS[r].traited),
-                backgroundColor: CC.blue + "55",
-                borderColor: CC.blue,
-                borderWidth: 2, borderRadius: 5,
-              },
-              {
-                label: "0-OH",
-                data: regSorted.map((r) => REGIONS[r].zero_oh),
-                backgroundColor: CC.red + "55",
-                borderColor: CC.red,
-                borderWidth: 2, borderRadius: 5,
-              },
-            ]}
-          />
-        </Card>
-      </div>
-
-      {/* State Detail Table */}
+      {/* STATE DETAIL */}
       <Card>
-        <CardHdr
-          title={activeRegion ? `${activeRegion} States` : "All States · Regional Detail"}
-          right={<Badge type="ok">Sorted by L4W Sales</Badge>}
-        />
-        <div style={{ overflowX: "auto" }}>
-          <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 11 }}>
+        <CardHdr title={activeRegion ? `${activeRegion} States` : "All States"} />
+        <div style={{ padding: "12px", maxHeight: "700px", overflowY: "auto" }}>
+          <table style={{ width: "100%", fontSize: "11px", borderCollapse: "collapse" }}>
             <thead>
-              <tr style={{ borderBottom: "1px solid var(--brd)" }}>
-                {["State", "Region", "L4W Sales", "% Total", "Traited", "$/Store", "Units", "0-OH", "1-OH", "Critical", "Risk"].map((h, i) => (
-                  <th key={h} style={{ ...SG(7.5, 700), textTransform: "uppercase", letterSpacing: ".07em", color: "var(--txt3)", padding: "8px 12px", textAlign: i >= 2 ? "right" : "left", whiteSpace: "nowrap", background: "var(--card2, #1A2D42)" }}>{h}</th>
-                ))}
+              <tr style={{ borderBottom: "1px solid #e5e7eb" }}>
+                <th style={{ textAlign: "left", padding: "6px", fontWeight: "600", color: "#666" }}>State</th>
+                <th style={{ textAlign: "right", padding: "6px", fontWeight: "600", color: "#666" }}>Sales</th>
+                <th style={{ textAlign: "right", padding: "6px", fontWeight: "600", color: "#666" }}>Qty</th>
+                <th style={{ textAlign: "right", padding: "6px", fontWeight: "600", color: "#666" }}>Stores</th>
               </tr>
             </thead>
             <tbody>
@@ -692,22 +751,13 @@ function RegionsTab() {
                 const region = STATE_TO_REGION[s.abbr] || "—";
                 const regColor = REGIONS[region]?.color || "var(--txt3)";
                 return (
-                  <tr key={s.abbr} style={{ borderBottom: "1px solid rgba(30,50,72,.5)" }}>
-                    <td style={{ padding: "7px 12px", fontWeight: 700, color: "var(--txt)" }}>{s.abbr}</td>
-                    <td style={{ padding: "7px 12px", color: regColor, fontWeight: 700, fontSize: 10 }}>{region}</td>
-                    <td style={{ padding: "7px 12px", textAlign: "right", fontWeight: 700, color: salesColor(s) }}>{fmtK(s.pos)}</td>
-                    <td style={{ padding: "7px 12px", textAlign: "right", color: "var(--txt2)" }}>{s.pct.toFixed(1)}%</td>
-                    <td style={{ padding: "7px 12px", textAlign: "right", color: "var(--txt)" }}>{s.traited}</td>
-                    <td style={{ padding: "7px 12px", textAlign: "right", fontWeight: 700, color: CC.teal }}>${s.dps.toFixed(0)}</td>
-                    <td style={{ padding: "7px 12px", textAlign: "right", color: "var(--txt2)" }}>{fN(s.qty)}</td>
-                    <td style={{ padding: "7px 12px", textAlign: "right", color: s.zero_oh > 0 ? CC.red : "var(--txt3)", fontWeight: s.zero_oh > 0 ? 700 : 400 }}>{s.zero_oh}</td>
-                    <td style={{ padding: "7px 12px", textAlign: "right", color: s.one_oh > 0 ? CC.amber : "var(--txt3)", fontWeight: s.one_oh > 0 ? 700 : 400 }}>{s.one_oh}</td>
-                    <td style={{ padding: "7px 12px", textAlign: "right", color: s.risk > 0 ? CC.red : "var(--txt3)", fontWeight: s.risk > 0 ? 700 : 400 }}>{s.risk}</td>
-                    <td style={{ padding: "7px 12px" }}>
-                      {s.risk >= 3 ? <span style={{ ...SG(8, 700), padding: "1px 7px", borderRadius: 4, background: "rgba(248,113,113,.12)", color: CC.red }}>HIGH</span>
-                        : s.risk >= 1 ? <span style={{ ...SG(8, 700), padding: "1px 7px", borderRadius: 4, background: "rgba(245,183,49,.12)", color: CC.amber }}>WATCH</span>
-                        : <span style={{ ...SG(8, 700), padding: "1px 7px", borderRadius: 4, background: "rgba(46,207,170,.08)", color: CC.teal }}>OK</span>}
+                  <tr key={s.abbr} style={{ borderBottom: "1px solid #f3f4f6", backgroundColor: s.risk >= 3 ? "#fef2f2" : "transparent" }}>
+                    <td style={{ padding: "6px", fontWeight: "500", borderLeft: `2px solid ${regColor}` }}>
+                      {s.abbr}
                     </td>
+                    <td style={{ padding: "6px", textAlign: "right" }}>{fmtK(s.pos)}</td>
+                    <td style={{ padding: "6px", textAlign: "right" }}>{fN(s.qty)}</td>
+                    <td style={{ padding: "6px", textAlign: "right" }}>{s.traited}</td>
                   </tr>
                 );
               })}
@@ -720,9 +770,8 @@ function RegionsTab() {
 }
 
 // ═════════════════════════════════════════════════════════════════════════════
-// SUB-TAB 3: STORE DETAIL
+// STORE DETAIL TAB (from API)
 // ═════════════════════════════════════════════════════════════════════════════
-
 function StoreDetailTab({ filters }) {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
@@ -737,382 +786,260 @@ function StoreDetailTab({ filters }) {
     (async () => {
       try {
         setLoading(true);
-        setError(null);
         const result = await api.walmartStoreGeography(filters);
         setData(result);
-      } catch (err) {
-        setError(err.message);
+      } catch (e) {
+        setError(e.message || "Failed to load data");
       } finally {
         setLoading(false);
       }
     })();
-  }, [filters.division, filters.customer]);
+  }, [filters]);
 
-  if (loading) return <Card><p style={{ ...SG(12), color: "var(--txt3)" }}>Loading...</p></Card>;
-  if (error) return <Card><p style={{ ...SG(12), color: CC.red }}>Error: {error}</p></Card>;
-  if (!data) return <Card><p style={{ ...SG(12), color: "var(--txt3)" }}>No data</p></Card>;
+  if (loading) return <div style={{ padding: "20px", textAlign: "center", color: "#999" }}>Loading stores...</div>;
+  if (error) return <div style={{ padding: "20px", color: "#dc2626" }}>{error}</div>;
 
-  const allStores = data.stores || [];
-  const totalPosSales = data.totalPosSales || 0;
+  const allStores = data?.stores || [];
+  const totalPosSales = data?.totalPosSales || 0;
 
-  // Filter
-  let filtered = allStores;
-  if (search) {
-    const s = search.toLowerCase();
-    filtered = filtered.filter((st) => st.storeName.toLowerCase().includes(s) || st.storeNumber.includes(s));
-  }
-  if (ohFilter === "0") filtered = filtered.filter((st) => st.ohTy === 0);
-  else if (ohFilter === "1") filtered = filtered.filter((st) => st.ohTy === 1);
-  else if (ohFilter === "risk") filtered = filtered.filter((st) => st.ohTy <= 1);
+  const filtered = allStores.filter((s) => {
+    const matchesSearch = !search || s.storeName?.toLowerCase().includes(search.toLowerCase()) || s.storeId?.toString().includes(search);
+    const matchesState = !stateFilter || s.state === stateFilter;
+    const matchesOh = !ohFilter || (ohFilter === "zero" && s.zeroOh) || (ohFilter === "one" && s.oneOh);
+    return matchesSearch && matchesState && matchesOh;
+  });
 
-  // Sort
   filtered.sort((a, b) => {
     const av = a[sortBy] ?? 0;
     const bv = b[sortBy] ?? 0;
-    if (typeof av === "string") return sortDir === "asc" ? av.localeCompare(bv) : bv.localeCompare(av);
     return sortDir === "asc" ? av - bv : bv - av;
   });
 
   const handleSort = (col) => {
-    if (sortBy === col) setSortDir(sortDir === "asc" ? "desc" : "asc");
-    else { setSortBy(col); setSortDir("desc"); }
+    if (sortBy === col) {
+      setSortDir(sortDir === "asc" ? "desc" : "asc");
+    } else {
+      setSortBy(col);
+      setSortDir("desc");
+    }
   };
 
   const si = (col) => sortBy === col ? (sortDir === "asc" ? " ▲" : " ▼") : "";
 
-  const uniqueStates = [...new Set(allStores.map((s) => {
-    // try to extract state from store name patterns
-    return "";
-  }))].filter(Boolean).sort();
+  const uniqueStates = [...new Set(allStores.map((s) => s.state))].sort();
 
   return (
-    <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
-      {/* Filters */}
-      <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
-        <div style={{ position: "relative", flex: 1, maxWidth: 280 }}>
-          <span style={{ position: "absolute", left: 8, top: "50%", transform: "translateY(-50%)", fontSize: 11, color: "var(--txt3)" }}>🔍</span>
+    <Card>
+      <CardHdr title="Store Details" />
+      <div style={{ padding: "12px", borderBottom: "1px solid #e5e7eb" }}>
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 120px 100px", gap: "8px", marginBottom: "12px" }}>
           <input
             type="text"
+            placeholder="Search store name or ID..."
             value={search}
             onChange={(e) => setSearch(e.target.value)}
-            placeholder="Store name or #..."
-            style={{
-              width: "100%", height: 28, padding: "0 10px 0 28px", borderRadius: 7,
-              border: "1px solid var(--brd2, #2a4060)", background: "rgba(255,255,255,.05)",
-              fontSize: 11, color: "var(--txt2)",
-            }}
+            style={{ padding: "6px", fontSize: "11px", border: "1px solid #d1d5db", borderRadius: "4px" }}
           />
+          <select
+            value={stateFilter}
+            onChange={(e) => setStateFilter(e.target.value)}
+            style={{ padding: "6px", fontSize: "11px", border: "1px solid #d1d5db", borderRadius: "4px" }}
+          >
+            <option value="">All States</option>
+            {uniqueStates.map((st) => (
+              <option key={st} value={st}>{st}</option>
+            ))}
+          </select>
+          <select
+            value={ohFilter}
+            onChange={(e) => setOhFilter(e.target.value)}
+            style={{ padding: "6px", fontSize: "11px", border: "1px solid #d1d5db", borderRadius: "4px" }}
+          >
+            <option value="">All OH</option>
+            <option value="zero">Zero OH</option>
+            <option value="one">One OH</option>
+          </select>
         </div>
-        <select
-          value={ohFilter}
-          onChange={(e) => setOhFilter(e.target.value)}
-          style={{
-            height: 28, padding: "0 9px", borderRadius: 7,
-            border: "1px solid var(--brd2, #2a4060)", background: "rgba(255,255,255,.05)",
-            fontSize: 11, color: "var(--txt2)", cursor: "pointer",
-          }}
-        >
-          <option value="">All OH</option>
-          <option value="0">0 OH only</option>
-          <option value="1">1 OH only</option>
-          <option value="risk">Risk only</option>
-        </select>
-        <Badge type="blue">{filtered.length} stores</Badge>
+        <div style={{ fontSize: "10px", color: "#666" }}>
+          {filtered.length} of {allStores.length} stores | Total: {f$(totalPosSales)}
+        </div>
       </div>
 
-      {/* Store Table */}
-      <Card>
-        <CardHdr title={`All Stores · ${data.latestWeek || ""}`} right={
-          <div style={{ display: "flex", gap: 6 }}>
-            <Badge type="warn">🟡=1 OH</Badge>
-            <Badge type="risk">🔴=0 OH</Badge>
-          </div>
-        } />
-        <div style={{ overflowX: "auto", fontSize: 11 }}>
-          <table style={{ width: "100%", borderCollapse: "collapse" }}>
-            <thead>
-              <tr style={{ borderBottom: "1px solid var(--brd)" }}>
-                {[
-                  { key: "ohTy", label: "OH", align: "left" },
-                  { key: "storeNumber", label: "Store #", align: "left" },
-                  { key: "storeName", label: "Store Name", align: "left" },
-                  { key: "posSalesTy", label: "L4W Sales", align: "right" },
-                  { key: "posQtyTy", label: "Units", align: "right" },
-                  { key: "ohTy", label: "Curr OH", align: "right" },
-                  { key: "inWarehouseTy", label: "On-Order", align: "right" },
-                  { key: "inTransitTy", label: "In-Transit", align: "right" },
-                  { key: "instockPctTy", label: "Instock %", align: "right" },
-                ].map((col) => (
-                  <th
-                    key={col.key + col.label}
-                    onClick={() => handleSort(col.key)}
-                    style={{
-                      ...SG(7.5, 700), textTransform: "uppercase", letterSpacing: ".07em",
-                      color: "var(--txt3)", padding: "8px 12px", textAlign: col.align,
-                      whiteSpace: "nowrap", background: "var(--card2, #1A2D42)",
-                      cursor: "pointer", userSelect: "none",
-                    }}
-                  >
-                    {col.label}{si(col.key)}
-                  </th>
-                ))}
+      <div style={{ padding: "12px", overflowX: "auto", maxHeight: "600px" }}>
+        <table style={{ width: "100%", fontSize: "10px", borderCollapse: "collapse" }}>
+          <thead style={{ backgroundColor: "#f9fafb", position: "sticky", top: 0 }}>
+            <tr>
+              <th
+                onClick={() => handleSort("storeId")}
+                style={{ padding: "6px", textAlign: "left", cursor: "pointer", fontWeight: "600", color: "#666", borderBottom: "1px solid #e5e7eb" }}
+              >
+                ID{si("storeId")}
+              </th>
+              <th
+                onClick={() => handleSort("storeName")}
+                style={{ padding: "6px", textAlign: "left", cursor: "pointer", fontWeight: "600", color: "#666", borderBottom: "1px solid #e5e7eb" }}
+              >
+                Name{si("storeName")}
+              </th>
+              <th
+                onClick={() => handleSort("state")}
+                style={{ padding: "6px", textAlign: "center", cursor: "pointer", fontWeight: "600", color: "#666", borderBottom: "1px solid #e5e7eb" }}
+              >
+                State{si("state")}
+              </th>
+              <th
+                onClick={() => handleSort("posSalesTy")}
+                style={{ padding: "6px", textAlign: "right", cursor: "pointer", fontWeight: "600", color: "#666", borderBottom: "1px solid #e5e7eb" }}
+              >
+                Sales TY{si("posSalesTy")}
+              </th>
+              <th style={{ padding: "6px", textAlign: "center", fontWeight: "600", color: "#666", borderBottom: "1px solid #e5e7eb" }}>
+                Status
+              </th>
+            </tr>
+          </thead>
+          <tbody>
+            {filtered.map((s) => (
+              <tr key={s.storeId} style={{ borderBottom: "1px solid #f3f4f6", backgroundColor: s.risk >= 3 ? "#fef2f2" : "transparent" }}>
+                <td style={{ padding: "6px" }}>{s.storeId}</td>
+                <td style={{ padding: "6px", fontWeight: "500" }}>{s.storeName}</td>
+                <td style={{ padding: "6px", textAlign: "center", fontSize: "10px" }}>{s.state}</td>
+                <td style={{ padding: "6px", textAlign: "right", fontWeight: "500" }}>{f$(s.posSalesTy)}</td>
+                <td style={{ padding: "6px", textAlign: "center" }}>
+                  {s.zeroOh && <OhBadge oh={0} />}
+                  {s.oneOh && <OhBadge oh={1} />}
+                  {s.risk > 0 && <RiskBadge risk={s.risk} />}
+                </td>
               </tr>
-            </thead>
-            <tbody>
-              {filtered.slice(0, 200).map((store, idx) => (
-                <tr key={idx} style={{ borderBottom: "1px solid rgba(30,50,72,.5)", background: idx % 2 === 0 ? "rgba(0,0,0,.02)" : "transparent" }}>
-                  <td style={{ padding: "7px 12px" }}><OhBadge oh={store.ohTy} /></td>
-                  <td style={{ padding: "7px 12px", color: "var(--txt3)", fontWeight: 700 }}>#{store.storeNumber}</td>
-                  <td style={{ padding: "7px 12px", fontWeight: 700, color: "var(--txt)" }}>{store.storeName}</td>
-                  <td style={{ padding: "7px 12px", textAlign: "right", fontWeight: 700, color: CC.teal }}>{f$(store.posSalesTy)}</td>
-                  <td style={{ padding: "7px 12px", textAlign: "right", color: "var(--txt2)" }}>{fN(store.posQtyTy)}</td>
-                  <td style={{ padding: "7px 12px", textAlign: "right", fontWeight: 700, color: store.ohTy === 0 ? CC.red : store.ohTy <= 1 ? CC.amber : "var(--txt)" }}>{fN(store.ohTy)}</td>
-                  <td style={{ padding: "7px 12px", textAlign: "right", color: "var(--txt2)" }}>{fN(store.inWarehouseTy)}</td>
-                  <td style={{ padding: "7px 12px", textAlign: "right", color: store.inTransitTy > 0 ? CC.blue : "var(--txt3)" }}>{fN(store.inTransitTy)}</td>
-                  <td style={{ padding: "7px 12px", textAlign: "right", color: store.instockPctTy >= 90 ? CC.teal : store.instockPctTy >= 70 ? CC.amber : CC.red }}>
-                    {store.instockPctTy != null ? Number(store.instockPctTy).toFixed(1) + "%" : "—"}
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-        {filtered.length > 200 && (
-          <div style={{ padding: "8px 12px", ...SG(10), color: "var(--txt3)" }}>
-            Showing first 200 of {filtered.length} stores
-          </div>
-        )}
-      </Card>
-    </div>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </Card>
   );
 }
 
 // ═════════════════════════════════════════════════════════════════════════════
-// SUB-TAB 4: RISK (0 & 1 OH)
+// RISK TAB
 // ═════════════════════════════════════════════════════════════════════════════
-
 function RiskTab() {
   const criticalStores = ZERO_OH.filter((s) => s.risk === 1);
-  const inboundStores = ZERO_OH.filter((s) => s.risk === 0);
-  const oneOhNoInbound = ONE_OH.filter((s) => s.risk === 1);
-  const oneOhInbound = ONE_OH.filter((s) => s.risk === 0);
-
-  // 0-OH by state
-  const zBySt = {};
-  ZERO_OH.forEach((s) => { zBySt[s.st] = (zBySt[s.st] || 0) + 1; });
-  const zSorted = Object.entries(zBySt).sort((a, b) => b[1] - a[1]);
+  const highRiskStores = ZERO_OH.filter((s) => s.risk >= 3);
 
   return (
-    <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
-      {/* KPI Cards */}
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(5, 1fr)", gap: 8 }}>
-        <KPICard label="0-OH Traited Stores" value={ZERO_OH.length} color={CC.red} />
-        <KPICard label="Critical · No Inbound" value={criticalStores.length} color={CC.red} />
-        <KPICard label="0-OH Has Inbound" value={inboundStores.length} color={CC.blue} />
-        <KPICard label="1-OH Stores" value={ONE_OH.length} color={CC.amber} />
-        <KPICard label="1-OH No Inbound" value={oneOhNoInbound.length} color={CC.amber} />
-      </div>
-
-      {/* Charts */}
-      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
-        <Card>
-          <CardHdr title="0-OH Risk by State" right={<Badge type="risk">Count</Badge>} />
-          <ChartCanvas
-            type="bar"
-            height={240}
-            configKey="risk-by-state"
-            labels={zSorted.map(([s]) => s)}
-            datasets={[
-              {
-                label: "0-OH Stores",
-                data: zSorted.map(([, v]) => v),
-                backgroundColor: CC.red + "55",
-                borderColor: CC.red,
-                borderWidth: 2, borderRadius: 5,
-              },
-            ]}
-          />
-        </Card>
-        <Card>
-          <CardHdr title="Risk Category Breakdown" right={<Badge type="warn">All risk stores</Badge>} />
-          <ChartCanvas
-            type="doughnut"
-            height={240}
-            configKey="risk-breakdown"
-            labels={["0-OH Critical", "0-OH Inbound", "1-OH No Order", "1-OH Inbound"]}
-            datasets={[
-              {
-                data: [criticalStores.length, inboundStores.length, oneOhNoInbound.length, oneOhInbound.length],
-                backgroundColor: [CC.red, "rgba(123,174,208,.6)", CC.amber, "rgba(46,207,170,.5)"],
-                borderColor: "#0E1F2D",
-                borderWidth: 2,
-              },
-            ]}
-          />
-        </Card>
-      </div>
-
-      {/* Critical Table */}
+    <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "16px" }}>
       <Card>
-        <CardHdr title={`🔴 Critical — 0 OH, No Inbound (${criticalStores.length} stores)`} right={<Badge type="risk">Raise PO / Expedite</Badge>} />
-        <div style={{ overflowX: "auto" }}>
-          <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 11 }}>
-            <thead>
-              <tr style={{ borderBottom: "1px solid var(--brd)" }}>
-                {["Store #", "Name", "State", "L4W Sales", "OH", "On-Order", "In-Transit", "Action"].map((h, i) => (
-                  <th key={h} style={{ ...SG(7.5, 700), textTransform: "uppercase", letterSpacing: ".07em", color: "var(--txt3)", padding: "8px 12px", textAlign: i >= 3 && i <= 6 ? "right" : "left", whiteSpace: "nowrap", background: "var(--card2, #1A2D42)" }}>{h}</th>
-                ))}
-              </tr>
-            </thead>
-            <tbody>
-              {criticalStores.map((s) => (
-                <tr key={s.s} style={{ borderBottom: "1px solid rgba(30,50,72,.5)" }}>
-                  <td style={{ padding: "7px 12px", color: "var(--txt3)", fontWeight: 700 }}>#{s.s}</td>
-                  <td style={{ padding: "7px 12px", fontWeight: 700, color: "var(--txt)" }}>{s.n}</td>
-                  <td style={{ padding: "7px 12px", color: "var(--txt2)" }}>{s.st}</td>
-                  <td style={{ padding: "7px 12px", textAlign: "right", fontWeight: 700, color: CC.teal }}>${s.pos}</td>
-                  <td style={{ padding: "7px 12px", textAlign: "right", fontWeight: 700, color: CC.red }}>0</td>
-                  <td style={{ padding: "7px 12px", textAlign: "right", color: "var(--txt3)" }}>0</td>
-                  <td style={{ padding: "7px 12px", textAlign: "right", color: "var(--txt3)" }}>0</td>
-                  <td style={{ padding: "7px 12px" }}>
-                    <span style={{ ...SG(8, 700), padding: "1px 7px", borderRadius: 4, background: "rgba(248,113,113,.12)", color: CC.red }}>RAISE PO</span>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
+        <CardHdr title="Critical Risk (Risk = 1)" />
+        <div style={{ padding: "12px" }}>
+          {criticalStores.length === 0 ? (
+            <div style={{ fontSize: "11px", color: "#999" }}>No critical risk stores</div>
+          ) : (
+            criticalStores.map((s) => (
+              <div key={s.abbr} style={{ padding: "8px", margin: "4px 0", borderRadius: "4px", backgroundColor: "#fef3c7", borderLeft: "3px solid #f59e0b" }}>
+                <div style={{ fontSize: "11px", fontWeight: "600" }}>{s.state}</div>
+                <div style={{ fontSize: "10px", color: "#666" }}>Risk: {s.risk} | Zero: {s.zero_oh}</div>
+              </div>
+            ))
+          )}
         </div>
       </Card>
 
-      {/* Inbound + 1-OH Tables */}
-      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
-        <Card>
-          <CardHdr title={`🔵 0 OH — Has Inbound (${inboundStores.length})`} right={<Badge type="blue">Monitor</Badge>} />
-          <div style={{ overflowX: "auto" }}>
-            <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 11 }}>
-              <thead>
-                <tr style={{ borderBottom: "1px solid var(--brd)" }}>
-                  {["Store #", "Name", "State", "Sales", "OH", "On-Ord", "In-Tr", "Status"].map((h, i) => (
-                    <th key={h} style={{ ...SG(7.5, 700), textTransform: "uppercase", letterSpacing: ".07em", color: "var(--txt3)", padding: "8px 12px", textAlign: i >= 3 && i <= 6 ? "right" : "left", whiteSpace: "nowrap", background: "var(--card2, #1A2D42)" }}>{h}</th>
-                  ))}
-                </tr>
-              </thead>
-              <tbody>
-                {inboundStores.map((s) => (
-                  <tr key={s.s} style={{ borderBottom: "1px solid rgba(30,50,72,.5)" }}>
-                    <td style={{ padding: "7px 12px", color: "var(--txt3)", fontWeight: 700 }}>#{s.s}</td>
-                    <td style={{ padding: "7px 12px", fontWeight: 700, color: "var(--txt)" }}>{s.n}</td>
-                    <td style={{ padding: "7px 12px", color: "var(--txt2)" }}>{s.st}</td>
-                    <td style={{ padding: "7px 12px", textAlign: "right", fontWeight: 700, color: CC.teal }}>${s.pos}</td>
-                    <td style={{ padding: "7px 12px", textAlign: "right", fontWeight: 700, color: CC.red }}>0</td>
-                    <td style={{ padding: "7px 12px", textAlign: "right", color: CC.blue }}>{s.oo}</td>
-                    <td style={{ padding: "7px 12px", textAlign: "right", color: CC.blue }}>{s.it}</td>
-                    <td style={{ padding: "7px 12px" }}>
-                      <span style={{ ...SG(8, 700), padding: "1px 7px", borderRadius: 4, background: "rgba(123,174,208,.12)", color: CC.blue }}>INBOUND</span>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        </Card>
-
-        <Card>
-          <CardHdr title={`🟡 1 OH — Last Unit (${ONE_OH.length})`} right={<Badge type="warn">Watch</Badge>} />
-          <div style={{ overflowX: "auto" }}>
-            <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 11 }}>
-              <thead>
-                <tr style={{ borderBottom: "1px solid var(--brd)" }}>
-                  {["Store #", "Name", "State", "Sales", "OH", "On-Ord", "In-Tr", "Risk"].map((h, i) => (
-                    <th key={h} style={{ ...SG(7.5, 700), textTransform: "uppercase", letterSpacing: ".07em", color: "var(--txt3)", padding: "8px 12px", textAlign: i >= 3 && i <= 6 ? "right" : "left", whiteSpace: "nowrap", background: "var(--card2, #1A2D42)" }}>{h}</th>
-                  ))}
-                </tr>
-              </thead>
-              <tbody>
-                {ONE_OH.map((s) => (
-                  <tr key={s.s} style={{ borderBottom: "1px solid rgba(30,50,72,.5)" }}>
-                    <td style={{ padding: "7px 12px", color: "var(--txt3)", fontWeight: 700 }}>#{s.s}</td>
-                    <td style={{ padding: "7px 12px", fontWeight: 700, color: "var(--txt)" }}>{s.n}</td>
-                    <td style={{ padding: "7px 12px", color: "var(--txt2)" }}>{s.st}</td>
-                    <td style={{ padding: "7px 12px", textAlign: "right", fontWeight: 700, color: CC.teal }}>${s.pos}</td>
-                    <td style={{ padding: "7px 12px", textAlign: "right", fontWeight: 700, color: CC.amber }}>1</td>
-                    <td style={{ padding: "7px 12px", textAlign: "right", color: s.oo > 0 ? CC.blue : "var(--txt3)" }}>{s.oo}</td>
-                    <td style={{ padding: "7px 12px", textAlign: "right", color: s.it > 0 ? CC.blue : "var(--txt3)" }}>{s.it}</td>
-                    <td style={{ padding: "7px 12px" }}>
-                      {s.risk === 1 ? (
-                        <span style={{ ...SG(8, 700), padding: "1px 7px", borderRadius: 4, background: "rgba(245,183,49,.12)", color: CC.amber }}>NO INBOUND</span>
-                      ) : (
-                        <span style={{ ...SG(8, 700), padding: "1px 7px", borderRadius: 4, background: "rgba(123,174,208,.12)", color: CC.blue }}>INBOUND</span>
-                      )}
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        </Card>
-      </div>
+      <Card>
+        <CardHdr title="High Risk (Risk >= 3)" />
+        <div style={{ padding: "12px" }}>
+          {highRiskStores.length === 0 ? (
+            <div style={{ fontSize: "11px", color: "#999" }}>No high-risk stores</div>
+          ) : (
+            highRiskStores.map((s) => (
+              <div key={s.abbr} style={{ padding: "8px", margin: "4px 0", borderRadius: "4px", backgroundColor: "#fef2f2", borderLeft: "3px solid #dc2626" }}>
+                <div style={{ fontSize: "11px", fontWeight: "600" }}>{s.state}</div>
+                <div style={{ fontSize: "10px", color: "#666" }}>Risk: {s.risk} | Zero: {s.zero_oh}</div>
+              </div>
+            ))
+          )}
+        </div>
+      </Card>
     </div>
   );
 }
 
 // ═════════════════════════════════════════════════════════════════════════════
-// MAIN EXPORT — Store Analytics with 4 Sub-Tabs
+// MAIN PAGE
 // ═════════════════════════════════════════════════════════════════════════════
-
-const SUB_TABS = [
-  { key: "map", label: "🗺 Geography Map" },
-  { key: "regions", label: "📍 Regions" },
-  { key: "stores", label: "🏪 Store Detail" },
-  { key: "risk", label: "⚠ Risk: 0 & 1 OH" },
-];
-
-export function WalmartStoreAnalytics({ filters }) {
-  const [subTab, setSubTab] = useState("map");
+export function WalmartStoreAnalytics() {
+  const [activeTab, setActiveTab] = useState("geography");
+  const [filters, setFilters] = useState({});
 
   return (
-    <div style={{ display: "flex", flexDirection: "column", gap: 0 }}>
-      {/* Sub-tab navigation */}
-      <div style={{ display: "flex", gap: 2, marginBottom: 16, borderBottom: "1px solid var(--brd)", background: "var(--card2, #1A2D42)", borderRadius: "8px 8px 0 0", overflow: "hidden" }}>
-        {SUB_TABS.map((t) => (
+    <div style={{ padding: "16px", display: "flex", flexDirection: "column", gap: "16px" }}>
+      {/* HEADER */}
+      <div>
+        <h2 style={SG()}>Walmart Store Analytics</h2>
+        <div style={{ fontSize: "13px", color: "#666", marginTop: "4px" }}>
+          Store-level POS sales, inventory, and risk analysis
+        </div>
+      </div>
+
+      {/* KPI CARDS */}
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))", gap: "12px" }}>
+        <KPICard
+          label="States Active"
+          value={Object.values(WM_DATA).filter((s) => s.pos > 0).length}
+          unit=""
+          color={COLORS.blue}
+        />
+        <KPICard
+          label="Total Sales"
+          value={TOTAL_POS}
+          unit="USD"
+          color={COLORS.green}
+        />
+        <KPICard
+          label="Total Units"
+          value={Object.values(WM_DATA).reduce((a, s) => a + s.qty, 0)}
+          unit="units"
+          color={COLORS.amber}
+        />
+        <KPICard
+          label="Total Returns"
+          value={Object.values(WM_DATA).reduce((a, s) => a + (s.returns || 0), 0)}
+          unit="USD"
+          color={COLORS.red}
+        />
+      </div>
+
+      {/* TAB SELECTOR */}
+      <div style={{ display: "flex", borderBottom: "2px solid #e5e7eb", gap: "0" }}>
+        {["geography", "regions", "stores", "risk"].map((t) => (
           <button
-            key={t.key}
-            onClick={() => setSubTab(t.key)}
+            key={t}
+            onClick={() => setActiveTab(t)}
             style={{
-              ...SG(10, subTab === t.key ? 700 : 500),
-              background: "none", border: "none", cursor: "pointer",
-              padding: "10px 16px", whiteSpace: "nowrap",
-              color: subTab === t.key ? CC.teal : "var(--txt3)",
-              borderBottom: subTab === t.key ? "2px solid " + CC.teal : "2px solid transparent",
-              textTransform: "uppercase", letterSpacing: ".08em",
+              padding: "12px 20px",
+              fontSize: "13px",
+              fontWeight: activeTab === t ? "600" : "400",
+              color: activeTab === t ? CC.blue : "#666",
+              border: "none",
+              borderBottom: activeTab === t ? `3px solid ${CC.blue}` : "none",
+              backgroundColor: "transparent",
+              cursor: "pointer",
             }}
           >
-            {t.label}
+            {t === "geography" && "Geography"}
+            {t === "regions" && "Regions"}
+            {t === "stores" && "Store Details"}
+            {t === "risk" && "Risk"}
           </button>
         ))}
       </div>
 
-      {/* Page header */}
-      <div style={{ marginBottom: 12 }}>
-        <div style={{ ...DM(22), color: CC.teal }}>
-          {subTab === "map" && "Sales Geography Heatmap"}
-          {subTab === "regions" && "Regional Performance"}
-          {subTab === "stores" && "Store Detail"}
-          {subTab === "risk" && "Inventory Risk Dashboard"}
-        </div>
-        <div style={{ ...SG(11), color: "var(--txt3)", marginTop: 2 }}>
-          {subTab === "map" && "Walmart POS · L4W · Click any state to select"}
-          {subTab === "regions" && "Click a region to filter · Avg $/Store shown per region and state"}
-          {subTab === "stores" && "All traited stores · L4W performance"}
-          {subTab === "risk" && "0 & 1 OH traited stores · Immediate action items"}
-        </div>
-      </div>
-
-      {/* Tab content */}
-      {subTab === "map" && <GeographyMapTab />}
-      {subTab === "regions" && <RegionsTab />}
-      {subTab === "stores" && <StoreDetailTab filters={filters} />}
-      {subTab === "risk" && <RiskTab />}
+      {/* TAB CONTENT */}
+      {activeTab === "geography" && <GeographyMapTab />}
+      {activeTab === "regions" && <RegionsTab />}
+      {activeTab === "stores" && <StoreDetailTab filters={filters} />}
+      {activeTab === "risk" && <RiskTab />}
     </div>
   );
 }
+
+export default WalmartStoreAnalytics;

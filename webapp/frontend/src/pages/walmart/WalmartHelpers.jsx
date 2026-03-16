@@ -161,7 +161,7 @@ export function KPICard({ label, value, delta: d, color = COLORS.teal }) {
 // CHART CANVAS COMPONENT
 // ═════════════════════════════════════════════════════════════════════════════
 
-export function ChartCanvas({ type, labels, datasets, periods, data, height, configKey }) {
+export function ChartCanvas({ type, labels, datasets, periods, data, height, configKey, options: optionOverrides }) {
   // Support both {labels, datasets} props and {data: {labels, datasets}} prop
   const resolvedLabels = labels || (data && data.labels);
   const resolvedDatasets = datasets || (data && data.datasets);
@@ -224,6 +224,38 @@ export function ChartCanvas({ type, labels, datasets, periods, data, height, con
               : {}),
           },
         };
+    // Merge custom option overrides (deep merge plugins + scales)
+    const basePlugins = {
+      legend: {
+        labels: {
+          font: { family: "'Space Grotesk', monospace", size: 10 },
+          color: "rgba(255,255,255,.5)",
+        },
+      },
+    };
+    const overridePlugins = optionOverrides?.plugins || {};
+    const mergedPlugins = { ...basePlugins, ...overridePlugins };
+    if (overridePlugins.legend) {
+      mergedPlugins.legend = { ...basePlugins.legend, ...overridePlugins.legend };
+      if (overridePlugins.legend.labels) {
+        mergedPlugins.legend.labels = { ...basePlugins.legend.labels, ...overridePlugins.legend.labels };
+      }
+    }
+
+    const baseScales = scales.scales || {};
+    const overrideScales = optionOverrides?.scales || {};
+    const mergedScales = isDoughnut ? {} : { scales: { ...baseScales, ...overrideScales } };
+    // Deep merge y axis ticks if override provided
+    if (overrideScales.y && baseScales.y) {
+      mergedScales.scales.y = { ...baseScales.y, ...overrideScales.y };
+      if (overrideScales.y.ticks) {
+        mergedScales.scales.y.ticks = { ...baseScales.y.ticks, ...overrideScales.y.ticks };
+      }
+    }
+
+    // Extract non-plugins/scales overrides (e.g. indexAxis, animation)
+    const { plugins: _p, scales: _s, ...topLevelOverrides } = optionOverrides || {};
+
     const config = {
       type,
       data: {
@@ -233,15 +265,9 @@ export function ChartCanvas({ type, labels, datasets, periods, data, height, con
       options: {
         responsive: true,
         maintainAspectRatio: false,
-        plugins: {
-          legend: {
-            labels: {
-              font: { family: "'Space Grotesk', monospace", size: 10 },
-              color: "rgba(255,255,255,.5)",
-            },
-          },
-        },
-        ...scales,
+        plugins: mergedPlugins,
+        ...mergedScales,
+        ...topLevelOverrides,
       },
     };
 

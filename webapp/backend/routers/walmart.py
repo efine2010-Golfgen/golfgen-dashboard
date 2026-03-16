@@ -787,9 +787,84 @@ def get_weekly_trend(division: str = None, customer: str = None):
                 entry["regularQtyTy"] += _n(r[4])
                 entry["regularQtyLy"] += _n(r[5])
 
+        # ── Per-week overall instock % and per-item instock % ──
+        instock_query = f"""
+            SELECT
+              walmart_week,
+              AVG(COALESCE(instock_pct_ty, 0)) as avg_instock_pct
+            FROM walmart_item_weekly
+            WHERE walmart_week IS NOT NULL
+              AND (period_type = 'weekly' OR period_type IS NULL OR period_type = '') {hw}
+            GROUP BY walmart_week
+            ORDER BY walmart_week ASC
+        """
+        try:
+            instock_rows = con.execute(instock_query, hp).fetchall()
+        except Exception:
+            instock_rows = []
+        instock_by_week = {}
+        for r in instock_rows:
+            wk = str(r[0]) if r[0] else ""
+            instock_by_week[wk] = _n(r[1])
+
+        # If no weekly-granularity instock found, try period_type IN (L1W, etc)
+        if not instock_by_week:
+            instock_fallback_q = f"""
+                SELECT
+                  walmart_week,
+                  AVG(COALESCE(instock_pct_ty, 0)) as avg_instock_pct
+                FROM walmart_item_weekly
+                WHERE walmart_week IS NOT NULL {hw}
+                GROUP BY walmart_week
+                ORDER BY walmart_week ASC
+            """
+            try:
+                fb_rows = con.execute(instock_fallback_q, hp).fetchall()
+                for r in fb_rows:
+                    wk = str(r[0]) if r[0] else ""
+                    instock_by_week[wk] = _n(r[1])
+            except Exception:
+                pass
+
+        # Per-item per-week instock %
+        item_instock_query = f"""
+            SELECT
+              walmart_week,
+              prime_item_desc,
+              AVG(COALESCE(instock_pct_ty, 0)) as instock_pct
+            FROM walmart_item_weekly
+            WHERE walmart_week IS NOT NULL
+              AND prime_item_desc IS NOT NULL {hw}
+            GROUP BY walmart_week, prime_item_desc
+            ORDER BY walmart_week ASC
+        """
+        try:
+            item_instock_rows = con.execute(item_instock_query, hp).fetchall()
+        except Exception:
+            item_instock_rows = []
+
+        # Build item instock map: {item_name: {week: pct}}
+        item_instock_map = {}
+        for r in item_instock_rows:
+            wk = str(r[0]) if r[0] else ""
+            item = r[1] or ""
+            pct = _n(r[2])
+            if item not in item_instock_map:
+                item_instock_map[item] = {}
+            item_instock_map[item][wk] = pct
+
+        # Add instock to week_map entries
+        for wk in week_map:
+            week_map[wk]["instockPct"] = instock_by_week.get(wk, 0)
+
         # Return in sorted order
-        weeks = [week_map[wk] for wk in sorted(week_map.keys())]
-        return {"weeks": weeks}
+        sorted_weeks = sorted(week_map.keys())
+        weeks = [week_map[wk] for wk in sorted_weeks]
+        return {
+            "weeks": weeks,
+            "itemInstock": item_instock_map,
+            "weekOrder": sorted_weeks,
+        }
     finally:
         con.close()
 

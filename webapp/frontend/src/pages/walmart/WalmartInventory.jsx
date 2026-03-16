@@ -34,6 +34,12 @@ const instockColor = (v) => {
   return COLORS.red;
 };
 
+// Line color palette for items
+const ITEM_COLORS = [
+  "#2ecf99", "#f97316", "#3b82f6", "#a78bfa",
+  "#ef4444", "#f59e0b", "#ec4899", "#14b8a6",
+];
+
 export function WalmartInventory({ filters }) {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
@@ -87,7 +93,6 @@ export function WalmartInventory({ filters }) {
   const itemNames = Object.keys(instockTrend);
   const periodKeys = ["lw", "l4w", "l13w", "l26w", "l52w"];
   const periodLabels = ["1W", "4W", "13W", "26W", "52W"];
-  const colorValues = Object.values(COLORS);
 
   const validItems = itemNames.filter((item) => {
     const vals = periodKeys.map((p) => instockTrend[item]?.[p]);
@@ -101,7 +106,7 @@ export function WalmartInventory({ filters }) {
       const v = instockTrend[item]?.[p];
       return v != null && v !== 0 ? toPercent(v) : null;
     }),
-    borderColor: colorValues[idx % colorValues.length],
+    borderColor: ITEM_COLORS[idx % ITEM_COLORS.length],
     fill: false,
     tension: 0.3,
     spanGaps: true,
@@ -131,8 +136,17 @@ export function WalmartInventory({ filters }) {
     ],
   };
 
-  // Weekly trend data for 52-week instock bar chart
+  // Weekly trend data for instock bar + item lines chart
   const weeks = weeklyData?.weeks || [];
+  const itemInstock = weeklyData?.itemInstock || {};
+  const weekOrder = weeklyData?.weekOrder || weeks.map((w) => w.week);
+
+  // Identify items that have per-week instock data
+  const itemsWithWeeklyInstock = Object.keys(itemInstock).filter((item) => {
+    const weekData = itemInstock[item] || {};
+    const nonZero = Object.values(weekData).filter((v) => v != null && v > 0);
+    return nonZero.length >= 2;
+  });
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: "24px" }}>
@@ -156,52 +170,61 @@ export function WalmartInventory({ filters }) {
         />
       </div>
 
-      {/* 52-Week Instock Trend — Bar (overall) + Item Lines */}
+      {/* Weekly In Stock % — Bars = dept instock %, Lines = per-item instock % */}
       {weeks.length > 0 && (
         <Card>
           <CardHdr title="Weekly In Stock % & Item Trends" />
           <div style={{ ...SG(9), color: "var(--txt3)", marginBottom: 8 }}>
-            Bars show overall weekly POS sales (scale: left axis). Colored lines
-            show per-item instock % (scale: right axis, 0-100%).
+            Bars show total department in stock % (left axis). Colored lines
+            show per-item in stock % by week.
           </div>
           <ChartCanvas
             type="bar"
             height={280}
-            configKey={`inv-weekly-${weeks.length}-${validItems.length}`}
+            configKey={`inv-weekly-${weeks.length}-${itemsWithWeeklyInstock.length}`}
             labels={weeks.map((w) => {
               const s = String(w.week);
               return s.length >= 6 ? "Wk" + s.slice(4) : s;
             })}
             datasets={[
               {
-                label: "POS Sales TY",
-                data: weeks.map((w) => w.posSalesTy),
-                backgroundColor: "rgba(46,207,170,0.25)",
+                label: "Dept In Stock %",
+                data: weeks.map((w) => toPercent(w.instockPct)),
+                backgroundColor: "rgba(46,207,170,0.3)",
                 borderColor: COLORS.teal,
                 borderWidth: 1,
                 order: 10,
                 yAxisID: "y",
               },
-              // Item instock lines overlay
-              ...validItems.slice(0, 6).map((item, idx) => ({
+              // Per-item instock lines
+              ...itemsWithWeeklyInstock.slice(0, 6).map((item, idx) => ({
                 label: item.length > 20 ? item.substring(0, 20) + "…" : item,
                 type: "line",
-                data: weeks.map(() => {
-                  // Use the item's LW instock as a constant line for now
-                  // since we don't have per-week per-item instock data
-                  const v = instockTrend[item]?.lw;
-                  return v != null && v !== 0 ? toPercent(v) : null;
+                data: weekOrder.map((wk) => {
+                  const v = itemInstock[item]?.[wk];
+                  return v != null && v > 0 ? toPercent(v) : null;
                 }),
-                borderColor: colorValues[idx % colorValues.length],
-                borderWidth: 1.5,
-                pointRadius: 0,
+                borderColor: ITEM_COLORS[idx % ITEM_COLORS.length],
+                borderWidth: 2,
+                pointRadius: 1,
                 fill: false,
                 tension: 0.3,
                 spanGaps: true,
                 order: idx + 1,
-                yAxisID: "y1",
+                yAxisID: "y",
               })),
             ]}
+            options={{
+              scales: {
+                y: {
+                  min: 0,
+                  max: 100,
+                  ticks: {
+                    callback: (v) => v + "%",
+                  },
+                },
+              },
+            }}
           />
         </Card>
       )}
@@ -225,27 +248,13 @@ export function WalmartInventory({ filters }) {
         )}
       </Card>
 
-      {/* OH Distribution by Sales Type */}
-      <div
-        style={{
-          display: "grid",
-          gridTemplateColumns: "1fr 1fr",
-          gap: "12px",
-        }}
-      >
-        <Card>
-          <CardHdr title="OH Distribution by Type" />
-          <div style={{ position: "relative", height: 250 }}>
-            <ChartCanvas type="bar" data={ohChartData} height={250} />
-          </div>
-        </Card>
-        <Card>
-          <CardHdr title="OH Breakdown" />
-          <div style={{ position: "relative", height: 250 }}>
-            <ChartCanvas type="doughnut" data={ohChartData} height={250} />
-          </div>
-        </Card>
-      </div>
+      {/* OH Distribution by Sales Type — full width, no doughnut */}
+      <Card>
+        <CardHdr title="OH Distribution by Type" />
+        <div style={{ position: "relative", height: 250 }}>
+          <ChartCanvas type="bar" data={ohChartData} height={250} />
+        </div>
+      </Card>
 
       {/* Instock Detail Table — only show items with valid data */}
       {validItems.length > 0 && (
