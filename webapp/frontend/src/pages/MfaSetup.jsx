@@ -163,7 +163,9 @@ function PasskeySection() {
               value={deviceName}
               onChange={e => setDeviceName(e.target.value)}
               className="login-input"
-              style={{ flex: 1, margin: 0 }}
+              style={{ flex: 1, margin: 0, minHeight: 42, fontSize: 15, color: "#fff",
+                       padding: "8px 14px", background: "rgba(255,255,255,0.06)",
+                       border: "1px solid rgba(255,255,255,0.15)", borderRadius: 8 }}
             />
             <button
               className="login-btn"
@@ -212,7 +214,11 @@ export default function MfaSetup() {
         setCodesCount(cd.count);
       }
       setStep("overview");
-    } catch { setStep("overview"); }
+    } catch (e) {
+      console.error("MFA setup load error:", e);
+      setStatus({ mfa_enabled: false });
+      setStep("overview");
+    }
   }
 
   async function beginSetup() {
@@ -338,7 +344,10 @@ export default function MfaSetup() {
                   onChange={e => setDisableCode(e.target.value)}
                   placeholder="6-digit code" maxLength={6}
                   style={{ flex: 1, letterSpacing: 6, textAlign: "center", fontSize: 20,
-                           fontFamily: "'Space Grotesk', monospace", margin: 0 }}
+                           fontFamily: "'Space Grotesk', monospace", margin: 0,
+                           minHeight: 48, color: "#fff", padding: "8px 14px",
+                           background: "rgba(255,255,255,0.06)",
+                           border: "1px solid rgba(255,255,255,0.15)", borderRadius: 8 }}
                 />
                 <button className="login-btn" onClick={handleDisable}
                   disabled={loading || disableCode.length < 6}
@@ -394,7 +403,9 @@ export default function MfaSetup() {
                 placeholder="000000" maxLength={6}
                 style={{ flex: 1, letterSpacing: 8, textAlign: "center", fontSize: 24,
                          fontFamily: "'Space Grotesk', monospace", margin: 0,
-                         padding: "14px 16px", minHeight: 52 }}
+                         padding: "14px 16px", minHeight: 52, color: "#fff",
+                         background: "rgba(255,255,255,0.06)",
+                         border: "1px solid rgba(255,255,255,0.15)", borderRadius: 8 }}
                 onKeyDown={e => e.key === "Enter" && code.length === 6 && confirmSetup()}
               />
               <button className="login-btn" onClick={confirmSetup}
