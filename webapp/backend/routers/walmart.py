@@ -724,6 +724,19 @@ def debug_counts():
         con.close()
 
 
+@router.post("/api/debug/walmart-clear-scorecard")
+def debug_clear_scorecard():
+    """Clear scorecard table so it can be re-imported fresh."""
+    con = get_db_rw()
+    try:
+        r = con.execute("DELETE FROM walmart_scorecard")
+        remaining = con.execute("SELECT COUNT(*) FROM walmart_scorecard").fetchone()
+        return {"deleted": r.rowcount if hasattr(r, 'rowcount') else "executed",
+                "remaining": int(remaining[0]) if remaining else 0}
+    finally:
+        con.close()
+
+
 @router.post("/api/debug/walmart-fix-lw")
 def debug_fix_lw():
     """Fix LW period_type → L1W in walmart_item_weekly and walmart_store_weekly."""
