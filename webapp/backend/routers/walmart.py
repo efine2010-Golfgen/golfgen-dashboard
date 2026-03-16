@@ -724,6 +724,49 @@ def debug_counts():
         con.close()
 
 
+@router.post("/api/debug/walmart-import-scorecard")
+async def debug_import_scorecard(request_body: dict):
+    """Import scorecard JSON data (no auth, for data loading)."""
+    from fastapi import HTTPException
+    rows = request_body.get("rows", [])
+    if not rows:
+        raise HTTPException(status_code=400, detail="No rows provided")
+
+    con = get_db_rw()
+    count = 0
+    errors = []
+    report_date = datetime.now(CT).date().isoformat()
+
+    for r in rows:
+        try:
+            con.execute("""
+                INSERT INTO walmart_scorecard
+                    (vendor_section, metric_group, metric_name, period, period_range,
+                     value_ty, value_ly, value_diff, report_date, upload_id,
+                     division, customer, platform)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'golf', 'walmart_stores', 'scintilla')
+            """, [
+                r.get("vendor_section", ""),
+                r.get("metric_group", ""),
+                r.get("metric_name", ""),
+                r.get("period", ""),
+                r.get("period_range"),
+                r.get("value_ty"),
+                r.get("value_ly"),
+                r.get("value_diff"),
+                report_date,
+                "debug-import",
+            ])
+            count += 1
+        except Exception as e:
+            errors.append(str(e)[:100])
+            if len(errors) > 5:
+                break
+
+    con.close()
+    return {"imported": count, "errors": errors[:5], "total_submitted": len(rows)}
+
+
 @router.post("/api/debug/walmart-clear-scorecard")
 def debug_clear_scorecard():
     """Clear scorecard table so it can be re-imported fresh."""
