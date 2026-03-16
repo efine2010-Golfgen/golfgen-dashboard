@@ -291,6 +291,8 @@ function USMap({ showCities, showRegions, selectedMetric, onSelectState, onSelec
     const h = Math.max(Math.min(w * 0.6, 620), 400);
 
     if (svgRef.current) svgRef.current.remove();
+    // Remove old tooltip if present
+    d3.select(container).selectAll(".map-tooltip").remove();
 
     const svg = d3.select(container).append("svg")
       .attr("width", w)
@@ -298,6 +300,23 @@ function USMap({ showCities, showRegions, selectedMetric, onSelectState, onSelec
       .style("background", "#0d1b2a");
 
     svgRef.current = svg.node();
+
+    // Tooltip div
+    const tooltip = d3.select(container).append("div")
+      .attr("class", "map-tooltip")
+      .style("position", "absolute")
+      .style("pointer-events", "none")
+      .style("background", "rgba(13,27,42,0.95)")
+      .style("border", "1px solid #2ECFAA")
+      .style("border-radius", "6px")
+      .style("padding", "8px 12px")
+      .style("font-family", "'Space Grotesk', monospace")
+      .style("font-size", "11px")
+      .style("color", "#e0e8f0")
+      .style("box-shadow", "0 4px 12px rgba(0,0,0,0.5)")
+      .style("display", "none")
+      .style("z-index", "10")
+      .style("max-width", "220px");
 
     const g = svg.append("g").attr("transform", "translate(10,5)");
 
@@ -347,11 +366,28 @@ function USMap({ showCities, showRegions, selectedMetric, onSelectState, onSelec
             const sd = WM_DATA[String(d.id).padStart(2, "0")];
             if (sd) onSelectState(sd.abbr);
           })
-          .on("mouseover", function () {
+          .on("mouseover", function (event, d) {
             d3.select(this).attr("opacity", 1).attr("stroke-width", 1.5).attr("stroke", "#2ECFAA");
+            const sd = WM_DATA[String(d.id).padStart(2, "0")];
+            if (sd) {
+              const avgPerStore = sd.traited > 0 ? Math.round(sd.pos / sd.traited) : 0;
+              tooltip.style("display", "block").html(
+                `<div style="font-weight:700;color:#2ECFAA;margin-bottom:4px">${sd.name} (${sd.abbr})</div>` +
+                `<div>Sales: <b style="color:#2ECFAA">$${sd.pos.toLocaleString()}</b></div>` +
+                `<div>Units: <b>${sd.qty.toLocaleString()}</b></div>` +
+                `<div>Returns: <b style="color:#f87171">$${sd.returns.toLocaleString()}</b></div>` +
+                `<div>Stores: <b>${sd.traited}</b> &nbsp;|&nbsp; Avg: <b>$${avgPerStore.toLocaleString()}</b>/st</div>`
+              );
+            }
+          })
+          .on("mousemove", function (event) {
+            const rect = container.getBoundingClientRect();
+            tooltip.style("left", (event.clientX - rect.left + 14) + "px")
+              .style("top", (event.clientY - rect.top - 10) + "px");
           })
           .on("mouseout", function () {
             d3.select(this).attr("opacity", 0.9).attr("stroke-width", 0.6).attr("stroke", "rgba(125,175,210,0.3)");
+            tooltip.style("display", "none");
           });
 
         // State abbreviation labels
@@ -446,6 +482,26 @@ function USMap({ showCities, showRegions, selectedMetric, onSelectState, onSelec
             .style("cursor", "pointer")
             .on("click", function (event, d) {
               if (onSelectCity) onSelectCity(d);
+            })
+            .on("mouseover", function (event, d) {
+              d3.select(this).attr("opacity", 1).attr("stroke-width", 1).attr("stroke", "#2ECFAA");
+              const avgPerStore = d.stores > 0 ? Math.round(d.pos / d.stores) : 0;
+              tooltip.style("display", "block").html(
+                `<div style="font-weight:700;color:#2ECFAA;margin-bottom:4px">${d.city}, ${d.state}</div>` +
+                `<div>Sales: <b style="color:#2ECFAA">$${d.pos.toLocaleString()}</b></div>` +
+                `<div>Units: <b>${d.qty.toLocaleString()}</b></div>` +
+                `<div>Returns: <b style="color:#f87171">$${d.returns.toLocaleString()}</b></div>` +
+                `<div>Stores: <b>${d.stores}</b> &nbsp;|&nbsp; Avg: <b>$${avgPerStore.toLocaleString()}</b>/st</div>`
+              );
+            })
+            .on("mousemove", function (event) {
+              const rect = container.getBoundingClientRect();
+              tooltip.style("left", (event.clientX - rect.left + 14) + "px")
+                .style("top", (event.clientY - rect.top - 10) + "px");
+            })
+            .on("mouseout", function () {
+              d3.select(this).attr("opacity", 0.85).attr("stroke-width", 0.3).attr("stroke", "rgba(255,255,255,0.4)");
+              tooltip.style("display", "none");
             });
 
           // City name labels — top 40 by metric value, nudge to avoid overlap
@@ -538,7 +594,7 @@ function USMap({ showCities, showRegions, selectedMetric, onSelectState, onSelec
       .catch((err) => console.error("Failed to load TopoJSON:", err));
   }, [showCities, showRegions, selectedMetric]);
 
-  return <div ref={mapRef} style={{ width: "100%", minHeight: "400px" }} />;
+  return <div ref={mapRef} style={{ width: "100%", minHeight: "400px", position: "relative" }} />;
 }
 
 // ═════════════════════════════════════════════════════════════════════════════

@@ -193,7 +193,7 @@ export function WalmartEcomm({ filters }) {
                     backgroundColor: idx % 2 === 0 ? "var(--bg2)" : "transparent",
                   }}
                 >
-                  <td style={{ padding: "8px", ...SG(11) }}>{item.productName}</td>
+                  <td style={{ padding: "8px", ...SG(11), maxWidth: 320, wordWrap: "break-word", whiteSpace: "normal" }}>{item.productName}</td>
                   <td style={{ padding: "8px", ...SG(11) }}>{item.fineline}</td>
                   <td style={{ padding: "8px", textAlign: "right", ...SG(11) }}>
                     {f$(item.authSalesTy)}

@@ -14,12 +14,14 @@ _SCORECARD_DATA = "eNrtvW2PXMeRJvpXGsYY2AVWeTMyMt7uN0MybAHDkUa01lgsFgPCbNuEaZIgq
 def migrate_scorecard_periods(con):
     """Load full scorecard data with all 8 periods if Q1 data is missing."""
     try:
-        # Check if Q1 data already exists
+        # Check if Q1 data already exists WITH normalized metric names
+        # (old data may have unnormalized names like "POS Sales in dollars" instead of "POS Sales $")
         result = con.execute(
-            "SELECT COUNT(*) FROM walmart_scorecard WHERE period = ?", ["Q1"]
+            "SELECT COUNT(*) FROM walmart_scorecard WHERE period = ? AND metric_name = ?",
+            ["Q1", "POS Sales $"]
         ).fetchone()
         if result and result[0] > 0:
-            logger.info(f"Scorecard Q1 data already present ({result[0]} rows), skipping migration")
+            logger.info(f"Scorecard Q1 data with normalized names already present ({result[0]} rows), skipping migration")
             return 0
 
         # Decode embedded data
