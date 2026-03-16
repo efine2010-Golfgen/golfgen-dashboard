@@ -174,6 +174,15 @@ async def lifespan(app: FastAPI):
     except Exception as e:
         logger.error(f"Auto-migration error (non-fatal): {e}")
 
+    # Scorecard data migration — load all 8 periods if Q1-Q4 missing
+    try:
+        from scripts.scorecard_migration import migrate_scorecard_periods
+        con = get_db_rw()
+        migrate_scorecard_periods(con)
+        con.close()
+    except Exception as e:
+        logger.error(f"Scorecard migration error (non-fatal): {e}")
+
     # Start background sync (imports scheduler module which imports services)
     task = None
     try:

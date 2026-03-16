@@ -406,12 +406,35 @@ Done (March 15, 2026):
 Done: Excel upload for warehouse data. Walmart Scintilla report ingestion (6 new tables,
 5 report type parsers, auto-detect upload, Retail Reporting nav + page with 5 sub-tabs).
 Architecture doc: Walmart_Retail_Data_Architecture.md.
-Scorecard data loaded (624 rows) via JSON import endpoint. WalmartAnalytics.jsx split into
-7 sub-components in walmart/ directory for stability.
+Scorecard data loaded (648 rows) with all 8 periods via embedded migration.
+WalmartAnalytics.jsx split into 7 sub-components in walmart/ directory for stability.
 - POST /api/retail/import-scorecard — JSON import for pre-parsed scorecard data
   (bypasses Excel upload when file parsing has issues)
 - dataAvailable flag checks walmart_item_weekly, walmart_scorecard, AND walmart_store_weekly
 - has_item_data flag gates item/ecomm/forecast sections separately from scorecard
+
+#### Scorecard Overhaul (March 16, 2026): COMPLETE ✓
+- Backend: scripts/scorecard_migration.py — embedded compressed JSON data (648 rows)
+  - Runs on startup in main.py lifespan(), checks if Q1 data exists before loading
+  - Clears old scorecard data and re-imports with normalized metric names
+  - 8 periods: Last Week, Current Month, Last Month, Year, Q1, Q2, Q3, Q4
+  - 3 vendor sections: All Vendors, Vendor 77893, Vendor 79010
+  - 27 metrics across 4 groups: Store Sales, Store Inventory, DC Inventory, Margins & Markdowns
+  - Metric names normalized (e.g. "POS Sales in dollars" → "POS Sales $")
+- Frontend: WalmartScorecard.jsx — full rewrite
+  - Period view selector: All Periods, Recent, Quarterly
+  - Vendor tab selector: All Vendors, V-77893, V-79010
+  - 4 summary charts: POS Sales TY vs LY, Margin Metrics, Supply Chain $, Turns & Instock
+  - Full scorecard table with metric group headers, sticky metric column, color-coded diffs
+  - Vendor Comparison table: Year-to-date side-by-side for key metrics across all vendors
+  - Period ranges shown from data (e.g. Q1 = 202501-202513)
+
+#### Sales Chart Improvements (March 16, 2026): COMPLETE ✓
+- Returns chart: Math.abs() on returnsAmtTy/Ly so bars go upward (were negative from source)
+- Sales/Units chart: Lines renamed "LY Revenue"/"LY Units" (was "Total Sales"), thicker (3px),
+  brighter colors (#f59e0b amber, #ef4444 red, #3b82f6 blue), TY bars semi-transparent
+- Clearance/Regular lines: renamed "Clearance TY"/"Regular TY", thicker (2.5px)
+
 Remaining: First Tee, Belk, Hobby Lobby, Albertsons, Family Dollar
 ingestion (same table schemas, different channel value). Google Drive watched folder. Email ingestion.
 

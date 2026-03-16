@@ -164,7 +164,7 @@ export function SalesPage({ filters }) {
                 ? [
                     {
                       label: "Returns $ TY",
-                      data: weeks.map((w) => w.returnsAmtTy || 0),
+                      data: weeks.map((w) => Math.abs(w.returnsAmtTy || 0)),
                       backgroundColor: COLORS.purple || "#a78bfa",
                       borderColor: COLORS.purple || "#a78bfa",
                       borderWidth: 1,
@@ -173,11 +173,11 @@ export function SalesPage({ filters }) {
                     {
                       label: "Returns $ LY",
                       type: "line",
-                      data: weeks.map((w) => w.returnsAmtLy || 0),
+                      data: weeks.map((w) => Math.abs(w.returnsAmtLy || 0)),
                       borderColor: COLORS.orange,
                       backgroundColor: "transparent",
-                      borderWidth: 2,
-                      pointRadius: 1.5,
+                      borderWidth: 3,
+                      pointRadius: 2,
                       pointBackgroundColor: COLORS.orange,
                       fill: false,
                       tension: 0.3,
@@ -186,60 +186,60 @@ export function SalesPage({ filters }) {
                   ]
                 : [
                     {
-                      label: "Total Sales",
+                      label: chartMetric === "sales" ? "LY Revenue" : "LY Units",
                       type: "line",
                       data: weeks.map((w) =>
                         chartMetric === "sales" ? w.posSalesLy : w.posQtyLy
                       ),
-                      borderColor: COLORS.orange,
+                      borderColor: "#f59e0b",
                       backgroundColor: "transparent",
-                      borderWidth: 2,
-                      pointRadius: 1.5,
-                      pointBackgroundColor: COLORS.orange,
+                      borderWidth: 3,
+                      pointRadius: 2.5,
+                      pointBackgroundColor: "#f59e0b",
                       fill: false,
                       tension: 0.3,
                       order: 0,
                     },
                     {
-                      label: "TY",
+                      label: chartMetric === "sales" ? "TY Revenue" : "TY Units",
                       data: weeks.map((w) =>
                         chartMetric === "sales" ? w.posSalesTy : w.posQtyTy
                       ),
-                      backgroundColor: COLORS.teal,
+                      backgroundColor: "rgba(46,207,170,0.5)",
                       borderColor: COLORS.teal,
                       borderWidth: 1,
                       order: 3,
                     },
                     {
-                      label: "Clearance",
+                      label: "Clearance TY",
                       type: "line",
                       data: weeks.map((w) =>
                         chartMetric === "sales"
                           ? w.clearanceSalesTy || 0
                           : w.clearanceQtyTy || 0
                       ),
-                      borderColor: COLORS.red || "#ef4444",
+                      borderColor: "#ef4444",
                       backgroundColor: "transparent",
-                      borderWidth: 1.5,
+                      borderWidth: 2.5,
                       pointRadius: 0,
-                      borderDash: [4, 2],
+                      borderDash: [6, 3],
                       fill: false,
                       tension: 0.3,
                       order: 1,
                     },
                     {
-                      label: "Regular",
+                      label: "Regular TY",
                       type: "line",
                       data: weeks.map((w) =>
                         chartMetric === "sales"
                           ? w.regularSalesTy || 0
                           : w.regularQtyTy || 0
                       ),
-                      borderColor: "#60a5fa",
+                      borderColor: "#3b82f6",
                       backgroundColor: "transparent",
-                      borderWidth: 1.5,
+                      borderWidth: 2.5,
                       pointRadius: 0,
-                      borderDash: [6, 3],
+                      borderDash: [8, 4],
                       fill: false,
                       tension: 0.3,
                       order: 2,
