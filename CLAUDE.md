@@ -150,6 +150,13 @@ webapp/
         api.js           ← ALL fetch() calls, _hq() hierarchy query builder
         constants.js     ← shared constants
       pages/             ← one file per dashboard tab (22 pages)
+        walmart/           ← Walmart Analytics sub-components (split for stability)
+          WalmartHelpers.jsx   ← shared: SG, DM, Card, fN, f$, fPct, delta, KPICard, ChartCanvas
+          WalmartSales.jsx     ← Sales Performance tab (KPIs, charts, item table)
+          WalmartInventory.jsx ← Inventory Health tab
+          WalmartScorecard.jsx ← Vendor Scorecard tab (metric matrix by vendor/group/period)
+          WalmartEcomm.jsx     ← eCommerce tab
+          WalmartForecast.jsx  ← Order Forecast tab
 ```
 
 ## Database
@@ -399,6 +406,12 @@ Done (March 15, 2026):
 Done: Excel upload for warehouse data. Walmart Scintilla report ingestion (6 new tables,
 5 report type parsers, auto-detect upload, Retail Reporting nav + page with 5 sub-tabs).
 Architecture doc: Walmart_Retail_Data_Architecture.md.
+Scorecard data loaded (624 rows) via JSON import endpoint. WalmartAnalytics.jsx split into
+7 sub-components in walmart/ directory for stability.
+- POST /api/retail/import-scorecard — JSON import for pre-parsed scorecard data
+  (bypasses Excel upload when file parsing has issues)
+- dataAvailable flag checks walmart_item_weekly, walmart_scorecard, AND walmart_store_weekly
+- has_item_data flag gates item/ecomm/forecast sections separately from scorecard
 Remaining: First Tee, Belk, Hobby Lobby, Albertsons, Family Dollar
 ingestion (same table schemas, different channel value). Google Drive watched folder. Email ingestion.
 
