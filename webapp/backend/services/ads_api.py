@@ -521,8 +521,8 @@ def _sync_ads_data_inner():
     start_date = (today - timedelta(days=30)).strftime("%Y-%m-%d")
     end_date = (today - timedelta(days=1)).strftime("%Y-%m-%d")
 
-    # v3 API: dimension columns (campaignId, campaignName, etc.) are returned
-    # automatically based on reportTypeId — only specify metric columns.
+    # v3 API: each reportTypeId has its own allowed columns and groupBy values.
+    # Dimension columns are returned automatically — only specify metric columns.
     # ── Report 1: Campaign-level daily data ──
     _pull_ads_report(
         ads_creds, "spCampaigns",
@@ -530,12 +530,14 @@ def _sync_ads_data_inner():
                  "purchases7d", "unitsSoldClicks7d", "sales7d"],
         start_date=start_date, end_date=end_date,
         handler=_handle_campaign_report,
+        group_by=["campaign"],
     )
 
     # ── Report 2: Targeting/Keywords daily data ──
+    # Note: spTargeting uses "cost" not "spend"
     _pull_ads_report(
         ads_creds, "spTargeting",
-        columns=["date", "impressions", "clicks", "spend",
+        columns=["date", "impressions", "clicks", "cost",
                  "purchases7d", "unitsSoldClicks7d", "sales7d"],
         start_date=start_date, end_date=end_date,
         handler=_handle_targeting_report,
