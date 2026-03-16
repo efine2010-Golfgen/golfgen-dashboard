@@ -516,40 +516,37 @@ def _sync_ads_data_inner():
             logger.error(f"Ads sync: failed to discover profiles: {e}")
             return
 
-    # Pull last 60 days of data
+    # Pull last 30 days of data (v3 API max range = 31 days)
     today = datetime.now(ZoneInfo("America/Chicago"))
-    start_date = (today - timedelta(days=60)).strftime("%Y-%m-%d")
+    start_date = (today - timedelta(days=30)).strftime("%Y-%m-%d")
     end_date = (today - timedelta(days=1)).strftime("%Y-%m-%d")
 
-    # ── Report 1: Campaign-level daily data (v3 column names) ──
+    # v3 API: dimension columns (campaignId, campaignName, etc.) are returned
+    # automatically based on reportTypeId — only specify metric columns.
+    # ── Report 1: Campaign-level daily data ──
     _pull_ads_report(
         ads_creds, "spCampaigns",
-        columns=["date", "campaignId", "campaignName", "campaignStatus",
-                 "campaignBudgetAmount", "impressions", "clicks", "cost",
+        columns=["date", "impressions", "clicks", "spend",
                  "purchases7d", "unitsSoldClicks7d", "sales7d"],
         start_date=start_date, end_date=end_date,
         handler=_handle_campaign_report,
     )
 
-    # ── Report 2: Targeting/Keywords daily data (v3 column names) ──
+    # ── Report 2: Targeting/Keywords daily data ──
     _pull_ads_report(
         ads_creds, "spTargeting",
-        columns=["date", "campaignId", "campaignName", "adGroupId",
-                 "adGroupName", "keywordId", "keyword", "matchType",
-                 "impressions", "clicks", "cost", "purchases7d",
-                 "unitsSoldClicks7d", "sales7d"],
+        columns=["date", "impressions", "clicks", "spend",
+                 "purchases7d", "unitsSoldClicks7d", "sales7d"],
         start_date=start_date, end_date=end_date,
         handler=_handle_targeting_report,
         group_by=["targeting"],
     )
 
-    # ── Report 3: Search terms (v3 column names) ──
+    # ── Report 3: Search terms ──
     _pull_ads_report(
         ads_creds, "spSearchTerm",
-        columns=["date", "campaignId", "campaignName", "adGroupName",
-                 "keyword", "matchType", "searchTerm",
-                 "impressions", "clicks", "cost", "purchases7d",
-                 "unitsSoldClicks7d", "sales7d"],
+        columns=["date", "impressions", "clicks", "spend",
+                 "purchases7d", "unitsSoldClicks7d", "sales7d"],
         start_date=start_date, end_date=end_date,
         handler=_handle_search_term_report,
         group_by=["searchTerm"],
@@ -685,7 +682,7 @@ def _handle_campaign_report(data):
                 date = row.get("date", "")
                 campaign_id = str(row.get("campaignId", ""))
                 campaign_name = row.get("campaignName", "")
-                spend = float(row.get("cost", 0) or 0)
+                spend = float(row.get("spend", row.get("cost", 0)) or 0)
                 sales = float(row.get("sales7d", row.get("sales", 0)) or 0)
                 impressions = int(row.get("impressions", 0) or 0)
                 clicks = int(row.get("clicks", 0) or 0)
@@ -775,7 +772,7 @@ def _handle_targeting_report(data):
                     row.get("matchType", ""),
                     int(row.get("impressions", 0) or 0),
                     int(row.get("clicks", 0) or 0),
-                    float(row.get("cost", 0) or 0),
+                    float(row.get("spend", row.get("cost", 0)) or 0),
                     float(row.get("sales7d", row.get("sales", 0)) or 0),
                     int(row.get("purchases7d", row.get("purchases", 0)) or 0),
                     int(row.get("unitsSoldClicks7d", row.get("unitsSold", 0)) or 0),
@@ -837,7 +834,7 @@ def _handle_search_term_report(data):
                     search_term,
                     int(row.get("impressions", 0) or 0),
                     int(row.get("clicks", 0) or 0),
-                    float(row.get("cost", 0) or 0),
+                    float(row.get("spend", row.get("cost", 0)) or 0),
                     float(row.get("sales7d", row.get("sales", 0)) or 0),
                     int(row.get("purchases7d", row.get("purchases", 0)) or 0),
                     int(row.get("unitsSoldClicks7d", row.get("unitsSold", 0)) or 0),
