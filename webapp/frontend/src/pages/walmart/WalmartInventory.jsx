@@ -11,6 +11,29 @@ import {
   COLORS,
 } from "./WalmartHelpers";
 
+// Smart instock formatter: handles both 0-1 decimal and 0-100 range
+const fInstock = (v) => {
+  if (v == null || v === 0) return "—";
+  const num = Number(v);
+  if (num > 1) return num.toFixed(1) + "%";
+  return (num * 100).toFixed(1) + "%";
+};
+
+// Convert to 0-100 scale for charts
+const toPercent = (v) => {
+  if (v == null || v === 0) return 0;
+  const num = Number(v);
+  return num > 1 ? num : num * 100;
+};
+
+// Color for instock value (after converting to 0-100 scale)
+const instockColor = (v) => {
+  const pct = toPercent(v);
+  if (pct >= 90) return COLORS.teal;
+  if (pct >= 70) return COLORS.yellow;
+  return COLORS.red;
+};
+
 export function WalmartInventory({ filters }) {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
@@ -66,7 +89,7 @@ export function WalmartInventory({ filters }) {
 
   const instockChartLines = itemNames.slice(0, 8).map((item, idx) => ({
     label: item.length > 25 ? item.substring(0, 25) + "…" : item,
-    data: periodKeys.map((p) => instockTrend[item]?.[p] || 0),
+    data: periodKeys.map((p) => toPercent(instockTrend[item]?.[p])),
     borderColor: colorValues[idx % colorValues.length],
     fill: false,
     tension: 0.3,
@@ -98,8 +121,8 @@ export function WalmartInventory({ filters }) {
         }}
       >
         <KPICard label="Total OH Units" value={fN(kpis.totalOhUnits)} />
-        <KPICard label="Avg Instock %" value={kpis.avgInstockPct != null ? Number(kpis.avgInstockPct).toFixed(1) + "%" : "—"} />
-        <KPICard label="Weeks of Supply" value={fN(kpis.weeksOfSupply)} />
+        <KPICard label="Avg Instock %" value={fInstock(kpis.avgInstockPct)} />
+        <KPICard label="Weeks of Supply" value={kpis.weeksOfSupply != null ? Number(kpis.weeksOfSupply).toFixed(1) : "—"} />
       </div>
 
       {/* Instock % Trend */}
@@ -175,9 +198,14 @@ export function WalmartInventory({ filters }) {
                       return (
                         <td
                           key={pk}
-                          style={{ padding: "8px", textAlign: "right", ...SG(11) }}
+                          style={{
+                            padding: "8px",
+                            textAlign: "right",
+                            ...SG(11),
+                            color: instockColor(val),
+                          }}
                         >
-                          {val != null ? Number(val).toFixed(1) + "%" : "—"}
+                          {fInstock(val)}
                         </td>
                       );
                     })}

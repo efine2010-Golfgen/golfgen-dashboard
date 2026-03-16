@@ -13,6 +13,54 @@ import {
   ChartCanvas,
 } from "./WalmartHelpers";
 
+// Detect metric formatting type from name
+const getMetricFormat = (name) => {
+  const n = (name || "").toLowerCase();
+  if (
+    n.includes("%") ||
+    n.includes("instock") ||
+    n.includes("gim") ||
+    n.includes("margin") ||
+    n.includes("gmroii") ||
+    n.includes("turns") ||
+    n.includes("aur")
+  )
+    return "pct";
+  if (
+    n.includes("dollar") ||
+    n.includes("sales") ||
+    n.includes("$") ||
+    n.includes("mumd") ||
+    n.includes("cost") ||
+    n.includes("retail") ||
+    n.includes("receipt")
+  )
+    return "dollar";
+  return "number";
+};
+
+// Format value based on metric type
+const fMetric = (v, metricName) => {
+  if (v == null) return "—";
+  const fmt = getMetricFormat(metricName);
+  if (fmt === "pct") {
+    const num = Number(v);
+    if (Math.abs(num) < 2) return (num * 100).toFixed(1) + "%";
+    return num.toFixed(1) + "%";
+  }
+  if (fmt === "dollar") return f$(v);
+  return fN(v);
+};
+
+// Format diff value (always a 0-1 decimal representing % change)
+const fDiff = (v) => {
+  if (v == null || v === 0) return { text: "—", color: "var(--txt3)" };
+  const pct = Number(v) * 100;
+  const color = pct >= 0 ? COLORS.teal : COLORS.red;
+  const arrow = pct >= 0 ? "▲" : "▼";
+  return { text: `${arrow} ${Math.abs(pct).toFixed(1)}%`, color };
+};
+
 export function WalmartScorecard({ filters }) {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
@@ -58,67 +106,26 @@ export function WalmartScorecard({ filters }) {
   const scorecard = data.scorecard || [];
   const kpis = data.kpis || {};
 
-  // Helper: detect if metric is a percentage type
-  const isPctMetric = (name) =>
-    /(%|margin|turns|gmroii|instock|aur)/i.test(name);
-
-  // Smart value formatter for scorecard
-  const fVal = (v, metricName) => {
-    if (v == null) return "—";
-    if (isPctMetric(metricName)) {
-      if (Math.abs(v) < 10) return (v * 100).toFixed(1) + "%";
-      return fN(v);
-    }
-    return fN(v);
-  };
-
-  // Extract KPIs and organize scorecard
-  const kpiList = [
-    { label: "POS Sales LW", key: "posSalesLw" },
-    { label: "GIM % LW", key: "gimPctLw" },
-    { label: "MUMD $ LW", key: "mumdLw" },
-    { label: "Repl Instock % LW", key: "replInstockLw" },
-    { label: "GMROII LW", key: "gmroiiLw" },
-  ];
-
-  const displayKpis = kpiList
-    .map((item) => {
-      const val = kpis[item.key];
-      if (!val || (val.ty === 0 && val.ly === 0)) return null;
-      return {
-        label: item.label,
-        value: fVal(val.ty, item.label),
-        delta: val.diff ? (val.diff * 100).toFixed(1) : null,
-      };
-    })
-    .filter(Boolean);
-
-  // If no KPIs from backend extraction, build from scorecard rows directly
-  if (displayKpis.length === 0 && scorecard.length > 0) {
-    // Get a few key metrics from Last Week period
-    const lwRows = scorecard.filter((r) => r.period === "Last Week");
+  // Extract KPIs from "All Vendors" + "Last Week" rows
+  const displayKpis = [];
+  if (scorecard.length > 0) {
+    const lwRows = scorecard.filter(
+      (r) => r.vendorSection === "All Vendors" && r.period === "Last Week"
+    );
     const seen = new Set();
     lwRows.forEach((r) => {
       if (displayKpis.length >= 5 || seen.has(r.metricName)) return;
       seen.add(r.metricName);
       displayKpis.push({
         label: r.metricName,
-        value: fVal(r.valueTy, r.metricName),
+        value: fMetric(r.valueTy, r.metricName),
         delta: r.valueDiff ? (r.valueDiff * 100).toFixed(1) : null,
       });
     });
   }
 
-  // Group scorecard by section
-  const sections = {};
-  scorecard.forEach((row) => {
-    const section = row.vendorSection || "Other";
-    if (!sections[section]) sections[section] = [];
-    sections[section].push(row);
-  });
-
-  // Extract unique periods from scorecard
-  const periods = [
+  // Extract unique periods and sort in preferred order
+  const periodOrder = [
     "Last Week",
     "4-Week",
     "13-Week",
@@ -126,9 +133,23 @@ export function WalmartScorecard({ filters }) {
     "52-Week",
     "Year",
   ];
-  const periodsInData = periods.filter((p) =>
+  const periodsInData = periodOrder.filter((p) =>
     scorecard.some((row) => row.period === p)
   );
+
+  // Group scorecard by section, then by metric group
+  const sectionMap = {};
+  scorecard.forEach((row) => {
+    const section = row.vendorSection || "Other";
+    if (!sectionMap[section]) {
+      sectionMap[section] = {};
+    }
+    const group = row.metricGroup || "General";
+    if (!sectionMap[section][group]) {
+      sectionMap[section][group] = [];
+    }
+    sectionMap[section][group].push(row);
+  });
 
   // Build chart data: POS Sales TY vs LY
   const posSalesData = scorecard.filter(
@@ -167,10 +188,7 @@ export function WalmartScorecard({ filters }) {
   const gimData = scorecard.filter((row) =>
     row.metricName?.includes("GIM")
   );
-  const gimPeriods = [...new Set(gimData.map((row) => row.period))].slice(
-    0,
-    4
-  );
+  const gimPeriods = [...new Set(gimData.map((row) => row.period))].slice(0, 4);
   const gimChartData = {
     labels: gimPeriods,
     datasets: [
@@ -189,141 +207,226 @@ export function WalmartScorecard({ filters }) {
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: "24px" }}>
       {/* KPI Cards */}
-      <div
-        style={{
-          display: "grid",
-          gridTemplateColumns: "repeat(5, 1fr)",
-          gap: "12px",
-        }}
-      >
-        {displayKpis.map((kpi) => (
-          <KPICard
-            key={kpi.label}
-            label={kpi.label}
-            value={kpi.value}
-            delta={kpi.delta}
-          />
-        ))}
-      </div>
+      {displayKpis.length > 0 && (
+        <div
+          style={{
+            display: "grid",
+            gridTemplateColumns: `repeat(${Math.min(5, displayKpis.length)}, 1fr)`,
+            gap: "12px",
+          }}
+        >
+          {displayKpis.map((kpi) => (
+            <KPICard
+              key={kpi.label}
+              label={kpi.label}
+              value={kpi.value}
+              delta={kpi.delta}
+            />
+          ))}
+        </div>
+      )}
 
-      {/* Full Scorecard Matrix (div-based CSS Grid) */}
-      {Object.entries(sections).map(([section, rows]) => {
-        const metricNames = [...new Set(rows.map((r) => r.metricName))];
-        return (
-          <Card key={section}>
-            <CardHdr title={section} />
-            <div
+      {/* Full Scorecard Matrix by Vendor Section */}
+      {Object.entries(sectionMap).map(([section, groupMap]) => (
+        <Card key={section}>
+          <CardHdr title={section} />
+          <div style={{ overflowX: "auto" }}>
+            <table
               style={{
-                display: "grid",
-                gridTemplateColumns: "180px repeat(7, 1fr)",
-                gap: "1px",
-                backgroundColor: "var(--border)",
-                padding: "1px",
+                width: "100%",
+                borderCollapse: "collapse",
+                ...SG(11),
               }}
             >
-              {/* Header: Metric | LW TY | LW LY | CM TY | CM LY | LM TY | LM LY | YR TY */}
-              <div
-                style={{
-                  backgroundColor: "var(--card)",
-                  padding: "8px",
-                  ...SG(10, 600),
-                  color: "var(--txt3)",
-                }}
-              >
-                Metric
-              </div>
-              {[
-                "LW TY",
-                "LW LY",
-                "CM TY",
-                "CM LY",
-                "LM TY",
-                "LM LY",
-                "YR TY",
-              ].map((hdr) => (
-                <div
-                  key={hdr}
+              <thead>
+                <tr
                   style={{
                     backgroundColor: "var(--card)",
-                    padding: "8px",
-                    textAlign: "right",
-                    ...SG(10, 600),
-                    color: "var(--txt3)",
+                    borderBottom: "2px solid var(--border)",
                   }}
                 >
-                  {hdr}
-                </div>
-              ))}
-
-              {/* Data rows */}
-              {metricNames.map((metric) => {
-                const metricRows = rows.filter(
-                  (r) => r.metricName === metric
-                );
-                const headerValues = [
-                  "Last Week",
-                  "Last Week",
-                  "4-Week",
-                  "4-Week",
-                  "13-Week",
-                  "13-Week",
-                  "52-Week",
-                ];
-                const headerTypes = ["TY", "LY", "TY", "LY", "TY", "LY", "TY"];
-                const cellValues = headerValues.map((period, idx) => {
-                  const row = metricRows.find((r) => r.period === period);
-                  const val =
-                    headerTypes[idx] === "TY" ? row?.valueTy : row?.valueLy;
-                  return val !== undefined && val !== null
-                    ? fVal(val, metric)
-                    : "—";
-                });
-
-                return (
-                  <Fragment key={metric}>
-                    <div
-                      style={{
-                        backgroundColor: "var(--card)",
-                        padding: "8px",
-                        ...SG(11),
-                        color: "var(--txt)",
-                      }}
-                    >
-                      {metric}
-                    </div>
-                    {cellValues.map((val, idx) => (
-                      <div
-                        key={idx}
+                  <th
+                    style={{
+                      padding: "10px",
+                      textAlign: "left",
+                      ...SG(10, 600),
+                      color: "var(--txt3)",
+                      whiteSpace: "nowrap",
+                    }}
+                  >
+                    Metric
+                  </th>
+                  {periodsInData.map((period) => (
+                    <Fragment key={period}>
+                      <th
                         style={{
-                          backgroundColor: "var(--card)",
-                          padding: "8px",
+                          padding: "10px",
                           textAlign: "right",
-                          ...SG(11),
-                          color: "var(--txt)",
+                          ...SG(10, 600),
+                          color: "var(--txt3)",
+                          whiteSpace: "nowrap",
+                          borderLeft: "1px solid var(--border)",
                         }}
                       >
-                        {val}
-                      </div>
-                    ))}
-                  </Fragment>
-                );
-              })}
-            </div>
-          </Card>
-        );
-      })}
+                        {period} TY
+                      </th>
+                      <th
+                        style={{
+                          padding: "10px",
+                          textAlign: "right",
+                          ...SG(10, 600),
+                          color: "var(--txt3)",
+                          whiteSpace: "nowrap",
+                        }}
+                      >
+                        LY
+                      </th>
+                      <th
+                        style={{
+                          padding: "10px",
+                          textAlign: "right",
+                          ...SG(10, 600),
+                          color: "var(--txt3)",
+                          whiteSpace: "nowrap",
+                        }}
+                      >
+                        Diff %
+                      </th>
+                    </Fragment>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {Object.entries(groupMap).map(([group, rows]) => {
+                  const metricNames = [
+                    ...new Set(rows.map((r) => r.metricName)),
+                  ];
+                  const rowCount = metricNames.length;
+                  let metricIdx = 0;
+
+                  return (
+                    <Fragment key={group}>
+                      {metricNames.map((metric) => {
+                        const metricRows = rows.filter(
+                          (r) => r.metricName === metric
+                        );
+                        const isFirstInGroup = metricIdx === 0;
+                        metricIdx++;
+                        const bgColor =
+                          metricIdx % 2 === 1
+                            ? "var(--card)"
+                            : "rgba(0,0,0,0.02)";
+
+                        return (
+                          <tr
+                            key={metric}
+                            style={{
+                              backgroundColor: bgColor,
+                              borderBottom: "1px solid var(--border)",
+                            }}
+                          >
+                            <td
+                              style={{
+                                padding: "8px 10px",
+                                textAlign: "left",
+                                color: "var(--txt)",
+                                fontWeight: isFirstInGroup ? 500 : 400,
+                                borderTop:
+                                  isFirstInGroup
+                                    ? "2px solid var(--border)"
+                                    : "none",
+                              }}
+                            >
+                              {metric}
+                            </td>
+                            {periodsInData.map((period, pIdx) => {
+                              const row = metricRows.find(
+                                (r) => r.period === period
+                              );
+                              const ty = row?.valueTy;
+                              const ly = row?.valueLy;
+                              const diff = row?.valueDiff;
+
+                              return (
+                                <Fragment key={`${metric}-${period}`}>
+                                  <td
+                                    style={{
+                                      padding: "8px 10px",
+                                      textAlign: "right",
+                                      color: "var(--txt)",
+                                      borderLeft:
+                                        pIdx === 0
+                                          ? "1px solid var(--border)"
+                                          : "none",
+                                      borderTop:
+                                        isFirstInGroup
+                                          ? "2px solid var(--border)"
+                                          : "none",
+                                    }}
+                                  >
+                                    {fMetric(ty, metric)}
+                                  </td>
+                                  <td
+                                    style={{
+                                      padding: "8px 10px",
+                                      textAlign: "right",
+                                      color: "var(--txt)",
+                                      borderTop:
+                                        isFirstInGroup
+                                          ? "2px solid var(--border)"
+                                          : "none",
+                                    }}
+                                  >
+                                    {fMetric(ly, metric)}
+                                  </td>
+                                  <td
+                                    style={{
+                                      padding: "8px 10px",
+                                      textAlign: "right",
+                                      color: fDiff(diff).color,
+                                      fontWeight: 500,
+                                      borderTop:
+                                        isFirstInGroup
+                                          ? "2px solid var(--border)"
+                                          : "none",
+                                    }}
+                                  >
+                                    {fDiff(diff).text}
+                                  </td>
+                                </Fragment>
+                              );
+                            })}
+                          </tr>
+                        );
+                      })}
+                    </Fragment>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        </Card>
+      ))}
 
       {/* Supporting Charts */}
-      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "12px" }}>
-        <Card>
-          <CardHdr title="POS Sales TY vs LY" />
-          <ChartCanvas type="bar" data={posSalesChartData} height={250} />
-        </Card>
-        <Card>
-          <CardHdr title="GIM % Trend" />
-          <ChartCanvas type="line" data={gimChartData} height={250} />
-        </Card>
-      </div>
+      {(posSalesData.length > 0 || gimData.length > 0) && (
+        <div
+          style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "12px" }}
+        >
+          {posSalesData.length > 0 && (
+            <Card>
+              <CardHdr title="POS Sales TY vs LY" />
+              <ChartCanvas type="bar" data={posSalesChartData} height={250} />
+            </Card>
+          )}
+          {gimData.length > 0 && (
+            <Card>
+              <CardHdr title="GIM % Trend" />
+              <ChartCanvas type="line" data={gimChartData} height={250} />
+            </Card>
+          )}
+        </div>
+      )}
     </div>
   );
 }

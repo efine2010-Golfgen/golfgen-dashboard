@@ -12,6 +12,7 @@ import {
   PERIOD_LABELS,
   KPICard,
   ChartCanvas,
+  CardHdr,
 } from "./WalmartHelpers";
 import { api } from "../../lib/api";
 
@@ -21,7 +22,7 @@ export function SalesPage({ filters }) {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [selectedPeriod, setSelectedPeriod] = useState("l4w");
-  const [expandedItem, setExpandedItem] = useState(null);
+  const [chartMetric, setChartMetric] = useState("sales");
 
   // Fetch data on mount and when filters change
   useEffect(() => {
@@ -156,69 +157,83 @@ export function SalesPage({ filters }) {
         ))}
       </div>
 
-      {/* Revenue & Units Charts */}
-      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
-        <Card>
-          <div style={{ ...SG(12, 700), color: "var(--txt)", marginBottom: 8 }}>
-            POS Revenue TY vs LY
+      {/* POS Revenue/Units Chart — Full Width with Toggle */}
+      <Card>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
+          <div style={{ ...SG(12, 700), color: "var(--txt)" }}>
+            {chartMetric === "sales" ? "POS Revenue TY vs LY" : "POS Units TY vs LY"}
           </div>
-          <ChartCanvas
-            type="bar"
-            periods={PERIODS}
-            datasets={[
-              {
-                label: "TY",
-                data: PERIODS.map((p) => {
-                  const bk = periodKeyMap[p] || p;
-                  return data.kpis?.[bk]?.posSalesTy || 0;
-                }),
-                backgroundColor: COLORS.teal,
-              },
-              {
-                label: "LY",
-                data: PERIODS.map((p) => {
-                  const bk = periodKeyMap[p] || p;
-                  return data.kpis?.[bk]?.posSalesLy || 0;
-                }),
-                backgroundColor: COLORS.orange,
-              },
-            ]}
-          />
-        </Card>
-        <Card>
-          <div style={{ ...SG(12, 700), color: "var(--txt)", marginBottom: 8 }}>
-            POS Units TY vs LY
+          <div style={{ display: "flex", gap: 8 }}>
+            <button
+              onClick={() => setChartMetric("sales")}
+              style={{
+                ...SG(10, chartMetric === "sales" ? 700 : 500),
+                padding: "4px 10px",
+                borderRadius: 4,
+                cursor: "pointer",
+                background: chartMetric === "sales" ? "var(--acc1)" : "var(--card)",
+                color: chartMetric === "sales" ? "#fff" : "var(--txt3)",
+                border: chartMetric === "sales" ? "none" : "1px solid var(--brd)",
+              }}
+            >
+              POS $
+            </button>
+            <button
+              onClick={() => setChartMetric("qty")}
+              style={{
+                ...SG(10, chartMetric === "qty" ? 700 : 500),
+                padding: "4px 10px",
+                borderRadius: 4,
+                cursor: "pointer",
+                background: chartMetric === "qty" ? "var(--acc1)" : "var(--card)",
+                color: chartMetric === "qty" ? "#fff" : "var(--txt3)",
+                border: chartMetric === "qty" ? "none" : "1px solid var(--brd)",
+              }}
+            >
+              POS Qty
+            </button>
           </div>
-          <ChartCanvas
-            type="bar"
-            periods={PERIODS}
-            datasets={[
-              {
-                label: "TY",
-                data: PERIODS.map((p) => {
-                  const bk = periodKeyMap[p] || p;
-                  return data.kpis?.[bk]?.posQtyTy || 0;
-                }),
-                backgroundColor: COLORS.teal,
-              },
-              {
-                label: "LY",
-                data: PERIODS.map((p) => {
-                  const bk = periodKeyMap[p] || p;
-                  return data.kpis?.[bk]?.posQtyLy || 0;
-                }),
-                backgroundColor: COLORS.orange,
-              },
-            ]}
-          />
-        </Card>
-      </div>
+        </div>
+        <ChartCanvas
+          type="bar"
+          periods={PERIODS}
+          datasets={[
+            {
+              label: "TY",
+              data: PERIODS.map((p) => {
+                const bk = periodKeyMap[p] || p;
+                return chartMetric === "sales"
+                  ? data.kpis?.[bk]?.posSalesTy || 0
+                  : data.kpis?.[bk]?.posQtyTy || 0;
+              }),
+              backgroundColor: COLORS.teal,
+              borderColor: COLORS.teal,
+              order: 2,
+            },
+            {
+              label: "LY",
+              type: "line",
+              data: PERIODS.map((p) => {
+                const bk = periodKeyMap[p] || p;
+                return chartMetric === "sales"
+                  ? data.kpis?.[bk]?.posSalesLy || 0
+                  : data.kpis?.[bk]?.posQtyLy || 0;
+              }),
+              borderColor: COLORS.orange,
+              backgroundColor: "transparent",
+              borderWidth: 2,
+              pointRadius: 4,
+              pointBackgroundColor: COLORS.orange,
+              fill: false,
+              order: 1,
+            },
+          ]}
+        />
+      </Card>
 
       {/* Sales by Type Table */}
       <Card>
-        <div style={{ ...SG(12, 700), color: "var(--txt)", marginBottom: 8 }}>
-          Sales by Type
-        </div>
+        <CardHdr title="Sales by Type" />
         <div style={{ overflowX: "auto" }}>
           <table
             style={{
@@ -238,24 +253,27 @@ export function SalesPage({ filters }) {
                 >
                   Type
                 </th>
-                {PERIODS.map((p) => (
-                  <th
-                    key={p}
-                    colSpan={3}
-                    style={{
-                      textAlign: "center",
-                      padding: "4px 6px",
-                      color: "var(--txt3)",
-                    }}
-                  >
-                    {PERIOD_LABELS[p]}
-                  </th>
+                {PERIODS.map((p, pi) => (
+                  <Fragment key={p}>
+                    {pi > 0 && <th style={{ width: 12 }} />}
+                    <th
+                      colSpan={3}
+                      style={{
+                        textAlign: "center",
+                        padding: "4px 2px",
+                        color: "var(--txt3)",
+                      }}
+                    >
+                      {PERIOD_LABELS[p]}
+                    </th>
+                  </Fragment>
                 ))}
               </tr>
               <tr style={{ borderBottom: "1px solid var(--brd)" }}>
                 <th />
-                {PERIODS.map((p) => (
+                {PERIODS.map((p, pi) => (
                   <Fragment key={p}>
+                    {pi > 0 && <th style={{ width: 12 }} />}
                     <th
                       style={{
                         textAlign: "right",
@@ -292,8 +310,6 @@ export function SalesPage({ filters }) {
             </thead>
             <tbody>
               {(() => {
-                // Pivot: salesByType is {period: {type: {salesTy, salesLy, ...}}}
-                // We need to iterate by type across all periods
                 const allTypes = new Set();
                 Object.values(salesByType).forEach((types) =>
                   Object.keys(types).forEach((t) => allTypes.add(t))
@@ -302,7 +318,7 @@ export function SalesPage({ filters }) {
                 if (typeList.length === 0) {
                   return (
                     <tr>
-                      <td colSpan={16} style={{ padding: "12px", textAlign: "center", color: "var(--txt3)" }}>
+                      <td colSpan={20} style={{ padding: "12px", textAlign: "center", color: "var(--txt3)" }}>
                         No sales by type data available.
                       </td>
                     </tr>
@@ -319,7 +335,7 @@ export function SalesPage({ filters }) {
                     >
                       {type}
                     </td>
-                    {PERIODS.map((p) => {
+                    {PERIODS.map((p, pi) => {
                       const bk = periodKeyMap[p] || p;
                       const pVals = salesByType[bk]?.[type] || {
                         salesTy: 0,
@@ -328,10 +344,11 @@ export function SalesPage({ filters }) {
                       const d = delta(pVals.salesTy, pVals.salesLy);
                       return (
                         <Fragment key={p}>
+                          {pi > 0 && <td style={{ width: 12 }} />}
                           <td
                             style={{
                               textAlign: "right",
-                              padding: "4px 6px",
+                              padding: "4px 4px",
                               color: "var(--txt)",
                             }}
                           >
@@ -340,7 +357,7 @@ export function SalesPage({ filters }) {
                           <td
                             style={{
                               textAlign: "right",
-                              padding: "4px 6px",
+                              padding: "4px 4px",
                               color: "var(--txt2)",
                             }}
                           >
@@ -349,7 +366,7 @@ export function SalesPage({ filters }) {
                           <td
                             style={{
                               textAlign: "right",
-                              padding: "4px 6px",
+                              padding: "4px 4px",
                               color:
                                 d && parseFloat(d) >= 0
                                   ? COLORS.teal
@@ -394,11 +411,9 @@ export function SalesPage({ filters }) {
         </Card>
       )}
 
-      {/* Item Performance Table with Expandable Detail Rows */}
+      {/* Item Performance Table — Complete Redesign */}
       <Card>
-        <div style={{ ...SG(12, 700), color: "var(--txt)", marginBottom: 8 }}>
-          Item Performance
-        </div>
+        <CardHdr title="Item Performance" />
         <div style={{ overflowX: "auto" }}>
           <table
             style={{
@@ -408,225 +423,438 @@ export function SalesPage({ filters }) {
             }}
           >
             <thead>
+              {/* Period header row */}
+              <tr style={{ borderBottom: "1px solid var(--brd)" }}>
+                <th
+                  style={{
+                    textAlign: "left",
+                    padding: "6px 8px",
+                    color: "var(--txt3)",
+                    position: "sticky",
+                    left: 0,
+                    background: "var(--card)",
+                    zIndex: 2,
+                    minWidth: 180,
+                  }}
+                >
+                  Item
+                </th>
+                <th
+                  style={{
+                    textAlign: "left",
+                    padding: "6px 4px",
+                    color: "var(--txt3)",
+                    width: 70,
+                  }}
+                >
+                  Metric
+                </th>
+                <th
+                  style={{
+                    textAlign: "right",
+                    padding: "6px 4px",
+                    color: "var(--txt3)",
+                    width: 50,
+                  }}
+                >
+                  % Total
+                </th>
+                {PERIODS.map((p, pi) => (
+                  <Fragment key={p}>
+                    {pi > 0 && <th style={{ width: 8 }} />}
+                    <th
+                      colSpan={3}
+                      style={{
+                        textAlign: "center",
+                        padding: "4px 2px",
+                        color: "var(--txt3)",
+                        borderBottom: `2px solid ${COLORS.teal}`,
+                      }}
+                    >
+                      {PERIOD_LABELS[p]}
+                    </th>
+                  </Fragment>
+                ))}
+              </tr>
+              {/* TY/LY/%Chg sub-header */}
               <tr style={{ borderBottom: "2px solid var(--brd)" }}>
-                <th style={{ width: 20 }} />
                 <th
                   style={{
-                    textAlign: "left",
-                    padding: "6px 8px",
-                    color: "var(--txt3)",
+                    position: "sticky",
+                    left: 0,
+                    background: "var(--card)",
+                    zIndex: 2,
                   }}
-                >
-                  Item Description
-                </th>
-                <th
-                  style={{
-                    textAlign: "left",
-                    padding: "6px 8px",
-                    color: "var(--txt3)",
-                    width: 80,
-                  }}
-                >
-                  Brand
-                </th>
-                <th
-                  style={{
-                    textAlign: "right",
-                    padding: "6px 8px",
-                    color: "var(--txt3)",
-                  }}
-                >
-                  $ Sales TY
-                </th>
-                <th
-                  style={{
-                    textAlign: "right",
-                    padding: "6px 8px",
-                    color: "var(--txt3)",
-                  }}
-                >
-                  $ Sales LY
-                </th>
-                <th
-                  style={{
-                    textAlign: "right",
-                    padding: "6px 8px",
-                    color: "var(--txt3)",
-                  }}
-                >
-                  Δ%
-                </th>
+                />
+                <th />
+                <th />
+                {PERIODS.map((p, pi) => (
+                  <Fragment key={p}>
+                    {pi > 0 && <th style={{ width: 8 }} />}
+                    <th
+                      style={{
+                        textAlign: "right",
+                        padding: "2px 4px",
+                        color: "var(--txt3)",
+                        fontSize: 8,
+                      }}
+                    >
+                      TY
+                    </th>
+                    <th
+                      style={{
+                        textAlign: "right",
+                        padding: "2px 4px",
+                        color: "var(--txt3)",
+                        fontSize: 8,
+                      }}
+                    >
+                      LY
+                    </th>
+                    <th
+                      style={{
+                        textAlign: "right",
+                        padding: "2px 4px",
+                        color: "var(--txt3)",
+                        fontSize: 8,
+                      }}
+                    >
+                      %Chg
+                    </th>
+                  </Fragment>
+                ))}
               </tr>
             </thead>
             <tbody>
-              {items.length > 0 ? (
-                items.map((item, i) => {
-                  const itemPeriod = item[selectedPeriod] || {};
-                  const d = delta(itemPeriod.posTy, itemPeriod.posLy);
+              {(() => {
+                if (items.length === 0) {
                   return (
-                    <Fragment key={i}>
-                      <tr style={{ borderBottom: "1px solid var(--brd)" }}>
-                        <td
-                          style={{
-                            textAlign: "center",
-                            padding: "4px 6px",
-                            cursor: "pointer",
-                          }}
-                          onClick={() =>
-                            setExpandedItem(expandedItem === i ? null : i)
-                          }
-                        >
-                          <span style={{ color: "var(--txt3)" }}>
-                            {expandedItem === i ? "▼" : "▶"}
-                          </span>
-                        </td>
-                        <td
-                          style={{
-                            padding: "4px 8px",
-                            color: "var(--txt)",
-                          }}
-                        >
-                          {item.name}
-                        </td>
-                        <td
-                          style={{
-                            padding: "4px 8px",
-                            color: "var(--txt2)",
-                            fontSize: 9,
-                          }}
-                        >
-                          {item.brand}
-                        </td>
-                        <td
-                          style={{
-                            textAlign: "right",
-                            padding: "4px 8px",
-                            color: "var(--txt)",
-                          }}
-                        >
-                          {f$(itemPeriod.posTy)}
-                        </td>
-                        <td
-                          style={{
-                            textAlign: "right",
-                            padding: "4px 8px",
-                            color: "var(--txt2)",
-                          }}
-                        >
-                          {f$(itemPeriod.posLy)}
-                        </td>
-                        <td
-                          style={{
-                            textAlign: "right",
-                            padding: "4px 8px",
-                            color:
-                              d && parseFloat(d) >= 0
-                                ? COLORS.teal
-                                : COLORS.red,
-                          }}
-                        >
-                          {d != null ? d + "%" : "—"}
-                        </td>
-                      </tr>
-                      {expandedItem === i && (
+                    <tr>
+                      <td
+                        colSpan={3 + PERIODS.length * 4}
+                        style={{
+                          padding: "12px",
+                          textAlign: "center",
+                          color: "var(--txt3)",
+                        }}
+                      >
+                        No item data available.
+                      </td>
+                    </tr>
+                  );
+                }
+
+                // Calculate totalSalesByPeriod ONCE
+                const totalSalesByPeriod = {};
+                PERIODS.forEach((p) => {
+                  totalSalesByPeriod[p] = items.reduce(
+                    (sum, it) => sum + (it[p]?.posTy || 0),
+                    0
+                  );
+                });
+
+                const metrics = [
+                  { key: "sales", label: "POS Sales", tyField: "posTy", lyField: "posLy", fmt: f$, showPctTotal: true },
+                  { key: "qty", label: "POS Qty", tyField: "qtyTy", lyField: "qtyLy", fmt: fN, showPctTotal: false },
+                  { key: "oh", label: "OH Units", tyField: "ohTy", lyField: "ohLy", fmt: fN, showPctTotal: false },
+                  { key: "instock", label: "In Stock %", tyField: "instockPct", lyField: null, fmt: null, showPctTotal: false },
+                ];
+
+                return (
+                  <>
+                    {items.map((item, i) => (
+                      metrics.map((m, mi) => (
                         <tr
+                          key={`${i}-${m.key}`}
                           style={{
-                            borderBottom: "1px solid var(--brd)",
-                            background: "rgba(255,255,255,.02)",
+                            borderBottom:
+                              mi === metrics.length - 1
+                                ? "2px solid var(--brd)"
+                                : "1px solid rgba(255,255,255,0.03)",
+                            background:
+                              i % 2 === 0
+                                ? "rgba(255,255,255,0.01)"
+                                : "transparent",
                           }}
                         >
-                          <td colSpan={6} style={{ padding: "12px 8px" }}>
-                            <div
+                          {/* Item name - only on first metric row */}
+                          {mi === 0 ? (
+                            <td
+                              rowSpan={metrics.length}
                               style={{
-                                display: "grid",
-                                gridTemplateColumns: "repeat(auto-fit, minmax(140px, 1fr))",
-                                gap: 16,
-                                ...SG(9),
+                                padding: "4px 8px",
+                                color: "var(--txt)",
+                                ...SG(10, 600),
+                                position: "sticky",
+                                left: 0,
+                                background:
+                                  i % 2 === 0
+                                    ? "var(--card)"
+                                    : "var(--card)",
+                                zIndex: 1,
+                                verticalAlign: "top",
+                                borderBottom: "2px solid var(--brd)",
                               }}
                             >
-                              {/* Iterate through all periods */}
-                              {PERIODS.map((p) => {
-                                const bk = periodKeyMap[p];
-                                const pData = item[p] || {};
-                                return (
-                                  <div key={p}>
-                                    <div
-                                      style={{
-                                        ...SG(8, 600),
-                                        color: "var(--txt3)",
-                                        marginBottom: 8,
-                                        textTransform: "uppercase",
-                                      }}
-                                    >
-                                      {PERIOD_LABELS[p]}
-                                    </div>
-                                    <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
-                                      <div>
-                                        <div style={{ ...SG(7), color: "var(--txt3)", marginBottom: 1 }}>
-                                          POS Sales TY
-                                        </div>
-                                        <div style={{ color: "var(--txt)" }}>
-                                          {f$(pData.posTy)}
-                                        </div>
-                                      </div>
-                                      <div>
-                                        <div style={{ ...SG(7), color: "var(--txt3)", marginBottom: 1 }}>
-                                          POS Sales LY
-                                        </div>
-                                        <div style={{ color: "var(--txt2)" }}>
-                                          {f$(pData.posLy)}
-                                        </div>
-                                      </div>
-                                      <div>
-                                        <div style={{ ...SG(7), color: "var(--txt3)", marginBottom: 1 }}>
-                                          POS Qty TY
-                                        </div>
-                                        <div style={{ color: "var(--txt)" }}>
-                                          {fN(pData.qtyTy)}
-                                        </div>
-                                      </div>
-                                      <div>
-                                        <div style={{ ...SG(7), color: "var(--txt3)", marginBottom: 1 }}>
-                                          OH TY
-                                        </div>
-                                        <div style={{ color: "var(--txt)" }}>
-                                          {fN(pData.ohTy)}
-                                        </div>
-                                      </div>
-                                      <div>
-                                        <div style={{ ...SG(7), color: "var(--txt3)", marginBottom: 1 }}>
-                                          OH LY
-                                        </div>
-                                        <div style={{ color: "var(--txt2)" }}>
-                                          {fN(pData.ohLy)}
-                                        </div>
-                                      </div>
-                                      <div>
-                                        <div style={{ ...SG(7), color: "var(--txt3)", marginBottom: 1 }}>
-                                          Instock %
-                                        </div>
-                                        <div style={{ color: "var(--txt)" }}>
-                                          {fPct(pData.instockPct)}
-                                        </div>
-                                      </div>
-                                    </div>
-                                  </div>
-                                );
-                              })}
-                            </div>
+                              {item.name}
+                              {item.brand && (
+                                <div
+                                  style={{
+                                    ...SG(8),
+                                    color: "var(--txt3)",
+                                    marginTop: 2,
+                                  }}
+                                >
+                                  {item.brand}
+                                </div>
+                              )}
+                            </td>
+                          ) : null}
+                          {/* Metric label */}
+                          <td
+                            style={{
+                              padding: "3px 4px",
+                              color: "var(--txt3)",
+                              ...SG(8, 600),
+                            }}
+                          >
+                            {m.label}
                           </td>
+                          {/* % of Total */}
+                          <td
+                            style={{
+                              textAlign: "right",
+                              padding: "3px 4px",
+                              color: "var(--txt2)",
+                              ...SG(8),
+                            }}
+                          >
+                            {m.showPctTotal ? (() => {
+                              const total =
+                                totalSalesByPeriod[selectedPeriod] || 0;
+                              const val =
+                                item[selectedPeriod]?.posTy || 0;
+                              return total > 0
+                                ? ((val / total) * 100).toFixed(1) + "%"
+                                : "—";
+                            })() : ""}
+                          </td>
+                          {/* Period data */}
+                          {PERIODS.map((p, pi) => {
+                            const pd = item[p] || {};
+                            if (m.key === "instock") {
+                              const raw = pd.instockPct;
+                              const formatted =
+                                raw == null || raw === 0
+                                  ? "—"
+                                  : raw > 1
+                                  ? raw.toFixed(1) + "%"
+                                  : ((raw * 100).toFixed(1)) + "%";
+                              return (
+                                <Fragment key={p}>
+                                  {pi > 0 && <td style={{ width: 8 }} />}
+                                  <td
+                                    style={{
+                                      textAlign: "right",
+                                      padding: "3px 4px",
+                                      color: "var(--txt)",
+                                    }}
+                                  >
+                                    {formatted}
+                                  </td>
+                                  <td
+                                    style={{
+                                      textAlign: "right",
+                                      padding: "3px 4px",
+                                      color: "var(--txt2)",
+                                    }}
+                                  >
+                                    —
+                                  </td>
+                                  <td
+                                    style={{
+                                      textAlign: "right",
+                                      padding: "3px 4px",
+                                    }}
+                                  />
+                                </Fragment>
+                              );
+                            }
+                            const ty = pd[m.tyField] || 0;
+                            const ly = pd[m.lyField] || 0;
+                            const d = delta(ty, ly);
+                            return (
+                              <Fragment key={p}>
+                                {pi > 0 && <td style={{ width: 8 }} />}
+                                <td
+                                  style={{
+                                    textAlign: "right",
+                                    padding: "3px 4px",
+                                    color: "var(--txt)",
+                                  }}
+                                >
+                                  {m.fmt(ty)}
+                                </td>
+                                <td
+                                  style={{
+                                    textAlign: "right",
+                                    padding: "3px 4px",
+                                    color: "var(--txt2)",
+                                  }}
+                                >
+                                  {m.fmt(ly)}
+                                </td>
+                                <td
+                                  style={{
+                                    textAlign: "right",
+                                    padding: "3px 4px",
+                                    color:
+                                      d && parseFloat(d) >= 0
+                                        ? COLORS.teal
+                                        : COLORS.red,
+                                  }}
+                                >
+                                  {d != null ? d + "%" : "—"}
+                                </td>
+                              </Fragment>
+                            );
+                          })}
                         </tr>
-                      )}
-                    </Fragment>
-                  );
-                })
-              ) : (
-                <tr>
-                  <td colSpan={6} style={{ padding: "12px", textAlign: "center", color: "var(--txt3)" }}>
-                    No item data available.
-                  </td>
-                </tr>
-              )}
+                      ))
+                    ))}
+                    {/* Total row */}
+                    {items.length > 0 && (() => {
+                      const totals = {};
+                      PERIODS.forEach((p) => {
+                        totals[p] = items.reduce(
+                          (acc, item) => {
+                            const pd = item[p] || {};
+                            return {
+                              salesTy: acc.salesTy + (pd.posTy || 0),
+                              salesLy: acc.salesLy + (pd.posLy || 0),
+                              qtyTy: acc.qtyTy + (pd.qtyTy || 0),
+                              qtyLy: acc.qtyLy + (pd.qtyLy || 0),
+                            };
+                          },
+                          {
+                            salesTy: 0,
+                            salesLy: 0,
+                            qtyTy: 0,
+                            qtyLy: 0,
+                          }
+                        );
+                      });
+
+                      const totalMetrics = [
+                        {
+                          label: "POS Sales",
+                          tyKey: "salesTy",
+                          lyKey: "salesLy",
+                          fmt: f$,
+                        },
+                        {
+                          label: "POS Qty",
+                          tyKey: "qtyTy",
+                          lyKey: "qtyLy",
+                          fmt: fN,
+                        },
+                      ];
+
+                      return totalMetrics.map((m, mi) => (
+                        <tr
+                          key={`total-${m.label}`}
+                          style={{
+                            borderBottom:
+                              mi === totalMetrics.length - 1
+                                ? "2px solid var(--brd)"
+                                : "none",
+                            background: "rgba(46,207,170,0.05)",
+                            fontWeight: 700,
+                          }}
+                        >
+                          {mi === 0 && (
+                            <td
+                              rowSpan={totalMetrics.length}
+                              style={{
+                                padding: "4px 8px",
+                                color: COLORS.teal,
+                                ...SG(10, 700),
+                                position: "sticky",
+                                left: 0,
+                                background: "var(--card)",
+                                zIndex: 1,
+                                borderBottom: "2px solid var(--brd)",
+                              }}
+                            >
+                              TOTAL
+                            </td>
+                          )}
+                          <td
+                            style={{
+                              padding: "3px 4px",
+                              color: COLORS.teal,
+                              ...SG(8, 700),
+                            }}
+                          >
+                            {m.label}
+                          </td>
+                          <td
+                            style={{
+                              textAlign: "right",
+                              padding: "3px 4px",
+                              color: COLORS.teal,
+                              ...SG(8, 700),
+                            }}
+                          >
+                            {mi === 0 ? "100%" : ""}
+                          </td>
+                          {PERIODS.map((p, pi) => {
+                            const t = totals[p];
+                            const ty = t[m.tyKey];
+                            const ly = t[m.lyKey];
+                            const d = delta(ty, ly);
+                            return (
+                              <Fragment key={p}>
+                                {pi > 0 && <td style={{ width: 8 }} />}
+                                <td
+                                  style={{
+                                    textAlign: "right",
+                                    padding: "3px 4px",
+                                    color: "var(--txt)",
+                                  }}
+                                >
+                                  {m.fmt(ty)}
+                                </td>
+                                <td
+                                  style={{
+                                    textAlign: "right",
+                                    padding: "3px 4px",
+                                    color: "var(--txt2)",
+                                  }}
+                                >
+                                  {m.fmt(ly)}
+                                </td>
+                                <td
+                                  style={{
+                                    textAlign: "right",
+                                    padding: "3px 4px",
+                                    color:
+                                      d && parseFloat(d) >= 0
+                                        ? COLORS.teal
+                                        : COLORS.red,
+                                  }}
+                                >
+                                  {d != null ? d + "%" : "—"}
+                                </td>
+                              </Fragment>
+                            );
+                          })}
+                        </tr>
+                      ));
+                    })()}
+                  </>
+                );
+              })()}
             </tbody>
           </table>
         </div>
