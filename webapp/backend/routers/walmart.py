@@ -448,10 +448,10 @@ def get_ecommerce(division: str = None, customer: str = None):
         # ── Query 1: Aggregate KPIs
         kpi_query = f"""
             SELECT
-              SUM(COALESCE(auth_sales_ty, 0)) as auth_sales_ty,
-              SUM(COALESCE(auth_sales_ly, 0)) as auth_sales_ly,
-              SUM(COALESCE(shipped_sales_ty, 0)) as shipped_sales_ty,
-              SUM(COALESCE(shipped_sales_ly, 0)) as shipped_sales_ly,
+              SUM(COALESCE(auth_based_net_sales_ty, 0)) as auth_sales_ty,
+              SUM(COALESCE(auth_based_net_sales_ly, 0)) as auth_sales_ly,
+              SUM(COALESCE(shipped_based_net_sales_ty, 0)) as shipped_sales_ty,
+              SUM(COALESCE(shipped_based_net_sales_ly, 0)) as shipped_sales_ly,
               COUNT(DISTINCT product_name) as total_items
             FROM walmart_ecomm_weekly
             WHERE 1=1 {hw}
@@ -468,14 +468,14 @@ def get_ecommerce(division: str = None, customer: str = None):
         # ── Query 2: Per-item data
         items_query = f"""
             SELECT
-              product_name, fineline_number,
-              retail_amount_ty, retail_amount_ly,
-              auth_sales_ty, auth_sales_ly,
-              shipped_sales_ty, shipped_sales_ly,
-              units_shipped_ty, units_shipped_ly
+              product_name, fineline_description,
+              base_unit_retail_amount, base_unit_retail_amount,
+              auth_based_net_sales_ty, auth_based_net_sales_ly,
+              shipped_based_net_sales_ty, shipped_based_net_sales_ly,
+              shipped_based_qty_ty, shipped_based_qty_ly
             FROM walmart_ecomm_weekly
             WHERE 1=1 {hw}
-            ORDER BY retail_amount_ty DESC
+            ORDER BY auth_based_net_sales_ty DESC
         """
         items_rows = con.execute(items_query, hp).fetchall()
         items = [
@@ -522,9 +522,7 @@ def get_forecast(division: str = None, customer: str = None):
         kpi_query = f"""
             SELECT
               COUNT(DISTINCT store_dc_nbr) as dc_count,
-              MAX(snapshot_date) as latest_date,
-              SUM(COALESCE(cost_on_order_ty, 0)) as cost_on_order_ty,
-              SUM(COALESCE(cost_on_order_ly, 0)) as cost_on_order_ly
+              MAX(snapshot_date) as latest_date
             FROM walmart_order_forecast
             WHERE 1=1 {hw}
         """
@@ -533,19 +531,16 @@ def get_forecast(division: str = None, customer: str = None):
         kpis = {
             "dcCount": _safe_int(kpi_row[0]) if kpi_row else 0,
             "latestDate": latest_date,
-            "costOnOrderTy": _n(kpi_row[2]) if kpi_row else 0.0,
-            "costOnOrderLy": _n(kpi_row[3]) if kpi_row else 0.0,
         }
 
         # ── Query 2: Per-record forecast data
         items_query = f"""
-            SELECT
-              snapshot_date, store_dc_nbr, store_dc_type, store_dc_name,
-              receipt_plan_cost_ty, receipt_plan_cost_ly,
-              receipt_plan_qty_ty, receipt_plan_qty_ly
+            SELECT DISTINCT
+              snapshot_date, store_dc_nbr, store_dc_type, vendor_dept_number
             FROM walmart_order_forecast
             WHERE 1=1 {hw}
             ORDER BY snapshot_date DESC, store_dc_nbr
+            LIMIT 200
         """
         items_rows = con.execute(items_query, hp).fetchall()
         items = [
@@ -553,11 +548,7 @@ def get_forecast(division: str = None, customer: str = None):
                 "snapshotDate": str(r[0]) if r[0] else None,
                 "storeDcNbr": r[1],
                 "storeDcType": r[2],
-                "storeDcName": r[3],
-                "receiptPlanCostTy": _n(r[4]),
-                "receiptPlanCostLy": _n(r[5]),
-                "receiptPlanQtyTy": _n(r[6]),
-                "receiptPlanQtyLy": _n(r[7]),
+                "vendorDeptNumber": r[3],
             }
             for r in items_rows
         ]
