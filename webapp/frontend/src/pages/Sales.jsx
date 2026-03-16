@@ -653,7 +653,7 @@ export default function Sales({ filters = {} }) {
               <div key={p} style={{flex:'1 1 185px',minWidth:185,background:'var(--card2)',border:'1px solid var(--brd)',borderRadius:12,padding:'12px 14px',transition:'background .3s'}}>
                 <div style={{fontSize:10,fontWeight:700,textTransform:'uppercase',letterSpacing:'.12em',color:B.b2,paddingBottom:9,borderBottom:'1px solid var(--brd)',marginBottom:9}}>{p}</div>
                 {/* Single flat grid — all header + data cells share the same column tracks */}
-                <div style={{display:'grid',gridTemplateColumns:'auto 1fr 1fr auto',columnGap:7,rowGap:6,alignItems:'center'}}>
+                <div style={{display:'grid',gridTemplateColumns:'auto 62px 54px 48px',columnGap:3,rowGap:6,alignItems:'center'}}>
                   {/* header row */}
                   <span/>
                   <span style={{fontSize:9,fontWeight:700,color:'var(--txt3)',textTransform:'uppercase',letterSpacing:'.06em'}}>TY</span>
@@ -661,7 +661,7 @@ export default function Sales({ filters = {} }) {
                   <span style={{fontSize:9,fontWeight:700,color:'var(--txt3)',textTransform:'uppercase',letterSpacing:'.06em',textAlign:'right'}}>Chg</span>
                   {/* data rows — flat children so all share same column sizing */}
                   {rows.flatMap(([l, ty, lyv, delta, inv]) => [
-                    <span key={l+'-l'} style={{fontSize:10,color:'var(--txt3)',whiteSpace:'nowrap',paddingRight:3}}>{l}</span>,
+                    <span key={l+'-l'} style={{fontSize:10,color:'var(--txt3)',whiteSpace:'nowrap',paddingRight:14}}>{l}</span>,
                     <span key={l+'-ty'} style={{fontSize:12,fontWeight:700,color:'var(--txt)'}}>{ty}</span>,
                     <span key={l+'-ly'} style={{fontSize:10,color:'var(--txt2)'}}>{lyv}</span>,
                     pctEl(delta, inv, l+'-chg'),

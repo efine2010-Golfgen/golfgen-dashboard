@@ -763,7 +763,7 @@ def fee_detail(days: int = Query(30), division: Optional[str] = None,
     row = con.execute(f"""
         SELECT COALESCE(SUM(ABS(commission)), 0) AS referral,
                COALESCE(SUM(ABS(fba_fees)), 0) AS fba,
-               COALESCE(SUM(principal), 0) AS principal
+               COALESCE(SUM(product_charges), 0) AS revenue
         FROM financial_events
         {fin_filter}
     """, fin_params).fetchone()

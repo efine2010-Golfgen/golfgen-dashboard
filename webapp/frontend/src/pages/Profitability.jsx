@@ -92,15 +92,15 @@ export default function Profitability({ filters = {} }) {
       {/* Page header */}
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 0, flexWrap: "wrap", gap: 10 }}>
         <div>
-          <div style={{ ...DM(22), color: "var(--teal, #2ECFAA)" }}>Profitability Command Center</div>
-          <div style={{ ...SG(11, 500), color: "var(--muted, #6B8090)", marginTop: 2 }}>
+          <div style={{ ...DM(22), color: "#2ECFAA" }}>Profitability Command Center</div>
+          <div style={{ ...SG(11, 500), color: "var(--txt3)", marginTop: 2 }}>
             {filters.division || "All Divisions"} · {filters.customer || "All Channels"} · Last {days} Days · Financial Events
           </div>
         </div>
         <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
           {DAY_OPTIONS.map(d => (
             <button key={d.days} className={`range-tab ${days === d.days ? "active" : ""}`}
-              onClick={() => setDays(d.days)} style={{ ...SG(10, 700), padding: "4px 10px", borderRadius: 7, border: "1px solid var(--border)", background: days === d.days ? "var(--navy)" : "transparent", color: days === d.days ? "#fff" : "var(--muted)", cursor: "pointer" }}>
+              onClick={() => setDays(d.days)} style={{ ...SG(10, 700), padding: "4px 10px", borderRadius: 7, border: "1px solid var(--brd)", background: days === d.days ? "var(--card2)" : "transparent", color: days === d.days ? "#fff" : "var(--txt3)", cursor: "pointer" }}>
               {d.label}
             </button>
           ))}
@@ -135,9 +135,9 @@ export default function Profitability({ filters = {} }) {
       {/* Toast */}
       {toast && (
         <div style={{
-          position: "fixed", bottom: 24, right: 24, background: "var(--navy, #0E1F2D)",
-          border: "1px solid var(--teal, #2ECFAA)", borderRadius: 10, padding: "12px 18px",
-          ...SG(11, 700, "var(--teal, #2ECFAA)"),
+          position: "fixed", bottom: 24, right: 24, background: "var(--card2)",
+          border: "1px solid #2ECFAA", borderRadius: 10, padding: "12px 18px",
+          ...SG(11, 700, "#2ECFAA"),
           boxShadow: "0 8px 32px rgba(0,0,0,.5)", zIndex: 9999,
         }}>{toast}</div>
       )}
@@ -158,7 +158,7 @@ function PnlOverview({ filters, days, showToast }) {
   }, [days, filters.division, filters.customer, filters.marketplace]);
 
   if (loading) return <div className="loading"><div className="spinner" /> Loading P&L overview...</div>;
-  if (!data) return <div style={{ color: "var(--muted)", padding: 40, textAlign: "center" }}>No data available</div>;
+  if (!data) return <div style={{ color: "var(--txt3)", padding: 40, textAlign: "center" }}>No data available</div>;
 
   const kpis = data.kpis || {};
   const wf = data.waterfall || {};
@@ -223,15 +223,15 @@ function PnlOverview({ filters, days, showToast }) {
       <div style={{ display: "grid", gridTemplateColumns: "1fr 340px", gap: 12, marginBottom: 12 }}>
         {/* Waterfall chart + table */}
         <div className="table-card" style={{ padding: 0 }}>
-          <div style={{ padding: "10px 16px", borderBottom: "1px solid var(--border)", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+          <div style={{ padding: "10px 16px", borderBottom: "1px solid var(--brd)", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
             <span style={{ ...SG(12, 700) }}>Revenue Waterfall — Gross to Net Operating Profit</span>
           </div>
           <div style={{ padding: "14px 18px" }}>
             <ResponsiveContainer width="100%" height={180}>
               <BarChart data={wfChartData} margin={{ top: 5, right: 5, bottom: 5, left: 5 }}>
-                <CartesianGrid strokeDasharray="3 3" stroke="rgba(14,31,45,0.08)" />
-                <XAxis dataKey="name" tick={{ ...SG(8, 600), fill: "var(--muted, #6B8090)" }} interval={0} angle={-20} textAnchor="end" height={40} />
-                <YAxis tick={{ ...SG(9, 600), fill: "var(--muted, #6B8090)" }} tickFormatter={v => `$${(Math.abs(v)/1000).toFixed(0)}k`} />
+                <CartesianGrid strokeDasharray="3 3" stroke="var(--brd)" />
+                <XAxis dataKey="name" tick={{ ...SG(8, 600), fill: "var(--txt3)" }} interval={0} angle={-20} textAnchor="end" height={40} />
+                <YAxis tick={{ ...SG(9, 600), fill: "var(--txt3)" }} tickFormatter={v => `$${(Math.abs(v)/1000).toFixed(0)}k`} />
                 <Tooltip contentStyle={TOOLTIP_STYLE} formatter={v => [fmt$2(v), ""]} />
                 <Bar dataKey="value" radius={[4,4,0,0]}>
                   {wfChartData.map((e, i) => <Cell key={i} fill={e.fill} />)}
@@ -252,15 +252,15 @@ function PnlOverview({ filters, days, showToast }) {
         <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
           {/* Margin Trend */}
           <div className="table-card" style={{ padding: 0 }}>
-            <div style={{ padding: "10px 16px", borderBottom: "1px solid var(--border)" }}>
+            <div style={{ padding: "10px 16px", borderBottom: "1px solid var(--brd)" }}>
               <span style={SG(12, 700)}>8-Week Margin Trend</span>
             </div>
             <div style={{ padding: 14 }}>
               <ResponsiveContainer width="100%" height={160}>
                 <ComposedChart data={marginTrend}>
-                  <CartesianGrid strokeDasharray="3 3" stroke="rgba(14,31,45,0.08)" />
-                  <XAxis dataKey="label" tick={{ ...SG(8, 600), fill: "var(--muted)" }} />
-                  <YAxis tick={{ ...SG(9, 600), fill: "var(--muted)" }} tickFormatter={v => `${v}%`} />
+                  <CartesianGrid strokeDasharray="3 3" stroke="var(--brd)" />
+                  <XAxis dataKey="label" tick={{ ...SG(8, 600), fill: "var(--txt3)" }} />
+                  <YAxis tick={{ ...SG(9, 600), fill: "var(--txt3)" }} tickFormatter={v => `${v}%`} />
                   <Tooltip contentStyle={TOOLTIP_STYLE} formatter={v => [`${round(v, 1)}%`, ""]} />
                   <Line type="monotone" dataKey="grossMargin" name="Gross Margin" stroke="#2ECFAA" strokeWidth={2} dot={{ r: 3 }} />
                   <Line type="monotone" dataKey="netMargin" name="Net Margin" stroke="#7BAED0" strokeWidth={2} dot={{ r: 3 }} />
@@ -273,7 +273,7 @@ function PnlOverview({ filters, days, showToast }) {
 
           {/* Fee Donut */}
           <div className="table-card" style={{ padding: 0, flex: 1 }}>
-            <div style={{ padding: "10px 16px", borderBottom: "1px solid var(--border)" }}>
+            <div style={{ padding: "10px 16px", borderBottom: "1px solid var(--brd)" }}>
               <span style={SG(12, 700)}>Fee Composition</span>
             </div>
             <div style={{ padding: 14, display: "flex", alignItems: "center", gap: 12 }}>
@@ -287,10 +287,10 @@ function PnlOverview({ filters, days, showToast }) {
               </ResponsiveContainer>
               <div style={{ flex: 1 }}>
                 {feeDonut.map((f, i) => (
-                  <div key={i} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "4px 0", borderBottom: "1px solid var(--border, rgba(14,31,45,0.06))" }}>
+                  <div key={i} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "4px 0", borderBottom: "1px solid var(--brd)" }}>
                     <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
                       <span style={{ width: 8, height: 8, borderRadius: 2, background: DONUT_COLORS[i % DONUT_COLORS.length], flexShrink: 0 }} />
-                      <span style={SG(9, 600, "var(--muted)")}>{f.name}</span>
+                      <span style={SG(9, 600, "var(--txt3)")}>{f.name}</span>
                     </div>
                     <span style={SG(10, 700)}>{fmt$2(f.value)}</span>
                   </div>
@@ -317,7 +317,7 @@ function FeeDetail({ filters, days }) {
   }, [days, filters.division, filters.customer, filters.marketplace]);
 
   if (loading) return <div className="loading"><div className="spinner" /> Loading fee detail...</div>;
-  if (!data) return <div style={{ color: "var(--muted)", padding: 40, textAlign: "center" }}>No fee data available</div>;
+  if (!data) return <div style={{ color: "var(--txt3)", padding: 40, textAlign: "center" }}>No fee data available</div>;
 
   const categories = data.categories || [];
   const totalFees = data.total_fees || 0;
@@ -326,12 +326,12 @@ function FeeDetail({ filters, days }) {
     <>
       <div className="sec-div"><span>Amazon Fee Breakdown — {days} Days</span></div>
       <div className="table-card" style={{ padding: 0 }}>
-        <div style={{ padding: "10px 16px", borderBottom: "1px solid var(--border)", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+        <div style={{ padding: "10px 16px", borderBottom: "1px solid var(--brd)", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
           <span style={SG(12, 700)}>Complete Fee Breakdown</span>
           <span style={SG(10, 700, "#f87171")}>Total: {fmt$2(totalFees)}</span>
         </div>
         {/* Header */}
-        <div style={{ display: "grid", gridTemplateColumns: "220px 1fr 80px 70px 70px", gap: 8, padding: "7px 14px", borderBottom: "1px solid var(--border)", background: "var(--navy, #0E1F2D)" }}>
+        <div style={{ display: "grid", gridTemplateColumns: "220px 1fr 80px 70px 70px", gap: 8, padding: "7px 14px", borderBottom: "1px solid var(--brd)", background: "var(--card2)" }}>
           <span style={SG(8, 700, "rgba(255,255,255,0.5)")}>FEE TYPE</span>
           <span style={SG(8, 700, "rgba(255,255,255,0.5)")}></span>
           <span style={{ ...SG(8, 700, "rgba(255,255,255,0.5)"), textAlign: "right" }}>AMOUNT</span>
@@ -341,24 +341,24 @@ function FeeDetail({ filters, days }) {
         {categories.map((cat, ci) => (
           <div key={ci}>
             {/* Category header */}
-            <div style={{ display: "grid", gridTemplateColumns: "220px 1fr 80px 70px 70px", gap: 8, padding: "8px 14px", borderBottom: "1px solid var(--border)", background: "rgba(14,31,45,0.03)" }}>
+            <div style={{ display: "grid", gridTemplateColumns: "220px 1fr 80px 70px 70px", gap: 8, padding: "8px 14px", borderBottom: "1px solid var(--brd)", background: "var(--card2)" }}>
               <span style={SG(10, 700)}>{cat.name}</span>
-              <div style={{ height: 6, background: "var(--border, rgba(14,31,45,0.08))", borderRadius: 3, overflow: "hidden", alignSelf: "center" }}>
+              <div style={{ height: 6, background: "var(--brd)", borderRadius: 3, overflow: "hidden", alignSelf: "center" }}>
                 <div style={{ width: `${totalFees > 0 ? Math.abs(cat.total) / totalFees * 100 : 0}%`, height: "100%", borderRadius: 3, background: DONUT_COLORS[ci % DONUT_COLORS.length] }} />
               </div>
               <span style={{ ...SG(11, 700, "#f87171"), textAlign: "right" }}>{fmt$2(cat.total)}</span>
-              <span style={{ ...SG(10, 700, "var(--muted)"), textAlign: "right" }}>{fmtPct(cat.pct_of_rev)}</span>
+              <span style={{ ...SG(10, 700, "var(--txt3)"), textAlign: "right" }}>{fmtPct(cat.pct_of_rev)}</span>
               <span style={{ textAlign: "right" }}></span>
             </div>
             {/* Sub-items */}
             {(cat.items || []).map((item, ii) => (
-              <div key={ii} style={{ display: "grid", gridTemplateColumns: "220px 1fr 80px 70px 70px", gap: 8, padding: "6px 14px 6px 28px", borderBottom: "1px solid var(--border, rgba(14,31,45,0.04))" }}>
-                <span style={SG(9, 500, "var(--muted)")}>{item.name}</span>
-                <div style={{ height: 4, background: "var(--border, rgba(14,31,45,0.06))", borderRadius: 2, overflow: "hidden", alignSelf: "center" }}>
+              <div key={ii} style={{ display: "grid", gridTemplateColumns: "220px 1fr 80px 70px 70px", gap: 8, padding: "6px 14px 6px 28px", borderBottom: "1px solid var(--brd)" }}>
+                <span style={SG(9, 500, "var(--txt3)")}>{item.name}</span>
+                <div style={{ height: 4, background: "var(--brd)", borderRadius: 2, overflow: "hidden", alignSelf: "center" }}>
                   <div style={{ width: `${totalFees > 0 ? Math.abs(item.amount) / totalFees * 100 : 0}%`, height: "100%", borderRadius: 2, background: DONUT_COLORS[ci % DONUT_COLORS.length], opacity: 0.6 }} />
                 </div>
                 <span style={{ ...SG(10, 600), textAlign: "right" }}>{fmt$2(item.amount)}</span>
-                <span style={{ ...SG(9, 600, "var(--muted)"), textAlign: "right" }}>{fmtPct(item.pct_of_rev)}</span>
+                <span style={{ ...SG(9, 600, "var(--txt3)"), textAlign: "right" }}>{fmtPct(item.pct_of_rev)}</span>
                 <span style={{ textAlign: "right" }}></span>
               </div>
             ))}
@@ -416,25 +416,25 @@ function ItemProfitability({ filters, days }) {
               style={{
                 ...SG(9, filter === f.key ? 700 : 600),
                 height: 24, padding: "0 9px", borderRadius: 7,
-                border: `1px solid ${filter === f.key ? "transparent" : "var(--border)"}`,
-                background: filter === f.key ? "var(--navy, #0E1F2D)" : "transparent",
-                color: filter === f.key ? "#fff" : "var(--muted)",
+                border: `1px solid ${filter === f.key ? "transparent" : "var(--brd)"}`,
+                background: filter === f.key ? "var(--card2)" : "transparent",
+                color: filter === f.key ? "#fff" : "var(--txt3)",
                 cursor: "pointer",
               }}>{f.label}</button>
           ))}
           <select value={sortKey} onChange={e => setSortKey(e.target.value)}
-            style={{ ...SG(9, 600), height: 24, padding: "0 8px", borderRadius: 7, border: "1px solid var(--border)", background: "transparent", color: "var(--muted)", cursor: "pointer", marginLeft: 8 }}>
+            style={{ ...SG(9, 600), height: 24, padding: "0 8px", borderRadius: 7, border: "1px solid var(--brd)", background: "transparent", color: "var(--txt3)", cursor: "pointer", marginLeft: 8 }}>
             {ITEM_SORTS.map(s => <option key={s.key} value={s.key}>Sort: {s.label}</option>)}
           </select>
           <input type="text" placeholder="Search SKU / ASIN..." value={search} onChange={e => setSearch(e.target.value)}
-            style={{ ...SG(10, 500), height: 24, padding: "0 9px", borderRadius: 7, border: "1px solid var(--border)", background: "transparent", color: "var(--body-text, #2A3D50)", width: 180, marginLeft: "auto", outline: "none" }} />
+            style={{ ...SG(10, 500), height: 24, padding: "0 9px", borderRadius: 7, border: "1px solid var(--brd)", background: "transparent", color: "var(--txt)", width: 180, marginLeft: "auto", outline: "none" }} />
         </div>
 
         {/* Table header */}
         <div style={{ overflowX: "auto" }}>
           <table style={{ width: "100%", borderCollapse: "collapse" }}>
             <thead>
-              <tr style={{ background: "var(--navy, #0E1F2D)" }}>
+              <tr style={{ background: "var(--card2)" }}>
                 {["SKU / ASIN", "30D Rev", "COGS/u", "COGS%", "Ref Fee", "FBA Fee", "Storage", "Other", "Total Fees", "Gross Margin", "Net Margin", "$/Unit Net", "Score"].map((h, i) => (
                   <th key={i} style={{ ...SG(8, 700), padding: "8px 10px", textAlign: i === 0 ? "left" : "right", color: "rgba(255,255,255,0.6)", textTransform: "uppercase", letterSpacing: "0.06em", whiteSpace: "nowrap" }}>{h}</th>
                 ))}
@@ -445,10 +445,10 @@ function ItemProfitability({ filters, days }) {
                 const gm = item.grossMargin || 0;
                 const gmColor = gm >= 40 ? "#2ECFAA" : gm >= 20 ? "#F5B731" : "#f87171";
                 return (
-                  <tr key={item.asin} style={{ borderBottom: "1px solid var(--border, rgba(14,31,45,0.04))" }}>
+                  <tr key={item.asin} style={{ borderBottom: "1px solid var(--brd)" }}>
                     <td style={{ ...cellL, maxWidth: 200 }}>
-                      <div style={{ fontWeight: 600, color: "var(--body-text, #2A3D50)", fontSize: 11, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{item.name || item.sku || item.asin}</div>
-                      <div style={SG(7.5, 500, "var(--muted)")}>{item.asin}{item.sku ? ` · ${item.sku}` : ""}</div>
+                      <div style={{ fontWeight: 600, color: "var(--txt)", fontSize: 11, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{item.name || item.sku || item.asin}</div>
+                      <div style={SG(7.5, 500, "var(--txt3)")}>{item.asin}{item.sku ? ` · ${item.sku}` : ""}</div>
                     </td>
                     <td style={cellR}>{fmt$2(item.rev)}</td>
                     <td style={cellR}>${round(item.cogsPerUnit || 0, 2)}</td>
@@ -473,7 +473,7 @@ function ItemProfitability({ filters, days }) {
                 );
               })}
               {filtered.length === 0 && (
-                <tr><td colSpan={13} style={{ padding: 30, textAlign: "center", color: "var(--muted)" }}>No items match your filters</td></tr>
+                <tr><td colSpan={13} style={{ padding: 30, textAlign: "center", color: "var(--txt3)" }}>No items match your filters</td></tr>
               )}
             </tbody>
           </table>
@@ -496,7 +496,7 @@ function AurAnalysis({ filters, days }) {
   }, [days, filters.division, filters.customer, filters.marketplace]);
 
   if (loading) return <div className="loading"><div className="spinner" /> Loading AUR data...</div>;
-  if (!data) return <div style={{ color: "var(--muted)", padding: 40, textAlign: "center" }}>No AUR data available</div>;
+  if (!data) return <div style={{ color: "var(--txt3)", padding: 40, textAlign: "center" }}>No AUR data available</div>;
 
   const skus = data.skus || [];
   const weeks = ["Wk-8", "Wk-7", "Wk-6", "Wk-5", "Wk-4", "Wk-3", "Wk-2", "Wk-1"];
@@ -508,13 +508,13 @@ function AurAnalysis({ filters, days }) {
 
       {/* AUR Trend Table */}
       <div className="table-card" style={{ padding: 0, marginBottom: 12 }}>
-        <div style={{ padding: "10px 16px", borderBottom: "1px solid var(--border)" }}>
+        <div style={{ padding: "10px 16px", borderBottom: "1px solid var(--brd)" }}>
           <span style={SG(12, 700)}>Average Unit Revenue (AUR) — Weekly Trend</span>
         </div>
         <div style={{ overflowX: "auto" }}>
           <table style={{ width: "100%", borderCollapse: "collapse" }}>
             <thead>
-              <tr style={{ background: "var(--navy, #0E1F2D)" }}>
+              <tr style={{ background: "var(--card2)" }}>
                 <th style={{ ...SG(8, 700), padding: "8px 14px", textAlign: "left", color: "rgba(255,255,255,0.6)", textTransform: "uppercase" }}>SKU / ASIN</th>
                 {weeks.map((w, i) => (
                   <th key={i} style={{ ...SG(8, 700), padding: "8px 6px", textAlign: "center", color: "rgba(255,255,255,0.6)" }}>{w}</th>
@@ -529,10 +529,10 @@ function AurAnalysis({ filters, days }) {
                 const avg = s.aur || 0;
                 const trend = aurs.length >= 2 ? (aurs[aurs.length - 1] - aurs[0]) : 0;
                 return (
-                  <tr key={si} style={{ borderBottom: "1px solid var(--border, rgba(14,31,45,0.04))" }}>
+                  <tr key={si} style={{ borderBottom: "1px solid var(--brd)" }}>
                     <td style={{ ...cellL, maxWidth: 190 }}>
-                      <div style={{ fontWeight: 600, color: "var(--body-text)", fontSize: 11, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{s.name || s.sku || s.asin}</div>
-                      <div style={SG(7.5, 500, "var(--muted)")}>{s.asin}</div>
+                      <div style={{ fontWeight: 600, color: "var(--txt)", fontSize: 11, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{s.name || s.sku || s.asin}</div>
+                      <div style={SG(7.5, 500, "var(--txt3)")}>{s.asin}</div>
                     </td>
                     {aurs.map((a, ai) => (
                       <td key={ai} style={{ ...cellR, textAlign: "center", fontSize: 9.5 }}>${round(a, 2)}</td>
@@ -560,9 +560,9 @@ function AurAnalysis({ filters, days }) {
       <div className="table-card" style={{ padding: 14 }}>
         <ResponsiveContainer width="100%" height={320}>
           <ScatterChart margin={{ top: 10, right: 20, bottom: 10, left: 10 }}>
-            <CartesianGrid strokeDasharray="3 3" stroke="rgba(14,31,45,0.08)" />
-            <XAxis type="number" dataKey="aur" name="AUR" tick={{ ...SG(9, 600), fill: "var(--muted)" }} tickFormatter={v => `$${v}`} label={{ value: "AUR ($)", position: "bottom", offset: -2, style: SG(9, 600) }} />
-            <YAxis type="number" dataKey="net_margin" name="Net Margin" tick={{ ...SG(9, 600), fill: "var(--muted)" }} tickFormatter={v => `${v}%`} label={{ value: "Net Margin %", angle: -90, position: "insideLeft", style: SG(9, 600) }} />
+            <CartesianGrid strokeDasharray="3 3" stroke="var(--brd)" />
+            <XAxis type="number" dataKey="aur" name="AUR" tick={{ ...SG(9, 600), fill: "var(--txt3)" }} tickFormatter={v => `$${v}`} label={{ value: "AUR ($)", position: "bottom", offset: -2, style: SG(9, 600) }} />
+            <YAxis type="number" dataKey="net_margin" name="Net Margin" tick={{ ...SG(9, 600), fill: "var(--txt3)" }} tickFormatter={v => `${v}%`} label={{ value: "Net Margin %", angle: -90, position: "insideLeft", style: SG(9, 600) }} />
             <ZAxis type="number" dataKey="revenue" range={[50, 800]} />
             <Tooltip contentStyle={TOOLTIP_STYLE} formatter={(v, name) => [name === "AUR" ? `$${round(v, 2)}` : name === "Net Margin" ? `${round(v, 1)}%` : fmt$2(v), name]} />
             <Scatter data={bubbles} fill="#2ECFAA" fillOpacity={0.6} stroke="#2ECFAA" strokeWidth={1} />
@@ -688,7 +688,7 @@ function PricingCoupons({ filters, showToast }) {
         <div style={{ overflowX: "auto" }}>
           <table style={{ width: "100%", borderCollapse: "collapse" }}>
             <thead>
-              <tr style={{ background: "var(--navy, #0E1F2D)" }}>
+              <tr style={{ background: "var(--card2)" }}>
                 {["SKU / ASIN", "Division", "List Price", "Buy Box", "Landed Price", "Sale Price", "Discount"].map((h, i) => (
                   <th key={i} style={{ ...SG(8, 700), padding: "8px 10px", textAlign: i === 0 ? "left" : "center", color: "rgba(255,255,255,0.6)", textTransform: "uppercase" }}>{h}</th>
                 ))}
@@ -696,10 +696,10 @@ function PricingCoupons({ filters, showToast }) {
             </thead>
             <tbody>
               {amazonPricing.map(p => (
-                <tr key={p.asin} style={{ borderBottom: "1px solid var(--border, rgba(14,31,45,0.04))" }}>
+                <tr key={p.asin} style={{ borderBottom: "1px solid var(--brd)" }}>
                   <td style={{ ...cellL, maxWidth: 200 }}>
                     <div style={{ fontWeight: 600, fontSize: 11, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{p.productName || p.sku || p.asin}</div>
-                    <div style={SG(7.5, 500, "var(--muted)")}>{p.asin}{p.sku ? ` · ${p.sku}` : ""}</div>
+                    <div style={SG(7.5, 500, "var(--txt3)")}>{p.asin}{p.sku ? ` · ${p.sku}` : ""}</div>
                   </td>
                   <td style={{ ...cellR, textAlign: "center" }}>
                     <span style={{ ...SG(8, 700), padding: "2px 7px", borderRadius: 5, background: p.division === "golf" ? "rgba(46,207,170,.1)" : "rgba(232,120,48,.1)", color: p.division === "golf" ? "#2ECFAA" : "#E87830" }}>{p.division}</span>
@@ -707,16 +707,16 @@ function PricingCoupons({ filters, showToast }) {
                   <td style={{ ...cellR, textAlign: "center" }}>{p.listPrice ? `$${round(p.listPrice, 2)}` : "—"}</td>
                   <td style={{ ...cellR, textAlign: "center", color: "#2ECFAA", fontWeight: 700 }}>{p.buyBoxPrice ? `$${round(p.buyBoxPrice, 2)}` : "—"}</td>
                   <td style={{ ...cellR, textAlign: "center" }}>{p.landedPrice ? `$${round(p.landedPrice, 2)}` : "—"}</td>
-                  <td style={{ ...cellR, textAlign: "center", color: p.salePrice ? "#E87830" : "var(--muted)" }}>{p.salePrice ? `$${round(p.salePrice, 2)}` : "—"}</td>
+                  <td style={{ ...cellR, textAlign: "center", color: p.salePrice ? "#E87830" : "var(--txt3)" }}>{p.salePrice ? `$${round(p.salePrice, 2)}` : "—"}</td>
                   <td style={{ ...cellR, textAlign: "center" }}>
                     {p.discountPct > 0 ? (
                       <span style={{ ...SG(9, 700), padding: "2px 7px", borderRadius: 6, background: "rgba(46,207,170,.13)", color: "#2ECFAA" }}>{round(p.discountPct, 0)}% off</span>
-                    ) : <span style={{ color: "var(--muted)" }}>—</span>}
+                    ) : <span style={{ color: "var(--txt3)" }}>—</span>}
                   </td>
                 </tr>
               ))}
               {amazonPricing.length === 0 && (
-                <tr><td colSpan={7} style={{ padding: 20, textAlign: "center", color: "var(--muted)" }}>No Amazon pricing data cached — pricing sync runs every hour at :30</td></tr>
+                <tr><td colSpan={7} style={{ padding: 20, textAlign: "center", color: "var(--txt3)" }}>No Amazon pricing data cached — pricing sync runs every hour at :30</td></tr>
               )}
             </tbody>
           </table>
@@ -729,7 +729,7 @@ function PricingCoupons({ filters, showToast }) {
         <div style={{ overflowX: "auto" }}>
           <table style={{ width: "100%", borderCollapse: "collapse" }}>
             <thead>
-              <tr style={{ background: "var(--navy, #0E1F2D)" }}>
+              <tr style={{ background: "var(--card2)" }}>
                 {["Coupon ID", "Items", "Discount", "Budget", "Used", "Redemptions", "State", "Start", "End"].map((h, i) => (
                   <th key={i} style={{ ...SG(8, 700), padding: "8px 10px", textAlign: i <= 1 ? "left" : "center", color: "rgba(255,255,255,0.6)", textTransform: "uppercase" }}>{h}</th>
                 ))}
@@ -739,12 +739,12 @@ function PricingCoupons({ filters, showToast }) {
               {amazonCoupons.map(c => {
                 const usedPct = c.budgetAmount > 0 ? round(c.budgetUsed / c.budgetAmount * 100, 0) : 0;
                 return (
-                  <tr key={c.couponId} style={{ borderBottom: "1px solid var(--border, rgba(14,31,45,0.04))" }}>
+                  <tr key={c.couponId} style={{ borderBottom: "1px solid var(--brd)" }}>
                     <td style={{ ...cellL, maxWidth: 130 }}>
                       <div style={SG(9, 600)}>{c.couponId}</div>
                     </td>
                     <td style={{ ...cellL, maxWidth: 200 }}>
-                      <div style={SG(8, 500, "var(--muted)")}>
+                      <div style={SG(8, 500, "var(--txt3)")}>
                         {(c.asins || []).map(a => a.productName || a.sku || a.asin).join(", ") || "—"}
                       </div>
                     </td>
@@ -754,7 +754,7 @@ function PricingCoupons({ filters, showToast }) {
                     <td style={{ ...cellR, textAlign: "center" }}>${round(c.budgetAmount || 0, 0)}</td>
                     <td style={{ ...cellR, textAlign: "center" }}>
                       <div style={{ display: "flex", alignItems: "center", gap: 5, justifyContent: "center" }}>
-                        <div style={{ width: 50, height: 5, borderRadius: 3, background: "var(--border, rgba(14,31,45,0.1))", overflow: "hidden" }}>
+                        <div style={{ width: 50, height: 5, borderRadius: 3, background: "var(--brd)", overflow: "hidden" }}>
                           <div style={{ width: `${Math.min(usedPct, 100)}%`, height: "100%", borderRadius: 3, background: usedPct > 80 ? "#f87171" : "#2ECFAA" }} />
                         </div>
                         <span style={SG(9, 700)}>{usedPct}%</span>
@@ -777,7 +777,7 @@ function PricingCoupons({ filters, showToast }) {
                 );
               })}
               {amazonCoupons.length === 0 && (
-                <tr><td colSpan={9} style={{ padding: 20, textAlign: "center", color: "var(--muted)" }}>No active Amazon coupons found — coupon sync runs hourly</td></tr>
+                <tr><td colSpan={9} style={{ padding: 20, textAlign: "center", color: "var(--txt3)" }}>No active Amazon coupons found — coupon sync runs hourly</td></tr>
               )}
             </tbody>
           </table>
@@ -790,7 +790,7 @@ function PricingCoupons({ filters, showToast }) {
         <div style={{ overflowX: "auto" }}>
           <table style={{ width: "100%", borderCollapse: "collapse" }}>
             <thead>
-              <tr style={{ background: "var(--navy, #0E1F2D)" }}>
+              <tr style={{ background: "var(--card2)" }}>
                 {["SKU / ASIN", "Reg Price", "Sale Price", "Discount", "Start", "End", "Status", "Actions"].map((h, i) => (
                   <th key={i} style={{ ...SG(8, 700), padding: "8px 10px", textAlign: i === 0 ? "left" : "center", color: "rgba(255,255,255,0.6)", textTransform: "uppercase" }}>{h}</th>
                 ))}
@@ -800,10 +800,10 @@ function PricingCoupons({ filters, showToast }) {
               {prices.map(p => {
                 const disc = p.regularPrice > 0 ? round((1 - p.salePrice / p.regularPrice) * 100, 0) : 0;
                 return (
-                  <tr key={p.id} style={{ borderBottom: "1px solid var(--border, rgba(14,31,45,0.04))" }}>
+                  <tr key={p.id} style={{ borderBottom: "1px solid var(--brd)" }}>
                     <td style={{ ...cellL, maxWidth: 200 }}>
                       <div style={{ fontWeight: 600, fontSize: 11, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{p.productName || p.sku || p.asin}</div>
-                      <div style={SG(7.5, 500, "var(--muted)")}>{p.asin}{p.sku ? ` · ${p.sku}` : ""}</div>
+                      <div style={SG(7.5, 500, "var(--txt3)")}>{p.asin}{p.sku ? ` · ${p.sku}` : ""}</div>
                     </td>
                     <td style={{ ...cellR, textAlign: "center" }}>${round(p.regularPrice, 2)}</td>
                     <td style={{ ...cellR, textAlign: "center", color: "#E87830", fontWeight: 700 }}>${round(p.salePrice, 2)}</td>
@@ -826,7 +826,7 @@ function PricingCoupons({ filters, showToast }) {
                 );
               })}
               {prices.length === 0 && (
-                <tr><td colSpan={8} style={{ padding: 20, textAlign: "center", color: "var(--muted)" }}>No sale prices configured</td></tr>
+                <tr><td colSpan={8} style={{ padding: 20, textAlign: "center", color: "var(--txt3)" }}>No sale prices configured</td></tr>
               )}
             </tbody>
           </table>
@@ -839,7 +839,7 @@ function PricingCoupons({ filters, showToast }) {
         <div style={{ overflowX: "auto" }}>
           <table style={{ width: "100%", borderCollapse: "collapse" }}>
             <thead>
-              <tr style={{ background: "var(--navy, #0E1F2D)" }}>
+              <tr style={{ background: "var(--card2)" }}>
                 {["Title / Items", "Off", "Type", "Budget", "Used", "Start", "End", "Status", "Actions"].map((h, i) => (
                   <th key={i} style={{ ...SG(8, 700), padding: "8px 10px", textAlign: i === 0 ? "left" : "center", color: "rgba(255,255,255,0.6)", textTransform: "uppercase" }}>{h}</th>
                 ))}
@@ -849,10 +849,10 @@ function PricingCoupons({ filters, showToast }) {
               {coupons.map(c => {
                 const usedPct = c.budget > 0 ? round(c.budgetUsed / c.budget * 100, 0) : 0;
                 return (
-                  <tr key={c.id} style={{ borderBottom: "1px solid var(--border, rgba(14,31,45,0.04))" }}>
+                  <tr key={c.id} style={{ borderBottom: "1px solid var(--brd)" }}>
                     <td style={{ ...cellL, maxWidth: 220 }}>
                       <div style={{ fontWeight: 600, fontSize: 11 }}>{c.title || "Untitled Coupon"}</div>
-                      <div style={SG(7.5, 500, "var(--muted)")}>
+                      <div style={SG(7.5, 500, "var(--txt3)")}>
                         {(c.items || []).map(it => it.sku || it.asin).join(", ") || "No items"}
                       </div>
                     </td>
@@ -860,12 +860,12 @@ function PricingCoupons({ filters, showToast }) {
                       {c.couponType === "percentage" ? `${c.discountValue}%` : `$${round(c.discountValue, 2)}`}
                     </td>
                     <td style={{ ...cellR, textAlign: "center" }}>
-                      <span style={SG(9, 600, "var(--muted)")}>{c.couponType === "percentage" ? "%" : "$"}</span>
+                      <span style={SG(9, 600, "var(--txt3)")}>{c.couponType === "percentage" ? "%" : "$"}</span>
                     </td>
                     <td style={{ ...cellR, textAlign: "center" }}>${round(c.budget || 0, 0)}</td>
                     <td style={{ ...cellR, textAlign: "center" }}>
                       <div style={{ display: "flex", alignItems: "center", gap: 5, justifyContent: "center" }}>
-                        <div style={{ width: 50, height: 5, borderRadius: 3, background: "var(--border, rgba(14,31,45,0.1))", overflow: "hidden" }}>
+                        <div style={{ width: 50, height: 5, borderRadius: 3, background: "var(--brd)", overflow: "hidden" }}>
                           <div style={{ width: `${Math.min(usedPct, 100)}%`, height: "100%", borderRadius: 3, background: usedPct > 80 ? "#f87171" : "#2ECFAA" }} />
                         </div>
                         <span style={SG(9, 700)}>{usedPct}%</span>
@@ -886,7 +886,7 @@ function PricingCoupons({ filters, showToast }) {
                 );
               })}
               {coupons.length === 0 && (
-                <tr><td colSpan={9} style={{ padding: 20, textAlign: "center", color: "var(--muted)" }}>No coupons configured</td></tr>
+                <tr><td colSpan={9} style={{ padding: 20, textAlign: "center", color: "var(--txt3)" }}>No coupons configured</td></tr>
               )}
             </tbody>
           </table>
@@ -920,10 +920,10 @@ function KpiCard({ label, value, color, sub, delta }) {
   return (
     <div className="kpi-card" style={{ position: "relative", overflow: "hidden" }}>
       <div style={{ position: "absolute", top: 0, left: 0, right: 0, height: 2, background: color }} />
-      <div style={SG(7, 700, "var(--muted)")}>{label.toUpperCase()}</div>
+      <div style={SG(7, 700, "var(--txt3)")}>{label.toUpperCase()}</div>
       <div style={{ ...DM(20), color, lineHeight: 1, margin: "4px 0 2px" }}>{value}</div>
       {delta && <span style={SG(8, 700, delta.startsWith("▲") ? "#2ECFAA" : "#f87171")}>{delta}</span>}
-      {sub && <div style={SG(8, 500, "var(--muted)")}>{sub}</div>}
+      {sub && <div style={SG(8, 500, "var(--txt3)")}>{sub}</div>}
     </div>
   );
 }
@@ -933,11 +933,11 @@ function WfRow({ label, amount, pct, color, maxVal, isTotal, isSub }) {
   return (
     <div style={{
       display: "flex", alignItems: "center", gap: 10, padding: "6px 18px",
-      borderBottom: "1px solid var(--border, rgba(14,31,45,0.04))",
+      borderBottom: "1px solid var(--brd)",
       ...(isTotal ? { background: "rgba(14,31,45,0.04)", borderTop: "2px solid #2ECFAA" } : {}),
     }}>
-      <span style={{ ...SG(isSub ? 8 : 9, isTotal ? 700 : 600), color: isSub ? "var(--muted)" : undefined, width: 200, flexShrink: 0, paddingLeft: isSub ? 12 : 0 }}>{label}</span>
-      <div style={{ flex: 1, height: 8, background: "var(--border, rgba(14,31,45,0.06))", borderRadius: 4, overflow: "hidden" }}>
+      <span style={{ ...SG(isSub ? 8 : 9, isTotal ? 700 : 600), color: isSub ? "var(--txt3)" : undefined, width: 200, flexShrink: 0, paddingLeft: isSub ? 12 : 0 }}>{label}</span>
+      <div style={{ flex: 1, height: 8, background: "var(--brd)", borderRadius: 4, overflow: "hidden" }}>
         <div style={{ width: `${Math.min(barW, 100)}%`, height: "100%", borderRadius: 4, background: color, opacity: isSub ? 0.5 : 0.8, transition: "width 0.6s" }} />
       </div>
       <span style={{ ...DM(14, color), width: 80, textAlign: "right", flexShrink: 0 }}>
@@ -952,19 +952,19 @@ function StatusBadge({ status }) {
   const s = (status || "").toLowerCase();
   if (s === "active") return <span style={{ ...SG(8, 700), padding: "2px 7px", borderRadius: 6, background: "rgba(46,207,170,.13)", color: "#2ECFAA", display: "inline-flex", alignItems: "center", gap: 4 }}><span style={{ width: 5, height: 5, borderRadius: "50%", background: "#2ECFAA" }} />Active</span>;
   if (s === "scheduled") return <span style={{ ...SG(8, 700), padding: "2px 7px", borderRadius: 6, background: "rgba(123,174,208,.13)", color: "#7BAED0" }}>Scheduled</span>;
-  return <span style={{ ...SG(8, 700), padding: "2px 7px", borderRadius: 6, background: "rgba(141,174,200,.08)", color: "var(--muted)" }}>Ended</span>;
+  return <span style={{ ...SG(8, 700), padding: "2px 7px", borderRadius: 6, background: "rgba(141,174,200,.08)", color: "var(--txt3)" }}>Ended</span>;
 }
 
-const editBtnStyle = { width: 28, height: 22, borderRadius: 5, border: "1px solid var(--border)", background: "transparent", color: "var(--muted)", fontSize: 10, cursor: "pointer", display: "inline-flex", alignItems: "center", justifyContent: "center" };
+const editBtnStyle = { width: 28, height: 22, borderRadius: 5, border: "1px solid var(--brd)", background: "transparent", color: "var(--txt3)", fontSize: 10, cursor: "pointer", display: "inline-flex", alignItems: "center", justifyContent: "center" };
 const delBtnStyle = { ...editBtnStyle, borderColor: "rgba(248,113,113,.2)", color: "rgba(248,113,113,.5)" };
 
 function Modal({ title, onClose, children }) {
   return (
     <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,.6)", zIndex: 1000, display: "flex", alignItems: "center", justifyContent: "center" }}
       onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}>
-      <div style={{ background: "var(--card-bg, #fff)", border: "1px solid var(--border)", borderRadius: 14, padding: 24, width: 520, maxWidth: "95vw", boxShadow: "0 20px 60px rgba(0,0,0,.3)" }}>
+      <div style={{ background: "var(--card-bg, #fff)", border: "1px solid var(--brd)", borderRadius: 14, padding: 24, width: 520, maxWidth: "95vw", boxShadow: "0 20px 60px rgba(0,0,0,.3)" }}>
         <div style={{ ...DM(18), color: "#2ECFAA", marginBottom: 4 }}>{title}</div>
-        <div style={{ borderTop: "1px solid var(--border)", paddingTop: 16 }}>
+        <div style={{ borderTop: "1px solid var(--brd)", paddingTop: 16 }}>
           {children}
         </div>
       </div>
@@ -1001,7 +1001,7 @@ function SalePriceForm({ products, onSubmit, onCancel, initial, isEdit }) {
 
   return (
     <div className="table-card" style={{ padding: 16, marginBottom: 12 }}>
-      <div style={{ ...SG(9, 700, "var(--muted)"), textTransform: "uppercase", letterSpacing: "0.1em", marginBottom: 12 }}>
+      <div style={{ ...SG(9, 700, "var(--txt3)"), textTransform: "uppercase", letterSpacing: "0.1em", marginBottom: 12 }}>
         {isEdit ? "Edit Sale Price" : "Create New Sale Price"}
       </div>
       <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
@@ -1032,7 +1032,7 @@ function SalePriceForm({ products, onSubmit, onCancel, initial, isEdit }) {
       </div>
       {disc > 0 && <div style={{ ...SG(10, 700, "#2ECFAA"), marginTop: 8 }}>Discount: {disc}% off</div>}
       <div style={{ display: "flex", gap: 8, marginTop: 14, justifyContent: "flex-end" }}>
-        <button onClick={onCancel} style={{ ...SG(10, 700), height: 32, padding: "0 16px", borderRadius: 8, border: "1px solid var(--border)", background: "transparent", color: "var(--muted)", cursor: "pointer" }}>Cancel</button>
+        <button onClick={onCancel} style={{ ...SG(10, 700), height: 32, padding: "0 16px", borderRadius: 8, border: "1px solid var(--brd)", background: "transparent", color: "var(--txt3)", cursor: "pointer" }}>Cancel</button>
         <button onClick={handleSubmit} style={{ ...SG(10, 700), height: 32, padding: "0 16px", borderRadius: 8, border: "1px solid #2ECFAA", background: "rgba(46,207,170,.12)", color: "#2ECFAA", cursor: "pointer" }}>
           {isEdit ? "Update" : "Create"} Sale Price
         </button>
@@ -1078,7 +1078,7 @@ function CouponForm({ products, onSubmit, onCancel, initial, isEdit }) {
 
   return (
     <div className="table-card" style={{ padding: 16, marginBottom: 12 }}>
-      <div style={{ ...SG(9, 700, "var(--muted)"), textTransform: "uppercase", letterSpacing: "0.1em", marginBottom: 12 }}>
+      <div style={{ ...SG(9, 700, "var(--txt3)"), textTransform: "uppercase", letterSpacing: "0.1em", marginBottom: 12 }}>
         {isEdit ? "Edit Coupon" : "Create New Coupon"}
       </div>
       <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
@@ -1114,10 +1114,10 @@ function CouponForm({ products, onSubmit, onCancel, initial, isEdit }) {
 
       {/* Multi-item selector */}
       <div style={{ marginTop: 12 }}>
-        <div style={{ ...SG(9, 700, "var(--muted)"), textTransform: "uppercase", marginBottom: 6 }}>
+        <div style={{ ...SG(9, 700, "var(--txt3)"), textTransform: "uppercase", marginBottom: 6 }}>
           Select Items ({selectedItems.length} selected)
         </div>
-        <div style={{ maxHeight: 200, overflowY: "auto", border: "1px solid var(--border)", borderRadius: 8, padding: 4 }}>
+        <div style={{ maxHeight: 200, overflowY: "auto", border: "1px solid var(--brd)", borderRadius: 8, padding: 4 }}>
           {products.map(p => (
             <label key={p.asin} style={{
               display: "flex", alignItems: "center", gap: 8, padding: "5px 8px", borderRadius: 6, cursor: "pointer",
@@ -1127,16 +1127,16 @@ function CouponForm({ products, onSubmit, onCancel, initial, isEdit }) {
                 style={{ accentColor: "#2ECFAA" }} />
               <div>
                 <div style={{ fontSize: 11, fontWeight: 600 }}>{p.name || p.sku || p.asin}</div>
-                <div style={SG(8, 500, "var(--muted)")}>{p.asin}{p.sku ? ` · ${p.sku}` : ""}</div>
+                <div style={SG(8, 500, "var(--txt3)")}>{p.asin}{p.sku ? ` · ${p.sku}` : ""}</div>
               </div>
             </label>
           ))}
-          {products.length === 0 && <div style={{ padding: 10, textAlign: "center", color: "var(--muted)", fontSize: 11 }}>No products found</div>}
+          {products.length === 0 && <div style={{ padding: 10, textAlign: "center", color: "var(--txt3)", fontSize: 11 }}>No products found</div>}
         </div>
       </div>
 
       <div style={{ display: "flex", gap: 8, marginTop: 14, justifyContent: "flex-end" }}>
-        <button onClick={onCancel} style={{ ...SG(10, 700), height: 32, padding: "0 16px", borderRadius: 8, border: "1px solid var(--border)", background: "transparent", color: "var(--muted)", cursor: "pointer" }}>Cancel</button>
+        <button onClick={onCancel} style={{ ...SG(10, 700), height: 32, padding: "0 16px", borderRadius: 8, border: "1px solid var(--brd)", background: "transparent", color: "var(--txt3)", cursor: "pointer" }}>Cancel</button>
         <button onClick={handleSubmit} style={{ ...SG(10, 700), height: 32, padding: "0 16px", borderRadius: 8, border: "1px solid #E87830", background: "rgba(232,120,48,.12)", color: "#E87830", cursor: "pointer" }}>
           {isEdit ? "Update" : "Create"} Coupon
         </button>
@@ -1148,7 +1148,7 @@ function CouponForm({ products, onSubmit, onCancel, initial, isEdit }) {
 function FormRow({ label, children, span }) {
   return (
     <div style={{ ...(span === 2 ? { gridColumn: "span 2" } : {}) }}>
-      <div style={{ ...SG(9, 600, "var(--muted)"), marginBottom: 3 }}>{label}</div>
+      <div style={{ ...SG(9, 600, "var(--txt3)"), marginBottom: 3 }}>{label}</div>
       {children}
     </div>
   );
@@ -1156,8 +1156,8 @@ function FormRow({ label, children, span }) {
 
 const inputStyle = {
   width: "100%", height: 30, padding: "0 10px", borderRadius: 7,
-  border: "1px solid var(--border)", background: "transparent",
-  color: "var(--body-text, #2A3D50)", fontSize: 11,
+  border: "1px solid var(--brd)", background: "transparent",
+  color: "var(--txt)", fontSize: 11,
   fontFamily: "'Sora', sans-serif", outline: "none",
   boxSizing: "border-box",
 };

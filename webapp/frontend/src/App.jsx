@@ -21,6 +21,7 @@ import MfaSetup from "./pages/MfaSetup";
 import MfaVerify from "./pages/MfaVerify";
 import AuditLog from "./pages/AuditLog";
 import Sales from "./pages/Sales";
+import ExecSummary from "./pages/ExecSummary";
 import RetailReporting from "./pages/RetailReporting";
 import WalmartAnalytics from "./pages/WalmartAnalytics";
 import AmazonAnalytics from "./pages/AmazonAnalytics";
@@ -252,41 +253,6 @@ function AppShell({ user, isAdmin, allowed, mfaProtected, userMfaEnabled, filter
         <div className="filter-bar">
           <span className="filter-lbl">View:</span>
           <HierarchyFilter division={division} customer={customer} onChange={handleFilterChange} compact />
-          {/* Marketplace toggle — show on Amazon Analytics pages */}
-          {["amazon-analytics"].includes(activeTab) && (
-            <div style={{ display: 'flex', alignItems: 'center', gap: 0, marginLeft: 4 }}>
-              <button
-                onClick={() => handleMarketplaceChange("US")}
-                className={`mp-toggle${marketplace === "US" ? " mp-active" : ""}`}
-                style={{
-                  height: 28, padding: '0 10px', borderRadius: '6px 0 0 6px',
-                  border: '1px solid var(--brd)', borderRight: 'none',
-                  background: marketplace === "US" ? 'var(--acc1)' : 'var(--ibg)',
-                  color: marketplace === "US" ? '#fff' : 'var(--txt3)',
-                  fontSize: 10, fontWeight: 700, fontFamily: "'Space Grotesk',monospace",
-                  cursor: 'pointer', transition: 'all .2s', letterSpacing: '.03em',
-                  display: 'inline-flex', alignItems: 'center', gap: 4,
-                }}
-              >
-                <span style={{ fontSize: 11 }}>🇺🇸</span> US
-              </button>
-              <button
-                onClick={() => handleMarketplaceChange("CA")}
-                className={`mp-toggle${marketplace === "CA" ? " mp-active" : ""}`}
-                style={{
-                  height: 28, padding: '0 10px', borderRadius: '0 6px 6px 0',
-                  border: '1px solid var(--brd)',
-                  background: marketplace === "CA" ? 'var(--acc1)' : 'var(--ibg)',
-                  color: marketplace === "CA" ? '#fff' : 'var(--txt3)',
-                  fontSize: 10, fontWeight: 700, fontFamily: "'Space Grotesk',monospace",
-                  cursor: 'pointer', transition: 'all .2s', letterSpacing: '.03em',
-                  display: 'inline-flex', alignItems: 'center', gap: 4,
-                }}
-              >
-                <span style={{ fontSize: 11 }}>🇨🇦</span> CA
-              </button>
-            </div>
-          )}
           <AskClaude activeTab={activeTab} division={division} customer={customer} />
           <ThemeSelector />
         </div>
@@ -302,16 +268,11 @@ function AppShell({ user, isAdmin, allowed, mfaProtected, userMfaEnabled, filter
       {/* ── Main Content ── */}
       <main className="page">
         <Routes>
-          {/* ── Master Exec Summary (blank placeholder) ── */}
-          <Route path="/exec-summary" element={
-            <div style={{ padding: "60px 40px", textAlign: "center", color: "var(--txt3)", border: "1px dashed var(--brd)", borderRadius: 8, background: "var(--card)", margin: 24 }}>
-              <h2 style={{ fontFamily: "'DM Serif Display',Georgia,serif", fontSize: 22, color: "var(--txt2)", margin: "0 0 8px" }}>Master Exec Summary</h2>
-              <p style={{ fontFamily: "'Space Grotesk',monospace", fontSize: 12, color: "var(--txt3)" }}>Cross-channel executive summary coming soon — will aggregate data across all channels and divisions.</p>
-            </div>
-          } />
+          {/* ── Master Exec Summary ── */}
+          <Route path="/exec-summary" element={<ExecSummary filters={filters} />} />
 
           {/* ── Amazon Analytics (wrapper with sub-tabs) ── */}
-          <Route path="/amazon-analytics" element={<AmazonAnalytics filters={filters} />} />
+          <Route path="/amazon-analytics" element={<AmazonAnalytics filters={filters} onMarketplaceChange={handleMarketplaceChange} />} />
 
           {/* ── Walmart Analytics ── */}
           {allowed["retail-reporting"] !== false && <Route path="/walmart-analytics" element={<WalmartAnalytics filters={filters} />} />}

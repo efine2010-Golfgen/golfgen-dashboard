@@ -79,7 +79,7 @@ TAB_API_PREFIXES = {
 USERS = {
     "eric": {
         "name": "Eric",
-        "emails": ["eric@golfgen.com", "eric@egbrands.com"],
+        "emails": ["eric@golfgen.com", "eric@egbrands.com", "efine2010@gmail.com"],
         "password_hash": "$2b$12$CXwF3gjnEyEPwej2qV9trem4AXZi4tUVR50ifvb2dUTiNVBhHAneu",
         "role": "admin",
     },

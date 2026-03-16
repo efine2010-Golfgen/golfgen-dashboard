@@ -61,13 +61,20 @@ def verify_backup_code(code: str, hashed_codes: list[str]) -> tuple[bool, list[s
 # ─── DB helpers ────────────────────────────────────────────────────────────
 
 def get_mfa_settings(user_name: str) -> Optional[dict]:
-    """Fetch MFA settings for a user, or None if not enrolled."""
+    """Fetch MFA settings for a user, or None if not enrolled.
+    Tries exact match first, then case-insensitive fallback."""
     con = get_db_rw()
     try:
         row = con.execute(
             "SELECT * FROM mfa_user_settings WHERE user_name = ?",
             [user_name],
         ).fetchone()
+        if not row:
+            # Case-insensitive fallback (handles "Eric" vs "eric" vs "Eric Fine")
+            row = con.execute(
+                "SELECT * FROM mfa_user_settings WHERE LOWER(user_name) = LOWER(?)",
+                [user_name],
+            ).fetchone()
         if not row:
             return None
         cols = [d[0] for d in con.description]
@@ -83,7 +90,7 @@ def save_mfa_enrollment(user_name: str, secret: str, backup_codes: list[str]):
     con = get_db_rw()
     try:
         existing = con.execute(
-            "SELECT user_name FROM mfa_user_settings WHERE user_name = ?",
+            "SELECT user_name FROM mfa_user_settings WHERE LOWER(user_name) = LOWER(?)",
             [user_name],
         ).fetchone()
         if existing:
@@ -91,9 +98,9 @@ def save_mfa_enrollment(user_name: str, secret: str, backup_codes: list[str]):
                 UPDATE mfa_user_settings
                 SET mfa_secret = ?, mfa_enabled = TRUE,
                     mfa_enrolled_at = ?, mfa_backup_codes = ?,
-                    updated_at = ?
-                WHERE user_name = ?
-            """, [secret, now, hashed, now, user_name])
+                    updated_at = ?, user_name = ?
+                WHERE LOWER(user_name) = LOWER(?)
+            """, [secret, now, hashed, now, user_name, user_name])
         else:
             con.execute("""
                 INSERT INTO mfa_user_settings

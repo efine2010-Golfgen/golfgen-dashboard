@@ -968,6 +968,10 @@ def sales_period_comparison(
         return {"error": str(e)}
 
 
+# Manually-provided 2024 monthly revenue data (user-supplied actuals)
+_Y2024_FALLBACK = {1: 29790, 2: 46186, 3: 56133}
+
+
 # ── ENDPOINT 4: Monthly YOY bar chart data ─────────────────
 @router.get("/api/sales/monthly-yoy")
 def sales_monthly_yoy(
@@ -1006,7 +1010,7 @@ def sales_monthly_yoy(
         for mo in range(1, 13):
             entry = {
                 "month": month_names[mo - 1], "month_num": mo,
-                "y2024": months_map.get(mo, {}).get(2024, 0),
+                "y2024": months_map.get(mo, {}).get(2024, 0) or _Y2024_FALLBACK.get(mo, 0),
                 "y2025": months_map.get(mo, {}).get(2025, 0),
                 "y2026": months_map.get(mo, {}).get(2026, None) if (current_year > 2026 or (current_year == 2026 and mo <= current_month)) else None,
             }

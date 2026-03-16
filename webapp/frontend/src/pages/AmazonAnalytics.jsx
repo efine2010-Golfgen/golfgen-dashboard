@@ -28,8 +28,9 @@ const DM = (sz = 22) => ({
   fontSize: sz,
 });
 
-export default function AmazonAnalytics({ filters = {} }) {
+export default function AmazonAnalytics({ filters = {}, onMarketplaceChange }) {
   const [page, setPage] = useState("exec-summary");
+  const mp = filters.marketplace || "US";
 
   return (
     <div style={{ padding: "0 24px 40px" }}>
@@ -52,13 +53,14 @@ export default function AmazonAnalytics({ filters = {} }) {
         </div>
       </div>
 
-      {/* ── Page nav ── */}
+      {/* ── Page nav with marketplace toggle ── */}
       <div
         style={{
           display: "flex",
           gap: 2,
           marginBottom: 16,
           borderBottom: "1px solid var(--brd)",
+          alignItems: "flex-end",
         }}
       >
         {TABS.map((t) => (
@@ -81,6 +83,56 @@ export default function AmazonAnalytics({ filters = {} }) {
             {t.label}
           </button>
         ))}
+        {/* Marketplace toggle — right side */}
+        {onMarketplaceChange && (
+          <div style={{ display: "flex", alignItems: "center", gap: 0, marginLeft: "auto", marginBottom: 4 }}>
+            <button
+              onClick={() => onMarketplaceChange("US")}
+              style={{
+                height: 28,
+                padding: "0 10px",
+                borderRadius: "6px 0 0 6px",
+                border: "1px solid var(--brd)",
+                borderRight: "none",
+                background: mp === "US" ? "var(--acc1)" : "var(--ibg)",
+                color: mp === "US" ? "#fff" : "var(--txt3)",
+                fontSize: 10,
+                fontWeight: 700,
+                fontFamily: "'Space Grotesk',monospace",
+                cursor: "pointer",
+                transition: "all .2s",
+                letterSpacing: ".03em",
+                display: "inline-flex",
+                alignItems: "center",
+                gap: 4,
+              }}
+            >
+              🇺🇸 US
+            </button>
+            <button
+              onClick={() => onMarketplaceChange("CA")}
+              style={{
+                height: 28,
+                padding: "0 10px",
+                borderRadius: "0 6px 6px 0",
+                border: "1px solid var(--brd)",
+                background: mp === "CA" ? "var(--acc1)" : "var(--ibg)",
+                color: mp === "CA" ? "#fff" : "var(--txt3)",
+                fontSize: 10,
+                fontWeight: 700,
+                fontFamily: "'Space Grotesk',monospace",
+                cursor: "pointer",
+                transition: "all .2s",
+                letterSpacing: ".03em",
+                display: "inline-flex",
+                alignItems: "center",
+                gap: 4,
+              }}
+            >
+              🇨🇦 CA
+            </button>
+          </div>
+        )}
       </div>
 
       {/* ── Tab content ── */}

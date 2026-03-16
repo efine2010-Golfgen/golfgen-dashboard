@@ -388,7 +388,7 @@ export default function Products({ filters = {} }) {
               <div style={{ ...SG(), fontSize: 7, fontWeight: 700, textTransform: "uppercase", letterSpacing: ".1em", color: "var(--txt3)", marginBottom: 5, display: "flex", alignItems: "center", justifyContent: "space-between" }}>
                 <span>{rank}</span><Badge color="teal">{p.grade}</Badge>
               </div>
-              <div style={{ fontSize: 11, fontWeight: 700, color: "var(--txt)", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis", marginBottom: 1 }}>{p.name}</div>
+              <div style={{ fontSize: 11, fontWeight: 700, color: "var(--txt)", marginBottom: 1, lineHeight: 1.3, display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', overflow: 'hidden' }}>{p.name}</div>
               <div style={{ ...SG(), fontSize: 8, color: "var(--acc3)", marginBottom: 8 }}>{p.asin} · {p.div} · Amazon</div>
               <div style={{ marginBottom: 8 }}><Sparkline data={p.velData} width={220} height={28} /></div>
               <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 4 }}>
@@ -418,7 +418,7 @@ export default function Products({ filters = {} }) {
             <div style={{ ...SG(), fontSize: 7, fontWeight: 700, textTransform: "uppercase", letterSpacing: ".1em", color: "var(--txt3)", marginBottom: 5, display: "flex", alignItems: "center", justifyContent: "space-between" }}>
               <span>⚠ Needs Action</span><ScoreBox grade="C" />
             </div>
-            <div style={{ fontSize: 11, fontWeight: 700, color: "var(--txt)", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis", marginBottom: 1 }}>{needsAction.name}</div>
+            <div style={{ fontSize: 11, fontWeight: 700, color: "var(--txt)", marginBottom: 1, lineHeight: 1.3, display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', overflow: 'hidden' }}>{needsAction.name}</div>
             <div style={{ ...SG(), fontSize: 8, color: "var(--acc3)", marginBottom: 8 }}>{needsAction.asin} · {needsAction.div} · Amazon</div>
             <div style={{ marginBottom: 8 }}><Sparkline data={needsAction.velData} width={220} height={28} forceColor="#f87171" /></div>
             <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 4 }}>
@@ -461,7 +461,7 @@ export default function Products({ filters = {} }) {
               </CardHdr>
               <div style={{ padding: "10px 14px", overflowX: "auto" }}>
                 {/* Column headers */}
-                <div style={{ display: "flex", gap: 2, marginLeft: 142, marginBottom: 4 }}>
+                <div style={{ display: "flex", gap: 2, marginLeft: 172, marginBottom: 4 }}>
                   {WEEKS.map((w, i) => (
                     <div key={w} style={{ flex: 1, textAlign: "center", minWidth: 46, ...SG(), fontSize: 7.5, fontWeight: 700, textTransform: "uppercase", color: i === 7 ? "#2ECFAA" : "var(--txt3)" }}>{w}</div>
                   ))}
@@ -472,7 +472,7 @@ export default function Products({ filters = {} }) {
                   const sName = shortName(p.name, 22);
                   return (
                     <div key={p.asin + "-cvrhm"} style={{ display: "flex", alignItems: "center", gap: 2, marginBottom: 2 }}>
-                      <span style={{ ...SG(), fontSize: 8, color: "var(--txt2)", width: 140, flexShrink: 0, textAlign: "right", paddingRight: 8, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{sName}</span>
+                      <span style={{ ...SG(), fontSize: 8, color: "var(--txt2)", width: 170, flexShrink: 0, textAlign: "right", paddingRight: 8, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{sName}</span>
                       {cd.map((v, i) => {
                         const { bg, fg } = cvrHmBgFg(v);
                         return <HmCell key={i} value={v} fmt={v => `${v.toFixed(1)}%`} bg={bg} fg={fg} />;
@@ -498,7 +498,7 @@ export default function Products({ filters = {} }) {
                 <CBadge color="blue">Velocity trend</CBadge>
               </CardHdr>
               <div style={{ padding: "10px 14px", overflowX: "auto" }}>
-                <div style={{ display: "flex", gap: 2, marginLeft: 142, marginBottom: 4 }}>
+                <div style={{ display: "flex", gap: 2, marginLeft: 172, marginBottom: 4 }}>
                   {WEEKS.map((w, i) => (
                     <div key={w} style={{ flex: 1, textAlign: "center", minWidth: 46, ...SG(), fontSize: 7.5, fontWeight: 700, textTransform: "uppercase", color: i === 7 ? "#2ECFAA" : "var(--txt3)" }}>{w}</div>
                   ))}
@@ -509,7 +509,7 @@ export default function Products({ filters = {} }) {
                   const isDeclining = vd.length >= 2 && vd[vd.length - 1] < vd[0] * 0.85;
                   return (
                     <div key={p.asin + "-unithm"} style={{ display: "flex", alignItems: "center", gap: 2, marginBottom: 2 }}>
-                      <span style={{ ...SG(), fontSize: 8, color: "var(--txt2)", width: 140, flexShrink: 0, textAlign: "right", paddingRight: 8, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{sName}</span>
+                      <span style={{ ...SG(), fontSize: 8, color: "var(--txt2)", width: 170, flexShrink: 0, textAlign: "right", paddingRight: 8, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{sName}</span>
                       {vd.map((v, i) => {
                         const { bg, fg } = unitsHmBgFg(v, maxUnitsAll, isDeclining && i >= vd.length - 3, p.isHW);
                         return <HmCell key={i} value={v} fmt={v => Math.round(v)} bg={bg} fg={fg} />;
