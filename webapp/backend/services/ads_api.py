@@ -563,7 +563,7 @@ def _pull_ads_report(creds, report_type_id, columns, start_date, end_date, handl
     import requests as req
     from ad_api.api import reports as ads_reports
 
-    body = json.dumps({
+    body = {
         "name": f"{report_type_id}_{start_date}_{end_date}",
         "startDate": start_date,
         "endDate": end_date,
@@ -575,22 +575,30 @@ def _pull_ads_report(creds, report_type_id, columns, start_date, end_date, handl
             "timeUnit": "DAILY",
             "format": "GZIP_JSON",
         }
-    })
+    }
 
     try:
         logger.info(f"Ads sync: creating {report_type_id} report ({start_date} to {end_date})...")
         reports_api = ads_reports.Reports(credentials=creds)
 
-        @retry_with_backoff(max_retries=3, base_delay=2.0, max_delay=30.0)
-        def _create_report():
-            return reports_api.post_report(body=body)
+        # Try v3 reporting API call — pass body as JSON string
+        try:
+            result = reports_api.post_report(body=json.dumps(body))
+            logger.info(f"Ads sync: post_report response: status_code={getattr(result, 'status_code', '?')}, payload={str(getattr(result, 'payload', '?'))[:300]}")
+        except Exception as create_err:
+            logger.error(f"Ads sync: post_report call failed for {report_type_id}: {type(create_err).__name__}: {create_err}")
+            # Try with dict body instead of JSON string
+            try:
+                result = reports_api.post_report(body=body)
+                logger.info(f"Ads sync: post_report (dict body) response: status_code={getattr(result, 'status_code', '?')}, payload={str(getattr(result, 'payload', '?'))[:300]}")
+            except Exception as create_err2:
+                logger.error(f"Ads sync: post_report (dict body) also failed: {type(create_err2).__name__}: {create_err2}")
+                return
 
-        result = _create_report()
-        logger.info(f"Ads sync: post_report response: status={result.status_code}, payload={str(result.payload)[:300]}, headers={dict(result.headers) if hasattr(result, 'headers') else 'N/A'}")
         report_id = result.payload.get("reportId") if isinstance(result.payload, dict) else None
 
         if not report_id:
-            logger.error(f"Ads sync: no reportId returned for {report_type_id}, full payload: {str(result.payload)[:500]}")
+            logger.error(f"Ads sync: no reportId returned for {report_type_id}, payload: {str(getattr(result, 'payload', '?'))[:500]}")
             return
 
         # Poll for completion (max ~5 min)
