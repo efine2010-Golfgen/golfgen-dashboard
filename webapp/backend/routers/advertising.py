@@ -66,8 +66,11 @@ def _get_ads_client_secret() -> str:
 
 def _get_ads_redirect_uri(request: Request) -> str:
     """Build the OAuth redirect URI from the current request's base URL."""
-    # Use the actual host header to build the correct URL
+    # Railway terminates SSL at the proxy — request.base_url is http://
+    # Force https:// for production (Amazon requires exact match)
     base = str(request.base_url).rstrip("/")
+    if base.startswith("http://") and "localhost" not in base and "127.0.0.1" not in base:
+        base = "https://" + base[7:]
     return f"{base}/api/ads/auth/callback"
 
 
