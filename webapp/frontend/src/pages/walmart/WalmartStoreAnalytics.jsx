@@ -276,7 +276,7 @@ function getMetroStats() {
 // ═════════════════════════════════════════════════════════════════════════════
 // US MAP WITH D3 + TOPOJSON — DARK THEME, LARGE, BRAND GRADIENTS
 // ═════════════════════════════════════════════════════════════════════════════
-function USMap({ showCities, showRegions, selectedMetric, onSelectState }) {
+function USMap({ showCities, showRegions, selectedMetric, onSelectState, onSelectCity }) {
   const mapRef = useRef(null);
   const svgRef = useRef(null);
 
@@ -434,16 +434,19 @@ function USMap({ showCities, showRegions, selectedMetric, onSelectState }) {
             .attr("cy", (d) => projection([d.lng, d.lat])[1])
             .attr("r", (d) => {
               const val = selectedMetric === "qty" ? d.qty : selectedMetric === "returns" ? d.returns : d.pos;
-              return Math.max(2.5, Math.sqrt(val / 30) + 2);
+              return Math.max(1.2, Math.sqrt(val / 120) + 1);
             })
             .attr("fill", (d) => {
               const val = selectedMetric === "qty" ? d.qty : selectedMetric === "returns" ? d.returns : d.pos;
               return cityColorScale(val);
             })
-            .attr("stroke", "rgba(255,255,255,0.6)")
-            .attr("stroke-width", 0.5)
+            .attr("stroke", "rgba(255,255,255,0.4)")
+            .attr("stroke-width", 0.3)
             .attr("opacity", 0.85)
-            .style("pointer-events", "none");
+            .style("cursor", "pointer")
+            .on("click", function (event, d) {
+              if (onSelectCity) onSelectCity(d);
+            });
 
           // City name labels (top 50 to show more coverage)
           const topCities = validCities.slice(0, 50);
@@ -453,15 +456,15 @@ function USMap({ showCities, showRegions, selectedMetric, onSelectState }) {
             .append("text")
             .attr("class", "city-label")
             .attr("x", (d) => projection([d.lng, d.lat])[0])
-            .attr("y", (d) => projection([d.lng, d.lat])[1] - 8)
+            .attr("y", (d) => projection([d.lng, d.lat])[1] - 4)
             .attr("text-anchor", "middle")
-            .attr("font-size", "7px")
-            .attr("fill", "rgba(255,255,255,0.7)")
-            .attr("font-weight", "500")
+            .attr("font-size", "5px")
+            .attr("fill", "rgba(255,255,255,0.55)")
+            .attr("font-weight", "400")
             .attr("pointer-events", "none")
             .text((d) => {
               const n = d.city;
-              return n.length > 10 ? n.substring(0, 10) : n;
+              return n.length > 12 ? n.substring(0, 12) : n;
             });
         }
 
@@ -713,6 +716,7 @@ export function WalmartStoreAnalytics() {
   const [showRegions, setShowRegions] = useState(false);
   const [selectedMetric, setSelectedMetric] = useState("pos");
   const [selectedState, setSelectedState] = useState(null);
+  const [selectedCity, setSelectedCity] = useState(null);
 
   const totalUnits = Object.values(WM_DATA).reduce((a, s) => a + s.qty, 0);
   const totalReturns = Object.values(WM_DATA).reduce((a, s) => a + (s.returns || 0), 0);
@@ -770,6 +774,7 @@ export function WalmartStoreAnalytics() {
             showRegions={showRegions}
             selectedMetric={selectedMetric}
             onSelectState={setSelectedState}
+            onSelectCity={setSelectedCity}
           />
         </Card>
 
@@ -935,15 +940,18 @@ export function WalmartStoreAnalytics() {
                 legend: {
                   position: "right",
                   labels: {
-                    padding: 16,
-                    font: { family: "'Space Grotesk', monospace", size: 11 },
-                    color: "rgba(255,255,255,.7)",
+                    padding: 14,
+                    font: { family: "'Space Grotesk', monospace", size: 11, weight: 600 },
+                    color: "#e2e8f0",
+                    usePointStyle: true,
+                    pointStyle: "rectRounded",
                     generateLabels: (chart) => {
                       const data = chart.data;
                       const total = data.datasets[0].data.reduce((a, v) => a + v, 0);
                       return data.labels.map((label, i) => ({
                         text: label + " (" + (total > 0 ? ((data.datasets[0].data[i] / total) * 100).toFixed(1) : 0) + "%)",
                         fillStyle: data.datasets[0].backgroundColor[i],
+                        fontColor: "#e2e8f0",
                         strokeStyle: "#0d1b2a",
                         lineWidth: 2,
                         index: i,
@@ -986,6 +994,47 @@ export function WalmartStoreAnalytics() {
                 { label: "Returns $", value: fmtK(sd.returns || 0), color: "#E87830" },
                 { label: "Stores", value: sd.traited, color: "#a78bfa" },
                 { label: "Avg $/Store", value: fmtAvg(sd.pos, sd.traited), color: "#F5B731" },
+              ].map((kpi) => (
+                <div key={kpi.label} style={{
+                  padding: "10px", borderRadius: 8,
+                  background: "rgba(20,35,55,.4)", borderTop: `2px solid ${kpi.color}`,
+                }}>
+                  <div style={{ ...SG(8, 600), color: "var(--txt3)", textTransform: "uppercase", letterSpacing: ".06em" }}>{kpi.label}</div>
+                  <div style={{ ...DM(16), color: "var(--txt)", marginTop: 4 }}>{kpi.value}</div>
+                </div>
+              ))}
+            </div>
+          </Card>
+        );
+      })()}
+
+      {/* Selected city detail (inline) */}
+      {selectedCity && (() => {
+        const cd = selectedCity;
+        const region = STATE_TO_REGION[cd.state] || "—";
+        return (
+          <Card>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+              <div>
+                <span style={{ ...SG(14, 700), color: "var(--txt)" }}>{cd.city}, {cd.state}</span>
+                <span style={{ ...SG(11), color: REGIONS[region]?.color || "var(--txt3)", marginLeft: 12 }}>{region}</span>
+              </div>
+              <button
+                onClick={() => setSelectedCity(null)}
+                style={{
+                  padding: "4px 10px", fontSize: "10px", background: "transparent",
+                  color: "var(--txt3)", border: "1px solid var(--brd)", borderRadius: 4, cursor: "pointer",
+                }}
+              >
+                ✕ Close
+              </button>
+            </div>
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: "12px", marginTop: 12 }}>
+              {[
+                { label: "Sales $", value: fmtK(cd.pos || 0), color: "#2ECFAA" },
+                { label: "Units Sold", value: fN(cd.qty || 0), color: "#7BAED0" },
+                { label: "Returns $", value: fmtK(cd.returns || 0), color: "#E87830" },
+                { label: "Return Rate", value: cd.pos > 0 ? ((cd.returns || 0) / cd.pos * 100).toFixed(1) + "%" : "—", color: "#a78bfa" },
               ].map((kpi) => (
                 <div key={kpi.label} style={{
                   padding: "10px", borderRadius: 8,
