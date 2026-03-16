@@ -273,12 +273,25 @@ def _sync_pricing_and_coupons():
 
 # ── Ads API Functions ────────────────────────────────────────────────────
 
-def _load_ads_credentials() -> dict | None:
-    """Load Amazon Ads API credentials from env vars or config file.
+def _get_db_setting(key: str) -> str:
+    """Read a value from app_settings table (helper for credential loading)."""
+    try:
+        from core.database import get_db
+        con = get_db()
+        row = con.execute("SELECT value FROM app_settings WHERE key = ?", [key]).fetchone()
+        con.close()
+        return row[0] if row else ""
+    except Exception:
+        return ""
 
-    Supports both naming conventions for env vars:
-      - New: AMAZON_ADS_CLIENT_ID, AMAZON_ADS_CLIENT_SECRET, AMAZON_ADS_REFRESH_TOKEN, AMAZON_ADS_PROFILE_ID
-      - Legacy: ADS_CLIENT_ID, ADS_CLIENT_SECRET, ADS_REFRESH_TOKEN, ADS_PROFILE_ID
+
+def _load_ads_credentials() -> dict | None:
+    """Load Amazon Ads API credentials from env vars, DB, or config file.
+
+    Priority order for each credential:
+      1. Environment variables (AMAZON_ADS_*, ADS_API_*, ADS_*)
+      2. Database app_settings table (set via OAuth flow)
+      3. Config file (credentials.json)
     """
     # Support all three naming conventions used across deployments:
     #   AMAZON_ADS_*   (new canonical)
@@ -289,33 +302,43 @@ def _load_ads_credentials() -> dict | None:
         or os.environ.get("ADS_API_CLIENT_ID")
         or os.environ.get("ADS_CLIENT_ID", "")
     )
-    if env_client_id:
+    env_client_secret = (
+        os.environ.get("AMAZON_ADS_CLIENT_SECRET")
+        or os.environ.get("ADS_API_CLIENT_SECRET")
+        or os.environ.get("ADS_CLIENT_SECRET", "")
+    )
+    env_refresh_token = (
+        os.environ.get("AMAZON_ADS_REFRESH_TOKEN")
+        or os.environ.get("ADS_API_REFRESH_TOKEN")
+        or os.environ.get("ADS_REFRESH_TOKEN", "")
+    )
+    env_profile_id = (
+        os.environ.get("AMAZON_ADS_PROFILE_ID")
+        or os.environ.get("ADS_API_PROFILE_ID")
+        or os.environ.get("ADS_PROFILE_ID", "")
+    )
+
+    # Merge env vars with DB-stored values (env takes priority)
+    client_id = env_client_id or _get_db_setting("ads_client_id")
+    client_secret = env_client_secret or _get_db_setting("ads_client_secret")
+    refresh_token = env_refresh_token or _get_db_setting("ads_refresh_token")
+    profile_id = env_profile_id or _get_db_setting("ads_profile_id")
+
+    if client_id:
         creds = {
-            "refresh_token": (
-                os.environ.get("AMAZON_ADS_REFRESH_TOKEN")
-                or os.environ.get("ADS_API_REFRESH_TOKEN")
-                or os.environ.get("ADS_REFRESH_TOKEN", "")
-            ),
-            "client_id": env_client_id,
-            "client_secret": (
-                os.environ.get("AMAZON_ADS_CLIENT_SECRET")
-                or os.environ.get("ADS_API_CLIENT_SECRET")
-                or os.environ.get("ADS_CLIENT_SECRET", "")
-            ),
-            "profile_id": (
-                os.environ.get("AMAZON_ADS_PROFILE_ID")
-                or os.environ.get("ADS_API_PROFILE_ID")
-                or os.environ.get("ADS_PROFILE_ID", "")
-            ),
+            "refresh_token": refresh_token,
+            "client_id": client_id,
+            "client_secret": client_secret,
+            "profile_id": profile_id,
         }
         if creds["refresh_token"] and creds["client_secret"]:
             logger.info(
-                f"Ads creds loaded: client_id={env_client_id[:8]}... "
+                f"Ads creds loaded: client_id={client_id[:8]}... "
                 f"profile_id={creds['profile_id'] or '(will discover)'}"
             )
             return creds
         logger.warning(
-            f"Ads creds: client_id found ({env_client_id[:8]}...) "
+            f"Ads creds: client_id found ({client_id[:8]}...) "
             f"but refresh_token or client_secret is missing"
         )
         return None

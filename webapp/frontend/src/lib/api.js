@@ -317,6 +317,12 @@ export const api = {
     }),
   drStatus: () => fetchJSON(`/api/backup/dr-status`),
 
+  // Ads API
+  adsAuthStatus: () => fetchJSON(`/api/ads/auth/status`),
+  adsProfiles: () => fetchJSON(`/api/ads/profiles`),
+  triggerAdsSync: () =>
+    fetch(`/api/ads/sync`, { method: "POST", credentials: "include" }).then((r) => r.json()),
+
   // Retail Reporting
   retailSummary: (h = {}) => fetchJSON(`/api/retail/summary${_hq(h) ? '?' + _hq(h).slice(1) : ''}`),
   retailScorecard: (h = {}) => fetchJSON(`/api/retail/scorecard${_hq(h) ? '?' + _hq(h).slice(1) : ''}`),

@@ -1,18 +1,272 @@
 """Amazon Advertising routes."""
+import os
 import logging
 import asyncio
 from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
 from typing import Optional
-from fastapi import APIRouter, Query
+from fastapi import APIRouter, Query, Request
+from fastapi.responses import RedirectResponse, HTMLResponse
+import requests as http_requests
 
 from core.config import DB_PATH, TIMEZONE
-from core.database import get_db
+from core.database import get_db, get_db_rw
 from core.hierarchy import hierarchy_filter
 from services.ads_api import _sync_ads_data, _load_ads_credentials
 
 logger = logging.getLogger("golfgen")
 router = APIRouter()
+
+# ── App Settings Helpers ─────────────────────────────────────────
+def _get_setting(key: str) -> str | None:
+    """Read a value from app_settings table."""
+    try:
+        con = get_db()
+        row = con.execute("SELECT value FROM app_settings WHERE key = ?", [key]).fetchone()
+        con.close()
+        return row[0] if row else None
+    except Exception:
+        return None
+
+def _set_setting(key: str, value: str):
+    """Upsert a value into app_settings table."""
+    con = get_db_rw()
+    try:
+        existing = con.execute("SELECT 1 FROM app_settings WHERE key = ?", [key]).fetchone()
+        if existing:
+            con.execute("UPDATE app_settings SET value = ?, updated_at = CURRENT_TIMESTAMP WHERE key = ?", [value, key])
+        else:
+            con.execute("INSERT INTO app_settings (key, value) VALUES (?, ?)", [key, value])
+    finally:
+        con.close()
+
+
+# ── Ads API OAuth Flow ───────────────────────────────────────────
+# These endpoints handle the Login with Amazon OAuth dance to obtain
+# a refresh token for the Amazon Ads API.
+
+AMAZON_AUTH_URL = "https://www.amazon.com/ap/oa"
+AMAZON_TOKEN_URL = "https://api.amazon.com/auth/o2/token"
+
+def _get_ads_client_id() -> str:
+    return (
+        os.environ.get("ADS_API_CLIENT_ID")
+        or os.environ.get("AMAZON_ADS_CLIENT_ID")
+        or _get_setting("ads_client_id")
+        or ""
+    )
+
+def _get_ads_client_secret() -> str:
+    return (
+        os.environ.get("ADS_API_CLIENT_SECRET")
+        or os.environ.get("AMAZON_ADS_CLIENT_SECRET")
+        or _get_setting("ads_client_secret")
+        or ""
+    )
+
+def _get_ads_redirect_uri(request: Request) -> str:
+    """Build the OAuth redirect URI from the current request's base URL."""
+    # Use the actual host header to build the correct URL
+    base = str(request.base_url).rstrip("/")
+    return f"{base}/api/ads/auth/callback"
+
+
+@router.get("/api/ads/auth/start")
+def ads_auth_start(request: Request):
+    """Redirect the user to Amazon's OAuth consent page to authorize Ads API."""
+    client_id = _get_ads_client_id()
+    if not client_id:
+        return HTMLResponse(
+            "<h2>Missing Ads API Client ID</h2>"
+            "<p>Set <code>ADS_API_CLIENT_ID</code> environment variable on Railway first.</p>",
+            status_code=400,
+        )
+
+    redirect_uri = _get_ads_redirect_uri(request)
+    auth_url = (
+        f"{AMAZON_AUTH_URL}"
+        f"?client_id={client_id}"
+        f"&scope=advertising::campaign_management"
+        f"&response_type=code"
+        f"&redirect_uri={redirect_uri}"
+    )
+    logger.info(f"Ads OAuth: redirecting to Amazon (redirect_uri={redirect_uri})")
+    return RedirectResponse(url=auth_url)
+
+
+@router.get("/api/ads/auth/callback")
+def ads_auth_callback(request: Request, code: str = Query(None), error: str = Query(None)):
+    """Handle the OAuth callback from Amazon — exchange code for tokens."""
+    if error:
+        return HTMLResponse(
+            f"<h2>Authorization Failed</h2><p>Amazon returned error: {error}</p>",
+            status_code=400,
+        )
+    if not code:
+        return HTMLResponse(
+            "<h2>No Authorization Code</h2><p>Amazon did not return an authorization code.</p>",
+            status_code=400,
+        )
+
+    client_id = _get_ads_client_id()
+    client_secret = _get_ads_client_secret()
+    redirect_uri = _get_ads_redirect_uri(request)
+
+    if not client_id or not client_secret:
+        return HTMLResponse(
+            "<h2>Missing Credentials</h2>"
+            "<p>Set <code>ADS_API_CLIENT_ID</code> and <code>ADS_API_CLIENT_SECRET</code> on Railway.</p>",
+            status_code=400,
+        )
+
+    # Exchange authorization code for tokens
+    try:
+        token_resp = http_requests.post(AMAZON_TOKEN_URL, data={
+            "grant_type": "authorization_code",
+            "code": code,
+            "redirect_uri": redirect_uri,
+            "client_id": client_id,
+            "client_secret": client_secret,
+        }, timeout=30)
+        token_data = token_resp.json()
+
+        if "error" in token_data:
+            logger.error(f"Ads OAuth token error: {token_data}")
+            return HTMLResponse(
+                f"<h2>Token Exchange Failed</h2>"
+                f"<p>Error: {token_data.get('error_description', token_data.get('error'))}</p>",
+                status_code=400,
+            )
+
+        refresh_token = token_data.get("refresh_token", "")
+        access_token = token_data.get("access_token", "")
+
+        if not refresh_token:
+            return HTMLResponse(
+                "<h2>No Refresh Token</h2><p>Amazon did not return a refresh token.</p>",
+                status_code=400,
+            )
+
+        # Save refresh token to DB
+        _set_setting("ads_refresh_token", refresh_token)
+        logger.info(f"Ads OAuth: refresh token obtained and saved (len={len(refresh_token)})")
+
+        # Try to discover the advertising profile ID
+        profile_msg = ""
+        try:
+            from ad_api.api import Profiles
+            creds = {
+                "refresh_token": refresh_token,
+                "client_id": client_id,
+                "client_secret": client_secret,
+                "profile_id": "",
+            }
+            result = Profiles(credentials=creds).get_profiles()
+            profiles = result.payload or []
+            us_profile = None
+            for p in profiles:
+                if p.get("accountInfo", {}).get("marketplaceStringId") == "ATVPDKIKX0DER":
+                    us_profile = p
+                    break
+            if not us_profile and profiles:
+                us_profile = profiles[0]
+
+            if us_profile:
+                profile_id = str(us_profile.get("profileId", ""))
+                account_name = us_profile.get("accountInfo", {}).get("name", "")
+                _set_setting("ads_profile_id", profile_id)
+                logger.info(f"Ads OAuth: discovered profile_id={profile_id} ({account_name})")
+                profile_msg = f"<p>✅ Discovered Ads Profile: <strong>{account_name}</strong> (ID: {profile_id})</p>"
+
+                # Show all profiles found
+                if len(profiles) > 1:
+                    profile_msg += "<p>All profiles found:</p><ul>"
+                    for p in profiles:
+                        pid = p.get("profileId")
+                        pname = p.get("accountInfo", {}).get("name", "")
+                        pmkt = p.get("accountInfo", {}).get("marketplaceStringId", "")
+                        profile_msg += f"<li>{pname} — {pmkt} (ID: {pid})</li>"
+                    profile_msg += "</ul>"
+            else:
+                profile_msg = "<p>⚠️ No advertising profiles found. You may need to create one in the Amazon Ads Console.</p>"
+        except Exception as e:
+            profile_msg = f"<p>⚠️ Could not auto-discover profile: {e}</p>"
+            logger.warning(f"Ads OAuth: profile discovery failed: {e}")
+
+        return HTMLResponse(
+            "<html><head><style>"
+            "body { font-family: -apple-system, sans-serif; max-width: 600px; margin: 60px auto; "
+            "background: #0f172a; color: #e2e8f0; padding: 20px; }"
+            "h2 { color: #2ECFAA; } code { background: #1e293b; padding: 2px 6px; border-radius: 4px; }"
+            ".card { background: #1e293b; border-radius: 12px; padding: 20px; margin: 16px 0; "
+            "border: 1px solid #334155; }"
+            "a { color: #2ECFAA; }"
+            "</style></head><body>"
+            "<h2>✅ Amazon Ads API Connected!</h2>"
+            "<div class='card'>"
+            "<p>Refresh token has been saved to the database.</p>"
+            f"{profile_msg}"
+            "<p>The ads sync will start pulling data on the next scheduled run (every 2 hours), "
+            "or you can trigger it manually from the System page.</p>"
+            f"<p><a href='/'>← Return to Dashboard</a></p>"
+            "</div>"
+            "</body></html>",
+            status_code=200,
+        )
+
+    except Exception as e:
+        logger.error(f"Ads OAuth callback error: {e}")
+        return HTMLResponse(
+            f"<h2>Error</h2><p>{str(e)}</p>",
+            status_code=500,
+        )
+
+
+@router.get("/api/ads/auth/status")
+def ads_auth_status():
+    """Check the current Ads API connection status."""
+    client_id = _get_ads_client_id()
+    client_secret = _get_ads_client_secret()
+    refresh_token = (
+        os.environ.get("ADS_API_REFRESH_TOKEN")
+        or os.environ.get("AMAZON_ADS_REFRESH_TOKEN")
+        or _get_setting("ads_refresh_token")
+        or ""
+    )
+    profile_id = (
+        os.environ.get("ADS_API_PROFILE_ID")
+        or os.environ.get("AMAZON_ADS_PROFILE_ID")
+        or _get_setting("ads_profile_id")
+        or ""
+    )
+
+    has_client_id = bool(client_id)
+    has_client_secret = bool(client_secret)
+    has_refresh_token = bool(refresh_token)
+    has_profile_id = bool(profile_id)
+
+    connected = has_client_id and has_client_secret and has_refresh_token
+
+    # Check if there's actual ads data in the DB
+    data_count = 0
+    try:
+        con = get_db()
+        row = con.execute("SELECT COUNT(*) FROM advertising").fetchone()
+        data_count = row[0] if row else 0
+        con.close()
+    except Exception:
+        pass
+
+    return {
+        "connected": connected,
+        "hasClientId": has_client_id,
+        "hasClientSecret": has_client_secret,
+        "hasRefreshToken": has_refresh_token,
+        "hasProfileId": has_profile_id,
+        "profileId": profile_id if has_profile_id else None,
+        "dataRows": data_count,
+        "clientIdPrefix": client_id[:12] + "..." if client_id else None,
+    }
 
 
 # ── Utility Functions ────────────────────────────────────────────

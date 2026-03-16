@@ -196,6 +196,8 @@ export default function System() {
   const [logFilter, setLogFilter] = useState("all");
   const [refreshing, setRefreshing] = useState(false);
   const [refreshError, setRefreshError] = useState(null);
+  const [adsStatus, setAdsStatus] = useState(null);
+  const [adsSyncRunning, setAdsSyncRunning] = useState(false);
 
   const load = useCallback((isManual = false) => {
     if (isManual) setRefreshing(true);
@@ -207,7 +209,8 @@ export default function System() {
       api.backupStatus().catch(e => { console.warn("backupStatus failed:", e); return null; }),
       api.githubBackupStatus().catch(e => { console.warn("githubStatus failed:", e); return null; }),
       api.drStatus().catch(e => { console.warn("drStatus failed:", e); return null; }),
-    ]).then(([log, cov, h, b, gb, dr]) => {
+      api.adsAuthStatus().catch(e => { console.warn("adsStatus failed:", e); return null; }),
+    ]).then(([log, cov, h, b, gb, dr, ads]) => {
       // Only update state if the fetch returned data — preserve stale data on error
       if (log !== null) setSyncLog(log.entries || []);
       if (cov !== null) setCoverage(cov);
@@ -215,7 +218,8 @@ export default function System() {
       if (b !== null) setBackup(b);
       if (gb !== null) setGithubBackup(gb);
       if (dr !== null) setDrStatus(dr);
-      const anyFailed = [log, cov, h, b, gb, dr].some(x => x === null);
+      if (ads !== null) setAdsStatus(ads);
+      const anyFailed = [log, cov, h, b, gb, dr, ads].some(x => x === null);
       if (anyFailed && isManual) setRefreshError("Some data failed to load — showing last known values");
       setLoading(false);
       setLastRefresh(new Date());
@@ -255,6 +259,13 @@ export default function System() {
       setGapFillResult({ status: "FAILED", reason: e.message });
     }
     finally { setGapFillRunning(false); }
+  };
+
+  const handleAdsSync = async () => {
+    setAdsSyncRunning(true);
+    try { await api.triggerAdsSync(); setTimeout(load, 5000); }
+    catch (e) { console.error(e); }
+    finally { setAdsSyncRunning(false); }
   };
 
   const handleVerifyBackup = async () => {
@@ -342,6 +353,68 @@ export default function System() {
           )}
         </div>
       )}
+
+      {/* ── Amazon Ads API ──────────────────────────────────────────────────── */}
+      <div style={{
+        background: "#fff", borderRadius: 12, padding: 20, marginBottom: 20,
+        boxShadow: "0 1px 3px rgba(0,0,0,0.08)",
+        borderLeft: `4px solid ${adsStatus?.connected ? "#16a34a" : "#d97706"}`,
+      }}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 14, flexWrap: "wrap", gap: 10 }}>
+          <div>
+            <h3 style={{ margin: "0 0 2px", fontSize: 15, fontWeight: 700 }}>
+              {adsStatus?.connected ? "🟢" : "🟡"} Amazon Ads API
+            </h3>
+            <div style={{ fontSize: 12, color: "#6B8090" }}>
+              {adsStatus?.connected
+                ? `Connected — ${(adsStatus.dataRows || 0).toLocaleString()} data rows`
+                : "Not connected — complete setup to enable ads data sync"
+              }
+            </div>
+          </div>
+          <div style={{ display: "flex", gap: 8 }}>
+            {adsStatus?.connected && (
+              <button onClick={handleAdsSync} disabled={adsSyncRunning} style={btnStyle(adsSyncRunning, "#3E658C")}>
+                {adsSyncRunning ? <><Spinner /> Syncing...</> : "🔄 Sync Ads Now"}
+              </button>
+            )}
+            {!adsStatus?.connected && adsStatus?.hasClientId && adsStatus?.hasClientSecret && (
+              <a href="/api/ads/auth/start" style={{
+                display: "inline-flex", alignItems: "center", gap: 6,
+                padding: "7px 16px", borderRadius: 8, fontSize: 12, fontWeight: 600,
+                background: "#f59e0b", color: "#fff", textDecoration: "none",
+              }}>
+                🔑 Authorize with Amazon
+              </a>
+            )}
+          </div>
+        </div>
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(160px, 1fr))", gap: 10 }}>
+          <StatBox label="Client ID" value={adsStatus?.hasClientId ? `${adsStatus.clientIdPrefix}` : "Not set"} mono
+            color={adsStatus?.hasClientId ? "#16a34a" : "#dc2626"} />
+          <StatBox label="Client Secret" value={adsStatus?.hasClientSecret ? "Set ✓" : "Not set"} mono
+            color={adsStatus?.hasClientSecret ? "#16a34a" : "#dc2626"} />
+          <StatBox label="Refresh Token" value={adsStatus?.hasRefreshToken ? "Set ✓" : "Not set"} mono
+            color={adsStatus?.hasRefreshToken ? "#16a34a" : "#dc2626"} />
+          <StatBox label="Profile ID" value={adsStatus?.profileId || "Not set"} mono
+            color={adsStatus?.hasProfileId ? "#16a34a" : "#d97706"} />
+          <StatBox label="Ad Data Rows" value={(adsStatus?.dataRows || 0).toLocaleString()} mono />
+          <StatBox label="Sync Schedule" value="Every 2h" />
+        </div>
+        {!adsStatus?.hasClientId && (
+          <div style={{ marginTop: 12, padding: "10px 14px", background: "#fef3c7", borderRadius: 8, fontSize: 12, color: "#92400e" }}>
+            <strong>Setup needed:</strong> Set <code>ADS_API_CLIENT_ID</code> and <code>ADS_API_CLIENT_SECRET</code> as environment variables on Railway,
+            then click "Authorize with Amazon" to complete the OAuth flow.
+          </div>
+        )}
+        {adsStatus?.hasClientId && adsStatus?.hasClientSecret && !adsStatus?.hasRefreshToken && (
+          <div style={{ marginTop: 12, padding: "10px 14px", background: "#fef3c7", borderRadius: 8, fontSize: 12, color: "#92400e" }}>
+            <strong>Almost there:</strong> Click "Authorize with Amazon" above to complete the OAuth flow and obtain a refresh token.
+            Make sure the callback URL <code>{window.location.origin}/api/ads/auth/callback</code> is added to your
+            LWA app's "Allowed Return URLs" in the Amazon Developer Console.
+          </div>
+        )}
+      </div>
 
       {/* ── Data Coverage ─────────────────────────────────────────────────── */}
       {coverage && (

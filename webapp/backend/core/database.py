@@ -1584,6 +1584,19 @@ def _init_retail_tables():
     con.close()
 
 
+def _init_app_settings_table():
+    """Create app_settings key-value table for storing API credentials, tokens, etc."""
+    con = get_db_rw()
+    con.execute("""
+        CREATE TABLE IF NOT EXISTS app_settings (
+            key         VARCHAR(100) PRIMARY KEY,
+            value       TEXT NOT NULL,
+            updated_at  TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+    """)
+    con.close()
+
+
 def _fix_pg_sequences():
     """Reset PostgreSQL sequences to match the current max IDs in their tables.
 
@@ -1702,6 +1715,12 @@ def init_all_tables():
         logger.info("Retail tables initialized (walmart_store_weekly, walmart_item_weekly, walmart_scorecard, walmart_ecomm_weekly, walmart_order_forecast, retail_upload_log)")
     except Exception as e:
         logger.error(f"Retail table init error: {e}")
+
+    try:
+        _init_app_settings_table()
+        logger.info("App settings table initialized")
+    except Exception as e:
+        logger.error(f"App settings table init error: {e}")
 
     # ── Fix PostgreSQL sequences after migration ──
     try:
