@@ -722,3 +722,71 @@ def debug_counts():
         return counts
     finally:
         con.close()
+
+
+@router.get("/debug/dept-audit")
+def debug_dept_audit():
+    """Audit department numbers and product names across Walmart tables."""
+    con = get_db()
+    try:
+        result = {}
+
+        # walmart_store_weekly — vendor_dept_number values
+        try:
+            rows = con.execute(
+                "SELECT vendor_dept_number, COUNT(*) as cnt FROM walmart_store_weekly GROUP BY vendor_dept_number ORDER BY vendor_dept_number"
+            ).fetchall()
+            result["store_weekly_depts"] = {str(r[0]): int(r[1]) for r in rows}
+        except Exception as e:
+            result["store_weekly_depts"] = f"ERROR: {e}"
+
+        # walmart_item_weekly — product descriptions (sample non-dept-09)
+        try:
+            rows = con.execute(
+                "SELECT DISTINCT product_description FROM walmart_item_weekly ORDER BY product_description"
+            ).fetchall()
+            result["item_weekly_products"] = [str(r[0]) for r in rows]
+        except Exception as e:
+            result["item_weekly_products"] = f"ERROR: {e}"
+
+        # walmart_ecomm_weekly — dept_number values
+        try:
+            rows = con.execute(
+                "SELECT dept_number, dept_description, COUNT(*) as cnt FROM walmart_ecomm_weekly GROUP BY dept_number, dept_description ORDER BY dept_number"
+            ).fetchall()
+            result["ecomm_depts"] = [{
+                "dept": str(r[0]), "desc": str(r[1]) if r[1] else None, "count": int(r[2])
+            } for r in rows]
+        except Exception as e:
+            result["ecomm_depts"] = f"ERROR: {e}"
+
+        # walmart_order_forecast — vendor_dept_number values
+        try:
+            rows = con.execute(
+                "SELECT vendor_dept_number, COUNT(*) as cnt FROM walmart_order_forecast GROUP BY vendor_dept_number ORDER BY vendor_dept_number"
+            ).fetchall()
+            result["forecast_depts"] = {str(r[0]): int(r[1]) for r in rows}
+        except Exception as e:
+            result["forecast_depts"] = f"ERROR: {e}"
+
+        # walmart_scorecard — vendor_section values
+        try:
+            rows = con.execute(
+                "SELECT DISTINCT vendor_section FROM walmart_scorecard ORDER BY vendor_section"
+            ).fetchall()
+            result["scorecard_sections"] = [str(r[0]) for r in rows]
+        except Exception as e:
+            result["scorecard_sections"] = f"ERROR: {e}"
+
+        # walmart_item_weekly — brand_name values
+        try:
+            rows = con.execute(
+                "SELECT brand_name, COUNT(*) as cnt FROM walmart_item_weekly GROUP BY brand_name ORDER BY brand_name"
+            ).fetchall()
+            result["item_weekly_brands"] = {str(r[0]): int(r[1]) for r in rows}
+        except Exception as e:
+            result["item_weekly_brands"] = f"ERROR: {e}"
+
+        return result
+    finally:
+        con.close()
