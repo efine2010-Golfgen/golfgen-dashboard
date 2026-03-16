@@ -22,7 +22,7 @@ export function SalesPage({ filters }) {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [selectedPeriod, setSelectedPeriod] = useState("l4w");
-  const [chartMetric, setChartMetric] = useState("sales");
+  const [chartMetric, setChartMetric] = useState("sales"); // "sales" | "qty" | "returns"
 
   useEffect(() => {
     async function fetchData() {
@@ -123,16 +123,17 @@ export function SalesPage({ filters }) {
         ))}
       </div>
 
-      {/* ═══════════ POS Revenue / Units Chart — 52 Weekly Bars + LY Line ═══════════ */}
+      {/* ═══════════ POS Revenue / Units / Returns Chart — 52 Weekly Bars + Lines ═══════════ */}
       <Card>
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
           <div style={{ ...SG(12, 700), color: "var(--txt)" }}>
-            {chartMetric === "sales" ? "POS Revenue TY vs LY" : "POS Units TY vs LY"}
+            {chartMetric === "sales" ? "POS Revenue — 52 Week Trend" : chartMetric === "qty" ? "POS Units — 52 Week Trend" : "Return $ — 52 Week Trend"}
           </div>
           <div style={{ display: "flex", gap: 8 }}>
             {[
               { key: "sales", label: "POS $" },
-              { key: "qty", label: "POS Qty" },
+              { key: "qty", label: "POS Units" },
+              { key: "returns", label: "Return $" },
             ].map((btn) => (
               <button
                 key={btn.key}
@@ -157,30 +158,94 @@ export function SalesPage({ filters }) {
             type="bar"
             labels={weekLabels}
             configKey={`weekly-${chartMetric}-${weeks.length}`}
-            height={260}
-            datasets={[
-              {
-                label: "TY",
-                data: weeks.map((w) => (chartMetric === "sales" ? w.posSalesTy : w.posQtyTy)),
-                backgroundColor: COLORS.teal,
-                borderColor: COLORS.teal,
-                borderWidth: 1,
-                order: 2,
-              },
-              {
-                label: "LY",
-                type: "line",
-                data: weeks.map((w) => (chartMetric === "sales" ? w.posSalesLy : w.posQtyLy)),
-                borderColor: COLORS.orange,
-                backgroundColor: "transparent",
-                borderWidth: 2,
-                pointRadius: 1.5,
-                pointBackgroundColor: COLORS.orange,
-                fill: false,
-                tension: 0.3,
-                order: 1,
-              },
-            ]}
+            height={280}
+            datasets={
+              chartMetric === "returns"
+                ? [
+                    {
+                      label: "Returns $ TY",
+                      data: weeks.map((w) => w.returnsAmtTy || 0),
+                      backgroundColor: COLORS.purple || "#a78bfa",
+                      borderColor: COLORS.purple || "#a78bfa",
+                      borderWidth: 1,
+                      order: 2,
+                    },
+                    {
+                      label: "Returns $ LY",
+                      type: "line",
+                      data: weeks.map((w) => w.returnsAmtLy || 0),
+                      borderColor: COLORS.orange,
+                      backgroundColor: "transparent",
+                      borderWidth: 2,
+                      pointRadius: 1.5,
+                      pointBackgroundColor: COLORS.orange,
+                      fill: false,
+                      tension: 0.3,
+                      order: 1,
+                    },
+                  ]
+                : [
+                    {
+                      label: "Total Sales",
+                      type: "line",
+                      data: weeks.map((w) =>
+                        chartMetric === "sales" ? w.posSalesLy : w.posQtyLy
+                      ),
+                      borderColor: COLORS.orange,
+                      backgroundColor: "transparent",
+                      borderWidth: 2,
+                      pointRadius: 1.5,
+                      pointBackgroundColor: COLORS.orange,
+                      fill: false,
+                      tension: 0.3,
+                      order: 0,
+                    },
+                    {
+                      label: "TY",
+                      data: weeks.map((w) =>
+                        chartMetric === "sales" ? w.posSalesTy : w.posQtyTy
+                      ),
+                      backgroundColor: COLORS.teal,
+                      borderColor: COLORS.teal,
+                      borderWidth: 1,
+                      order: 3,
+                    },
+                    {
+                      label: "Clearance",
+                      type: "line",
+                      data: weeks.map((w) =>
+                        chartMetric === "sales"
+                          ? w.clearanceSalesTy || 0
+                          : w.clearanceQtyTy || 0
+                      ),
+                      borderColor: COLORS.red || "#ef4444",
+                      backgroundColor: "transparent",
+                      borderWidth: 1.5,
+                      pointRadius: 0,
+                      borderDash: [4, 2],
+                      fill: false,
+                      tension: 0.3,
+                      order: 1,
+                    },
+                    {
+                      label: "Regular",
+                      type: "line",
+                      data: weeks.map((w) =>
+                        chartMetric === "sales"
+                          ? w.regularSalesTy || 0
+                          : w.regularQtyTy || 0
+                      ),
+                      borderColor: "#60a5fa",
+                      backgroundColor: "transparent",
+                      borderWidth: 1.5,
+                      pointRadius: 0,
+                      borderDash: [6, 3],
+                      fill: false,
+                      tension: 0.3,
+                      order: 2,
+                    },
+                  ]
+            }
           />
         ) : (
           <div style={{ ...SG(11), color: "var(--txt3)", padding: "40px 0", textAlign: "center" }}>

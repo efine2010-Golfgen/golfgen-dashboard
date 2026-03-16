@@ -10,6 +10,7 @@ import {
   fPct,
   COLORS,
   KPICard,
+  ChartCanvas,
 } from "./WalmartHelpers";
 
 // Detect metric formatting type from name
@@ -163,6 +164,110 @@ export function WalmartScorecard({ filters }) {
           ))}
         </div>
       )}
+
+      {/* ═══ Summary Charts — Key Metrics Across Periods ═══ */}
+      {(() => {
+        // Build chart data from "All Vendors" section across periods
+        const allVendorRows = scorecard.filter(
+          (r) => r.vendorSection === "All Vendors"
+        );
+        // Key chart metrics to visualize
+        const chartMetrics = [
+          { name: "POS Sales $", format: "dollar" },
+          { name: "Cost On Order", format: "dollar" },
+          { name: "Ships At Cost WHSE", format: "dollar" },
+          { name: "GMROII", format: "pct" },
+          { name: "Cost On Hand", format: "dollar" },
+          { name: "Warehouse Turns", format: "pct" },
+        ];
+        // Filter to metrics that exist in data
+        const availableMetrics = chartMetrics.filter((cm) =>
+          allVendorRows.some(
+            (r) => r.metricName === cm.name
+          )
+        );
+        if (availableMetrics.length === 0) return null;
+
+        // Build period-based chart for key dollar metrics
+        const dollarMetrics = availableMetrics.filter(
+          (m) => m.format === "dollar"
+        );
+        const pctMetrics = availableMetrics.filter(
+          (m) => m.format === "pct"
+        );
+
+        const buildBarData = (metrics) => {
+          const labels = periodsInData;
+          const datasets = metrics.map((cm, idx) => {
+            const colors = [COLORS.teal, COLORS.orange, "#60a5fa", "#a78bfa", COLORS.red, "#f59e0b"];
+            return {
+              label: cm.name,
+              data: periodsInData.map((period) => {
+                const row = allVendorRows.find(
+                  (r) => r.metricName === cm.name && r.period === period
+                );
+                return row?.valueTy || 0;
+              }),
+              backgroundColor: colors[idx % colors.length],
+              borderColor: colors[idx % colors.length],
+              borderWidth: 1,
+            };
+          });
+          return { labels, datasets };
+        };
+
+        return (
+          <div
+            style={{
+              display: "grid",
+              gridTemplateColumns: pctMetrics.length > 0 ? "1fr 1fr" : "1fr",
+              gap: 16,
+            }}
+          >
+            {dollarMetrics.length > 0 && (
+              <Card>
+                <CardHdr title="Key Dollar Metrics by Period (TY)" />
+                <ChartCanvas
+                  type="bar"
+                  labels={periodsInData}
+                  configKey={`scorecard-dollar-${periodsInData.length}`}
+                  height={220}
+                  datasets={buildBarData(dollarMetrics).datasets}
+                />
+              </Card>
+            )}
+            {pctMetrics.length > 0 && (
+              <Card>
+                <CardHdr title="Key % Metrics by Period (TY)" />
+                <ChartCanvas
+                  type="bar"
+                  labels={periodsInData}
+                  configKey={`scorecard-pct-${periodsInData.length}`}
+                  height={220}
+                  datasets={pctMetrics.map((cm, idx) => {
+                    const colors = ["#a78bfa", COLORS.teal, COLORS.orange];
+                    return {
+                      label: cm.name,
+                      data: periodsInData.map((period) => {
+                        const row = allVendorRows.find(
+                          (r) =>
+                            r.metricName === cm.name && r.period === period
+                        );
+                        const v = row?.valueTy || 0;
+                        // If stored as decimal, convert to readable %
+                        return Math.abs(v) < 2 ? v * 100 : v;
+                      }),
+                      backgroundColor: colors[idx % colors.length],
+                      borderColor: colors[idx % colors.length],
+                      borderWidth: 1,
+                    };
+                  })}
+                />
+              </Card>
+            )}
+          </div>
+        );
+      })()}
 
       {/* Full Scorecard Matrix by Vendor Section */}
       {Object.entries(sectionMap).map(([section, groupMap]) => (

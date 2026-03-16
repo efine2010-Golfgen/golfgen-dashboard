@@ -700,22 +700,24 @@ def get_store_analytics(
 def get_weekly_trend(division: str = None, customer: str = None):
     """
     Returns up to 52 individual weeks of aggregate POS data for the
-    bar+line chart (TY bars, LY line overlay).
-
-    Data source: walmart_store_weekly aggregated by walmart_week.
-    Returns weeks sorted chronologically.
+    bar+line chart (TY bars, LY line overlay) plus sales_type breakdowns
+    (Clearance, Regular, Rollback, Store Tab) and returns $ from
+    walmart_item_weekly.
     """
     con = get_db()
     try:
         hw, hp = hierarchy_filter(division=division, customer=customer or "walmart_stores")
 
+        # ── Store-level totals (already aggregated, no sales_type split)
         query = f"""
             SELECT
               walmart_week,
               SUM(COALESCE(pos_sales_ty, 0)) as pos_sales_ty,
               SUM(COALESCE(pos_sales_ly, 0)) as pos_sales_ly,
               SUM(COALESCE(pos_qty_ty, 0)) as pos_qty_ty,
-              SUM(COALESCE(pos_qty_ly, 0)) as pos_qty_ly
+              SUM(COALESCE(pos_qty_ly, 0)) as pos_qty_ly,
+              SUM(COALESCE(returns_qty_ty, 0)) as returns_qty_ty,
+              SUM(COALESCE(returns_qty_ly, 0)) as returns_qty_ly
             FROM walmart_store_weekly
             WHERE walmart_week IS NOT NULL {hw}
             GROUP BY walmart_week
@@ -724,16 +726,69 @@ def get_weekly_trend(division: str = None, customer: str = None):
         """
         rows = con.execute(query, hp).fetchall()
 
-        weeks = []
+        # Build week map from store-level data
+        week_map = {}
         for r in rows:
-            weeks.append({
-                "week": str(r[0]) if r[0] else "",
+            wk = str(r[0]) if r[0] else ""
+            week_map[wk] = {
+                "week": wk,
                 "posSalesTy": _n(r[1]),
                 "posSalesLy": _n(r[2]),
                 "posQtyTy": _n(r[3]),
                 "posQtyLy": _n(r[4]),
-            })
+                "returnsQtyTy": _n(r[5]),
+                "returnsQtyLy": _n(r[6]),
+                "clearanceSalesTy": 0.0,
+                "clearanceSalesLy": 0.0,
+                "regularSalesTy": 0.0,
+                "regularSalesLy": 0.0,
+                "clearanceQtyTy": 0.0,
+                "clearanceQtyLy": 0.0,
+                "regularQtyTy": 0.0,
+                "regularQtyLy": 0.0,
+                "returnsAmtTy": 0.0,
+                "returnsAmtLy": 0.0,
+            }
 
+        # ── Item-level: sales_type breakdowns + returns $ ──
+        item_query = f"""
+            SELECT
+              walmart_week,
+              COALESCE(sales_type, 'Regular') as sales_type,
+              SUM(COALESCE(pos_sales_ty, 0)) as pos_sales_ty,
+              SUM(COALESCE(pos_sales_ly, 0)) as pos_sales_ly,
+              SUM(COALESCE(pos_qty_ty, 0)) as pos_qty_ty,
+              SUM(COALESCE(pos_qty_ly, 0)) as pos_qty_ly,
+              SUM(COALESCE(returns_amt_ty, 0)) as returns_amt_ty,
+              SUM(COALESCE(returns_amt_ly, 0)) as returns_amt_ly
+            FROM walmart_item_weekly
+            WHERE walmart_week IS NOT NULL {hw}
+            GROUP BY walmart_week, sales_type
+            ORDER BY walmart_week ASC
+        """
+        item_rows = con.execute(item_query, hp).fetchall()
+
+        for r in item_rows:
+            wk = str(r[0]) if r[0] else ""
+            st = (r[1] or "Regular").strip()
+            if wk not in week_map:
+                continue
+            entry = week_map[wk]
+            entry["returnsAmtTy"] += _n(r[6])
+            entry["returnsAmtLy"] += _n(r[7])
+            if st.lower() == "clearance":
+                entry["clearanceSalesTy"] += _n(r[2])
+                entry["clearanceSalesLy"] += _n(r[3])
+                entry["clearanceQtyTy"] += _n(r[4])
+                entry["clearanceQtyLy"] += _n(r[5])
+            elif st.lower() == "regular":
+                entry["regularSalesTy"] += _n(r[2])
+                entry["regularSalesLy"] += _n(r[3])
+                entry["regularQtyTy"] += _n(r[4])
+                entry["regularQtyLy"] += _n(r[5])
+
+        # Return in sorted order
+        weeks = [week_map[wk] for wk in sorted(week_map.keys())]
         return {"weeks": weeks}
     finally:
         con.close()
