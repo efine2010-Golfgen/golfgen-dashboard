@@ -586,10 +586,11 @@ def _pull_ads_report(creds, report_type_id, columns, start_date, end_date, handl
             return reports_api.post_report(body=body)
 
         result = _create_report()
-        report_id = result.payload.get("reportId")
+        logger.info(f"Ads sync: post_report response: status={result.status_code}, payload={str(result.payload)[:300]}, headers={dict(result.headers) if hasattr(result, 'headers') else 'N/A'}")
+        report_id = result.payload.get("reportId") if isinstance(result.payload, dict) else None
 
         if not report_id:
-            logger.error(f"Ads sync: no reportId returned for {report_type_id}")
+            logger.error(f"Ads sync: no reportId returned for {report_type_id}, full payload: {str(result.payload)[:500]}")
             return
 
         # Poll for completion (max ~5 min)
