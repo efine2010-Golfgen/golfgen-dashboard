@@ -557,7 +557,6 @@ export default function Sales({ filters = {} }) {
     const params = {...baseParams, period: chartSalesApi};
     load('trend',   setTrend,   'trend',     params);
     load('rolling', setRolling, 'rolling',   params);
-    load('channel', setChannel, 'by-channel',params);
     load('heatmap', setHeatmap, 'heatmap',   baseParams);
     load('yoy',     setYoy,     'monthly-yoy',baseParams);
   }, [divRaw, custRaw, cpSales]);
@@ -710,16 +709,6 @@ export default function Sales({ filters = {} }) {
       <ChartCard title="Monthly Revenue — 2024 / 2025 / 2026" badge="Year over Year" error={errors.yoy}>
         {loading.yoy ? <Spinner/> : svgChart(yoyBarSVG(toArr(yoy)))}
       </ChartCard>
-
-      {/* Revenue by Channel (All Divisions only) */}
-      {!divRaw && (
-        <ChartCard title="Revenue by Channel" badge={cpSales} error={errors.channel}>
-          {loading.channel ? <Spinner/> : <>
-            {svgChart(stackedBarSVG(toArr(channel)))}
-            <Legend items={[['Amazon',B.b2],['Walmart Mkt',B.o2],['Walmart Stores',B.o3],['Shopify',B.t2],['Stores',B.t3]]}/>
-          </>}
-        </ChartCard>
-      )}
 
       {/* Sales $ Trend */}
       <ChartCard title="Sales $ Trend" badge={cpSales} error={errors.trend}>

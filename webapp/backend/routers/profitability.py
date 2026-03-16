@@ -102,6 +102,8 @@ def _next_id(con, table: str, seq_name: str = None) -> int:
 def _build_product_list(con, cutoff: str, division=None, customer=None, platform=None, marketplace=None) -> list:
     """Build per-ASIN product list with revenue, units, COGS, fees, and ad spend."""
     hf, hp = hierarchy_filter(division, customer, platform, marketplace)
+    # financial_events lacks marketplace column — build separate filter
+    ff, ffp = hierarchy_filter(division, customer, platform, marketplace=None)
     filters = "WHERE date >= ? AND asin <> 'ALL'" + hf
     params = [cutoff] + hp
     asin_rows = con.execute(f"""
@@ -150,9 +152,9 @@ def _build_product_list(con, cutoff: str, division=None, customer=None, platform
         cogsTotal = units * cpu
         cogsPerUnit = cpu
 
-        # Financial data
-        fin_filter = "WHERE asin = ? AND date >= ?" + hf
-        fin_params = [asin, cutoff] + hp
+        # Financial data (financial_events lacks marketplace column — use ff/ffp)
+        fin_filter = "WHERE asin = ? AND date >= ?" + ff
+        fin_params = [asin, cutoff] + ffp
         fin_row = con.execute(f"""
             SELECT COALESCE(SUM(ABS(fba_fees)), 0),
                    COALESCE(SUM(ABS(commission)), 0)
@@ -208,6 +210,8 @@ def _build_product_list(con, cutoff: str, division=None, customer=None, platform
 def _build_waterfall(con, cogs_data, start, end, division=None, customer=None, platform=None, marketplace=None):
     """Build Sellerboard-style waterfall for a single period."""
     div_cust_sql, div_cust_params = hierarchy_filter(division, customer, platform, marketplace)
+    # financial_events lacks marketplace column
+    fin_sql, fin_params = hierarchy_filter(division, customer, platform, marketplace=None)
 
     row = con.execute(f"""
         SELECT COALESCE(SUM(ordered_product_sales), 0),
@@ -241,8 +245,8 @@ def _build_waterfall(con, cogs_data, start, end, division=None, customer=None, p
                    COUNT(CASE WHEN event_type ILIKE '%refund%' OR event_type ILIKE '%return%'
                        THEN 1 END)
             FROM financial_events
-            WHERE date >= ? AND date < ?{div_cust_sql}
-        """, [start, end] + div_cust_params).fetchone()
+            WHERE date >= ? AND date < ?{fin_sql}
+        """, [start, end] + fin_params).fetchone()
         if acct_row and acct_row[0] is not None:
             acct_fin = {"fba": _n(acct_row[0]), "comm": _n(acct_row[1]),
                         "promo": _n(acct_row[2]), "shipping": _n(acct_row[3]),
@@ -284,9 +288,9 @@ def _build_waterfall(con, cogs_data, start, end, division=None, customer=None, p
                    COUNT(CASE WHEN event_type ILIKE '%refund%' OR event_type ILIKE '%return%'
                        THEN 1 END) AS refund_count
             FROM financial_events
-            WHERE date >= ? AND date < ?{div_cust_sql}
+            WHERE date >= ? AND date < ?{fin_sql}
             GROUP BY asin
-        """, [start, end] + div_cust_params).fetchall()
+        """, [start, end] + fin_params).fetchall()
         # SKU→ASIN resolution
         sku_to_asin = {}
         try:
@@ -537,9 +541,10 @@ def profitability_items(days: int = Query(365), division: Optional[str] = None,
     cutoff = (datetime.now(ZoneInfo("America/Chicago")) - timedelta(days=days)).strftime("%Y-%m-%d")
     products = _build_product_list(con, cutoff, division, customer, platform, marketplace)
 
-    hf, hp = hierarchy_filter(division, customer, platform, marketplace)
-    fin_filter = "WHERE date >= ?" + hf
-    fin_params = [cutoff] + hp
+    # financial_events lacks marketplace column — filter without it
+    ff, ffp = hierarchy_filter(division, customer, platform, marketplace=None)
+    fin_filter = "WHERE date >= ?" + ff
+    fin_params = [cutoff] + ffp
     fin_by_asin = {}
     try:
         fin_rows = con.execute(f"""
@@ -754,7 +759,8 @@ def fee_detail(days: int = Query(30), division: Optional[str] = None,
     con = get_db()
     now = datetime.now(ZoneInfo("America/Chicago"))
     cutoff = (now - timedelta(days=days)).strftime("%Y-%m-%d")
-    hf, hp = hierarchy_filter(division, customer, platform, marketplace)
+    # financial_events has NO marketplace column — filter without it
+    hf, hp = hierarchy_filter(division, customer, platform, marketplace=None)
 
     # Aggregate fee totals from financial_events
     fin_filter = f"WHERE date >= ?" + hf

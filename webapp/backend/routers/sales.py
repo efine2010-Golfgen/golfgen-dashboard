@@ -447,6 +447,20 @@ def _hier_where(division=None, customer=None, table_alias='', marketplace=None):
     return ('AND ' + ' AND '.join(clauses) if clauses else ''), params
 
 
+def _hier_where_no_mp(division=None, customer=None, table_alias=''):
+    """Like _hier_where but WITHOUT marketplace — for tables that lack the column
+    (financial_events, fba_inventory, etc.)."""
+    prefix = table_alias + '.' if table_alias else ''
+    clauses, params = [], []
+    if division and division != 'all':
+        clauses.append(f"{prefix}division = ?")
+        params.append(division)
+    if customer and customer != 'all' and customer != 'All Channels':
+        clauses.append(f"{prefix}customer = ?")
+        params.append(customer)
+    return ('AND ' + ' AND '.join(clauses) if clauses else ''), params
+
+
 # ── ENDPOINT 1: Sales summary metrics ──────────────────────
 @router.get("/api/sales/summary")
 def sales_summary(
@@ -462,6 +476,8 @@ def sales_summary(
         con = get_db()
         sd, ed = _period_to_dates(period, start, end)
         hw, hp = _hier_where(division, customer, marketplace=marketplace)
+        # financial_events & fba_inventory lack marketplace column — use stripped filter
+        fw, fp = _hier_where_no_mp(division, customer)
 
         # LY: shift back 364 days for weekday alignment
         ly_sd = sd - timedelta(days=364)
@@ -550,17 +566,17 @@ def sales_summary(
                            COALESCE(SUM(ABS(other_fees)), 0)
                     FROM financial_events
                     WHERE date >= ? AND date <= ?
-                      AND (event_type IS NULL OR event_type NOT ILIKE '%%refund%%') {hw}
+                      AND (event_type IS NULL OR event_type NOT ILIKE '%%refund%%') {fw}
                 """, [str(s), str(e)] + extra_params).fetchone()
                 fba_ref = float(r[0]) if r else 0
                 other = float(r[1]) if r else 0
                 return fba_ref + other
             except Exception as fee_err:
-                logger.error(f"_sum_fees error: {fee_err} | s={s} e={e} hw={hw}")
+                logger.error(f"_sum_fees error: {fee_err} | s={s} e={e} fw={fw}")
                 return 0
 
-        ty_fees = _sum_fees(sd, ed, hp)
-        ly_fees = _sum_fees(ly_sd, ly_ed, hp)
+        ty_fees = _sum_fees(sd, ed, fp)
+        ly_fees = _sum_fees(ly_sd, ly_ed, fp)
 
         # financial_events stores PostedDate (settlement, ~14 days after order).
         # Fall back to estimated 27% of sales ONLY when financial_events
@@ -598,21 +614,21 @@ def sales_summary(
         ty_gm_pct = round(ty_gm / ty_sales, 4) if ty_sales else 0
         ly_gm_pct = round(ly_gm / ly_sales, 4) if ly_sales else 0
 
-        # Returns/refunds from financial_events
+        # Returns/refunds from financial_events (no marketplace column)
         def _sum_refunds(s, e, extra_params):
             try:
                 r = con.execute(f"""
                     SELECT COALESCE(COUNT(*), 0),
                            COALESCE(SUM(ABS(product_charges)), 0)
                     FROM financial_events
-                    WHERE date >= ? AND date <= ? AND event_type ILIKE '%%refund%%' {hw}
+                    WHERE date >= ? AND date <= ? AND event_type ILIKE '%%refund%%' {fw}
                 """, [str(s), str(e)] + extra_params).fetchone()
                 return int(r[0]) if r else 0, round(float(r[1]), 2) if r else 0
             except Exception:
                 return 0, 0
 
-        ty_return_units, ty_return_amt = _sum_refunds(sd, ed, hp)
-        ly_return_units, ly_return_amt = _sum_refunds(ly_sd, ly_ed, hp)
+        ty_return_units, ty_return_amt = _sum_refunds(sd, ed, fp)
+        ly_return_units, ly_return_amt = _sum_refunds(ly_sd, ly_ed, fp)
 
         # Inventory: current stock and days of supply
         try:
@@ -769,6 +785,8 @@ def sales_period_comparison(
     try:
         con = get_db()
         hw, hp = _hier_where(division, customer, marketplace=marketplace)
+        # financial_events lacks marketplace column — use stripped filter
+        fw, fp = _hier_where_no_mp(division, customer)
 
         view_periods = {
             "exec": {
@@ -909,6 +927,7 @@ def sales_period_comparison(
             # Amazon fees — exclude refund events to avoid double-counting fee reversals
             # Only fba_fees + commission + other_fees. NOT shipping_charges (credits) or
             # promotion_amount (discounts already reflected in lower revenue).
+            # NOTE: financial_events has NO marketplace column — use fw/fp.
             def _pc_fees(s, e, extra_params):
                 try:
                     r = con.execute(f"""
@@ -916,35 +935,35 @@ def sales_period_comparison(
                                COALESCE(SUM(ABS(other_fees)), 0)
                         FROM financial_events
                         WHERE date >= ? AND date <= ?
-                          AND (event_type IS NULL OR event_type NOT ILIKE '%%refund%%') {hw}
+                          AND (event_type IS NULL OR event_type NOT ILIKE '%%refund%%') {fw}
                     """, [str(s), str(e)] + extra_params).fetchone()
                     return round(float(r[0]) + float(r[1]), 2)
                 except Exception:
                     return 0
 
-            ty_fees = _pc_fees(sd, ed, hp)
-            ly_fees_val = _pc_fees(ly_sd, ly_ed, hp)
+            ty_fees = _pc_fees(sd, ed, fp)
+            ly_fees_val = _pc_fees(ly_sd, ly_ed, fp)
             # Fallback: estimate fees at 27% when no financial_events data
             if sales > 0 and ty_fees == 0:
                 ty_fees = round(sales * 0.27, 2)
             if ly_sales > 0 and ly_fees_val == 0:
                 ly_fees_val = round(ly_sales * 0.27, 2)
 
-            # Returns / refunds
+            # Returns / refunds (financial_events — no marketplace column, use fw/fp)
             def _pc_refunds(s, e, extra_params):
                 try:
                     r = con.execute(f"""
                         SELECT COALESCE(COUNT(*), 0),
                                COALESCE(SUM(ABS(product_charges)), 0)
                         FROM financial_events
-                        WHERE date >= ? AND date <= ? AND event_type ILIKE '%%refund%%' {hw}
+                        WHERE date >= ? AND date <= ? AND event_type ILIKE '%%refund%%' {fw}
                     """, [str(s), str(e)] + extra_params).fetchone()
                     return int(r[0]) if r else 0, round(float(r[1]), 2) if r else 0
                 except Exception:
                     return 0, 0
 
-            ty_ret_units, ty_ret_amt = _pc_refunds(sd, ed, hp)
-            ly_ret_units, ly_ret_amt = _pc_refunds(ly_sd, ly_ed, hp)
+            ty_ret_units, ty_ret_amt = _pc_refunds(sd, ed, fp)
+            ly_ret_units, ly_ret_amt = _pc_refunds(ly_sd, ly_ed, fp)
 
             result[label] = {
                 "sales": round(sales, 2), "units": units, "aur": aur,
