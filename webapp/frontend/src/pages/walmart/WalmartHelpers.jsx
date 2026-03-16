@@ -185,6 +185,45 @@ export function ChartCanvas({ type, labels, datasets, periods, data, height, con
 
     const { labels: l, datasets: ds, periods: p } = dataRef.current;
     const isDoughnut = type === "doughnut" || type === "pie";
+    const hasDualAxis = (ds || []).some((d) => d.yAxisID === "y1");
+    const scales = isDoughnut
+      ? {}
+      : {
+          scales: {
+            x: {
+              grid: { color: "rgba(30,50,72,.5)" },
+              ticks: {
+                font: { family: "'Space Grotesk', monospace", size: 9 },
+                color: "rgba(255,255,255,.4)",
+                maxRotation: 90,
+                minRotation: 0,
+              },
+            },
+            y: {
+              grid: { color: "rgba(30,50,72,.5)" },
+              ticks: {
+                font: { family: "'Space Grotesk', monospace", size: 9 },
+                color: "rgba(255,255,255,.4)",
+              },
+              position: "left",
+            },
+            ...(hasDualAxis
+              ? {
+                  y1: {
+                    grid: { drawOnChartArea: false },
+                    ticks: {
+                      font: { family: "'Space Grotesk', monospace", size: 9 },
+                      color: "rgba(255,255,255,.4)",
+                      callback: (v) => v + "%",
+                    },
+                    position: "right",
+                    min: 0,
+                    max: 100,
+                  },
+                }
+              : {}),
+          },
+        };
     const config = {
       type,
       data: {
@@ -202,32 +241,7 @@ export function ChartCanvas({ type, labels, datasets, periods, data, height, con
             },
           },
         },
-        ...(isDoughnut
-          ? {}
-          : {
-              scales: {
-                x: {
-                  grid: { color: "rgba(30,50,72,.5)" },
-                  ticks: {
-                    font: {
-                      family: "'Space Grotesk', monospace",
-                      size: 9,
-                    },
-                    color: "rgba(255,255,255,.4)",
-                  },
-                },
-                y: {
-                  grid: { color: "rgba(30,50,72,.5)" },
-                  ticks: {
-                    font: {
-                      family: "'Space Grotesk', monospace",
-                      size: 9,
-                    },
-                    color: "rgba(255,255,255,.4)",
-                  },
-                },
-              },
-            }),
+        ...scales,
       },
     };
 

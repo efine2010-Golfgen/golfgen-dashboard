@@ -116,16 +116,24 @@ export function WalmartEcomm({ filters }) {
           />
         </Card>
         <Card>
-          <CardHdr title="eComm Items" />
+          <CardHdr title="Top Items — Auth Sales TY vs LY" />
           <ChartCanvas
             type="bar"
             data={{
-              labels: items.slice(0, 5).map((item) => item.productName),
+              labels: items.slice(0, 8).map((item) => {
+                const n = item.productName || "";
+                return n.length > 20 ? n.substring(0, 20) + "…" : n;
+              }),
               datasets: [
                 {
-                  label: "Auth Sales",
-                  data: items.slice(0, 5).map((item) => item.authSalesTy || 0),
-                  backgroundColor: COLORS.blue,
+                  label: "TY",
+                  data: items.slice(0, 8).map((item) => item.authSalesTy || 0),
+                  backgroundColor: COLORS.teal,
+                },
+                {
+                  label: "LY",
+                  data: items.slice(0, 8).map((item) => item.authSalesLy || 0),
+                  backgroundColor: COLORS.orange,
                 },
               ],
             }}

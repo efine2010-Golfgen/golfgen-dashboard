@@ -10,7 +10,6 @@ import {
   fPct,
   COLORS,
   KPICard,
-  ChartCanvas,
 } from "./WalmartHelpers";
 
 // Detect metric formatting type from name
@@ -52,7 +51,7 @@ const fMetric = (v, metricName) => {
   return fN(v);
 };
 
-// Format diff value (always a 0-1 decimal representing % change)
+// Format diff value
 const fDiff = (v) => {
   if (v == null || v === 0) return { text: "—", color: "var(--txt3)" };
   const pct = Number(v) * 100;
@@ -81,30 +80,26 @@ export function WalmartScorecard({ filters }) {
     })();
   }, [filters.division, filters.customer]);
 
-  if (loading) {
+  if (loading)
     return (
       <Card>
         <p style={{ ...SG(12), color: "var(--txt3)" }}>Loading...</p>
       </Card>
     );
-  }
-  if (error) {
+  if (error)
     return (
       <Card>
         <p style={{ ...SG(12), color: "#f87171" }}>Error: {error}</p>
       </Card>
     );
-  }
-  if (!data) {
+  if (!data)
     return (
       <Card>
         <p style={{ ...SG(12), color: "var(--txt3)" }}>No data</p>
       </Card>
     );
-  }
 
   const scorecard = data.scorecard || [];
-  const kpis = data.kpis || {};
 
   // Extract KPIs from "All Vendors" + "Last Week" rows
   const displayKpis = [];
@@ -114,7 +109,7 @@ export function WalmartScorecard({ filters }) {
     );
     const seen = new Set();
     lwRows.forEach((r) => {
-      if (displayKpis.length >= 5 || seen.has(r.metricName)) return;
+      if (displayKpis.length >= 6 || seen.has(r.metricName)) return;
       seen.add(r.metricName);
       displayKpis.push({
         label: r.metricName,
@@ -141,68 +136,11 @@ export function WalmartScorecard({ filters }) {
   const sectionMap = {};
   scorecard.forEach((row) => {
     const section = row.vendorSection || "Other";
-    if (!sectionMap[section]) {
-      sectionMap[section] = {};
-    }
+    if (!sectionMap[section]) sectionMap[section] = {};
     const group = row.metricGroup || "General";
-    if (!sectionMap[section][group]) {
-      sectionMap[section][group] = [];
-    }
+    if (!sectionMap[section][group]) sectionMap[section][group] = [];
     sectionMap[section][group].push(row);
   });
-
-  // Build chart data: POS Sales TY vs LY
-  const posSalesData = scorecard.filter(
-    (row) => row.metricName?.includes("POS Sales")
-  );
-  const posPeriods = [
-    ...new Set(posSalesData.map((row) => row.period)),
-  ].slice(0, 4);
-  const posSalesChartData = {
-    labels: posPeriods,
-    datasets: [
-      {
-        label: "TY",
-        data: posPeriods.map((p) => {
-          const r = posSalesData.find(
-            (row) => row.period === p && row.metricName?.includes("dollars")
-          );
-          return r?.valueTy || 0;
-        }),
-        backgroundColor: COLORS.teal,
-      },
-      {
-        label: "LY",
-        data: posPeriods.map((p) => {
-          const r = posSalesData.find(
-            (row) => row.period === p && row.metricName?.includes("dollars")
-          );
-          return r?.valueLy || 0;
-        }),
-        backgroundColor: COLORS.orange,
-      },
-    ],
-  };
-
-  // Build GIM chart
-  const gimData = scorecard.filter((row) =>
-    row.metricName?.includes("GIM")
-  );
-  const gimPeriods = [...new Set(gimData.map((row) => row.period))].slice(0, 4);
-  const gimChartData = {
-    labels: gimPeriods,
-    datasets: [
-      {
-        label: "GIM %",
-        data: gimPeriods.map((p) => {
-          const r = gimData.find((row) => row.period === p);
-          return r ? (r.valueTy * 100) : 0;
-        }),
-        borderColor: COLORS.blue,
-        fill: false,
-      },
-    ],
-  };
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: "24px" }}>
@@ -211,7 +149,7 @@ export function WalmartScorecard({ filters }) {
         <div
           style={{
             display: "grid",
-            gridTemplateColumns: `repeat(${Math.min(5, displayKpis.length)}, 1fr)`,
+            gridTemplateColumns: `repeat(${Math.min(6, displayKpis.length)}, 1fr)`,
             gap: "12px",
           }}
         >
@@ -301,7 +239,6 @@ export function WalmartScorecard({ filters }) {
                   const metricNames = [
                     ...new Set(rows.map((r) => r.metricName)),
                   ];
-                  const rowCount = metricNames.length;
                   let metricIdx = 0;
 
                   return (
@@ -331,10 +268,9 @@ export function WalmartScorecard({ filters }) {
                                 textAlign: "left",
                                 color: "var(--txt)",
                                 fontWeight: isFirstInGroup ? 500 : 400,
-                                borderTop:
-                                  isFirstInGroup
-                                    ? "2px solid var(--border)"
-                                    : "none",
+                                borderTop: isFirstInGroup
+                                  ? "2px solid var(--border)"
+                                  : "none",
                               }}
                             >
                               {metric}
@@ -358,10 +294,9 @@ export function WalmartScorecard({ filters }) {
                                         pIdx === 0
                                           ? "1px solid var(--border)"
                                           : "none",
-                                      borderTop:
-                                        isFirstInGroup
-                                          ? "2px solid var(--border)"
-                                          : "none",
+                                      borderTop: isFirstInGroup
+                                        ? "2px solid var(--border)"
+                                        : "none",
                                     }}
                                   >
                                     {fMetric(ty, metric)}
@@ -371,10 +306,9 @@ export function WalmartScorecard({ filters }) {
                                       padding: "8px 10px",
                                       textAlign: "right",
                                       color: "var(--txt)",
-                                      borderTop:
-                                        isFirstInGroup
-                                          ? "2px solid var(--border)"
-                                          : "none",
+                                      borderTop: isFirstInGroup
+                                        ? "2px solid var(--border)"
+                                        : "none",
                                     }}
                                   >
                                     {fMetric(ly, metric)}
@@ -385,10 +319,9 @@ export function WalmartScorecard({ filters }) {
                                       textAlign: "right",
                                       color: fDiff(diff).color,
                                       fontWeight: 500,
-                                      borderTop:
-                                        isFirstInGroup
-                                          ? "2px solid var(--border)"
-                                          : "none",
+                                      borderTop: isFirstInGroup
+                                        ? "2px solid var(--border)"
+                                        : "none",
                                     }}
                                   >
                                     {fDiff(diff).text}
@@ -407,26 +340,6 @@ export function WalmartScorecard({ filters }) {
           </div>
         </Card>
       ))}
-
-      {/* Supporting Charts */}
-      {(posSalesData.length > 0 || gimData.length > 0) && (
-        <div
-          style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "12px" }}
-        >
-          {posSalesData.length > 0 && (
-            <Card>
-              <CardHdr title="POS Sales TY vs LY" />
-              <ChartCanvas type="bar" data={posSalesChartData} height={250} />
-            </Card>
-          )}
-          {gimData.length > 0 && (
-            <Card>
-              <CardHdr title="GIM % Trend" />
-              <ChartCanvas type="line" data={gimChartData} height={250} />
-            </Card>
-          )}
-        </div>
-      )}
     </div>
   );
 }
