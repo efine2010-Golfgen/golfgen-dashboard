@@ -1,6 +1,6 @@
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect } from "react";
 import { api } from "../lib/api";
-import { SG, DM, Card } from "./walmart/WalmartHelpers";
+import { SG, DM, Card, fN } from "./walmart/WalmartHelpers";
 import { SalesPage } from "./walmart/WalmartSales";
 import { WalmartInventory as InventoryPage } from "./walmart/WalmartInventory";
 import { WalmartScorecard as ScorecardPage } from "./walmart/WalmartScorecard";
@@ -12,38 +12,22 @@ export default function WalmartAnalytics({ filters = {} }) {
   const [page, setPage] = useState("sales");
   const [availability, setAvailability] = useState(null);
   const [loading, setLoading] = useState(true);
-  const [uploading, setUploading] = useState(false);
-  const [uploadResult, setUploadResult] = useState(null);
-  const fileRef = useRef(null);
+  const [uploads, setUploads] = useState([]);
+  const [showUploads, setShowUploads] = useState(false);
 
   const h = filters;
 
-  // Check data availability on mount
+  // Check data availability + fetch recent uploads on mount
   useEffect(() => {
     setLoading(true);
-    api
-      .walmartAvailability(h)
-      .then((d) => setAvailability(d))
-      .catch(() => setAvailability(null))
-      .finally(() => setLoading(false));
+    Promise.all([
+      api.walmartAvailability(h).catch(() => null),
+      api.retailSummary(h).catch(() => null),
+    ]).then(([avail, summary]) => {
+      setAvailability(avail);
+      setUploads(summary?.uploads || []);
+    }).finally(() => setLoading(false));
   }, [filters.division, filters.customer]);
-
-  const handleUpload = async () => {
-    const file = fileRef.current?.files?.[0];
-    if (!file) return;
-    setUploading(true);
-    setUploadResult(null);
-    try {
-      const res = await api.retailUpload(file);
-      setUploadResult(res);
-      // Refresh availability after upload
-      const fresh = await api.walmartAvailability(h);
-      setAvailability(fresh);
-    } catch (e) {
-      setUploadResult({ status: "error", error: e.message });
-    }
-    setUploading(false);
-  };
 
   if (loading)
     return (
@@ -58,6 +42,8 @@ export default function WalmartAnalytics({ filters = {} }) {
     availability?.hasStoreData ||
     availability?.hasEcommData ||
     availability?.hasForecastData;
+
+  const latestWeek = availability?.latestWeek;
 
   const TABS = [
     { key: "sales", label: "SALES PERFORMANCE" },
@@ -81,7 +67,7 @@ export default function WalmartAnalytics({ filters = {} }) {
       >
         <div>
           <h1 style={{ ...DM(22), margin: 0, color: "var(--txt)" }}>
-            Walmart Analytics
+            Performance Dashboard
           </h1>
           <p
             style={{
@@ -90,48 +76,10 @@ export default function WalmartAnalytics({ filters = {} }) {
               margin: "2px 0 0",
             }}
           >
-            Sales performance, inventory health, and order forecasting
+            {latestWeek
+              ? `Through Walmart Week ${latestWeek}`
+              : "Walmart sell-through performance data"}
           </p>
-        </div>
-        <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
-          <input
-            type="file"
-            ref={fileRef}
-            accept=".xlsx,.xls"
-            style={{ display: "none" }}
-            onChange={handleUpload}
-          />
-          <button
-            onClick={() => fileRef.current?.click()}
-            disabled={uploading}
-            style={{
-              ...SG(11, 600),
-              background: "var(--acc1)",
-              color: "#fff",
-              border: "none",
-              borderRadius: 6,
-              padding: "6px 14px",
-              cursor: "pointer",
-              opacity: uploading ? 0.6 : 1,
-            }}
-          >
-            {uploading ? "Uploading..." : "Upload Report"}
-          </button>
-          {uploadResult && (
-            <span
-              style={{
-                ...SG(10),
-                color:
-                  uploadResult.status === "ok"
-                    ? "#2ECFAA"
-                    : "#f87171",
-              }}
-            >
-              {uploadResult.status === "ok"
-                ? `✓ ${uploadResult.rows_loaded} rows`
-                : `✗ ${uploadResult.error || "Failed"}`}
-            </span>
-          )}
         </div>
       </div>
 
@@ -195,8 +143,7 @@ export default function WalmartAnalytics({ filters = {} }) {
               lineHeight: "1.4",
             }}
           >
-            Upload Walmart Scintilla reports to populate this dashboard. Use
-            the Upload Report button above to get started.
+            Upload Walmart Scintilla reports to populate this dashboard.
           </p>
         </Card>
       )}
@@ -208,6 +155,56 @@ export default function WalmartAnalytics({ filters = {} }) {
       {page === "ecomm" && <EcommPage filters={h} />}
       {page === "forecast" && <ForecastPage filters={h} />}
       {page === "store-analytics" && <StoreAnalyticsPage filters={h} />}
+
+      {/* ── Recent Uploads (bottom, collapsible) ── */}
+      {uploads.length > 0 && (
+        <div style={{ marginTop: 24 }}>
+          <button
+            onClick={() => setShowUploads(!showUploads)}
+            style={{
+              ...SG(10, 600),
+              background: "none",
+              border: "1px solid var(--brd)",
+              borderRadius: 6,
+              padding: "4px 12px",
+              cursor: "pointer",
+              color: "var(--txt3)",
+              marginBottom: showUploads ? 8 : 0,
+            }}
+          >
+            {showUploads ? "Hide Uploads ▲" : "Recent Uploads ▼"}
+          </button>
+          {showUploads && (
+            <Card>
+              <div style={{ ...SG(12, 700), color: "var(--txt)", marginBottom: 8 }}>
+                Recent Uploads
+              </div>
+              <table style={{ width: "100%", borderCollapse: "collapse", ...SG(10) }}>
+                <thead>
+                  <tr style={{ borderBottom: "1px solid var(--brd)" }}>
+                    <th style={{ textAlign: "left", padding: "4px 8px", color: "var(--txt3)" }}>File</th>
+                    <th style={{ textAlign: "left", padding: "4px 8px", color: "var(--txt3)" }}>Type</th>
+                    <th style={{ textAlign: "right", padding: "4px 8px", color: "var(--txt3)" }}>Rows</th>
+                    <th style={{ textAlign: "left", padding: "4px 8px", color: "var(--txt3)" }}>Status</th>
+                    <th style={{ textAlign: "left", padding: "4px 8px", color: "var(--txt3)" }}>Time</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {uploads.map((u, i) => (
+                    <tr key={i} style={{ borderBottom: "1px solid var(--brd)" }}>
+                      <td style={{ padding: "4px 8px", color: "var(--txt)" }}>{u.filename}</td>
+                      <td style={{ padding: "4px 8px", color: "var(--txt2)" }}>{u.reportType}</td>
+                      <td style={{ padding: "4px 8px", color: "var(--txt)", textAlign: "right" }}>{fN(u.rowsLoaded)}</td>
+                      <td style={{ padding: "4px 8px", color: u.status === "SUCCESS" ? "#2ECFAA" : "#f87171" }}>{u.status}</td>
+                      <td style={{ padding: "4px 8px", color: "var(--txt3)" }}>{u.uploadedAt}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </Card>
+          )}
+        </div>
+      )}
     </div>
   );
 }

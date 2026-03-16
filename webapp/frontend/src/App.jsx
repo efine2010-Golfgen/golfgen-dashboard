@@ -51,7 +51,6 @@ const CATEGORIES = [
     key: "retail-reporting", label: "Walmart Analytics",
     views: [
       { key: "walmart-analytics", path: "/walmart-analytics", label: "Walmart Analytics" },
-      { key: "retail-reporting", path: "/retail-reporting", label: "Upload & Data" },
     ],
   },
   {
