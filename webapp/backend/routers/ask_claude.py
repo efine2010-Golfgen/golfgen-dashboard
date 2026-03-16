@@ -187,6 +187,61 @@ def _build_snapshot(con, active_tab: str, division: str | None, customer: str | 
         except Exception:
             lines.append("Supply chain data: unavailable")
 
+    elif active_tab in ("walmart-analytics", "walmart", "retail", "retail-reporting"):
+        # ── Walmart Store / Retail data ──
+        try:
+            wm_row = con.execute("""
+                SELECT COUNT(*), SUM(COALESCE(pos_sales_ty, 0)), SUM(COALESCE(pos_qty_ty, 0)),
+                       SUM(COALESCE(pos_sales_ly, 0)), SUM(COALESCE(pos_qty_ly, 0))
+                FROM walmart_item_weekly
+                WHERE period_type = 'L4W'
+            """).fetchone()
+            if wm_row and int(wm_row[0]) > 0:
+                lines.append(f"Walmart Item-Week Rows (L4W): {int(wm_row[0]):,}")
+                ty_sales = _n(wm_row[1])
+                ly_sales = _n(wm_row[3])
+                lines.append(f"L4W POS Sales TY: {_fmt_dollar(ty_sales)}")
+                lines.append(f"L4W POS Sales LY: {_fmt_dollar(ly_sales)}")
+                if ly_sales > 0:
+                    chg = (ty_sales - ly_sales) / ly_sales * 100
+                    lines.append(f"L4W Sales Change: {chg:.1f}%")
+                lines.append(f"L4W POS Units TY: {int(wm_row[2]):,}")
+                lines.append(f"L4W POS Units LY: {int(wm_row[4]):,}")
+        except Exception:
+            lines.append("Walmart item data: unavailable")
+
+        try:
+            store_row = con.execute("""
+                SELECT COUNT(DISTINCT store_number), SUM(COALESCE(pos_sales_ty, 0))
+                FROM walmart_store_weekly
+                WHERE walmart_week = (SELECT MAX(walmart_week) FROM walmart_store_weekly)
+            """).fetchone()
+            if store_row and _n(store_row[0]) > 0:
+                lines.append(f"\nWalmart Stores (latest week): {int(store_row[0]):,}")
+                lines.append(f"Latest Week Store Sales TY: {_fmt_dollar(store_row[1])}")
+        except Exception:
+            pass
+
+        try:
+            sc_row = con.execute("""
+                SELECT COUNT(*) FROM walmart_scorecard
+            """).fetchone()
+            lines.append(f"Scorecard Rows: {int(sc_row[0]):,}")
+        except Exception:
+            pass
+
+        try:
+            ecomm_row = con.execute("""
+                SELECT SUM(COALESCE(auth_based_net_sales_ty, 0)),
+                       SUM(COALESCE(auth_based_net_sales_ly, 0))
+                FROM walmart_ecomm_weekly
+            """).fetchone()
+            if ecomm_row and _n(ecomm_row[0]) > 0:
+                lines.append(f"\neComm Auth Sales TY: {_fmt_dollar(ecomm_row[0])}")
+                lines.append(f"eComm Auth Sales LY: {_fmt_dollar(ecomm_row[1])}")
+        except Exception:
+            pass
+
     # Default / fallback — general summary
     if not lines:
         try:
@@ -291,11 +346,15 @@ operations team in Bentonville, AR. You have access to live data from
 the dashboard pulled from PostgreSQL in real time.
 
 Answer questions clearly and concisely. Use bullet points for lists.
-Bold key numbers. If data is only from Amazon (SP-API), note that —
-other channels (Walmart stores, Belk, Hobby Lobby, etc.) are coming
-in a future phase. Never make up numbers. Only report what is in the
-data snapshot provided. If the data snapshot is empty or a table has
-no rows, say so clearly.
+Bold key numbers. Data is available from both Amazon (SP-API) and
+Walmart Stores (Scintilla POS reports). Amazon data covers orders,
+sales, inventory, advertising, and financial events. Walmart data
+covers store-level POS sales, item-level performance, scorecard
+metrics, eCommerce, and inventory health. Other channels (Belk,
+Hobby Lobby, Shopify, etc.) are coming in a future phase.
+Never make up numbers. Only report what is in the data snapshot
+provided. If the data snapshot is empty or a table has no rows,
+say so clearly.
 
 Today's date: {today_str} (Central Time)
 Active tab: {req.active_tab}
