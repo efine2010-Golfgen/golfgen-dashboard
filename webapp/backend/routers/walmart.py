@@ -136,7 +136,7 @@ def get_availability(division: str = None, customer: str = None):
                 SELECT walmart_week FROM walmart_ecomm_weekly WHERE 1=1 {hw}
             ) t
             """,
-            hp
+            hp + hp + hp
         ).fetchone()
         if week_row and week_row[0]:
             latest_week = str(week_row[0])
@@ -675,5 +675,38 @@ def get_store_analytics(
             "total": total,
             "weeks": weeks,
         }
+    finally:
+        con.close()
+
+
+# ═════════════════════════════════════════════════════════════════════════════
+#  DEBUG: Table counts (no auth required)
+# ═════════════════════════════════════════════════════════════════════════════
+
+
+@router.get("/api/walmart/debug-counts")
+def debug_counts():
+    """Quick row count check for all Walmart tables (no auth)."""
+    con = get_db()
+    try:
+        counts = {}
+        for tbl in [
+            "walmart_item_weekly", "walmart_scorecard", "walmart_store_weekly",
+            "walmart_ecomm_weekly", "walmart_order_forecast",
+        ]:
+            try:
+                r = con.execute(f"SELECT COUNT(*) FROM {tbl}").fetchone()
+                counts[tbl] = int(r[0]) if r else 0
+            except Exception as e:
+                counts[tbl] = f"ERROR: {e}"
+        # Also check period_type values in item_weekly
+        try:
+            ptypes = con.execute(
+                "SELECT period_type, COUNT(*) FROM walmart_item_weekly GROUP BY period_type ORDER BY period_type"
+            ).fetchall()
+            counts["item_weekly_periods"] = {str(r[0]): int(r[1]) for r in ptypes}
+        except Exception:
+            counts["item_weekly_periods"] = "N/A"
+        return counts
     finally:
         con.close()
