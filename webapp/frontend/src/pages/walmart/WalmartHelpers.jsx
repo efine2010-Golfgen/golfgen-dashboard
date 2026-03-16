@@ -118,7 +118,7 @@ export const PERIOD_LABELS = {
 // KPI CARD COMPONENT
 // ═════════════════════════════════════════════════════════════════════════════
 
-export function KPICard({ label, value, delta: d, color = COLORS.teal }) {
+export function KPICard({ label, value, delta: d, color = COLORS.teal, subLabel, subValue }) {
   return (
     <div
       style={{
@@ -143,16 +143,23 @@ export function KPICard({ label, value, delta: d, color = COLORS.teal }) {
       <div style={{ ...DM(20), color: "var(--txt)", marginBottom: 4 }}>
         {value}
       </div>
-      {d != null && (
-        <span
-          style={{
-            ...SG(10, 600),
-            color: parseFloat(d) >= 0 ? COLORS.teal : COLORS.red,
-          }}
-        >
-          {parseFloat(d) >= 0 ? "▲" : "▼"} {Math.abs(d)}%
-        </span>
-      )}
+      <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+        {subLabel && subValue != null && (
+          <span style={{ ...SG(9), color: "var(--txt3)" }}>
+            {subLabel}: {subValue}
+          </span>
+        )}
+        {d != null && (
+          <span
+            style={{
+              ...SG(10, 600),
+              color: parseFloat(d) >= 0 ? COLORS.teal : COLORS.red,
+            }}
+          >
+            {parseFloat(d) >= 0 ? "▲" : "▼"} {Math.abs(d)}%
+          </span>
+        )}
+      </div>
     </div>
   );
 }
@@ -161,7 +168,7 @@ export function KPICard({ label, value, delta: d, color = COLORS.teal }) {
 // CHART CANVAS COMPONENT
 // ═════════════════════════════════════════════════════════════════════════════
 
-export function ChartCanvas({ type, labels, datasets, periods, data, height, configKey, options: optionOverrides }) {
+export function ChartCanvas({ type, labels, datasets, periods, data, height, configKey, options: optionOverrides, chartPlugins }) {
   // Support both {labels, datasets} props and {data: {labels, datasets}} prop
   const resolvedLabels = labels || (data && data.labels);
   const resolvedDatasets = datasets || (data && data.datasets);
@@ -271,6 +278,9 @@ export function ChartCanvas({ type, labels, datasets, periods, data, height, con
       },
     };
 
+    if (chartPlugins && chartPlugins.length > 0) {
+      config.plugins = chartPlugins;
+    }
     chartRef.current = new window.Chart(canvasRef.current, config);
     return () => {
       if (chartRef.current) {
