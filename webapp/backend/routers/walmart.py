@@ -301,11 +301,11 @@ def get_inventory(division: str = None, customer: str = None):
     try:
         hw, hp = hierarchy_filter(division=division, customer=customer or "walmart_stores")
 
-        # ── Query 1: Aggregate KPIs
+        # ── Query 1: Aggregate KPIs (exclude zero instock from average)
         kpi_query = f"""
             SELECT
               SUM(COALESCE(on_hand_qty_ty, 0)) as total_oh,
-              AVG(COALESCE(instock_pct_ty, 0)) as avg_instock_pct,
+              AVG(CASE WHEN COALESCE(instock_pct_ty, 0) > 0 THEN instock_pct_ty END) as avg_instock_pct,
               SUM(CASE WHEN COALESCE(pos_qty_ty, 0) > 0
                     THEN COALESCE(on_hand_qty_ty, 0) / COALESCE(pos_qty_ty, 0)
                     ELSE 0 END) as weeks_of_supply
@@ -319,12 +319,12 @@ def get_inventory(division: str = None, customer: str = None):
             "weeksOfSupply": _n(kpi_row[2]) if kpi_row else 0.0,
         }
 
-        # ── Query 2: Instock trend by item across all periods
+        # ── Query 2: Instock trend by item across all periods (exclude zero)
         trend_query = f"""
             SELECT
               prime_item_desc,
               CASE WHEN period_type = 'L1W' THEN 'LW' ELSE period_type END as period,
-              AVG(COALESCE(instock_pct_ty, 0)) as avg_instock
+              AVG(CASE WHEN COALESCE(instock_pct_ty, 0) > 0 THEN instock_pct_ty END) as avg_instock
             FROM walmart_item_weekly
             WHERE period_type IN ('L1W','L4W','L13W','L26W','L52W') {hw}
             GROUP BY prime_item_desc, period_type
@@ -791,7 +791,7 @@ def get_weekly_trend(division: str = None, customer: str = None):
         instock_query = f"""
             SELECT
               walmart_week,
-              AVG(COALESCE(instock_pct_ty, 0)) as avg_instock_pct
+              AVG(CASE WHEN COALESCE(instock_pct_ty, 0) > 0 THEN instock_pct_ty END) as avg_instock_pct
             FROM walmart_item_weekly
             WHERE walmart_week IS NOT NULL
               AND (period_type = 'weekly' OR period_type IS NULL OR period_type = '') {hw}
@@ -812,7 +812,7 @@ def get_weekly_trend(division: str = None, customer: str = None):
             instock_fallback_q = f"""
                 SELECT
                   walmart_week,
-                  AVG(COALESCE(instock_pct_ty, 0)) as avg_instock_pct
+                  AVG(CASE WHEN COALESCE(instock_pct_ty, 0) > 0 THEN instock_pct_ty END) as avg_instock_pct
                 FROM walmart_item_weekly
                 WHERE walmart_week IS NOT NULL {hw}
                 GROUP BY walmart_week
@@ -831,7 +831,7 @@ def get_weekly_trend(division: str = None, customer: str = None):
             SELECT
               walmart_week,
               prime_item_desc,
-              AVG(COALESCE(instock_pct_ty, 0)) as instock_pct
+              AVG(CASE WHEN COALESCE(instock_pct_ty, 0) > 0 THEN instock_pct_ty END) as instock_pct
             FROM walmart_item_weekly
             WHERE walmart_week IS NOT NULL
               AND prime_item_desc IS NOT NULL {hw}

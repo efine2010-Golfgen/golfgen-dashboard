@@ -568,19 +568,17 @@ async def passkey_login_options(request: Request):
     # Find credentials for this user (if email provided)
     allow_credentials = []
     if email_hint:
-        # Look up user_name from email
-        from core.config import USERS
-        user_name = None
-        for uname, udata in USERS.items():
-            if udata.get("email", "").lower() == email_hint.lower():
-                user_name = uname
-                break
-
-        if user_name:
+        # Look up user_name from email — check all emails in the "emails" list
+        from core.config import USERS, EMAIL_TO_USER
+        user_key = EMAIL_TO_USER.get(email_hint.lower().strip())
+        if user_key:
+            # Passkeys are stored with display name (e.g. "Eric"), look up both
+            display_name = USERS[user_key]["name"]
             con = get_db()
             try:
                 rows = con.execute(
-                    "SELECT credential_id FROM passkeys WHERE user_name = ?", [user_name]
+                    "SELECT credential_id FROM passkeys WHERE user_name = ? OR user_name = ?",
+                    [user_key, display_name]
                 ).fetchall()
                 allow_credentials = [
                     PublicKeyCredentialDescriptor(id=base64url_to_bytes(r[0]))
@@ -651,19 +649,31 @@ async def passkey_login_verify(request: Request, response: Response):
     con.close()
 
     # Create a session for this user
-    user_data = USERS.get(user_name)
+    # Passkeys store user_name as display name (e.g. "Eric"), but USERS dict
+    # is keyed by lowercase (e.g. "eric"). Try both lookups.
+    from core.config import EMAIL_TO_USER
+    user_data = USERS.get(user_name)  # Try direct (lowercase key)
+    user_key = user_name
+    if not user_data:
+        # Try matching by display name
+        for ukey, udata in USERS.items():
+            if udata["name"] == user_name:
+                user_data = udata
+                user_key = ukey
+                break
     if not user_data:
         return JSONResponse({"ok": False, "detail": "User not found"}, status_code=400)
 
     import secrets
     token = secrets.token_hex(32)
+    user_email = user_data["emails"][0] if user_data.get("emails") else ""
     con2 = get_db_rw()
     con2.execute(
         "INSERT INTO sessions (token, user_email, user_name, role, login_method) VALUES (?, ?, ?, ?, ?)",
-        [token, user_data["email"], user_name, user_data["role"], "passkey"]
+        [token, user_email, user_data["name"], user_data["role"], "passkey"]
     )
     con2.close()
-    response = JSONResponse({"ok": True, "user": user_name, "role": user_data["role"]})
+    response = JSONResponse({"ok": True, "user": user_data["name"], "role": user_data["role"]})
     response.set_cookie(
         "golfgen_session", token,
         httponly=True, samesite="none", secure=True,

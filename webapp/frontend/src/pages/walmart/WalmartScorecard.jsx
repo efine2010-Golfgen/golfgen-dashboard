@@ -329,6 +329,266 @@ export function WalmartScorecard({ filters }) {
         </div>
       )}
 
+      {/* ═══ Pie Charts: Quarterly Breakdown ═══ */}
+      {quarterPeriods.length > 0 && (
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr 1fr", gap: 16 }}>
+          {/* Pie 1: POS Sales $ */}
+          <Card>
+            <CardHdr title="POS Sales $ by Quarter" />
+            <ChartCanvas
+              type="doughnut"
+              labels={quarterPeriods}
+              configKey={`sc-pie-pos$-${activeVendor}`}
+              height={200}
+              datasets={[
+                {
+                  data: quarterPeriods.map((p) =>
+                    Math.abs(getNum(activeVendor, "POS Sales $", p))
+                  ),
+                  backgroundColor: PIE_COLORS.slice(0, quarterPeriods.length),
+                  borderColor: "rgba(0,0,0,0.2)",
+                  borderWidth: 1,
+                },
+              ]}
+              options={{
+                plugins: {
+                  legend: { display: true, position: "bottom", labels: { color: "rgba(255,255,255,0.7)", font: { size: 9 } } },
+                  tooltip: {
+                    callbacks: {
+                      label: (ctx) => `${ctx.label}: $${(ctx.raw || 0).toLocaleString()}`,
+                    },
+                  },
+                },
+              }}
+            />
+          </Card>
+
+          {/* Pie 2: POS Units */}
+          <Card>
+            <CardHdr title="POS Units by Quarter" />
+            <ChartCanvas
+              type="doughnut"
+              labels={quarterPeriods}
+              configKey={`sc-pie-units-${activeVendor}`}
+              height={200}
+              datasets={[
+                {
+                  data: quarterPeriods.map((p) =>
+                    Math.abs(getNum(activeVendor, "POS Units", p))
+                  ),
+                  backgroundColor: PIE_COLORS.slice(0, quarterPeriods.length),
+                  borderColor: "rgba(0,0,0,0.2)",
+                  borderWidth: 1,
+                },
+              ]}
+              options={{
+                plugins: {
+                  legend: { display: true, position: "bottom", labels: { color: "rgba(255,255,255,0.7)", font: { size: 9 } } },
+                  tooltip: {
+                    callbacks: {
+                      label: (ctx) => `${ctx.label}: ${(ctx.raw || 0).toLocaleString()} units`,
+                    },
+                  },
+                },
+              }}
+            />
+          </Card>
+
+          {/* Pie 3: Gross Margin $ */}
+          <Card>
+            <CardHdr title="Gross Margin $ by Quarter" />
+            <ChartCanvas
+              type="doughnut"
+              labels={quarterPeriods}
+              configKey={`sc-pie-gm$-${activeVendor}`}
+              height={200}
+              datasets={[
+                {
+                  data: quarterPeriods.map((p) => {
+                    // Try "Gross Margin $" or calculate from GIM% * POS Sales $
+                    let v = getNum(activeVendor, "Gross Margin $", p);
+                    if (!v) {
+                      const gim = getNum(activeVendor, "GIM%", p);
+                      const sales = getNum(activeVendor, "POS Sales $", p);
+                      const gimPct = Math.abs(gim) < 2 ? gim : gim / 100;
+                      v = sales * gimPct;
+                    }
+                    return Math.abs(v);
+                  }),
+                  backgroundColor: PIE_COLORS.slice(0, quarterPeriods.length),
+                  borderColor: "rgba(0,0,0,0.2)",
+                  borderWidth: 1,
+                },
+              ]}
+              options={{
+                plugins: {
+                  legend: { display: true, position: "bottom", labels: { color: "rgba(255,255,255,0.7)", font: { size: 9 } } },
+                  tooltip: {
+                    callbacks: {
+                      label: (ctx) => `${ctx.label}: $${(ctx.raw || 0).toLocaleString()}`,
+                    },
+                  },
+                },
+              }}
+            />
+          </Card>
+
+          {/* Pie 4: Return $ */}
+          <Card>
+            <CardHdr title="Return $ by Quarter" />
+            <ChartCanvas
+              type="doughnut"
+              labels={quarterPeriods}
+              configKey={`sc-pie-ret$-${activeVendor}`}
+              height={200}
+              datasets={[
+                {
+                  data: quarterPeriods.map((p) => {
+                    let v = getNum(activeVendor, "Store Returns $", p);
+                    if (!v) v = getNum(activeVendor, "Returns $", p);
+                    return Math.abs(v);
+                  }),
+                  backgroundColor: PIE_COLORS.slice(0, quarterPeriods.length),
+                  borderColor: "rgba(0,0,0,0.2)",
+                  borderWidth: 1,
+                },
+              ]}
+              options={{
+                plugins: {
+                  legend: { display: true, position: "bottom", labels: { color: "rgba(255,255,255,0.7)", font: { size: 9 } } },
+                  tooltip: {
+                    callbacks: {
+                      label: (ctx) => `${ctx.label}: $${(ctx.raw || 0).toLocaleString()}`,
+                    },
+                  },
+                },
+              }}
+            />
+          </Card>
+        </div>
+      )}
+
+      {/* ═══ Bar Charts: Margin Comparison + Repl Instock ═══ */}
+      {quarterPeriods.length > 0 && (
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16 }}>
+          {/* Maintained Margin vs Gross Margin by Quarter */}
+          <Card>
+            <CardHdr title="Maintained Margin vs Gross Margin — Quarterly" />
+            <ChartCanvas
+              type="bar"
+              labels={quarterPeriods}
+              configKey={`sc-margin-comp-${activeVendor}-${quarterPeriods.length}`}
+              height={220}
+              datasets={[
+                {
+                  label: "Gross Margin (GIM%)",
+                  data: quarterPeriods.map((p) =>
+                    toMarginPct(getVal(activeVendor, "GIM%", p))
+                  ),
+                  backgroundColor: COLORS.teal,
+                  borderColor: COLORS.teal,
+                  borderWidth: 1,
+                },
+                {
+                  label: "Maintained Margin%",
+                  data: quarterPeriods.map((p) =>
+                    toMarginPct(getVal(activeVendor, "Maintain Margin%", p))
+                  ),
+                  backgroundColor: "#3b82f6",
+                  borderColor: "#3b82f6",
+                  borderWidth: 1,
+                },
+              ]}
+              options={{
+                scales: {
+                  y: {
+                    beginAtZero: true,
+                    suggestedMax: 60,
+                    ticks: {
+                      callback: (v) => v.toFixed(0) + "%",
+                      color: "rgba(255,255,255,0.7)",
+                      stepSize: 10,
+                    },
+                    grid: { color: "rgba(255,255,255,0.08)" },
+                    title: { display: true, text: "Margin %", color: "rgba(255,255,255,0.5)", font: { size: 10 } },
+                  },
+                  x: {
+                    ticks: { color: "rgba(255,255,255,0.7)" },
+                    grid: { display: false },
+                  },
+                },
+                plugins: {
+                  legend: { labels: { color: "rgba(255,255,255,0.7)", font: { size: 10 } } },
+                  tooltip: {
+                    callbacks: {
+                      label: (ctx) => `${ctx.dataset.label}: ${ctx.raw.toFixed(1)}%`,
+                    },
+                  },
+                },
+              }}
+            />
+          </Card>
+
+          {/* Replenishment In Stock % by Quarter */}
+          <Card>
+            <CardHdr title="Replenishment In Stock % — Quarterly" />
+            <ChartCanvas
+              type="bar"
+              labels={quarterPeriods}
+              configKey={`sc-repl-instock-${activeVendor}-${quarterPeriods.length}`}
+              height={220}
+              datasets={[
+                {
+                  label: "Repl Instock % TY",
+                  data: quarterPeriods.map((p) =>
+                    toMarginPct(getVal(activeVendor, "Repl Instock %", p))
+                  ),
+                  backgroundColor: COLORS.teal,
+                  borderColor: COLORS.teal,
+                  borderWidth: 1,
+                },
+                {
+                  label: "Repl Instock % LY",
+                  data: quarterPeriods.map((p) =>
+                    toMarginPct(getVal(activeVendor, "Repl Instock %", p, "valueLy"))
+                  ),
+                  backgroundColor: "rgba(249,115,22,0.5)",
+                  borderColor: "#f97316",
+                  borderWidth: 1,
+                },
+              ]}
+              options={{
+                scales: {
+                  y: {
+                    min: 80,
+                    max: 100,
+                    ticks: {
+                      callback: (v) => v.toFixed(0) + "%",
+                      color: "rgba(255,255,255,0.7)",
+                      stepSize: 5,
+                    },
+                    grid: { color: "rgba(255,255,255,0.08)" },
+                    title: { display: true, text: "In Stock %", color: "rgba(255,255,255,0.5)", font: { size: 10 } },
+                  },
+                  x: {
+                    ticks: { color: "rgba(255,255,255,0.7)" },
+                    grid: { display: false },
+                  },
+                },
+                plugins: {
+                  legend: { labels: { color: "rgba(255,255,255,0.7)", font: { size: 10 } } },
+                  tooltip: {
+                    callbacks: {
+                      label: (ctx) => `${ctx.dataset.label}: ${ctx.raw.toFixed(1)}%`,
+                    },
+                  },
+                },
+              }}
+            />
+          </Card>
+        </div>
+      )}
+
       {/* ═══ Period View Selector + Vendor Tabs ═══ */}
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 8 }}>
         <div style={{ display: "flex", gap: 6 }}>
@@ -380,258 +640,6 @@ export function WalmartScorecard({ filters }) {
           })}
         </div>
       </div>
-
-      {/* ═══ Pie Charts: Quarterly Breakdown ═══ */}
-      {quarterPeriods.length > 0 && (
-        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr 1fr", gap: 16 }}>
-          {/* Pie 1: POS Sales $ */}
-          <Card>
-            <CardHdr title="POS Sales $ by Quarter" />
-            <ChartCanvas
-              type="doughnut"
-              labels={quarterPeriods}
-              configKey={`sc-pie-pos$-${activeVendor}`}
-              height={200}
-              datasets={[
-                {
-                  data: quarterPeriods.map((p) =>
-                    Math.abs(getNum(activeVendor, "POS Sales $", p))
-                  ),
-                  backgroundColor: PIE_COLORS.slice(0, quarterPeriods.length),
-                  borderColor: "rgba(0,0,0,0.2)",
-                  borderWidth: 1,
-                },
-              ]}
-              options={{
-                plugins: {
-                  legend: { display: true, position: "bottom", labels: { color: "var(--txt3)", font: { size: 9 } } },
-                  tooltip: {
-                    callbacks: {
-                      label: (ctx) => `${ctx.label}: $${(ctx.raw || 0).toLocaleString()}`,
-                    },
-                  },
-                },
-              }}
-            />
-          </Card>
-
-          {/* Pie 2: POS Units */}
-          <Card>
-            <CardHdr title="POS Units by Quarter" />
-            <ChartCanvas
-              type="doughnut"
-              labels={quarterPeriods}
-              configKey={`sc-pie-units-${activeVendor}`}
-              height={200}
-              datasets={[
-                {
-                  data: quarterPeriods.map((p) =>
-                    Math.abs(getNum(activeVendor, "POS Units", p))
-                  ),
-                  backgroundColor: PIE_COLORS.slice(0, quarterPeriods.length),
-                  borderColor: "rgba(0,0,0,0.2)",
-                  borderWidth: 1,
-                },
-              ]}
-              options={{
-                plugins: {
-                  legend: { display: true, position: "bottom", labels: { color: "var(--txt3)", font: { size: 9 } } },
-                  tooltip: {
-                    callbacks: {
-                      label: (ctx) => `${ctx.label}: ${(ctx.raw || 0).toLocaleString()} units`,
-                    },
-                  },
-                },
-              }}
-            />
-          </Card>
-
-          {/* Pie 3: Gross Margin $ */}
-          <Card>
-            <CardHdr title="Gross Margin $ by Quarter" />
-            <ChartCanvas
-              type="doughnut"
-              labels={quarterPeriods}
-              configKey={`sc-pie-gm$-${activeVendor}`}
-              height={200}
-              datasets={[
-                {
-                  data: quarterPeriods.map((p) => {
-                    // Try "Gross Margin $" or calculate from GIM% * POS Sales $
-                    let v = getNum(activeVendor, "Gross Margin $", p);
-                    if (!v) {
-                      const gim = getNum(activeVendor, "GIM%", p);
-                      const sales = getNum(activeVendor, "POS Sales $", p);
-                      const gimPct = Math.abs(gim) < 2 ? gim : gim / 100;
-                      v = sales * gimPct;
-                    }
-                    return Math.abs(v);
-                  }),
-                  backgroundColor: PIE_COLORS.slice(0, quarterPeriods.length),
-                  borderColor: "rgba(0,0,0,0.2)",
-                  borderWidth: 1,
-                },
-              ]}
-              options={{
-                plugins: {
-                  legend: { display: true, position: "bottom", labels: { color: "var(--txt3)", font: { size: 9 } } },
-                  tooltip: {
-                    callbacks: {
-                      label: (ctx) => `${ctx.label}: $${(ctx.raw || 0).toLocaleString()}`,
-                    },
-                  },
-                },
-              }}
-            />
-          </Card>
-
-          {/* Pie 4: Return $ */}
-          <Card>
-            <CardHdr title="Return $ by Quarter" />
-            <ChartCanvas
-              type="doughnut"
-              labels={quarterPeriods}
-              configKey={`sc-pie-ret$-${activeVendor}`}
-              height={200}
-              datasets={[
-                {
-                  data: quarterPeriods.map((p) => {
-                    let v = getNum(activeVendor, "Store Returns $", p);
-                    if (!v) v = getNum(activeVendor, "Returns $", p);
-                    return Math.abs(v);
-                  }),
-                  backgroundColor: PIE_COLORS.slice(0, quarterPeriods.length),
-                  borderColor: "rgba(0,0,0,0.2)",
-                  borderWidth: 1,
-                },
-              ]}
-              options={{
-                plugins: {
-                  legend: { display: true, position: "bottom", labels: { color: "var(--txt3)", font: { size: 9 } } },
-                  tooltip: {
-                    callbacks: {
-                      label: (ctx) => `${ctx.label}: $${(ctx.raw || 0).toLocaleString()}`,
-                    },
-                  },
-                },
-              }}
-            />
-          </Card>
-        </div>
-      )}
-
-      {/* ═══ Bar Charts: Margin Comparison + Repl Instock ═══ */}
-      {quarterPeriods.length > 0 && (
-        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16 }}>
-          {/* Maintained Margin vs Gross Margin by Quarter */}
-          <Card>
-            <CardHdr title="Maintained Margin vs Gross Margin — Quarterly" />
-            <ChartCanvas
-              type="bar"
-              labels={quarterPeriods}
-              configKey={`sc-margin-comp-${activeVendor}-${quarterPeriods.length}`}
-              height={220}
-              datasets={[
-                {
-                  label: "Gross Margin (GIM%)",
-                  data: quarterPeriods.map((p) =>
-                    toMarginPct(getVal(activeVendor, "GIM%", p))
-                  ),
-                  backgroundColor: COLORS.teal,
-                  borderColor: COLORS.teal,
-                  borderWidth: 1,
-                },
-                {
-                  label: "Maintained Margin%",
-                  data: quarterPeriods.map((p) =>
-                    toMarginPct(getVal(activeVendor, "Maintain Margin%", p))
-                  ),
-                  backgroundColor: "#3b82f6",
-                  borderColor: "#3b82f6",
-                  borderWidth: 1,
-                },
-              ]}
-              options={{
-                scales: {
-                  y: {
-                    ticks: {
-                      callback: (v) => v.toFixed(1) + "%",
-                      color: "var(--txt3)",
-                    },
-                    grid: { color: "rgba(255,255,255,0.06)" },
-                  },
-                  x: {
-                    ticks: { color: "var(--txt3)" },
-                    grid: { display: false },
-                  },
-                },
-                plugins: {
-                  legend: { labels: { color: "var(--txt3)", font: { size: 10 } } },
-                  tooltip: {
-                    callbacks: {
-                      label: (ctx) => `${ctx.dataset.label}: ${ctx.raw.toFixed(1)}%`,
-                    },
-                  },
-                },
-              }}
-            />
-          </Card>
-
-          {/* Replenishment In Stock % by Quarter */}
-          <Card>
-            <CardHdr title="Replenishment In Stock % — Quarterly" />
-            <ChartCanvas
-              type="bar"
-              labels={quarterPeriods}
-              configKey={`sc-repl-instock-${activeVendor}-${quarterPeriods.length}`}
-              height={220}
-              datasets={[
-                {
-                  label: "Repl Instock % TY",
-                  data: quarterPeriods.map((p) =>
-                    toMarginPct(getVal(activeVendor, "Repl Instock %", p))
-                  ),
-                  backgroundColor: COLORS.teal,
-                  borderColor: COLORS.teal,
-                  borderWidth: 1,
-                },
-                {
-                  label: "Repl Instock % LY",
-                  data: quarterPeriods.map((p) =>
-                    toMarginPct(getVal(activeVendor, "Repl Instock %", p, "valueLy"))
-                  ),
-                  backgroundColor: "rgba(249,115,22,0.5)",
-                  borderColor: "#f97316",
-                  borderWidth: 1,
-                },
-              ]}
-              options={{
-                scales: {
-                  y: {
-                    ticks: {
-                      callback: (v) => v.toFixed(1) + "%",
-                      color: "var(--txt3)",
-                    },
-                    grid: { color: "rgba(255,255,255,0.06)" },
-                  },
-                  x: {
-                    ticks: { color: "var(--txt3)" },
-                    grid: { display: false },
-                  },
-                },
-                plugins: {
-                  legend: { labels: { color: "var(--txt3)", font: { size: 10 } } },
-                  tooltip: {
-                    callbacks: {
-                      label: (ctx) => `${ctx.dataset.label}: ${ctx.raw.toFixed(1)}%`,
-                    },
-                  },
-                },
-              }}
-            />
-          </Card>
-        </div>
-      )}
 
       {/* ═══ Scorecard Table for Active Vendor ═══ */}
       {(() => {

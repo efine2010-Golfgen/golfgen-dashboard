@@ -399,8 +399,9 @@ export default function App() {
         permMap[k] = tabList.includes(k);
       }
       setPermissions(permMap);
-      setAuthed(true);
+      // Check MFA BEFORE marking as authed — prevents dashboard flash
       await loadMfaState();
+      setAuthed(true);
     } catch {
       setAuthed(false);
       setUser(null);
