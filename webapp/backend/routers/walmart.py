@@ -21,7 +21,7 @@ from collections import defaultdict
 
 from fastapi import APIRouter, Query
 
-from core.database import get_db
+from core.database import get_db, get_db_rw
 from core.hierarchy import hierarchy_filter
 
 logger = logging.getLogger("golfgen")
@@ -710,3 +710,29 @@ def debug_counts():
         return counts
     finally:
         con.close()
+
+
+# TEMPORARY — remove after Holiday Time cleanup
+@router.delete("/api/debug/remove-brand")
+def remove_brand(brand: str = "Holiday Time"):
+    """Delete all rows matching a brand from walmart tables."""
+    con = get_db_rw()
+    results = {}
+    try:
+        # walmart_item_weekly — has brand_name column
+        cur = con._conn.cursor()
+        cur.execute("DELETE FROM walmart_item_weekly WHERE brand_name ILIKE %s", [brand])
+        results["item_weekly"] = cur.rowcount
+        # walmart_ecomm_weekly — has brand_name column
+        cur.execute("DELETE FROM walmart_ecomm_weekly WHERE brand_name ILIKE %s", [brand])
+        results["ecomm_weekly"] = cur.rowcount
+        # walmart_scorecard — check vendor_section
+        cur.execute("DELETE FROM walmart_scorecard WHERE vendor_section ILIKE %s", [f"%{brand}%"])
+        results["scorecard"] = cur.rowcount
+        con._conn.commit()
+    except Exception as e:
+        con._conn.rollback()
+        results["error"] = str(e)
+    finally:
+        con.close()
+    return results
