@@ -724,6 +724,49 @@ def debug_counts():
         con.close()
 
 
+@router.post("/api/debug/walmart-fix-scorecard-constraint")
+def debug_fix_scorecard_constraint():
+    """Drop old unique constraint, add new one with metric_group, clear + re-import."""
+    con = get_db_rw()
+    try:
+        results = {}
+        # Find and drop existing constraint
+        try:
+            con.execute("""
+                DO $$ BEGIN
+                    -- Drop all unique constraints on walmart_scorecard
+                    EXECUTE (
+                        SELECT string_agg('ALTER TABLE walmart_scorecard DROP CONSTRAINT ' || conname, '; ')
+                        FROM pg_constraint
+                        WHERE conrelid = 'walmart_scorecard'::regclass AND contype = 'u'
+                    );
+                EXCEPTION WHEN OTHERS THEN NULL;
+                END $$
+            """)
+            results["drop_old_constraint"] = "ok"
+        except Exception as e:
+            results["drop_old_constraint"] = f"ERROR: {e}"
+        # Add new constraint with metric_group
+        try:
+            con.execute("""
+                ALTER TABLE walmart_scorecard
+                ADD CONSTRAINT walmart_scorecard_unique
+                UNIQUE(vendor_section, metric_group, metric_name, period, upload_id)
+            """)
+            results["add_new_constraint"] = "ok"
+        except Exception as e:
+            results["add_new_constraint"] = f"ERROR: {e}"
+        # Clear table for fresh import
+        try:
+            con.execute("DELETE FROM walmart_scorecard")
+            results["cleared"] = True
+        except Exception as e:
+            results["cleared"] = f"ERROR: {e}"
+        return results
+    finally:
+        con.close()
+
+
 @router.post("/api/debug/walmart-import-scorecard")
 async def debug_import_scorecard(request_body: dict):
     """Import scorecard JSON data (no auth, for data loading)."""
@@ -765,44 +808,6 @@ async def debug_import_scorecard(request_body: dict):
 
     con.close()
     return {"imported": count, "errors": errors[:5], "total_submitted": len(rows)}
-
-
-@router.post("/api/debug/walmart-clear-scorecard")
-def debug_clear_scorecard():
-    """Clear scorecard table so it can be re-imported fresh."""
-    con = get_db_rw()
-    try:
-        r = con.execute("DELETE FROM walmart_scorecard")
-        remaining = con.execute("SELECT COUNT(*) FROM walmart_scorecard").fetchone()
-        return {"deleted": r.rowcount if hasattr(r, 'rowcount') else "executed",
-                "remaining": int(remaining[0]) if remaining else 0}
-    finally:
-        con.close()
-
-
-@router.post("/api/debug/walmart-fix-lw")
-def debug_fix_lw():
-    """Fix LW period_type → L1W in walmart_item_weekly and walmart_store_weekly."""
-    con = get_db_rw()
-    try:
-        results = {}
-        for tbl in ["walmart_item_weekly", "walmart_store_weekly"]:
-            try:
-                r = con.execute(f"UPDATE {tbl} SET period_type = 'L1W' WHERE period_type = 'LW'")
-                results[f"{tbl}_updated"] = r.rowcount if hasattr(r, 'rowcount') else "executed"
-            except Exception as e:
-                results[f"{tbl}_updated"] = f"ERROR: {e}"
-        # Verify
-        try:
-            ptypes = con.execute(
-                "SELECT period_type, COUNT(*) FROM walmart_item_weekly GROUP BY period_type ORDER BY period_type"
-            ).fetchall()
-            results["item_weekly_periods_after"] = {str(r[0]): int(r[1]) for r in ptypes}
-        except Exception as e:
-            results["item_weekly_periods_after"] = f"ERROR: {e}"
-        return results
-    finally:
-        con.close()
 
 
 

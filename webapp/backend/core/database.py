@@ -1493,7 +1493,7 @@ def _init_retail_tables():
             division    VARCHAR(20) DEFAULT 'golf',
             customer    VARCHAR(30) DEFAULT 'walmart_stores',
             platform    VARCHAR(20) DEFAULT 'scintilla',
-            UNIQUE(vendor_section, metric_name, period, upload_id)
+            UNIQUE(vendor_section, metric_group, metric_name, period, upload_id)
         )
     """)
 
