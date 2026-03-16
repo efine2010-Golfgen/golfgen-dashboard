@@ -21,7 +21,7 @@ from collections import defaultdict
 
 from fastapi import APIRouter, Query
 
-from core.database import get_db
+from core.database import get_db, get_db_rw
 from core.hierarchy import hierarchy_filter
 
 logger = logging.getLogger("golfgen")
@@ -788,5 +788,62 @@ def debug_dept_audit():
             result["item_weekly_brands"] = f"ERROR: {e}"
 
         return result
+    finally:
+        con.close()
+
+
+@router.post("/api/debug/walmart-cleanup")
+def debug_walmart_cleanup():
+    """Delete non-golf items (Halloween, Way To Celebrate brand) from Walmart tables."""
+    con = get_db_rw()
+    try:
+        results = {}
+
+        # Delete from walmart_item_weekly where brand is "Way To Celebrate" or product starts with HALLOWEEN or WTC
+        try:
+            r = con.execute(
+                "DELETE FROM walmart_item_weekly WHERE brand_name = %s OR product_description LIKE %s OR product_description LIKE %s",
+                ["Way To Celebrate", "HALLOWEEN%", "WTC%"]
+            )
+            results["item_weekly_deleted"] = r.rowcount if hasattr(r, 'rowcount') else "executed"
+        except Exception as e:
+            results["item_weekly_deleted"] = f"ERROR: {e}"
+
+        # Delete from walmart_store_weekly — these don't have product-level detail,
+        # but the store data for Dept 09 is valid golf data, so we keep it
+        results["store_weekly"] = "kept (dept 09 store data is valid)"
+
+        # walmart_scorecard — keep (vendor-level scorecard data)
+        results["scorecard"] = "kept (vendor scorecard data)"
+
+        # walmart_ecomm_weekly — all dept 09, keep
+        results["ecomm_weekly"] = "kept (all dept 09)"
+
+        # walmart_order_forecast — all dept 09, keep
+        results["order_forecast"] = "kept (all dept 09)"
+
+        # Also delete items with brand_name = None (3 rows)
+        try:
+            r = con.execute(
+                "DELETE FROM walmart_item_weekly WHERE brand_name IS NULL"
+            )
+            results["item_weekly_null_brand_deleted"] = r.rowcount if hasattr(r, 'rowcount') else "executed"
+        except Exception as e:
+            results["item_weekly_null_brand_deleted"] = f"ERROR: {e}"
+
+        # Verify remaining counts
+        try:
+            r = con.execute("SELECT brand_name, COUNT(*) FROM walmart_item_weekly GROUP BY brand_name ORDER BY brand_name").fetchall()
+            results["remaining_brands"] = {str(row[0]): int(row[1]) for row in r}
+        except Exception as e:
+            results["remaining_brands"] = f"ERROR: {e}"
+
+        try:
+            r = con.execute("SELECT COUNT(*) FROM walmart_item_weekly").fetchone()
+            results["total_remaining"] = int(r[0]) if r else 0
+        except Exception as e:
+            results["total_remaining"] = f"ERROR: {e}"
+
+        return results
     finally:
         con.close()
