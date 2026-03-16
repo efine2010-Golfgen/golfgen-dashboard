@@ -240,6 +240,8 @@ async def tab_permission_middleware(request: Request, call_next):
         path.startswith("/api/mfa/") or
         path.startswith("/api/upload/") or
         path.startswith("/api/debug/") or
+        path.startswith("/api/ads/auth/") or
+        path == "/api/ads/discover-profile" or
         path == "/api/sales/debug-today" or
         path in ("/api/health", "/api/sync", "/api/backfill") or
         path.startswith("/api/refresh")):

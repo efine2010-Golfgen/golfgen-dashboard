@@ -650,14 +650,18 @@ async def passkey_login_verify(request: Request, response: Response):
 
     # Create a session for this user
     # Passkeys store user_name as display name (e.g. "Eric"), but USERS dict
-    # is keyed by lowercase (e.g. "eric"). Try both lookups.
+    # is keyed by lowercase (e.g. "eric"). Try lowercase key first, then
+    # match by display name (case-insensitive).
     from core.config import EMAIL_TO_USER
-    user_data = USERS.get(user_name)  # Try direct (lowercase key)
+    user_data = USERS.get(user_name)  # Try direct (e.g. "eric")
     user_key = user_name
     if not user_data:
-        # Try matching by display name
+        user_data = USERS.get(user_name.lower())  # Try lowercase (e.g. "Eric" -> "eric")
+        user_key = user_name.lower()
+    if not user_data:
+        # Try matching by display name (case-insensitive)
         for ukey, udata in USERS.items():
-            if udata["name"] == user_name:
+            if udata["name"].lower() == user_name.lower():
                 user_data = udata
                 user_key = ukey
                 break
