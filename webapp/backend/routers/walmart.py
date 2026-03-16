@@ -724,126 +724,61 @@ def debug_counts():
         con.close()
 
 
-@router.get("/api/debug/walmart-dept-audit")
-def debug_dept_audit():
-    """Audit department numbers and product names across Walmart tables."""
+@router.get("/api/debug/walmart-division-audit")
+def debug_division_audit():
+    """Check division values across all Walmart tables."""
     con = get_db()
     try:
         result = {}
-
-        # walmart_store_weekly — vendor_dept_number values
-        try:
-            rows = con.execute(
-                "SELECT vendor_dept_number, COUNT(*) as cnt FROM walmart_store_weekly GROUP BY vendor_dept_number ORDER BY vendor_dept_number"
-            ).fetchall()
-            result["store_weekly_depts"] = {str(r[0]): int(r[1]) for r in rows}
-        except Exception as e:
-            result["store_weekly_depts"] = f"ERROR: {e}"
-
-        # walmart_item_weekly — product descriptions (sample non-dept-09)
-        try:
-            rows = con.execute(
-                "SELECT DISTINCT product_description FROM walmart_item_weekly ORDER BY product_description"
-            ).fetchall()
-            result["item_weekly_products"] = [str(r[0]) for r in rows]
-        except Exception as e:
-            result["item_weekly_products"] = f"ERROR: {e}"
-
-        # walmart_ecomm_weekly — dept_number values
-        try:
-            rows = con.execute(
-                "SELECT dept_number, dept_description, COUNT(*) as cnt FROM walmart_ecomm_weekly GROUP BY dept_number, dept_description ORDER BY dept_number"
-            ).fetchall()
-            result["ecomm_depts"] = [{
-                "dept": str(r[0]), "desc": str(r[1]) if r[1] else None, "count": int(r[2])
-            } for r in rows]
-        except Exception as e:
-            result["ecomm_depts"] = f"ERROR: {e}"
-
-        # walmart_order_forecast — vendor_dept_number values
-        try:
-            rows = con.execute(
-                "SELECT vendor_dept_number, COUNT(*) as cnt FROM walmart_order_forecast GROUP BY vendor_dept_number ORDER BY vendor_dept_number"
-            ).fetchall()
-            result["forecast_depts"] = {str(r[0]): int(r[1]) for r in rows}
-        except Exception as e:
-            result["forecast_depts"] = f"ERROR: {e}"
-
-        # walmart_scorecard — vendor_section values
-        try:
-            rows = con.execute(
-                "SELECT DISTINCT vendor_section FROM walmart_scorecard ORDER BY vendor_section"
-            ).fetchall()
-            result["scorecard_sections"] = [str(r[0]) for r in rows]
-        except Exception as e:
-            result["scorecard_sections"] = f"ERROR: {e}"
-
-        # walmart_item_weekly — brand_name values
-        try:
-            rows = con.execute(
-                "SELECT brand_name, COUNT(*) as cnt FROM walmart_item_weekly GROUP BY brand_name ORDER BY brand_name"
-            ).fetchall()
-            result["item_weekly_brands"] = {str(r[0]): int(r[1]) for r in rows}
-        except Exception as e:
-            result["item_weekly_brands"] = f"ERROR: {e}"
-
+        for tbl in ["walmart_item_weekly", "walmart_store_weekly", "walmart_scorecard",
+                     "walmart_ecomm_weekly", "walmart_order_forecast"]:
+            try:
+                rows = con.execute(
+                    f"SELECT division, COUNT(*) FROM {tbl} GROUP BY division ORDER BY division"
+                ).fetchall()
+                result[tbl] = {str(r[0]): int(r[1]) for r in rows}
+            except Exception as e:
+                result[tbl] = f"ERROR: {e}"
         return result
     finally:
         con.close()
 
 
-@router.post("/api/debug/walmart-cleanup")
-def debug_walmart_cleanup():
-    """Delete non-golf items (Halloween, Way To Celebrate brand) from Walmart tables."""
+@router.post("/api/debug/walmart-cleanup-housewares")
+def debug_cleanup_housewares():
+    """Delete all housewares division rows from Walmart tables."""
     con = get_db_rw()
     try:
         results = {}
+        for tbl in ["walmart_item_weekly", "walmart_store_weekly", "walmart_scorecard",
+                     "walmart_ecomm_weekly", "walmart_order_forecast"]:
+            try:
+                r = con.execute(f"DELETE FROM {tbl} WHERE division = ?", ["housewares"])
+                results[f"{tbl}_deleted"] = r.rowcount if hasattr(r, 'rowcount') else "executed"
+            except Exception as e:
+                results[f"{tbl}_deleted"] = f"ERROR: {e}"
 
-        # Delete from walmart_item_weekly where brand is "Way To Celebrate" or product starts with HALLOWEEN or WTC
-        try:
-            r = con.execute(
-                "DELETE FROM walmart_item_weekly WHERE brand_name = ? OR product_description LIKE ? OR product_description LIKE ?",
-                ["Way To Celebrate", "HALLOWEEN%", "WTC%"]
-            )
-            results["item_weekly_deleted"] = r.rowcount if hasattr(r, 'rowcount') else "executed"
-        except Exception as e:
-            results["item_weekly_deleted"] = f"ERROR: {e}"
-
-        # Delete from walmart_store_weekly — these don't have product-level detail,
-        # but the store data for Dept 09 is valid golf data, so we keep it
-        results["store_weekly"] = "kept (dept 09 store data is valid)"
-
-        # walmart_scorecard — keep (vendor-level scorecard data)
-        results["scorecard"] = "kept (vendor scorecard data)"
-
-        # walmart_ecomm_weekly — all dept 09, keep
-        results["ecomm_weekly"] = "kept (all dept 09)"
-
-        # walmart_order_forecast — all dept 09, keep
-        results["order_forecast"] = "kept (all dept 09)"
-
-        # Also delete items with brand_name = None (3 rows)
-        try:
-            r = con.execute(
-                "DELETE FROM walmart_item_weekly WHERE brand_name IS NULL"
-            )
-            results["item_weekly_null_brand_deleted"] = r.rowcount if hasattr(r, 'rowcount') else "executed"
-        except Exception as e:
-            results["item_weekly_null_brand_deleted"] = f"ERROR: {e}"
+        # Also delete non-dept-9 from tables that have dept columns
+        for tbl, col in [("walmart_store_weekly", "vendor_dept_number"),
+                         ("walmart_ecomm_weekly", "dept_number"),
+                         ("walmart_order_forecast", "vendor_dept_number")]:
+            try:
+                r = con.execute(f"DELETE FROM {tbl} WHERE {col} IS NOT NULL AND {col} != ?", ["9"])
+                results[f"{tbl}_non_dept9_deleted"] = r.rowcount if hasattr(r, 'rowcount') else "executed"
+            except Exception as e:
+                results[f"{tbl}_non_dept9_deleted"] = f"ERROR: {e}"
 
         # Verify remaining counts
-        try:
-            r = con.execute("SELECT brand_name, COUNT(*) FROM walmart_item_weekly GROUP BY brand_name ORDER BY brand_name").fetchall()
-            results["remaining_brands"] = {str(row[0]): int(row[1]) for row in r}
-        except Exception as e:
-            results["remaining_brands"] = f"ERROR: {e}"
-
-        try:
-            r = con.execute("SELECT COUNT(*) FROM walmart_item_weekly").fetchone()
-            results["total_remaining"] = int(r[0]) if r else 0
-        except Exception as e:
-            results["total_remaining"] = f"ERROR: {e}"
+        for tbl in ["walmart_item_weekly", "walmart_store_weekly", "walmart_scorecard",
+                     "walmart_ecomm_weekly", "walmart_order_forecast"]:
+            try:
+                r = con.execute(f"SELECT COUNT(*) FROM {tbl}").fetchone()
+                results[f"{tbl}_remaining"] = int(r[0]) if r else 0
+            except Exception as e:
+                results[f"{tbl}_remaining"] = f"ERROR: {e}"
 
         return results
     finally:
         con.close()
+
+
