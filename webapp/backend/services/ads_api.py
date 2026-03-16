@@ -516,9 +516,9 @@ def _sync_ads_data_inner():
             logger.error(f"Ads sync: failed to discover profiles: {e}")
             return
 
-    # Pull last 30 days of data (v3 API max range = 31 days)
+    # Pull last 14 days of data (shorter range = faster report generation)
     today = datetime.now(ZoneInfo("America/Chicago"))
-    start_date = (today - timedelta(days=30)).strftime("%Y-%m-%d")
+    start_date = (today - timedelta(days=14)).strftime("%Y-%m-%d")
     end_date = (today - timedelta(days=1)).strftime("%Y-%m-%d")
 
     # v3 API: each reportTypeId has its own allowed columns and groupBy values.
@@ -623,9 +623,9 @@ def _pull_ads_report(creds, report_type_id, columns, start_date, end_date, handl
             logger.error(f"Ads sync: no reportId returned for {report_type_id}, response: {create_data}")
             return
 
-        # Poll for completion (max ~5 min)
+        # Poll for completion (max ~10 min)
         download_url = None
-        for attempt in range(30):
+        for attempt in range(60):
             _time.sleep(10)
             poll_resp = req.get(
                 f"https://advertising-api.amazon.com/reporting/reports/{report_id}",
