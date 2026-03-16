@@ -561,7 +561,7 @@ def _pull_ads_report(creds, report_type_id, columns, start_date, end_date, handl
     import time as _time
     import gzip as gz
     import requests as req
-    from ad_api.api import sponsored_products
+    from ad_api.api import reports as ads_reports
 
     body = json.dumps({
         "name": f"{report_type_id}_{start_date}_{end_date}",
@@ -579,7 +579,7 @@ def _pull_ads_report(creds, report_type_id, columns, start_date, end_date, handl
 
     try:
         logger.info(f"Ads sync: creating {report_type_id} report ({start_date} to {end_date})...")
-        reports_api = sponsored_products.Reports(credentials=creds)
+        reports_api = ads_reports.Reports(credentials=creds)
 
         @retry_with_backoff(max_retries=3, base_delay=2.0, max_delay=30.0)
         def _create_report():
