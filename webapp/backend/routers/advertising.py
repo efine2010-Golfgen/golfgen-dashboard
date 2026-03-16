@@ -154,18 +154,20 @@ def ads_auth_callback(request: Request, code: str = Query(None), error: str = Qu
         _set_setting("ads_refresh_token", refresh_token)
         logger.info(f"Ads OAuth: refresh token obtained and saved (len={len(refresh_token)})")
 
-        # Try to discover the advertising profile ID
+        # Try to discover the advertising profile ID using direct HTTP
+        # (ad_api library requires profile_id even to list profiles — catch-22)
         profile_msg = ""
         try:
-            from ad_api.api import Profiles
-            creds = {
-                "refresh_token": refresh_token,
-                "client_id": client_id,
-                "client_secret": client_secret,
-                "profile_id": "",
-            }
-            result = Profiles(credentials=creds).get_profiles()
-            profiles = result.payload or []
+            prof_resp = http_requests.get(
+                "https://advertising-api.amazon.com/v2/profiles",
+                headers={
+                    "Authorization": f"Bearer {access_token}",
+                    "Amazon-Advertising-API-ClientId": client_id,
+                    "Content-Type": "application/json",
+                },
+                timeout=30,
+            )
+            profiles = prof_resp.json() if prof_resp.status_code == 200 else []
             us_profile = None
             for p in profiles:
                 if p.get("accountInfo", {}).get("marketplaceStringId") == "ATVPDKIKX0DER":
@@ -192,6 +194,8 @@ def ads_auth_callback(request: Request, code: str = Query(None), error: str = Qu
                     profile_msg += "</ul>"
             else:
                 profile_msg = "<p>⚠️ No advertising profiles found. You may need to create one in the Amazon Ads Console.</p>"
+                if prof_resp.status_code != 200:
+                    profile_msg += f"<p>API response: {prof_resp.status_code} — {prof_resp.text[:200]}</p>"
         except Exception as e:
             profile_msg = f"<p>⚠️ Could not auto-discover profile: {e}</p>"
             logger.warning(f"Ads OAuth: profile discovery failed: {e}")
@@ -270,6 +274,83 @@ def ads_auth_status():
         "dataRows": data_count,
         "clientIdPrefix": client_id[:12] + "..." if client_id else None,
     }
+
+
+@router.post("/api/ads/discover-profile")
+def ads_discover_profile():
+    """Manually discover the Ads profile ID using stored credentials."""
+    client_id = _get_ads_client_id()
+    client_secret = _get_ads_client_secret()
+    refresh_token = (
+        os.environ.get("ADS_API_REFRESH_TOKEN")
+        or os.environ.get("AMAZON_ADS_REFRESH_TOKEN")
+        or _get_setting("ads_refresh_token")
+        or ""
+    )
+    if not all([client_id, client_secret, refresh_token]):
+        return {"error": "Missing credentials. Complete OAuth flow first."}
+
+    # Get a fresh access token
+    try:
+        token_resp = http_requests.post("https://api.amazon.com/auth/o2/token", data={
+            "grant_type": "refresh_token",
+            "refresh_token": refresh_token,
+            "client_id": client_id,
+            "client_secret": client_secret,
+        }, timeout=30)
+        token_data = token_resp.json()
+        access_token = token_data.get("access_token", "")
+        if not access_token:
+            return {"error": f"Token refresh failed: {token_data}"}
+    except Exception as e:
+        return {"error": f"Token refresh error: {e}"}
+
+    # List profiles
+    try:
+        prof_resp = http_requests.get(
+            "https://advertising-api.amazon.com/v2/profiles",
+            headers={
+                "Authorization": f"Bearer {access_token}",
+                "Amazon-Advertising-API-ClientId": client_id,
+                "Content-Type": "application/json",
+            },
+            timeout=30,
+        )
+        if prof_resp.status_code != 200:
+            return {"error": f"Profiles API returned {prof_resp.status_code}: {prof_resp.text[:300]}"}
+
+        profiles = prof_resp.json()
+        us_profile = None
+        for p in profiles:
+            if p.get("accountInfo", {}).get("marketplaceStringId") == "ATVPDKIKX0DER":
+                us_profile = p
+                break
+        if not us_profile and profiles:
+            us_profile = profiles[0]
+
+        if us_profile:
+            pid = str(us_profile.get("profileId", ""))
+            account_name = us_profile.get("accountInfo", {}).get("name", "")
+            _set_setting("ads_profile_id", pid)
+            logger.info(f"Ads discover-profile: saved profile_id={pid} ({account_name})")
+            return {
+                "success": True,
+                "profileId": pid,
+                "accountName": account_name,
+                "allProfiles": [
+                    {
+                        "profileId": p.get("profileId"),
+                        "name": p.get("accountInfo", {}).get("name", ""),
+                        "marketplace": p.get("accountInfo", {}).get("marketplaceStringId", ""),
+                        "type": p.get("accountInfo", {}).get("type", ""),
+                    }
+                    for p in profiles
+                ],
+            }
+        else:
+            return {"error": "No advertising profiles found.", "profiles": profiles}
+    except Exception as e:
+        return {"error": f"Profile discovery failed: {e}"}
 
 
 # ── Utility Functions ────────────────────────────────────────────
