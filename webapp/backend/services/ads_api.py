@@ -521,42 +521,44 @@ def _sync_ads_data_inner():
     start_date = (today - timedelta(days=60)).strftime("%Y-%m-%d")
     end_date = (today - timedelta(days=1)).strftime("%Y-%m-%d")
 
-    # ── Report 1: Campaign-level daily data ──
+    # ── Report 1: Campaign-level daily data (v3 column names) ──
     _pull_ads_report(
         ads_creds, "spCampaigns",
         columns=["date", "campaignId", "campaignName", "campaignStatus",
                  "campaignBudgetAmount", "impressions", "clicks", "cost",
-                 "purchases", "unitsSold", "sales"],
+                 "purchases7d", "unitsSoldClicks7d", "sales7d"],
         start_date=start_date, end_date=end_date,
         handler=_handle_campaign_report,
     )
 
-    # ── Report 2: Targeting/Keywords daily data ──
+    # ── Report 2: Targeting/Keywords daily data (v3 column names) ──
     _pull_ads_report(
         ads_creds, "spTargeting",
         columns=["date", "campaignId", "campaignName", "adGroupId",
-                 "adGroupName", "keywordId", "keywordText", "matchType",
-                 "impressions", "clicks", "cost", "purchases",
-                 "unitsSold", "sales"],
+                 "adGroupName", "keywordId", "keyword", "matchType",
+                 "impressions", "clicks", "cost", "purchases7d",
+                 "unitsSoldClicks7d", "sales7d"],
         start_date=start_date, end_date=end_date,
         handler=_handle_targeting_report,
+        group_by=["targeting"],
     )
 
-    # ── Report 3: Search terms ──
+    # ── Report 3: Search terms (v3 column names) ──
     _pull_ads_report(
         ads_creds, "spSearchTerm",
         columns=["date", "campaignId", "campaignName", "adGroupName",
-                 "keywordText", "matchType", "searchTerm",
-                 "impressions", "clicks", "cost", "purchases",
-                 "unitsSold", "sales"],
+                 "keyword", "matchType", "searchTerm",
+                 "impressions", "clicks", "cost", "purchases7d",
+                 "unitsSoldClicks7d", "sales7d"],
         start_date=start_date, end_date=end_date,
         handler=_handle_search_term_report,
+        group_by=["searchTerm"],
     )
 
     logger.info("Ads sync complete")
 
 
-def _pull_ads_report(creds, report_type_id, columns, start_date, end_date, handler):
+def _pull_ads_report(creds, report_type_id, columns, start_date, end_date, handler, group_by=None):
     """Create, poll, download, and process a single Amazon Ads v3 report."""
     import time as _time
     import gzip as gz
@@ -569,7 +571,7 @@ def _pull_ads_report(creds, report_type_id, columns, start_date, end_date, handl
         "endDate": end_date,
         "configuration": {
             "adProduct": "SPONSORED_PRODUCTS",
-            "groupBy": ["advertiser"],
+            "groupBy": group_by or ["advertiser"],
             "columns": columns,
             "reportTypeId": report_type_id,
             "timeUnit": "DAILY",
@@ -684,11 +686,11 @@ def _handle_campaign_report(data):
                 campaign_id = str(row.get("campaignId", ""))
                 campaign_name = row.get("campaignName", "")
                 spend = float(row.get("cost", 0) or 0)
-                sales = float(row.get("sales", 0) or 0)
+                sales = float(row.get("sales7d", row.get("sales", 0)) or 0)
                 impressions = int(row.get("impressions", 0) or 0)
                 clicks = int(row.get("clicks", 0) or 0)
-                orders = int(row.get("purchases", 0) or 0)
-                units = int(row.get("unitsSold", 0) or 0)
+                orders = int(row.get("purchases7d", row.get("purchases", 0)) or 0)
+                units = int(row.get("unitsSoldClicks7d", row.get("unitsSold", 0)) or 0)
                 status = row.get("campaignStatus", "")
                 budget = float(row.get("campaignBudgetAmount", 0) or 0)
 
@@ -769,14 +771,14 @@ def _handle_targeting_report(data):
                     str(row.get("adGroupId", "")),
                     row.get("adGroupName", ""),
                     keyword_id,
-                    row.get("keywordText", row.get("targeting", "")),
+                    row.get("keyword", row.get("keywordText", row.get("targeting", ""))),
                     row.get("matchType", ""),
                     int(row.get("impressions", 0) or 0),
                     int(row.get("clicks", 0) or 0),
                     float(row.get("cost", 0) or 0),
-                    float(row.get("sales", 0) or 0),
-                    int(row.get("purchases", 0) or 0),
-                    int(row.get("unitsSold", 0) or 0),
+                    float(row.get("sales7d", row.get("sales", 0)) or 0),
+                    int(row.get("purchases7d", row.get("purchases", 0)) or 0),
+                    int(row.get("unitsSoldClicks7d", row.get("unitsSold", 0)) or 0),
                 ])
                 inserted += 1
             except Exception as e:
@@ -830,15 +832,15 @@ def _handle_search_term_report(data):
                     date, campaign_id,
                     row.get("campaignName", ""),
                     row.get("adGroupName", ""),
-                    row.get("keywordText", ""),
+                    row.get("keyword", row.get("keywordText", "")),
                     row.get("matchType", ""),
                     search_term,
                     int(row.get("impressions", 0) or 0),
                     int(row.get("clicks", 0) or 0),
                     float(row.get("cost", 0) or 0),
-                    float(row.get("sales", 0) or 0),
-                    int(row.get("purchases", 0) or 0),
-                    int(row.get("unitsSold", 0) or 0),
+                    float(row.get("sales7d", row.get("sales", 0)) or 0),
+                    int(row.get("purchases7d", row.get("purchases", 0)) or 0),
+                    int(row.get("unitsSoldClicks7d", row.get("unitsSold", 0)) or 0),
                 ])
                 inserted += 1
             except Exception as e:
