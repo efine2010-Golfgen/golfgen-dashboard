@@ -544,8 +544,10 @@ function USMap({ showCities, showRegions, selectedMetric, onSelectState, onSelec
 // ═════════════════════════════════════════════════════════════════════════════
 // RIGHT PANEL — Top 20 States, Top 20 Cities, Metro Breakdown
 // ═════════════════════════════════════════════════════════════════════════════
-function DataPanel({ selectedMetric }) {
+function DataPanel({ selectedMetric, onSelectState, onSelectCity }) {
   const [panelTab, setPanelTab] = useState("states");
+  const [sortKey, setSortKey] = useState("total");   // "name" | "total" | "stores" | "avg"
+  const [sortAsc, setSortAsc] = useState(false);      // default descending
   const metroStats = getMetroStats();
 
   const getMetricVal = (item) => {
@@ -559,8 +561,33 @@ function DataPanel({ selectedMetric }) {
     return fmtK(v);
   };
 
-  const topStates = [...statesSorted].sort((a, b) => getMetricVal(b) - getMetricVal(a)).slice(0, 20);
-  const topCities = [...citiesSorted].sort((a, b) => getMetricVal(b) - getMetricVal(a)).slice(0, 20);
+  // Sort helper — toggles asc/desc when same key clicked again
+  const handleSort = (key) => {
+    if (sortKey === key) { setSortAsc(!sortAsc); }
+    else { setSortKey(key); setSortAsc(key === "name"); } // name defaults asc, numbers desc
+  };
+
+  const sortArrow = (key) => sortKey === key ? (sortAsc ? " \u25B2" : " \u25BC") : "";
+
+  // Generic sorter
+  const sortItems = (items, nameAccessor, storesAccessor) => {
+    const sorted = [...items];
+    sorted.sort((a, b) => {
+      let av, bv;
+      if (sortKey === "name") { av = nameAccessor(a); bv = nameAccessor(b); return sortAsc ? av.localeCompare(bv) : bv.localeCompare(av); }
+      if (sortKey === "stores") { av = storesAccessor(a); bv = storesAccessor(b); }
+      else if (sortKey === "avg") { av = storesAccessor(a) > 0 ? getMetricVal(a) / storesAccessor(a) : 0; bv = storesAccessor(b) > 0 ? getMetricVal(b) / storesAccessor(b) : 0; }
+      else { av = getMetricVal(a); bv = getMetricVal(b); } // "total"
+      return sortAsc ? av - bv : bv - av;
+    });
+    return sorted;
+  };
+
+  const topStates = sortItems(Object.values(WM_DATA), s => s.name, s => s.traited).slice(0, 30);
+  const topCities = sortItems([...CITY_DATA], c => c.city, c => c.stores).slice(0, 30);
+  const sortedMetro = sortItems(metroStats, m => m.name, m => m.stores);
+
+  const metricLabel = selectedMetric === "qty" ? "Units" : selectedMetric === "returns" ? "Return $" : "Total Sales $";
 
   const tabStyle = (t) => ({
     flex: 1,
@@ -577,7 +604,7 @@ function DataPanel({ selectedMetric }) {
     fontFamily: "'Space Grotesk', monospace",
   });
 
-  const rowStyle = (i) => ({
+  const rowStyle = (i, clickable) => ({
     display: "grid",
     gridTemplateColumns: "1fr 70px 45px 60px",
     padding: "5px 8px",
@@ -585,6 +612,13 @@ function DataPanel({ selectedMetric }) {
     borderBottom: "1px solid rgba(30,50,72,.4)",
     backgroundColor: i % 2 === 0 ? "transparent" : "rgba(20,35,55,.3)",
     alignItems: "center",
+    cursor: clickable ? "pointer" : "default",
+  });
+
+  const headerColStyle = (align = "right") => ({
+    textAlign: align,
+    cursor: "pointer",
+    userSelect: "none",
   });
 
   const headerRow = {
@@ -616,15 +650,19 @@ function DataPanel({ selectedMetric }) {
         {panelTab === "states" && (
           <div>
             <div style={headerRow}>
-              <span>State</span>
-              <span style={{ textAlign: "right" }}>Total $</span>
-              <span style={{ textAlign: "right" }}>Stores</span>
-              <span style={{ textAlign: "right" }}>Avg $/St</span>
+              <span style={headerColStyle("left")} onClick={() => handleSort("name")}>State{sortArrow("name")}</span>
+              <span style={headerColStyle()} onClick={() => handleSort("total")}>{metricLabel}{sortArrow("total")}</span>
+              <span style={headerColStyle()} onClick={() => handleSort("stores")}># Stores{sortArrow("stores")}</span>
+              <span style={headerColStyle()} onClick={() => handleSort("avg")}>Avg $/St{sortArrow("avg")}</span>
             </div>
             {topStates.map((s, i) => (
-              <div key={s.abbr} style={rowStyle(i)}>
+              <div key={s.abbr} style={rowStyle(i, true)}
+                onClick={() => onSelectState && onSelectState(s.abbr)}
+                onMouseOver={(e) => e.currentTarget.style.backgroundColor = "rgba(46,207,170,.08)"}
+                onMouseOut={(e) => e.currentTarget.style.backgroundColor = i % 2 === 0 ? "transparent" : "rgba(20,35,55,.3)"}
+              >
                 <span style={{ ...SG(10, 500), color: "var(--txt)" }}>{s.abbr} — {s.name}</span>
-                <span style={{ textAlign: "right", color: "#2ECFAA", fontWeight: "600", fontSize: "10px" }}>{fmtK(s.pos)}</span>
+                <span style={{ textAlign: "right", color: "#2ECFAA", fontWeight: "600", fontSize: "10px" }}>{fmtVal(getMetricVal(s))}</span>
                 <span style={{ textAlign: "right", color: "var(--txt2)", fontSize: "10px" }}>{s.traited}</span>
                 <span style={{ textAlign: "right", color: "var(--txt2)", fontSize: "10px" }}>{fmtAvg(s.pos, s.traited)}</span>
               </div>
@@ -636,17 +674,21 @@ function DataPanel({ selectedMetric }) {
         {panelTab === "cities" && (
           <div>
             <div style={headerRow}>
-              <span>City</span>
-              <span style={{ textAlign: "right" }}>Total $</span>
-              <span style={{ textAlign: "right" }}>Stores</span>
-              <span style={{ textAlign: "right" }}>Avg $/St</span>
+              <span style={headerColStyle("left")} onClick={() => handleSort("name")}>City{sortArrow("name")}</span>
+              <span style={headerColStyle()} onClick={() => handleSort("total")}>{metricLabel}{sortArrow("total")}</span>
+              <span style={headerColStyle()} onClick={() => handleSort("stores")}># Stores{sortArrow("stores")}</span>
+              <span style={headerColStyle()} onClick={() => handleSort("avg")}>Avg $/St{sortArrow("avg")}</span>
             </div>
             {topCities.map((c, i) => (
-              <div key={c.city + c.state + i} style={rowStyle(i)}>
+              <div key={c.city + c.state + i} style={rowStyle(i, true)}
+                onClick={() => onSelectCity && onSelectCity(c)}
+                onMouseOver={(e) => e.currentTarget.style.backgroundColor = "rgba(46,207,170,.08)"}
+                onMouseOut={(e) => e.currentTarget.style.backgroundColor = i % 2 === 0 ? "transparent" : "rgba(20,35,55,.3)"}
+              >
                 <span style={{ ...SG(10, 500), color: "var(--txt)" }}>
-                  {c.city.length > 14 ? c.city.substring(0, 14) + "…" : c.city}, {c.state}
+                  {c.city.length > 14 ? c.city.substring(0, 14) + "\u2026" : c.city}, {c.state}
                 </span>
-                <span style={{ textAlign: "right", color: "#2ECFAA", fontWeight: "600", fontSize: "10px" }}>{fmtK(c.pos)}</span>
+                <span style={{ textAlign: "right", color: "#2ECFAA", fontWeight: "600", fontSize: "10px" }}>{fmtVal(getMetricVal(c))}</span>
                 <span style={{ textAlign: "right", color: "var(--txt2)", fontSize: "10px" }}>{c.stores}</span>
                 <span style={{ textAlign: "right", color: "var(--txt2)", fontSize: "10px" }}>{fmtAvg(c.pos, c.stores)}</span>
               </div>
@@ -658,17 +700,17 @@ function DataPanel({ selectedMetric }) {
         {panelTab === "metro" && (
           <div>
             <div style={headerRow}>
-              <span>Metro Area</span>
-              <span style={{ textAlign: "right" }}>Total $</span>
-              <span style={{ textAlign: "right" }}>Stores</span>
-              <span style={{ textAlign: "right" }}>Avg $/St</span>
+              <span style={headerColStyle("left")} onClick={() => handleSort("name")}>Metro Area{sortArrow("name")}</span>
+              <span style={headerColStyle()} onClick={() => handleSort("total")}>{metricLabel}{sortArrow("total")}</span>
+              <span style={headerColStyle()} onClick={() => handleSort("stores")}># Stores{sortArrow("stores")}</span>
+              <span style={headerColStyle()} onClick={() => handleSort("avg")}>Avg $/St{sortArrow("avg")}</span>
             </div>
-            {metroStats.map((m, i) => (
-              <div key={m.name} style={rowStyle(i)}>
+            {sortedMetro.map((m, i) => (
+              <div key={m.name} style={rowStyle(i, false)}>
                 <span style={{ ...SG(10, 500), color: "var(--txt)" }}>{m.name}, {m.state}</span>
-                <span style={{ textAlign: "right", color: "#2ECFAA", fontWeight: "600", fontSize: "10px" }}>{fmtK(m.pos)}</span>
+                <span style={{ textAlign: "right", color: "#2ECFAA", fontWeight: "600", fontSize: "10px" }}>{fmtVal(getMetricVal(m))}</span>
                 <span style={{ textAlign: "right", color: "var(--txt2)", fontSize: "10px" }}>{m.stores}</span>
-                <span style={{ textAlign: "right", color: "var(--txt2)", fontSize: "10px" }}>{m.stores > 0 ? fmtK(m.avg) : "—"}</span>
+                <span style={{ textAlign: "right", color: "var(--txt2)", fontSize: "10px" }}>{m.stores > 0 ? fmtK(m.avg) : "\u2014"}</span>
               </div>
             ))}
           </div>
@@ -678,17 +720,25 @@ function DataPanel({ selectedMetric }) {
         {panelTab === "regions" && (
           <div>
             <div style={headerRow}>
-              <span>Region</span>
-              <span style={{ textAlign: "right" }}>Total $</span>
-              <span style={{ textAlign: "right" }}>Stores</span>
-              <span style={{ textAlign: "right" }}>Avg $/St</span>
+              <span style={headerColStyle("left")} onClick={() => handleSort("name")}>Region{sortArrow("name")}</span>
+              <span style={headerColStyle()} onClick={() => handleSort("total")}>{metricLabel}{sortArrow("total")}</span>
+              <span style={headerColStyle()} onClick={() => handleSort("stores")}># Stores{sortArrow("stores")}</span>
+              <span style={headerColStyle()} onClick={() => handleSort("avg")}>Avg $/St{sortArrow("avg")}</span>
             </div>
-            {Object.entries(REGIONS).sort((a, b) => (b[1].pos || 0) - (a[1].pos || 0)).map(([name, r], i) => (
-              <div key={name} style={rowStyle(i)}>
+            {Object.entries(REGIONS).sort((a, b) => {
+              const [nameA, rA] = a, [nameB, rB] = b;
+              if (sortKey === "name") return sortAsc ? nameA.localeCompare(nameB) : nameB.localeCompare(nameA);
+              let av, bv;
+              if (sortKey === "stores") { av = rA.stores || 0; bv = rB.stores || 0; }
+              else if (sortKey === "avg") { av = (rA.stores || 0) > 0 ? (rA.pos || 0) / rA.stores : 0; bv = (rB.stores || 0) > 0 ? (rB.pos || 0) / rB.stores : 0; }
+              else { av = rA.pos || 0; bv = rB.pos || 0; }
+              return sortAsc ? av - bv : bv - av;
+            }).map(([name, r], i) => (
+              <div key={name} style={rowStyle(i, false)}>
                 <span style={{ ...SG(10, 600), color: r.color }}>{name}</span>
                 <span style={{ textAlign: "right", color: "#2ECFAA", fontWeight: "600", fontSize: "10px" }}>{fmtK(r.pos || 0)}</span>
                 <span style={{ textAlign: "right", color: "var(--txt2)", fontSize: "10px" }}>{r.stores || 0}</span>
-                <span style={{ textAlign: "right", color: "var(--txt2)", fontSize: "10px" }}>{r.stores > 0 ? fmtK(Math.round((r.pos || 0) / r.stores)) : "—"}</span>
+                <span style={{ textAlign: "right", color: "var(--txt2)", fontSize: "10px" }}>{r.stores > 0 ? fmtK(Math.round((r.pos || 0) / r.stores)) : "\u2014"}</span>
               </div>
             ))}
             {/* States within each region */}
@@ -701,7 +751,9 @@ function DataPanel({ selectedMetric }) {
                     .filter((s) => r.states.includes(s.abbr))
                     .sort((a, b) => b.pos - a.pos)
                     .map((s, i) => (
-                      <div key={s.abbr} style={{ ...rowStyle(i), gridTemplateColumns: "1fr 70px 45px 60px" }}>
+                      <div key={s.abbr} style={{ ...rowStyle(i, true), gridTemplateColumns: "1fr 70px 45px 60px" }}
+                        onClick={() => onSelectState && onSelectState(s.abbr)}
+                      >
                         <span style={{ ...SG(9, 400), color: "var(--txt2)" }}>{s.abbr} — {s.name}</span>
                         <span style={{ textAlign: "right", color: "var(--txt2)", fontSize: "9px" }}>{fmtK(s.pos)}</span>
                         <span style={{ textAlign: "right", color: "var(--txt3)", fontSize: "9px" }}>{s.traited}</span>
@@ -815,7 +867,7 @@ export function WalmartStoreAnalytics() {
 
         {/* RIGHT: DATA PANEL */}
         <Card style={{ padding: "0", display: "flex", flexDirection: "column", maxHeight: "620px" }}>
-          <DataPanel selectedMetric={selectedMetric} />
+          <DataPanel selectedMetric={selectedMetric} onSelectState={setSelectedState} onSelectCity={setSelectedCity} />
         </Card>
       </div>
 
