@@ -23,57 +23,27 @@ import AuditLog from "./pages/AuditLog";
 import Sales from "./pages/Sales";
 import RetailReporting from "./pages/RetailReporting";
 import WalmartAnalytics from "./pages/WalmartAnalytics";
+import AmazonAnalytics from "./pages/AmazonAnalytics";
+import GolfgenCommandCenter from "./pages/GolfgenCommandCenter";
 import HierarchyFilter from "./components/HierarchyFilter";
 import AskClaude from "./components/AskClaude";
 import "./App.css";
 
 /* ── Category definitions with view mappings ── */
+/* Golf Division Navigation:
+   Exec Summary | Amazon Analytics | Walmart Analytics | Shopify Analytics | GolfGen Command Center
+*/
 const CATEGORIES = [
   {
     key: "exec-summary", label: "Exec Summary",
     views: [
-      { key: "sales", path: "/sales", label: "Exec Summary" },
+      { key: "exec-summary", path: "/exec-summary", label: "Exec Summary" },
     ],
   },
   {
-    key: "sales", label: "Item Sales",
+    key: "amazon-analytics", label: "Amazon Analytics",
     views: [
-      { key: "products", path: "/products", label: "Item Sales" },
-      { key: "item-master", path: "/item-master", label: "Item Master" },
-    ],
-  },
-  {
-    key: "profitability", label: "Profitability",
-    views: [
-      { key: "profitability", path: "/profitability", label: "Profitability" },
-    ],
-  },
-  {
-    key: "inventory", label: "Inventory",
-    views: [
-      { key: "golfgen-inventory", path: "/golfgen-inventory", label: "GolfGen Inventory" },
-      { key: "inventory", path: "/inventory", label: "Amazon Inventory" },
-      { key: "fba-shipments", path: "/fba-shipments", label: "Shipments to FBA" },
-    ],
-  },
-  {
-    key: "supply-chain", label: "Supply Chain",
-    views: [
-      { key: "supply-chain", path: "/supply-chain", label: "OTW" },
-      { key: "supply-chain-po", path: "/supply-chain", label: "PO Summary", hash: "po" },
-      { key: "supply-chain-inv", path: "/supply-chain", label: "Invoice Summary", hash: "invoices" },
-    ],
-  },
-  {
-    key: "forecasting", label: "Forecasting",
-    views: [
-      { key: "item-planning", path: "/item-planning", label: "Item Planning" },
-    ],
-  },
-  {
-    key: "advertising", label: "Advertising",
-    views: [
-      { key: "advertising", path: "/advertising", label: "Advertising" },
+      { key: "amazon-analytics", path: "/amazon-analytics", label: "Amazon Analytics" },
     ],
   },
   {
@@ -84,9 +54,15 @@ const CATEGORIES = [
     ],
   },
   {
-    key: "financial", label: "Financial",
+    key: "shopify-analytics", label: "Shopify Analytics",
     views: [
-      { key: "dashboard", path: "/", label: "Financial", hash: "financial" },
+      { key: "shopify-analytics", path: "/shopify-analytics", label: "Shopify Analytics" },
+    ],
+  },
+  {
+    key: "golfgen-command", label: "GolfGen Command Center",
+    views: [
+      { key: "golfgen-command", path: "/golfgen-command-center", label: "GolfGen Command Center" },
     ],
   },
 ];
@@ -99,7 +75,7 @@ function detectCategory(pathname) {
       }
     }
   }
-  return "exec-summary";
+  return "amazon-analytics";
 }
 
 /* ── Theme Selector (double-stacked: Dark row on top, Light row below, selected theme pill to the right) ── */
@@ -191,7 +167,7 @@ function NavSystem({ permissions, mfaProtected, userMfaEnabled }) {
       </nav>
 
       {/* Secondary: sub-views for current category (only when > 1 view) */}
-      {visibleViews.length > 1 && activeCat.key !== 'inventory' && (
+      {visibleViews.length > 1 && (
         <nav className="subnav subnav-sub" style={{ background: 'var(--card)', borderBottom: '1px solid var(--brd2)' }}>
           {visibleViews.map((v, i) => {
             const isActive = location.pathname === v.path;
@@ -276,8 +252,8 @@ function AppShell({ user, isAdmin, allowed, mfaProtected, userMfaEnabled, filter
         <div className="filter-bar">
           <span className="filter-lbl">View:</span>
           <HierarchyFilter division={division} customer={customer} onChange={handleFilterChange} compact />
-          {/* Marketplace toggle — show on relevant Amazon pages */}
-          {["exec-summary", "sales", "profitability", "inventory", "advertising"].includes(activeTab) && (
+          {/* Marketplace toggle — show on Amazon Analytics pages */}
+          {["amazon-analytics"].includes(activeTab) && (
             <div style={{ display: 'flex', alignItems: 'center', gap: 0, marginLeft: 4 }}>
               <button
                 onClick={() => handleMarketplaceChange("US")}
@@ -326,26 +302,51 @@ function AppShell({ user, isAdmin, allowed, mfaProtected, userMfaEnabled, filter
       {/* ── Main Content ── */}
       <main className="page">
         <Routes>
-          {allowed["dashboard"] !== false && <Route path="/" element={<Dashboard filters={filters} />} />}
-          <Route path="/sales" element={<Sales filters={filters} />} />
-          {allowed["products"] !== false && <Route path="/products" element={<Products filters={filters} />} />}
-          {allowed["profitability"] !== false && <Route path="/profitability" element={<Profitability filters={filters} />} />}
-          {allowed["inventory"] !== false && <Route path="/inventory" element={<Inventory filters={filters} />} />}
-          {allowed["golfgen-inventory"] !== false && <Route path="/golfgen-inventory" element={<GolfGenInventory filters={filters} />} />}
-          {allowed["advertising"] !== false && <Route path="/advertising" element={<Advertising filters={filters} />} />}
+          {/* ── Master Exec Summary (blank placeholder) ── */}
+          <Route path="/exec-summary" element={
+            <div style={{ padding: "60px 40px", textAlign: "center", color: "var(--txt3)", border: "1px dashed var(--brd)", borderRadius: 8, background: "var(--card)", margin: 24 }}>
+              <h2 style={{ fontFamily: "'DM Serif Display',Georgia,serif", fontSize: 22, color: "var(--txt2)", margin: "0 0 8px" }}>Master Exec Summary</h2>
+              <p style={{ fontFamily: "'Space Grotesk',monospace", fontSize: 12, color: "var(--txt3)" }}>Cross-channel executive summary coming soon — will aggregate data across all channels and divisions.</p>
+            </div>
+          } />
+
+          {/* ── Amazon Analytics (wrapper with sub-tabs) ── */}
+          <Route path="/amazon-analytics" element={<AmazonAnalytics filters={filters} />} />
+
+          {/* ── Walmart Analytics ── */}
           {allowed["retail-reporting"] !== false && <Route path="/walmart-analytics" element={<WalmartAnalytics filters={filters} />} />}
           {allowed["retail-reporting"] !== false && <Route path="/retail-reporting" element={<RetailReporting filters={filters} />} />}
-          {allowed["item-master"] !== false && <Route path="/item-master" element={<ItemMaster filters={filters} />} />}
-          {allowed["factory-po"] !== false && <Route path="/factory-po" element={<FactoryPO />} />}
-          {allowed["logistics"] !== false && <Route path="/logistics" element={<LogisticsTracking />} />}
-          {allowed["supply-chain"] !== false && <Route path="/supply-chain" element={<SupplyChain />} />}
-          {allowed["fba-shipments"] !== false && <Route path="/fba-shipments" element={<FBAShipments filters={filters} />} />}
-          {allowed["item-planning"] !== false && <Route path="/item-planning" element={<ItemPlanning />} />}
+
+          {/* ── Shopify Analytics (placeholder) ── */}
+          <Route path="/shopify-analytics" element={
+            <div style={{ padding: "60px 40px", textAlign: "center", color: "var(--txt3)", border: "1px dashed var(--brd)", borderRadius: 8, background: "var(--card)", margin: 24 }}>
+              <h2 style={{ fontFamily: "'DM Serif Display',Georgia,serif", fontSize: 22, color: "var(--txt2)", margin: "0 0 8px" }}>Shopify Analytics</h2>
+              <p style={{ fontFamily: "'Space Grotesk',monospace", fontSize: 12, color: "var(--txt3)" }}>Shopify API integration coming in Phase 5.</p>
+            </div>
+          } />
+
+          {/* ── GolfGen Command Center (wrapper with sub-tabs) ── */}
+          <Route path="/golfgen-command-center" element={<GolfgenCommandCenter filters={filters} />} />
+
+          {/* ── Legacy routes (backward compat, redirects) ── */}
+          {allowed["dashboard"] !== false && <Route path="/" element={<Navigate to="/amazon-analytics" replace />} />}
+          <Route path="/sales" element={<Navigate to="/amazon-analytics" replace />} />
+          <Route path="/products" element={<Navigate to="/amazon-analytics" replace />} />
+          <Route path="/profitability" element={<Navigate to="/amazon-analytics" replace />} />
+          <Route path="/inventory" element={<Navigate to="/amazon-analytics" replace />} />
+          <Route path="/golfgen-inventory" element={<Navigate to="/golfgen-command-center" replace />} />
+          <Route path="/advertising" element={<Navigate to="/amazon-analytics" replace />} />
+          <Route path="/supply-chain" element={<Navigate to="/golfgen-command-center" replace />} />
+          <Route path="/fba-shipments" element={<Navigate to="/amazon-analytics" replace />} />
+          <Route path="/item-planning" element={<Navigate to="/amazon-analytics" replace />} />
+          <Route path="/item-master" element={<Navigate to="/amazon-analytics" replace />} />
+
+          {/* ── Admin routes ── */}
           <Route path="/account/security/mfa-setup" element={<MfaSetup />} />
           {isAdmin && <Route path="/permissions" element={<Permissions />} />}
           {isAdmin && <Route path="/system" element={<System />} />}
           {isAdmin && <Route path="/audit-log" element={<AuditLog />} />}
-          <Route path="*" element={<Navigate to="/" replace />} />
+          <Route path="*" element={<Navigate to="/amazon-analytics" replace />} />
         </Routes>
       </main>
     </div>
