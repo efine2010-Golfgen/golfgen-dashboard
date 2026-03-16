@@ -260,6 +260,13 @@ class DbConnection:
         except Exception:
             pass
 
+    @property
+    def description(self):
+        """Proxy cursor/connection description for column metadata."""
+        if self._is_postgres and self._cursor:
+            return self._cursor.description
+        return getattr(self._conn, "description", None)
+
     # Allow use as context manager
     def __enter__(self):
         return self

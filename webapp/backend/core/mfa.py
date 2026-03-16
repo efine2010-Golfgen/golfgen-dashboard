@@ -60,25 +60,31 @@ def verify_backup_code(code: str, hashed_codes: list[str]) -> tuple[bool, list[s
 
 # ─── DB helpers ────────────────────────────────────────────────────────────
 
+_MFA_COLS = [
+    "user_name", "mfa_secret", "mfa_enabled", "mfa_enrolled_at",
+    "mfa_verified_at", "mfa_backup_codes", "created_at", "updated_at",
+]
+_MFA_SELECT = ", ".join(_MFA_COLS)
+
+
 def get_mfa_settings(user_name: str) -> Optional[dict]:
     """Fetch MFA settings for a user, or None if not enrolled.
     Tries exact match first, then case-insensitive fallback."""
     con = get_db_rw()
     try:
         row = con.execute(
-            "SELECT * FROM mfa_user_settings WHERE user_name = ?",
+            f"SELECT {_MFA_SELECT} FROM mfa_user_settings WHERE user_name = ?",
             [user_name],
         ).fetchone()
         if not row:
             # Case-insensitive fallback (handles "Eric" vs "eric" vs "Eric Fine")
             row = con.execute(
-                "SELECT * FROM mfa_user_settings WHERE LOWER(user_name) = LOWER(?)",
+                f"SELECT {_MFA_SELECT} FROM mfa_user_settings WHERE LOWER(user_name) = LOWER(?)",
                 [user_name],
             ).fetchone()
         if not row:
             return None
-        cols = [d[0] for d in con.description]
-        return dict(zip(cols, row))
+        return dict(zip(_MFA_COLS, row))
     finally:
         con.close()
 
