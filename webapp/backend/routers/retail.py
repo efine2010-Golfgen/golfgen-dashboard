@@ -965,42 +965,53 @@ def get_walmart_analytics(division: str = None, customer: str = None):
                     "qtyTy": _n(row[3]),
                 }
 
-        # Item-level performance: aggregate across all periods
+        # Item-level performance: per-period nested data for frontend
+        # Frontend expects: { name, lw: {posTy, posLy, qtyTy, qtyLy, ohTy, ohLy, instockPct}, l4w: {...}, ... }
+        period_map_items = {"L1W": "lw", "L4W": "l4w", "L13W": "l13w", "L26W": "l26w", "L52W": "l52w"}
         item_rows = con.execute(f"""
             SELECT
                 prime_item_desc,
-                SUM(CASE WHEN period_type = 'L1W' THEN pos_sales_ty ELSE 0 END) as pos_sales_lw,
-                SUM(CASE WHEN period_type = 'L1W' THEN pos_sales_ly ELSE 0 END) as pos_sales_lw_ly,
-                SUM(CASE WHEN period_type = 'L1W' THEN pos_qty_ty ELSE 0 END) as pos_qty_lw,
-                SUM(CASE WHEN period_type = 'L1W' THEN pos_qty_ly ELSE 0 END) as pos_qty_lw_ly,
-                SUM(CASE WHEN period_type = 'L4W' THEN traited_store_count_ty ELSE 0 END) as traited_stores,
-                SUM(CASE WHEN period_type = 'L4W' THEN on_hand_qty_ty ELSE 0 END) as on_hand_ty,
-                SUM(CASE WHEN period_type = 'L4W' THEN on_hand_qty_ly ELSE 0 END) as on_hand_ly,
-                SUM(CASE WHEN period_type = 'L4W' THEN instock_pct_ty ELSE 0 END) as instock_avg
+                period_type,
+                SUM(pos_sales_ty) as pos_sales_ty,
+                SUM(pos_sales_ly) as pos_sales_ly,
+                SUM(pos_qty_ty) as pos_qty_ty,
+                SUM(pos_qty_ly) as pos_qty_ly,
+                SUM(on_hand_qty_ty) as oh_ty,
+                SUM(on_hand_qty_ly) as oh_ly,
+                AVG(instock_pct_ty) as instock_pct
             FROM walmart_item_weekly
             WHERE prime_item_desc IS NOT NULL AND 1=1 {hw}
-            GROUP BY prime_item_desc
-            ORDER BY pos_sales_lw DESC
-            LIMIT 50
+            GROUP BY prime_item_desc, period_type
+            ORDER BY prime_item_desc, period_type
         """, hp).fetchall()
 
+        # Build nested item dict keyed by item name
+        item_dict = {}
         for row in item_rows:
-            aur = _n(row[1]) / _n(row[3]) if _n(row[3]) > 0 else 0
-            aur_ly = _n(row[2]) / _n(row[4]) if _n(row[4]) > 0 else 0
-
-            sales_performance["items"].append({
-                "itemDesc": row[0],
-                "posSalesTy": _n(row[1]),
-                "posSalesLy": _n(row[2]),
-                "posQtyTy": _n(row[3]),
-                "posQtyLy": _n(row[4]),
-                "traitedStores": _safe_int(row[5]),
-                "onHandTy": _n(row[6]),
-                "onHandLy": _n(row[7]),
-                "aur": aur,
-                "aurLy": aur_ly,
+            name = row[0]
+            pt = row[1]
+            fe_key = period_map_items.get(pt)
+            if not fe_key:
+                continue
+            if name not in item_dict:
+                item_dict[name] = {"name": name}
+            item_dict[name][fe_key] = {
+                "posTy": _n(row[2]),
+                "posLy": _n(row[3]),
+                "qtyTy": _n(row[4]),
+                "qtyLy": _n(row[5]),
+                "ohTy": _n(row[6]),
+                "ohLy": _n(row[7]),
                 "instockPct": _n(row[8]),
-            })
+            }
+
+        # Sort by L4W posTy descending (fallback to LW), take top 50
+        sorted_items = sorted(
+            item_dict.values(),
+            key=lambda x: (x.get("l4w", {}).get("posTy", 0) or 0),
+            reverse=True
+        )[:50]
+        sales_performance["items"] = sorted_items
 
         # Category breakdown based on item descriptions
         category_keywords = {
@@ -1011,7 +1022,7 @@ def get_walmart_analytics(division: str = None, customer: str = None):
 
         category_data = {}
         for item in sales_performance["items"]:
-            desc_lower = (item["itemDesc"] or "").lower()
+            desc_lower = (item.get("name") or "").lower()
             found_cat = "Other"
             for cat, keywords in category_keywords.items():
                 if any(kw in desc_lower for kw in keywords):
@@ -1020,9 +1031,11 @@ def get_walmart_analytics(division: str = None, customer: str = None):
 
             if found_cat not in category_data:
                 category_data[found_cat] = {"salesTy": 0, "salesLy": 0, "qtyTy": 0, "count": 0}
-            category_data[found_cat]["salesTy"] += item["posSalesTy"]
-            category_data[found_cat]["salesLy"] += item["posSalesLy"]
-            category_data[found_cat]["qtyTy"] += item["posQtyTy"]
+            # Sum L4W data for category breakdown (fallback to LW)
+            pd = item.get("l4w") or item.get("lw") or {}
+            category_data[found_cat]["salesTy"] += pd.get("posTy", 0) or 0
+            category_data[found_cat]["salesLy"] += pd.get("posLy", 0) or 0
+            category_data[found_cat]["qtyTy"] += pd.get("qtyTy", 0) or 0
             category_data[found_cat]["count"] += 1
 
         sales_performance["categories"] = category_data

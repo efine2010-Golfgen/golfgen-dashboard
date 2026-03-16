@@ -423,11 +423,10 @@ export function SalesPage({ filters }) {
             </thead>
             <tbody>
               {(() => {
-                // Sort items by descending POS sales (L4W period as default)
+                // Sort items by descending POS sales (L4W primary, fallback LW)
                 const sortedItems = [...items].sort((a, b) => {
-                  // Use L4W posTy as primary sort, fallback to any available period
-                  const aVal = (a.l4w?.posTy || 0) + (a.lw?.posTy || 0) + (a.l13w?.posTy || 0);
-                  const bVal = (b.l4w?.posTy || 0) + (b.lw?.posTy || 0) + (b.l13w?.posTy || 0);
+                  const aVal = (a.l4w?.posTy || 0) || (a.lw?.posTy || 0);
+                  const bVal = (b.l4w?.posTy || 0) || (b.lw?.posTy || 0);
                   return bVal - aVal;
                 });
 

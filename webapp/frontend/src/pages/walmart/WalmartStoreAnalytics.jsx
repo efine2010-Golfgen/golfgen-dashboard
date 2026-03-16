@@ -434,7 +434,7 @@ function USMap({ showCities, showRegions, selectedMetric, onSelectState, onSelec
             .attr("cy", (d) => projection([d.lng, d.lat])[1])
             .attr("r", (d) => {
               const val = selectedMetric === "qty" ? d.qty : selectedMetric === "returns" ? d.returns : d.pos;
-              return Math.max(1.2, Math.sqrt(val / 120) + 1);
+              return Math.max(0.8, Math.sqrt(val / 300) + 0.5);
             })
             .attr("fill", (d) => {
               const val = selectedMetric === "qty" ? d.qty : selectedMetric === "returns" ? d.returns : d.pos;
@@ -448,23 +448,44 @@ function USMap({ showCities, showRegions, selectedMetric, onSelectState, onSelec
               if (onSelectCity) onSelectCity(d);
             });
 
-          // City name labels (top 50 to show more coverage)
-          const topCities = validCities.slice(0, 50);
+          // City name labels — top 20 by metric value, with collision avoidance
+          const sortedCities = [...validCities].sort((a, b) => {
+            const aV = selectedMetric === "qty" ? b.qty - a.qty : selectedMetric === "returns" ? b.returns - a.returns : b.pos - a.pos;
+            return aV;
+          });
+          const topCities = sortedCities.slice(0, 20);
+          // Simple collision avoidance: track placed label bounding boxes
+          const placed = [];
+          const labelData = topCities.map((d) => {
+            const pt = projection([d.lng, d.lat]);
+            const x = pt[0]; const y = pt[1] - 3;
+            const approxW = Math.min(d.city.length, 10) * 2.5;
+            const approxH = 4;
+            // Check overlap with already-placed labels
+            const overlaps = placed.some((p) =>
+              Math.abs(p.x - x) < (p.w + approxW) / 2 + 2 && Math.abs(p.y - y) < (p.h + approxH) / 2 + 1
+            );
+            if (!overlaps) {
+              placed.push({ x, y, w: approxW, h: approxH });
+              return { ...d, lx: x, ly: y, show: true };
+            }
+            return { ...d, lx: x, ly: y, show: false };
+          });
           g.selectAll("text.city-label")
-            .data(topCities)
+            .data(labelData.filter((d) => d.show))
             .enter()
             .append("text")
             .attr("class", "city-label")
-            .attr("x", (d) => projection([d.lng, d.lat])[0])
-            .attr("y", (d) => projection([d.lng, d.lat])[1] - 4)
+            .attr("x", (d) => d.lx)
+            .attr("y", (d) => d.ly)
             .attr("text-anchor", "middle")
-            .attr("font-size", "5px")
-            .attr("fill", "rgba(255,255,255,0.55)")
+            .attr("font-size", "3.5px")
+            .attr("fill", "rgba(255,255,255,0.5)")
             .attr("font-weight", "400")
             .attr("pointer-events", "none")
             .text((d) => {
               const n = d.city;
-              return n.length > 12 ? n.substring(0, 12) : n;
+              return n.length > 10 ? n.substring(0, 10) : n;
             });
         }
 
