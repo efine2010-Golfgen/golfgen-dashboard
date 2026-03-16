@@ -349,6 +349,29 @@ export const api = {
   },
   walmartStoreGeography: (h = {}) => fetchJSON('/api/walmart/store-geography' + (_hq(h) ? '?' + _hq(h).slice(1) : '')),
 
+  // Passkey (WebAuthn)
+  passkeyList: () => fetchJSON(`/api/mfa/passkeys`),
+  passkeyRegisterOpts: () => fetchJSON(`/api/mfa/passkeys/register-options`),
+  passkeyRegisterDone: (credential, device_name) =>
+    fetch(`${API_BASE}/api/mfa/passkeys/register-done`, {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ credential, device_name }), credentials: "include",
+    }).then(r => r.json()),
+  passkeyDelete: (id) =>
+    fetch(`${API_BASE}/api/mfa/passkeys/${id}`, {
+      method: "DELETE", credentials: "include",
+    }).then(r => r.json()),
+  passkeyLoginOptions: (email) =>
+    fetch(`${API_BASE}/api/mfa/passkeys/login-options`, {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ email }), credentials: "include",
+    }).then(r => r.json()),
+  passkeyLoginVerify: (credential, email) =>
+    fetch(`${API_BASE}/api/mfa/passkeys/login-verify`, {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ credential, email }), credentials: "include",
+    }).then(r => r.json()),
+
   retailUpload: (file) => {
     const fd = new FormData();
     fd.append("file", file);

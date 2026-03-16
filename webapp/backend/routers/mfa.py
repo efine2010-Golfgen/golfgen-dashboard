@@ -384,3 +384,296 @@ async def admin_audit_log(request: Request):
     total = get_audit_log_count()
 
     return {"entries": entries, "total": total, "limit": limit, "offset": offset}
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+#  PASSKEY (WebAuthn) ENDPOINTS
+# ═══════════════════════════════════════════════════════════════════════════
+
+import uuid
+import hashlib
+from webauthn import (
+    generate_registration_options,
+    verify_registration_response,
+    generate_authentication_options,
+    verify_authentication_response,
+    options_to_json,
+)
+from webauthn.helpers.structs import (
+    PublicKeyCredentialDescriptor,
+    AuthenticatorSelectionCriteria,
+    ResidentKeyRequirement,
+    UserVerificationRequirement,
+)
+from webauthn.helpers import bytes_to_base64url, base64url_to_bytes
+from core.database import get_db, get_db_rw
+
+# RP configuration — must match the domain the browser is on
+import os
+_RP_ID = os.environ.get("WEBAUTHN_RP_ID", "golfgen-dashboard-production-ce30.up.railway.app")
+_RP_NAME = "GolfGen Dashboard"
+_RP_ORIGIN = os.environ.get("WEBAUTHN_ORIGIN", "https://golfgen-dashboard-production-ce30.up.railway.app")
+
+# In-memory challenge store (short-lived, keyed by user_name)
+_challenges: dict[str, bytes] = {}
+
+
+@router.get("/passkeys")
+async def passkey_list(request: Request):
+    """List all passkeys for the current user."""
+    session, err = _user_from_request(request)
+    if err:
+        return JSONResponse({"error": err}, status_code=401)
+
+    con = get_db()
+    try:
+        rows = con.execute(
+            "SELECT id, device_name, created_at, last_used_at FROM passkeys WHERE user_name = ? ORDER BY created_at DESC",
+            [session["user_name"]]
+        ).fetchall()
+    except Exception:
+        rows = []
+    con.close()
+
+    return {
+        "passkeys": [
+            {"id": r[0], "device_name": r[1], "created_at": str(r[2]), "last_used_at": str(r[3]) if r[3] else None}
+            for r in rows
+        ]
+    }
+
+
+@router.get("/passkeys/register-options")
+async def passkey_register_options(request: Request):
+    """Generate WebAuthn registration options for the current user."""
+    session, err = _user_from_request(request)
+    if err:
+        return JSONResponse({"error": err}, status_code=401)
+
+    user_name = session["user_name"]
+    user_email = session.get("user_email", user_name)
+
+    # Get existing credentials to exclude
+    con = get_db()
+    try:
+        rows = con.execute(
+            "SELECT credential_id FROM passkeys WHERE user_name = ?", [user_name]
+        ).fetchall()
+        exclude = [
+            PublicKeyCredentialDescriptor(id=base64url_to_bytes(r[0]))
+            for r in rows
+        ]
+    except Exception:
+        exclude = []
+    con.close()
+
+    # Generate a stable user ID from the user_name
+    user_id = hashlib.sha256(user_name.encode()).digest()[:32]
+
+    options = generate_registration_options(
+        rp_id=_RP_ID,
+        rp_name=_RP_NAME,
+        user_id=user_id,
+        user_name=user_email,
+        user_display_name=user_name,
+        exclude_credentials=exclude,
+        authenticator_selection=AuthenticatorSelectionCriteria(
+            resident_key=ResidentKeyRequirement.PREFERRED,
+            user_verification=UserVerificationRequirement.PREFERRED,
+        ),
+    )
+
+    # Store challenge for verification
+    _challenges[user_name] = options.challenge
+
+    return JSONResponse(content=json.loads(options_to_json(options)))
+
+
+@router.post("/passkeys/register-done")
+async def passkey_register_done(request: Request):
+    """Verify registration response and store the new passkey."""
+    session, err = _user_from_request(request)
+    if err:
+        return JSONResponse({"error": err}, status_code=401)
+
+    user_name = session["user_name"]
+    body = await request.json()
+    credential_json = body.get("credential", {})
+    device_name = body.get("device_name", "My Passkey")
+
+    challenge = _challenges.pop(user_name, None)
+    if not challenge:
+        return JSONResponse({"ok": False, "detail": "No pending registration challenge"}, status_code=400)
+
+    try:
+        verification = verify_registration_response(
+            credential=credential_json,
+            expected_challenge=challenge,
+            expected_rp_id=_RP_ID,
+            expected_origin=_RP_ORIGIN,
+        )
+    except Exception as e:
+        return JSONResponse({"ok": False, "detail": str(e)}, status_code=400)
+
+    # Store credential
+    cred_id_b64 = bytes_to_base64url(verification.credential_id)
+    pub_key_b64 = bytes_to_base64url(verification.credential_public_key)
+    pk_id = str(uuid.uuid4())
+
+    con = get_db_rw()
+    try:
+        con.execute(
+            """INSERT INTO passkeys (id, user_name, device_name, credential_id, public_key, sign_count)
+               VALUES (?, ?, ?, ?, ?, ?)""",
+            [pk_id, user_name, device_name, cred_id_b64, pub_key_b64, verification.sign_count]
+        )
+    except Exception as e:
+        con.close()
+        return JSONResponse({"ok": False, "detail": f"Failed to save: {e}"}, status_code=500)
+    con.close()
+
+    ip, ua = _client_info(request)
+    log_mfa_event(user_name, "passkey_registered", f"Device: {device_name}", ip, ua)
+
+    return {"ok": True, "id": pk_id, "device_name": device_name}
+
+
+@router.delete("/passkeys/{passkey_id}")
+async def passkey_delete(request: Request, passkey_id: str):
+    """Delete a passkey."""
+    session, err = _user_from_request(request)
+    if err:
+        return JSONResponse({"error": err}, status_code=401)
+
+    con = get_db_rw()
+    con.execute(
+        "DELETE FROM passkeys WHERE id = ? AND user_name = ?",
+        [passkey_id, session["user_name"]]
+    )
+    con.close()
+
+    ip, ua = _client_info(request)
+    log_mfa_event(session["user_name"], "passkey_deleted", f"ID: {passkey_id}", ip, ua)
+    return {"ok": True}
+
+
+# ── Passkey Authentication (login flow) ────────────────────────────────
+
+@router.post("/passkeys/login-options")
+async def passkey_login_options(request: Request):
+    """Generate authentication options for passkey login (no session required)."""
+    body = await request.json()
+    email_hint = body.get("email", "")
+
+    # Find credentials for this user (if email provided)
+    allow_credentials = []
+    if email_hint:
+        # Look up user_name from email
+        from core.config import USERS
+        user_name = None
+        for uname, udata in USERS.items():
+            if udata.get("email", "").lower() == email_hint.lower():
+                user_name = uname
+                break
+
+        if user_name:
+            con = get_db()
+            try:
+                rows = con.execute(
+                    "SELECT credential_id FROM passkeys WHERE user_name = ?", [user_name]
+                ).fetchall()
+                allow_credentials = [
+                    PublicKeyCredentialDescriptor(id=base64url_to_bytes(r[0]))
+                    for r in rows
+                ]
+            except Exception:
+                pass
+            con.close()
+
+    options = generate_authentication_options(
+        rp_id=_RP_ID,
+        allow_credentials=allow_credentials if allow_credentials else None,
+        user_verification=UserVerificationRequirement.PREFERRED,
+    )
+
+    # Store challenge keyed by email or "anonymous"
+    _challenges[f"login:{email_hint or 'anon'}"] = options.challenge
+
+    return JSONResponse(content=json.loads(options_to_json(options)))
+
+
+@router.post("/passkeys/login-verify")
+async def passkey_login_verify(request: Request, response: Response):
+    """Verify authentication response and create a session."""
+    body = await request.json()
+    credential_json = body.get("credential", {})
+    email_hint = body.get("email", "")
+
+    challenge = _challenges.pop(f"login:{email_hint or 'anon'}", None)
+    if not challenge:
+        return JSONResponse({"ok": False, "detail": "No pending login challenge"}, status_code=400)
+
+    # Find the credential in our database
+    cred_id = credential_json.get("id", "")
+    con = get_db()
+    try:
+        row = con.execute(
+            "SELECT user_name, credential_id, public_key, sign_count FROM passkeys WHERE credential_id = ?",
+            [cred_id]
+        ).fetchone()
+    except Exception:
+        row = None
+    con.close()
+
+    if not row:
+        return JSONResponse({"ok": False, "detail": "Unknown credential"}, status_code=400)
+
+    user_name, stored_cred_id, pub_key_b64, stored_sign_count = row
+
+    try:
+        verification = verify_authentication_response(
+            credential=credential_json,
+            expected_challenge=challenge,
+            expected_rp_id=_RP_ID,
+            expected_origin=_RP_ORIGIN,
+            credential_public_key=base64url_to_bytes(pub_key_b64),
+            credential_current_sign_count=stored_sign_count or 0,
+        )
+    except Exception as e:
+        return JSONResponse({"ok": False, "detail": str(e)}, status_code=400)
+
+    # Update sign count and last_used_at
+    con = get_db_rw()
+    con.execute(
+        "UPDATE passkeys SET sign_count = ?, last_used_at = CURRENT_TIMESTAMP WHERE credential_id = ?",
+        [verification.new_sign_count, cred_id]
+    )
+    con.close()
+
+    # Create a session for this user
+    user_data = USERS.get(user_name)
+    if not user_data:
+        return JSONResponse({"ok": False, "detail": "User not found"}, status_code=400)
+
+    import secrets
+    token = secrets.token_hex(32)
+    con2 = get_db_rw()
+    con2.execute(
+        "INSERT INTO sessions (token, user_email, user_name, role, login_method) VALUES (?, ?, ?, ?, ?)",
+        [token, user_data["email"], user_name, user_data["role"], "passkey"]
+    )
+    con2.close()
+    response = JSONResponse({"ok": True, "user": user_name, "role": user_data["role"]})
+    response.set_cookie(
+        "golfgen_session", token,
+        httponly=True, samesite="none", secure=True,
+        max_age=18 * 3600,  # 18hr session
+    )
+
+    # Mark session as MFA-verified (passkey counts as strong auth)
+    mark_session_mfa_verified(token)
+
+    ip, ua = _client_info(request)
+    log_mfa_event(user_name, "passkey_login", "", ip, ua)
+
+    return response
