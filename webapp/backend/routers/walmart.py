@@ -724,7 +724,7 @@ def debug_counts():
         con.close()
 
 
-@router.get("/debug/dept-audit")
+@router.get("/api/debug/walmart-dept-audit")
 def debug_dept_audit():
     """Audit department numbers and product names across Walmart tables."""
     con = get_db()
