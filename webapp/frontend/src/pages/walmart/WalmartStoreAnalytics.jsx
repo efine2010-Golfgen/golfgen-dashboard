@@ -434,7 +434,7 @@ function USMap({ showCities, showRegions, selectedMetric, onSelectState, onSelec
             .attr("cy", (d) => projection([d.lng, d.lat])[1])
             .attr("r", (d) => {
               const val = selectedMetric === "qty" ? d.qty : selectedMetric === "returns" ? d.returns : d.pos;
-              return Math.max(0.8, Math.sqrt(val / 300) + 0.5);
+              return Math.max(1.0, Math.sqrt(val / 180) + 0.8);
             })
             .attr("fill", (d) => {
               const val = selectedMetric === "qty" ? d.qty : selectedMetric === "returns" ? d.returns : d.pos;
@@ -448,28 +448,45 @@ function USMap({ showCities, showRegions, selectedMetric, onSelectState, onSelec
               if (onSelectCity) onSelectCity(d);
             });
 
-          // City name labels — top 20 by metric value, with collision avoidance
+          // City name labels — top 40 by metric value, nudge to avoid overlap
           const sortedCities = [...validCities].sort((a, b) => {
             const aV = selectedMetric === "qty" ? b.qty - a.qty : selectedMetric === "returns" ? b.returns - a.returns : b.pos - a.pos;
             return aV;
           });
-          const topCities = sortedCities.slice(0, 20);
-          // Simple collision avoidance: track placed label bounding boxes
+          const topCities = sortedCities.slice(0, 40);
+          const fontSize = 4.2;
+          const charW = fontSize * 0.52;
+          const labelH = fontSize + 1;
+          // Place labels with nudging: try original position, then nudge up/down/left/right
           const placed = [];
+          const nudges = [
+            [0, -(fontSize + 2)],    // above dot
+            [0, fontSize + 4],       // below dot
+            [8, -(fontSize)],        // upper-right
+            [-8, -(fontSize)],       // upper-left
+            [8, fontSize + 2],       // lower-right
+            [-8, fontSize + 2],      // lower-left
+            [0, -(fontSize * 2 + 3)], // further above
+            [0, fontSize * 2 + 5],   // further below
+          ];
           const labelData = topCities.map((d) => {
             const pt = projection([d.lng, d.lat]);
-            const x = pt[0]; const y = pt[1] - 3;
-            const approxW = Math.min(d.city.length, 10) * 2.5;
-            const approxH = 4;
-            // Check overlap with already-placed labels
-            const overlaps = placed.some((p) =>
-              Math.abs(p.x - x) < (p.w + approxW) / 2 + 2 && Math.abs(p.y - y) < (p.h + approxH) / 2 + 1
-            );
-            if (!overlaps) {
-              placed.push({ x, y, w: approxW, h: approxH });
-              return { ...d, lx: x, ly: y, show: true };
+            const name = d.city.length > 14 ? d.city.substring(0, 14) : d.city;
+            const approxW = name.length * charW;
+            // Try each nudge position until one doesn't overlap
+            for (const [nx, ny] of nudges) {
+              const x = pt[0] + nx;
+              const y = pt[1] + ny;
+              const overlaps = placed.some((p) =>
+                Math.abs(p.x - x) < (p.w + approxW) / 2 + 1.5 &&
+                Math.abs(p.y - y) < (p.h + labelH) / 2 + 0.5
+              );
+              if (!overlaps) {
+                placed.push({ x, y, w: approxW, h: labelH });
+                return { ...d, lx: x, ly: y, name, show: true };
+              }
             }
-            return { ...d, lx: x, ly: y, show: false };
+            return { ...d, lx: pt[0], ly: pt[1] - fontSize - 2, name, show: false };
           });
           g.selectAll("text.city-label")
             .data(labelData.filter((d) => d.show))
@@ -479,14 +496,11 @@ function USMap({ showCities, showRegions, selectedMetric, onSelectState, onSelec
             .attr("x", (d) => d.lx)
             .attr("y", (d) => d.ly)
             .attr("text-anchor", "middle")
-            .attr("font-size", "3.5px")
-            .attr("fill", "rgba(255,255,255,0.5)")
-            .attr("font-weight", "400")
+            .attr("font-size", fontSize + "px")
+            .attr("fill", "rgba(255,255,255,0.6)")
+            .attr("font-weight", "500")
             .attr("pointer-events", "none")
-            .text((d) => {
-              const n = d.city;
-              return n.length > 10 ? n.substring(0, 10) : n;
-            });
+            .text((d) => d.name);
         }
 
         // Gradient legend
