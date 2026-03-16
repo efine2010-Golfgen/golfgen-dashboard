@@ -872,33 +872,31 @@ def get_walmart_analytics(division: str = None, customer: str = None):
     hw, hp = hierarchy_filter(division=division, customer=customer or "walmart_stores")
 
     # Determine if data is available (check multiple tables)
-    data_available = False
+    has_item_data = False
+    has_scorecard_data = False
+    has_store_data = False
     try:
         total_items = con.execute(
             f"SELECT COUNT(*) FROM walmart_item_weekly WHERE 1=1 {hw}", hp
         ).fetchone()
-        if total_items and total_items[0] > 0:
-            data_available = True
+        has_item_data = bool(total_items and total_items[0] > 0)
     except Exception:
         pass
-    if not data_available:
-        try:
-            total_sc = con.execute(
-                f"SELECT COUNT(*) FROM walmart_scorecard WHERE 1=1 {hw}", hp
-            ).fetchone()
-            if total_sc and total_sc[0] > 0:
-                data_available = True
-        except Exception:
-            pass
-    if not data_available:
-        try:
-            total_store = con.execute(
-                f"SELECT COUNT(*) FROM walmart_store_weekly WHERE 1=1 {hw}", hp
-            ).fetchone()
-            if total_store and total_store[0] > 0:
-                data_available = True
-        except Exception:
-            pass
+    try:
+        total_sc = con.execute(
+            f"SELECT COUNT(*) FROM walmart_scorecard WHERE 1=1 {hw}", hp
+        ).fetchone()
+        has_scorecard_data = bool(total_sc and total_sc[0] > 0)
+    except Exception:
+        pass
+    try:
+        total_store = con.execute(
+            f"SELECT COUNT(*) FROM walmart_store_weekly WHERE 1=1 {hw}", hp
+        ).fetchone()
+        has_store_data = bool(total_store and total_store[0] > 0)
+    except Exception:
+        pass
+    data_available = has_item_data or has_scorecard_data or has_store_data
 
     # ── 1. SALES PERFORMANCE ─────────────────────────────────────────────
 
@@ -909,7 +907,7 @@ def get_walmart_analytics(division: str = None, customer: str = None):
         "categories": {},
     }
 
-    if data_available:
+    if has_item_data:
         # KPIs by period type (L52W, L26W, L13W, L4W, L1W/LW)
         period_types = ["L52W", "L26W", "L13W", "L4W", "L1W"]
         for pt in period_types:
@@ -1035,7 +1033,7 @@ def get_walmart_analytics(division: str = None, customer: str = None):
         "instockByType": {},
     }
 
-    if data_available:
+    if has_item_data:
         # Inventory KPIs
         r = con.execute(f"""
             SELECT
@@ -1074,7 +1072,7 @@ def get_walmart_analytics(division: str = None, customer: str = None):
                     SELECT AVG(instock_pct_ty)
                     FROM walmart_item_weekly
                     WHERE period_type = ? AND prime_item_desc = ? AND 1=1 {hw}
-                """, [pt] + hp).fetchone()
+                """, [pt, item_desc] + hp).fetchone()
                 trend_vals.append(_n(r[0]) if r and r[0] else 0)
 
             inventory_health["instockTrend"][item_desc] = trend_vals
@@ -1147,7 +1145,7 @@ def get_walmart_analytics(division: str = None, customer: str = None):
         "items": [],
     }
 
-    if data_available:
+    if has_item_data:
         # eComm KPIs
         r = con.execute(f"""
             SELECT
@@ -1205,7 +1203,7 @@ def get_walmart_analytics(division: str = None, customer: str = None):
         "items": [],
     }
 
-    if data_available:
+    if has_item_data:
         # Latest snapshot
         r = con.execute("""
             SELECT COUNT(DISTINCT store_dc_nbr) as dc_count
