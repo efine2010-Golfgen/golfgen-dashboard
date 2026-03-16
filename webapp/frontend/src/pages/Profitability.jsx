@@ -89,16 +89,8 @@ export default function Profitability({ filters = {} }) {
 
   return (
     <>
-      {/* Sub-nav tabs */}
-      <div className="inv-subnav">
-        {SUB_TABS.map(t => (
-          <button key={t.key} className={`inv-tab ${tab === t.key ? "active" : ""}`}
-            onClick={() => setTab(t.key)}>{t.label}</button>
-        ))}
-      </div>
-
       {/* Page header */}
-      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 14, flexWrap: "wrap", gap: 10 }}>
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 0, flexWrap: "wrap", gap: 10 }}>
         <div>
           <div style={{ ...DM(22), color: "var(--teal, #2ECFAA)" }}>Profitability Command Center</div>
           <div style={{ ...SG(11, 500), color: "var(--muted, #6B8090)", marginTop: 2 }}>
@@ -113,6 +105,24 @@ export default function Profitability({ filters = {} }) {
             </button>
           ))}
         </div>
+      </div>
+
+      {/* Sub-nav tabs — underline style matching Amazon Analytics / Walmart tabs */}
+      <div style={{ display: "flex", gap: 2, marginTop: 12, marginBottom: 16, borderBottom: "1px solid var(--brd)" }}>
+        {SUB_TABS.map(t => (
+          <button key={t.key}
+            onClick={() => setTab(t.key)}
+            style={{
+              ...SG(11, tab === t.key ? 700 : 500),
+              background: "none",
+              border: "none",
+              cursor: "pointer",
+              padding: "8px 14px",
+              color: tab === t.key ? "var(--acc1)" : "var(--txt3)",
+              borderBottom: tab === t.key ? "2px solid var(--acc1)" : "2px solid transparent",
+            }}
+          >{t.label}</button>
+        ))}
       </div>
 
       {/* Tab content */}

@@ -133,7 +133,7 @@ body.fresh {
 .theme-groups { display:flex; align-items:center; gap:10px; margin-left:auto; flex-wrap:wrap; }
 .theme-group { display:flex; align-items:center; gap:4px; }
 .tg-label { font-family:'Space Grotesk',monospace; font-size:7px; font-weight:700; text-transform:uppercase; letter-spacing:.12em; color:var(--txt3); white-space:nowrap; border-right:1px solid var(--brd); padding-right:6px; margin-right:1px; }
-.tbtn { padding:3px 9px; border-radius:6px; font-size:10px; font-weight:700; font-family:'Sora',sans-serif; border:1px solid var(--brd2); background:transparent; color:var(--txt2); cursor:pointer; transition:all .15s; white-space:nowrap; }
+.tbtn { padding:3px 9px; border-radius:6px; font-size:10px; font-weight:700; font-family:'Sora',sans-serif; border:1px solid var(--brd2); background:transparent; color:var(--txt2); cursor:pointer; transition:all .15s; white-space:nowrap; min-width:62px; text-align:center; box-sizing:border-box; }
 .tbtn:hover { border-color:var(--acc1); color:var(--acc1); }
 .tbtn.active { background:var(--acc1); border-color:var(--acc1); color:#0E1F2D; font-weight:800; }
 
