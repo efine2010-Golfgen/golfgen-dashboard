@@ -4,3 +4,21 @@ data/*.duckdb.wal
 __pycache__/
 *.pyc
 .DS_Store
+
+# Large binary files — keep out of repo
+*.xlsx
+*.xls
+*.numbers
+*.pdf
+*.PDF
+*.zip
+*.tar.gz
+
+# Walmart data import dumps
+store_weekly_*.json
+item_weekly_*.json
+ecomm_*.json
+forecast_*.json
+
+# Frontend build output (committed to backend/dist instead)
+webapp/frontend/dist/
