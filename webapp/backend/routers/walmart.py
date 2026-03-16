@@ -176,21 +176,21 @@ def get_sales(division: str = None, customer: str = None):
         # ── Query 1: KPI aggregates by period (single query with multiple CASE WHEN)
         kpi_query = f"""
             SELECT
-              CASE WHEN period_type = 'L1W' THEN 'LW' ELSE period_type END as period,
-              SUM(CASE WHEN period_type IN ('L1W','L4W','L13W','L26W','L52W')
+              CASE WHEN period_type IN ('L1W','LW') THEN 'LW' ELSE period_type END as period,
+              SUM(CASE WHEN period_type IN ('L1W','LW','L4W','L13W','L26W','L52W')
                     THEN COALESCE(pos_sales_ty, 0) ELSE 0 END) as pos_sales_ty,
-              SUM(CASE WHEN period_type IN ('L1W','L4W','L13W','L26W','L52W')
+              SUM(CASE WHEN period_type IN ('L1W','LW','L4W','L13W','L26W','L52W')
                     THEN COALESCE(pos_sales_ly, 0) ELSE 0 END) as pos_sales_ly,
-              SUM(CASE WHEN period_type IN ('L1W','L4W','L13W','L26W','L52W')
+              SUM(CASE WHEN period_type IN ('L1W','LW','L4W','L13W','L26W','L52W')
                     THEN COALESCE(pos_qty_ty, 0) ELSE 0 END) as pos_qty_ty,
-              SUM(CASE WHEN period_type IN ('L1W','L4W','L13W','L26W','L52W')
+              SUM(CASE WHEN period_type IN ('L1W','LW','L4W','L13W','L26W','L52W')
                     THEN COALESCE(pos_qty_ly, 0) ELSE 0 END) as pos_qty_ly,
-              SUM(CASE WHEN period_type IN ('L1W','L4W','L13W','L26W','L52W')
+              SUM(CASE WHEN period_type IN ('L1W','LW','L4W','L13W','L26W','L52W')
                     THEN COALESCE(returns_qty_ty, 0) ELSE 0 END) as returns_ty,
-              SUM(CASE WHEN period_type IN ('L1W','L4W','L13W','L26W','L52W')
+              SUM(CASE WHEN period_type IN ('L1W','LW','L4W','L13W','L26W','L52W')
                     THEN COALESCE(returns_qty_ly, 0) ELSE 0 END) as returns_ly
             FROM walmart_item_weekly
-            WHERE period_type IN ('L1W','L4W','L13W','L26W','L52W') {hw}
+            WHERE period_type IN ('L1W','LW','L4W','L13W','L26W','L52W') {hw}
             GROUP BY period_type
         """
         kpi_rows = con.execute(kpi_query, hp).fetchall()
@@ -209,14 +209,14 @@ def get_sales(division: str = None, customer: str = None):
         # ── Query 2: Sales by type breakdown (Regular, Clearance, CVP, etc.)
         sales_type_query = f"""
             SELECT
-              CASE WHEN period_type = 'L1W' THEN 'LW' ELSE period_type END as period,
+              CASE WHEN period_type IN ('L1W','LW') THEN 'LW' ELSE period_type END as period,
               COALESCE(sales_type, 'Other') as sales_type,
               SUM(COALESCE(pos_sales_ty, 0)) as sales_ty,
               SUM(COALESCE(pos_sales_ly, 0)) as sales_ly,
               SUM(COALESCE(pos_qty_ty, 0)) as qty_ty,
               SUM(COALESCE(pos_qty_ly, 0)) as qty_ly
             FROM walmart_item_weekly
-            WHERE period_type IN ('L1W','L4W','L13W','L26W','L52W') {hw}
+            WHERE period_type IN ('L1W','LW','L4W','L13W','L26W','L52W') {hw}
             GROUP BY period_type, sales_type
         """
         sales_type_rows = con.execute(sales_type_query, hp).fetchall()
@@ -238,13 +238,13 @@ def get_sales(division: str = None, customer: str = None):
             SELECT
               prime_item_desc,
               brand_name,
-              CASE WHEN period_type = 'L1W' THEN 'LW' ELSE period_type END as period,
+              CASE WHEN period_type IN ('L1W','LW') THEN 'LW' ELSE period_type END as period,
               pos_sales_ty, pos_sales_ly, pos_qty_ty, pos_qty_ly,
               COALESCE(instock_pct_ty, 0) as instock_pct_ty,
               COALESCE(on_hand_qty_ty, 0) as on_hand_qty_ty,
               COALESCE(on_hand_qty_ly, 0) as on_hand_qty_ly
             FROM walmart_item_weekly
-            WHERE period_type IN ('L1W','L4W','L13W','L26W','L52W') {hw}
+            WHERE period_type IN ('L1W','LW','L4W','L13W','L26W','L52W') {hw}
             ORDER BY prime_item_desc, period_type
         """
         item_rows = con.execute(item_query, hp).fetchall()
@@ -323,10 +323,10 @@ def get_inventory(division: str = None, customer: str = None):
         trend_query = f"""
             SELECT
               prime_item_desc,
-              CASE WHEN period_type = 'L1W' THEN 'LW' ELSE period_type END as period,
+              CASE WHEN period_type IN ('L1W','LW') THEN 'LW' ELSE period_type END as period,
               AVG(CASE WHEN COALESCE(instock_pct_ty, 0) > 0 THEN instock_pct_ty END) as avg_instock
             FROM walmart_item_weekly
-            WHERE period_type IN ('L1W','L4W','L13W','L26W','L52W') {hw}
+            WHERE period_type IN ('L1W','LW','L4W','L13W','L26W','L52W') {hw}
             GROUP BY prime_item_desc, period_type
             ORDER BY prime_item_desc, period_type
         """
@@ -381,6 +381,23 @@ def get_scorecard(division: str = None, customer: str = None):
     try:
         hw, hp = hierarchy_filter(division=division, customer=customer or "walmart_stores")
 
+        # Metric name normalization map (handle old names from data)
+        _METRIC_NORMALIZE = {
+            "POS Sales in dollars": "POS Sales $",
+            "POS Sales in Units": "POS Units",
+            "Comp Sales in dollars": "Comp Sales $",
+            "Store Returns in dollars": "Returns $",  
+            "Store Returns as % of POS Sales": "Returns %",
+            "Gross Initial Margin %": "GIM%",
+            "Maintain Margin %": "Maintain Margin%",
+            "Store Weeks of Supply/ Weeks on Hand": "Weeks of Supply",
+            "Store Weeks of Supply/Weeks on Hand": "Weeks of Supply",
+            "Warehouse Weeks of Supply/Weeks on Hand": "Warehouse Weeks of Supply",
+            "MUMD Percent To Sales": "MUMD %",
+            "Retail turns": "Retail Turns",
+            "Ships at cost": "Ships at Cost",
+        }
+
         # Fetch all scorecard rows
         scorecard_query = f"""
             SELECT vendor_section, metric_group, metric_name, period, period_range,
@@ -395,7 +412,7 @@ def get_scorecard(division: str = None, customer: str = None):
             {
                 "vendorSection": r[0],
                 "metricGroup": r[1],
-                "metricName": r[2],
+                "metricName": _METRIC_NORMALIZE.get(r[2], r[2]),
                 "period": r[3],
                 "periodRange": r[4],
                 "valueTy": _n(r[5]),
@@ -690,6 +707,22 @@ def get_store_analytics(
     finally:
         con.close()
 
+
+# ═════════════════════════════════════════════════════════════════════════════
+#  FIX 2 TODO: Store Analytics Aggregation (State/City Level)
+# ═════════════════════════════════════════════════════════════════════════════
+# LIMITATION: walmart_store_weekly table does NOT have store_state or store_city columns.
+# To implement period-based aggregation by state/city for WalmartStoreAnalytics.jsx:
+# 1. Add store_state VARCHAR(2) and store_city VARCHAR(50) columns to walmart_store_weekly
+# 2. Add logic to Scintilla import to extract state/city from store_name field
+# 3. Create aggregation endpoint: GET /api/walmart/store-analytics-summary?period=L13W
+#    Returns: {states: [...], cities: [...], period: "L13W", weeks: 13}
+# 4. Update WalmartStoreAnalytics.jsx to fetch this data and merge with WM_DATA/CITY_DATA
+# 5. Add period selector buttons (L4W, L13W, L26W, L52W) with useEffect for data fetching
+#
+# Currently, /api/walmart/store-geography returns latest-week store-level data,
+# and frontend uses static WM_DATA constants for geographic/heatmap rendering.
+# ═════════════════════════════════════════════════════════════════════════════
 
 # ═════════════════════════════════════════════════════════════════════════════
 #  ENDPOINT 8: Weekly Trend — 52 individual weeks for TY/LY chart

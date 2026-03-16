@@ -91,9 +91,11 @@ export function WalmartInventory({ filters }) {
   const itemInstock = weeklyData?.itemInstock || {};
   const weekOrder = weeklyData?.weekOrder || weeks.map((w) => w.week);
 
-  // Get last 13 weeks for the table
-  const last13WeekOrder = weekOrder.slice(-13);
-  const last13Weeks = weeks.filter((w) => last13WeekOrder.includes(w.week));
+  // Get last 52 weeks for dept chart, last 26 weeks for item chart/table
+  const last52WeekOrder = weekOrder.slice(-52);
+  const last52Weeks = weeks.filter((w) => last52WeekOrder.includes(w.week));
+  const last26WeekOrder = weekOrder.slice(-26);
+  const last26Weeks = weeks.filter((w) => last26WeekOrder.includes(w.week));
 
   // Identify items that have per-week instock data
   const itemsWithWeeklyInstock = Object.keys(itemInstock).filter((item) => {
@@ -130,46 +132,27 @@ export function WalmartInventory({ filters }) {
         />
       </div>
 
-      {/* Weekly In Stock % Bar Chart — last 13 weeks */}
-      {last13Weeks.length > 0 && (
+      {/* Weekly In Stock % Bar Chart — last 52 weeks */}
+      {last52Weeks.length > 0 && (
         <Card>
-          <CardHdr title="Weekly In Stock % — Last 13 Weeks" />
+          <CardHdr title="Weekly In Stock % — Last 52 Weeks" />
           <div style={{ ...SG(9), color: "var(--txt3)", marginBottom: 8 }}>
-            Bars show total department in stock % by week. Colored lines
-            show per-item in stock %.
+            Bars show total department in stock % by week.
           </div>
           <ChartCanvas
             type="bar"
             height={280}
-            configKey={`inv-weekly-13wk-${last13Weeks.length}-${itemsWithWeeklyInstock.length}`}
-            labels={last13Weeks.map((w) => fmtWeek(w.week))}
+            configKey={`inv-weekly-52wk-${last52Weeks.length}`}
+            labels={last52Weeks.map((w) => fmtWeek(w.week))}
             datasets={[
               {
                 label: "Dept In Stock %",
-                data: last13Weeks.map((w) => toPercent(w.instockPct)),
+                data: last52Weeks.map((w) => toPercent(w.instockPct)),
                 backgroundColor: "rgba(46,207,170,0.3)",
                 borderColor: COLORS.teal,
                 borderWidth: 1,
-                order: 10,
                 yAxisID: "y",
               },
-              // Per-item instock lines
-              ...itemsWithWeeklyInstock.slice(0, 6).map((item, idx) => ({
-                label: item.length > 20 ? item.substring(0, 20) + "…" : item,
-                type: "line",
-                data: last13WeekOrder.map((wk) => {
-                  const v = itemInstock[item]?.[wk];
-                  return v != null && v > 0 ? toPercent(v) : null;
-                }),
-                borderColor: ITEM_COLORS[idx % ITEM_COLORS.length],
-                borderWidth: 2,
-                pointRadius: 1,
-                fill: false,
-                tension: 0.3,
-                spanGaps: true,
-                order: idx + 1,
-                yAxisID: "y",
-              })),
             ]}
             options={{
               scales: {
@@ -180,16 +163,64 @@ export function WalmartInventory({ filters }) {
                     callback: (v) => v + "%",
                   },
                 },
+                x: {
+                  ticks: { maxRotation: 45, autoSkip: true, maxTicksLimit: 52 },
+                },
               },
             }}
           />
         </Card>
       )}
 
-      {/* 13-Week Instock % Table by Item */}
-      {last13Weeks.length > 0 && itemsWithWeeklyInstock.length > 0 && (
+      {/* Item-Level In Stock % — last 26 weeks */}
+      {last26Weeks.length > 0 && itemsWithWeeklyInstock.length > 0 && (
         <Card>
-          <CardHdr title="In Stock % by Item — Last 13 Weeks" />
+          <CardHdr title="Item In Stock % — Last 26 Weeks" />
+          <div style={{ ...SG(9), color: "var(--txt3)", marginBottom: 8 }}>
+            Colored lines show per-item in stock % by week.
+          </div>
+          <ChartCanvas
+            type="line"
+            height={280}
+            configKey={`inv-item-26wk-${last26Weeks.length}-${itemsWithWeeklyInstock.length}`}
+            labels={last26Weeks.map((w) => fmtWeek(w.week))}
+            datasets={
+              itemsWithWeeklyInstock.slice(0, 8).map((item, idx) => ({
+                label: item.length > 25 ? item.substring(0, 25) + "…" : item,
+                data: last26WeekOrder.map((wk) => {
+                  const v = itemInstock[item]?.[wk];
+                  return v != null && v > 0 ? toPercent(v) : null;
+                }),
+                borderColor: ITEM_COLORS[idx % ITEM_COLORS.length],
+                borderWidth: 2,
+                pointRadius: 2,
+                fill: false,
+                tension: 0.3,
+                spanGaps: true,
+              }))
+            }
+            options={{
+              scales: {
+                y: {
+                  min: 0,
+                  max: 100,
+                  ticks: {
+                    callback: (v) => v + "%",
+                  },
+                },
+                x: {
+                  ticks: { maxRotation: 45, autoSkip: true, maxTicksLimit: 13 },
+                },
+              },
+            }}
+          />
+        </Card>
+      )}
+
+      {/* 26-Week Instock % Table by Item */}
+      {last26Weeks.length > 0 && itemsWithWeeklyInstock.length > 0 && (
+        <Card>
+          <CardHdr title="In Stock % by Item — Last 26 Weeks" />
           <div
             style={{
               overflowX: "auto",
@@ -214,7 +245,7 @@ export function WalmartInventory({ filters }) {
                   >
                     Item
                   </th>
-                  {last13WeekOrder.map((wk) => (
+                  {last26WeekOrder.map((wk) => (
                     <th
                       key={wk}
                       style={{
@@ -252,7 +283,7 @@ export function WalmartInventory({ filters }) {
                     >
                       {item.length > 30 ? item.substring(0, 30) + "…" : item}
                     </td>
-                    {last13WeekOrder.map((wk) => {
+                    {last26WeekOrder.map((wk) => {
                       const val = itemInstock[item]?.[wk];
                       const hasData = val != null && val > 0;
                       return (
