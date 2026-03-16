@@ -802,7 +802,7 @@ def debug_walmart_cleanup():
         # Delete from walmart_item_weekly where brand is "Way To Celebrate" or product starts with HALLOWEEN or WTC
         try:
             r = con.execute(
-                "DELETE FROM walmart_item_weekly WHERE brand_name = %s OR product_description LIKE %s OR product_description LIKE %s",
+                "DELETE FROM walmart_item_weekly WHERE brand_name = ? OR product_description LIKE ? OR product_description LIKE ?",
                 ["Way To Celebrate", "HALLOWEEN%", "WTC%"]
             )
             results["item_weekly_deleted"] = r.rowcount if hasattr(r, 'rowcount') else "executed"
