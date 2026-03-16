@@ -336,6 +336,7 @@ export const api = {
   walmartScorecard: (h = {}) => fetchJSON('/api/walmart/scorecard' + (_hq(h) ? '?' + _hq(h).slice(1) : '')),
   walmartEcommerce: (h = {}) => fetchJSON('/api/walmart/ecommerce' + (_hq(h) ? '?' + _hq(h).slice(1) : '')),
   walmartForecast: (h = {}) => fetchJSON('/api/walmart/forecast' + (_hq(h) ? '?' + _hq(h).slice(1) : '')),
+  walmartWeeklyTrend: (h = {}) => fetchJSON('/api/walmart/weekly-trend' + (_hq(h) ? '?' + _hq(h).slice(1) : '')),
   walmartStoreAnalytics: (h = {}, opts = {}) => {
     const { week, sortBy, sortDir, limit, offset } = opts;
     let q = _hq(h) ? '?' + _hq(h).slice(1) : '?';

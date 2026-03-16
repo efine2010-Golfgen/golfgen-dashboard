@@ -691,6 +691,50 @@ def get_store_analytics(
         con.close()
 
 
+# ═════════════════════════════════════════════════════════════════════════════
+#  ENDPOINT 8: Weekly Trend — 52 individual weeks for TY/LY chart
+# ═════════════════════════════════════════════════════════════════════════════
 
 
+@router.get("/api/walmart/weekly-trend")
+def get_weekly_trend(division: str = None, customer: str = None):
+    """
+    Returns up to 52 individual weeks of aggregate POS data for the
+    bar+line chart (TY bars, LY line overlay).
+
+    Data source: walmart_store_weekly aggregated by walmart_week.
+    Returns weeks sorted chronologically.
+    """
+    con = get_db()
+    try:
+        hw, hp = hierarchy_filter(division=division, customer=customer or "walmart_stores")
+
+        query = f"""
+            SELECT
+              walmart_week,
+              SUM(COALESCE(pos_sales_ty, 0)) as pos_sales_ty,
+              SUM(COALESCE(pos_sales_ly, 0)) as pos_sales_ly,
+              SUM(COALESCE(pos_qty_ty, 0)) as pos_qty_ty,
+              SUM(COALESCE(pos_qty_ly, 0)) as pos_qty_ly
+            FROM walmart_store_weekly
+            WHERE walmart_week IS NOT NULL {hw}
+            GROUP BY walmart_week
+            ORDER BY walmart_week ASC
+            LIMIT 52
+        """
+        rows = con.execute(query, hp).fetchall()
+
+        weeks = []
+        for r in rows:
+            weeks.append({
+                "week": str(r[0]) if r[0] else "",
+                "posSalesTy": _n(r[1]),
+                "posSalesLy": _n(r[2]),
+                "posQtyTy": _n(r[3]),
+                "posQtyLy": _n(r[4]),
+            })
+
+        return {"weeks": weeks}
+    finally:
+        con.close()
 
