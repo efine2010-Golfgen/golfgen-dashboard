@@ -168,6 +168,33 @@ def _build_product_list(con, cutoff: str) -> list:
     except Exception:
         pass
 
+    # Division lookup from item_master (source of truth)
+    division_map = {}
+    try:
+        im_rows = con.execute(
+            "SELECT asin, division FROM item_master WHERE asin IS NOT NULL"
+        ).fetchall()
+        for im in im_rows:
+            division_map[im[0]] = im[1] or "unknown"
+    except Exception:
+        pass
+
+    # Refund data per ASIN from financial_events
+    refund_map = {}
+    try:
+        ref_rows = con.execute("""
+            SELECT asin,
+                   COUNT(*) AS refund_count,
+                   COALESCE(SUM(ABS(product_charges)), 0) AS refund_amt
+            FROM financial_events
+            WHERE date >= ? AND (event_type ILIKE '%%refund%%' OR event_type ILIKE '%%return%%')
+            GROUP BY asin
+        """, [cutoff]).fetchall()
+        for rr in ref_rows:
+            refund_map[rr[0]] = {"count": int(rr[1] or 0), "amount": float(rr[2] or 0)}
+    except Exception:
+        pass
+
     rows = con.execute("""
         SELECT asin,
                COALESCE(SUM(ordered_product_sales), 0) AS revenue,
@@ -248,10 +275,15 @@ def _build_product_list(con, cutoff: str) -> list:
         margin = round(net / float(revenue) * 100) if revenue else 0
         conv_rate = round(float(units) / sessions * 100, 1) if sessions else 0
 
+        # Refund rate for this ASIN
+        ref_info = refund_map.get(asin, {})
+        refund_rate = round(ref_info.get("count", 0) / units * 100, 1) if units > 0 else 0
+
         products.append({
             "asin": asin,
             "sku": resolved_sku,
             "name": name,
+            "division": division_map.get(asin, "unknown"),
             "rev": round(revenue, 2),
             "units": units,
             "price": aur,
@@ -264,6 +296,9 @@ def _build_product_list(con, cutoff: str) -> list:
             "adSpend": ad_spend,
             "net": net,
             "margin": margin,
+            "refundRate": refund_rate,
+            "refundCount": ref_info.get("count", 0),
+            "refundAmount": round(ref_info.get("amount", 0), 2),
         })
 
     return products
