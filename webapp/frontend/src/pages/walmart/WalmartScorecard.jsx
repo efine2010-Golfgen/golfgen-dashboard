@@ -32,8 +32,51 @@ export function ScorecardPage({ data }) {
   // Extract unique periods
   const periods = [...new Set(scorecard.map((r) => r.period))];
 
-  // Top 5 KPIs by first metric TY value
-  const topKpis = scorecard.slice(0, 5);
+  // Helper: detect if metric is a percentage type
+  const isPctMetric = (name) =>
+    /(%|margin|turns|gmroii|instock|aur)/i.test(name);
+
+  // Smart value formatter for scorecard
+  const fVal = (v, metricName) => {
+    if (v == null) return "—";
+    if (isPctMetric(metricName)) {
+      // Percentage metrics: value is already a decimal (0.291 = 29.1%)
+      if (Math.abs(v) < 10) return (v * 100).toFixed(1) + "%";
+      // If value looks like it's already a whole percent or dollar, show as number
+      return fN(v);
+    }
+    return fN(v);
+  };
+
+  // Top 5 KPIs: pick distinct metrics from "All Vendors" Last Week period
+  const priorityMetrics = [
+    "POS Sales in dollars",
+    "POS Sales in Units",
+    "Comp Sales in dollars",
+    "Repl Instock %",
+    "Gross Initial Margin %",
+  ];
+  const topKpis = [];
+  for (const pm of priorityMetrics) {
+    const match = scorecard.find(
+      (r) =>
+        r.vendorSection === "All Vendors" &&
+        r.period === "Last Week" &&
+        r.metricName === pm
+    );
+    if (match) topKpis.push(match);
+  }
+  // Fall back to first 5 distinct metrics if no matches
+  if (topKpis.length === 0) {
+    const seen = new Set();
+    for (const r of scorecard) {
+      if (!seen.has(r.metricName) && r.period === "Last Week") {
+        seen.add(r.metricName);
+        topKpis.push(r);
+        if (topKpis.length >= 5) break;
+      }
+    }
+  }
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
@@ -49,9 +92,9 @@ export function ScorecardPage({ data }) {
           <KPICard
             key={i}
             label={kpi.metricName}
-            value={fN(kpi.valueTy)}
+            value={fVal(kpi.valueTy, kpi.metricName)}
             delta={
-              kpi.valueDiff
+              kpi.valueDiff != null
                 ? (kpi.valueDiff * 100).toFixed(1)
                 : null
             }
@@ -190,7 +233,7 @@ export function ScorecardPage({ data }) {
                                     color: "var(--txt)",
                                   }}
                                 >
-                                  {r ? fN(r.valueTy) : "—"}
+                                  {r ? fVal(r.valueTy, metric) : "—"}
                                 </td>
                                 <td
                                   style={{
@@ -199,7 +242,7 @@ export function ScorecardPage({ data }) {
                                     color: "var(--txt2)",
                                   }}
                                 >
-                                  {r ? fN(r.valueLy) : "—"}
+                                  {r ? fVal(r.valueLy, metric) : "—"}
                                 </td>
                                 <td
                                   style={{
