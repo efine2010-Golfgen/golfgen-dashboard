@@ -447,20 +447,6 @@ def _hier_where(division=None, customer=None, table_alias='', marketplace=None):
     return ('AND ' + ' AND '.join(clauses) if clauses else ''), params
 
 
-def _hier_where_no_mp(division=None, customer=None, table_alias=''):
-    """Like _hier_where but WITHOUT marketplace — for tables that lack the column
-    (financial_events, fba_inventory, etc.)."""
-    prefix = table_alias + '.' if table_alias else ''
-    clauses, params = [], []
-    if division and division != 'all':
-        clauses.append(f"{prefix}division = ?")
-        params.append(division)
-    if customer and customer != 'all' and customer != 'All Channels':
-        clauses.append(f"{prefix}customer = ?")
-        params.append(customer)
-    return ('AND ' + ' AND '.join(clauses) if clauses else ''), params
-
-
 # ── ENDPOINT 1: Sales summary metrics ──────────────────────
 @router.get("/api/sales/summary")
 def sales_summary(
@@ -476,8 +462,8 @@ def sales_summary(
         con = get_db()
         sd, ed = _period_to_dates(period, start, end)
         hw, hp = _hier_where(division, customer, marketplace=marketplace)
-        # financial_events & fba_inventory lack marketplace column — use stripped filter
-        fw, fp = _hier_where_no_mp(division, customer)
+        # financial_events has NO marketplace column — build separate filter
+        fw, fp = _hier_where(division, customer, marketplace=None)
 
         # LY: shift back 364 days for weekday alignment
         ly_sd = sd - timedelta(days=364)
@@ -614,7 +600,7 @@ def sales_summary(
         ty_gm_pct = round(ty_gm / ty_sales, 4) if ty_sales else 0
         ly_gm_pct = round(ly_gm / ly_sales, 4) if ly_sales else 0
 
-        # Returns/refunds from financial_events (no marketplace column)
+        # Returns/refunds from financial_events
         def _sum_refunds(s, e, extra_params):
             try:
                 r = con.execute(f"""
@@ -785,8 +771,8 @@ def sales_period_comparison(
     try:
         con = get_db()
         hw, hp = _hier_where(division, customer, marketplace=marketplace)
-        # financial_events lacks marketplace column — use stripped filter
-        fw, fp = _hier_where_no_mp(division, customer)
+        # financial_events has NO marketplace column — build separate filter
+        fw, fp = _hier_where(division, customer, marketplace=None)
 
         view_periods = {
             "exec": {
@@ -927,7 +913,6 @@ def sales_period_comparison(
             # Amazon fees — exclude refund events to avoid double-counting fee reversals
             # Only fba_fees + commission + other_fees. NOT shipping_charges (credits) or
             # promotion_amount (discounts already reflected in lower revenue).
-            # NOTE: financial_events has NO marketplace column — use fw/fp.
             def _pc_fees(s, e, extra_params):
                 try:
                     r = con.execute(f"""
@@ -949,7 +934,7 @@ def sales_period_comparison(
             if ly_sales > 0 and ly_fees_val == 0:
                 ly_fees_val = round(ly_sales * 0.27, 2)
 
-            # Returns / refunds (financial_events — no marketplace column, use fw/fp)
+            # Returns / refunds
             def _pc_refunds(s, e, extra_params):
                 try:
                     r = con.execute(f"""

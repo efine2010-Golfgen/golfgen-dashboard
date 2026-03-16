@@ -102,8 +102,8 @@ def _next_id(con, table: str, seq_name: str = None) -> int:
 def _build_product_list(con, cutoff: str, division=None, customer=None, platform=None, marketplace=None) -> list:
     """Build per-ASIN product list with revenue, units, COGS, fees, and ad spend."""
     hf, hp = hierarchy_filter(division, customer, platform, marketplace)
-    # financial_events lacks marketplace column — build separate filter
-    ff, ffp = hierarchy_filter(division, customer, platform, marketplace=None)
+    # financial_events has NO marketplace column — build separate filter
+    ff, fp = hierarchy_filter(division, customer, platform, marketplace=None)
     filters = "WHERE date >= ? AND asin <> 'ALL'" + hf
     params = [cutoff] + hp
     asin_rows = con.execute(f"""
@@ -152,9 +152,9 @@ def _build_product_list(con, cutoff: str, division=None, customer=None, platform
         cogsTotal = units * cpu
         cogsPerUnit = cpu
 
-        # Financial data (financial_events lacks marketplace column — use ff/ffp)
+        # Financial data — use ff/fp (no marketplace) since financial_events lacks that column
         fin_filter = "WHERE asin = ? AND date >= ?" + ff
-        fin_params = [asin, cutoff] + ffp
+        fin_params = [asin, cutoff] + fp
         fin_row = con.execute(f"""
             SELECT COALESCE(SUM(ABS(fba_fees)), 0),
                    COALESCE(SUM(ABS(commission)), 0)
@@ -210,7 +210,7 @@ def _build_product_list(con, cutoff: str, division=None, customer=None, platform
 def _build_waterfall(con, cogs_data, start, end, division=None, customer=None, platform=None, marketplace=None):
     """Build Sellerboard-style waterfall for a single period."""
     div_cust_sql, div_cust_params = hierarchy_filter(division, customer, platform, marketplace)
-    # financial_events lacks marketplace column
+    # financial_events has NO marketplace column — build separate filter
     fin_sql, fin_params = hierarchy_filter(division, customer, platform, marketplace=None)
 
     row = con.execute(f"""
@@ -541,10 +541,10 @@ def profitability_items(days: int = Query(365), division: Optional[str] = None,
     cutoff = (datetime.now(ZoneInfo("America/Chicago")) - timedelta(days=days)).strftime("%Y-%m-%d")
     products = _build_product_list(con, cutoff, division, customer, platform, marketplace)
 
-    # financial_events lacks marketplace column — filter without it
-    ff, ffp = hierarchy_filter(division, customer, platform, marketplace=None)
+    # financial_events has NO marketplace column — exclude it from filter
+    ff, fp = hierarchy_filter(division, customer, platform, marketplace=None)
     fin_filter = "WHERE date >= ?" + ff
-    fin_params = [cutoff] + ffp
+    fin_params = [cutoff] + fp
     fin_by_asin = {}
     try:
         fin_rows = con.execute(f"""
@@ -759,7 +759,7 @@ def fee_detail(days: int = Query(30), division: Optional[str] = None,
     con = get_db()
     now = datetime.now(ZoneInfo("America/Chicago"))
     cutoff = (now - timedelta(days=days)).strftime("%Y-%m-%d")
-    # financial_events has NO marketplace column — filter without it
+    # financial_events has NO marketplace column — exclude it from filter
     hf, hp = hierarchy_filter(division, customer, platform, marketplace=None)
 
     # Aggregate fee totals from financial_events
