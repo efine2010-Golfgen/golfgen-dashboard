@@ -84,7 +84,7 @@ export function WalmartScorecard({ filters }) {
   const displayKpis = kpiList
     .map((item) => {
       const val = kpis[item.key];
-      if (!val) return null;
+      if (!val || (val.ty === 0 && val.ly === 0)) return null;
       return {
         label: item.label,
         value: fVal(val.ty, item.label),
@@ -92,6 +92,22 @@ export function WalmartScorecard({ filters }) {
       };
     })
     .filter(Boolean);
+
+  // If no KPIs from backend extraction, build from scorecard rows directly
+  if (displayKpis.length === 0 && scorecard.length > 0) {
+    // Get a few key metrics from Last Week period
+    const lwRows = scorecard.filter((r) => r.period === "Last Week");
+    const seen = new Set();
+    lwRows.forEach((r) => {
+      if (displayKpis.length >= 5 || seen.has(r.metricName)) return;
+      seen.add(r.metricName);
+      displayKpis.push({
+        label: r.metricName,
+        value: fVal(r.valueTy, r.metricName),
+        delta: r.valueDiff ? (r.valueDiff * 100).toFixed(1) : null,
+      });
+    });
+  }
 
   // Group scorecard by section
   const sections = {};

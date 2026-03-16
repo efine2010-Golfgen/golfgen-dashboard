@@ -2,16 +2,12 @@ import { useState, useEffect } from "react";
 import { api } from "../../lib/api";
 import {
   SG,
-  DM,
   Card,
   CardHdr,
   KPICard,
   ChartCanvas,
-  DeltaBadge,
   fN,
-  f$,
   fPct,
-  delta,
   COLORS,
 } from "./WalmartHelpers";
 
@@ -19,8 +15,6 @@ export function WalmartInventory({ filters }) {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [data, setData] = useState(null);
-  const [selectedItem, setSelectedItem] = useState(null);
-  const [selectedPeriod, setSelectedPeriod] = useState("L4W");
 
   useEffect(() => {
     (async () => {
@@ -29,9 +23,6 @@ export function WalmartInventory({ filters }) {
         setError(null);
         const result = await api.walmartInventory(filters);
         setData(result);
-        if (result?.instockDetail?.length > 0) {
-          setSelectedItem(result.instockDetail[0].itemDesc);
-        }
       } catch (err) {
         setError(err.message);
       } finally {
@@ -65,73 +56,36 @@ export function WalmartInventory({ filters }) {
   const kpis = data.kpis || {};
   const instockTrend = data.instockTrend || {};
   const ohDistribution = data.ohDistribution || {};
-  const instockByType = data.instockByType || {};
-  const instockDetail = data.instockDetail || [];
-  const inventoryDetail = data.inventoryDetail || [];
 
   // Build instock trend chart data
+  // API returns: {itemName: {lw: val, l4w: val, l13w: val, l26w: val, l52w: val}}
   const itemNames = Object.keys(instockTrend);
-  const periods = ["L52W", "L26W", "L13W", "L4W", "LW"];
-  const periodLabels = ["52W", "26W", "13W", "4W", "1W"];
-  const instockChartLines = itemNames.map((item, idx) => ({
-    label: item,
-    data: periods.map((p) => instockTrend[item]?.[periods.indexOf(p)] || 0),
-    borderColor: Object.values(COLORS)[idx % 5],
+  const periodKeys = ["lw", "l4w", "l13w", "l26w", "l52w"];
+  const periodLabels = ["1W", "4W", "13W", "26W", "52W"];
+  const colorValues = Object.values(COLORS);
+
+  const instockChartLines = itemNames.slice(0, 8).map((item, idx) => ({
+    label: item.length > 25 ? item.substring(0, 25) + "…" : item,
+    data: periodKeys.map((p) => instockTrend[item]?.[p] || 0),
+    borderColor: colorValues[idx % colorValues.length],
+    fill: false,
+    tension: 0.3,
   }));
 
-  // Build OH distribution chart data for selected period
-  const ohPeriod = selectedPeriod;
-  const ohData = ohDistribution[ohPeriod] || {};
+  // Build OH distribution chart (by sales type)
+  // API returns: {salesType: totalOh} e.g. {"Regular": 1234, "Clearance": 56}
+  const ohLabels = Object.keys(ohDistribution);
+  const ohValues = Object.values(ohDistribution);
   const ohChartData = {
-    labels: ohData.items || [],
+    labels: ohLabels,
     datasets: [
       {
-        label: "TY",
-        data: ohData.ty || [],
-        backgroundColor: COLORS.teal,
-      },
-      {
-        label: "LY",
-        data: ohData.ly || [],
-        backgroundColor: COLORS.orange,
+        label: "OH Units",
+        data: ohValues,
+        backgroundColor: [COLORS.teal, COLORS.red, COLORS.orange, COLORS.blue, COLORS.purple],
       },
     ],
   };
-
-  // Category sales (instock by type chart)
-  const catPeriods = Object.keys(instockByType).slice(0, 4);
-  const catChartData = {
-    labels: catPeriods,
-    datasets: [
-      {
-        label: "Regular",
-        data: catPeriods.map((p) => instockByType[p]?.Regular || 0),
-        backgroundColor: COLORS.teal,
-      },
-      {
-        label: "Clearance",
-        data: catPeriods.map((p) => instockByType[p]?.Clearance || 0),
-        backgroundColor: COLORS.red,
-      },
-    ],
-  };
-
-  // Item instock detail chart
-  const selectedItemData = instockDetail.find(
-    (row) => row.itemDesc === selectedItem
-  );
-  const itemInstockChartData = selectedItemData
-    ? {
-        labels: ["Avg Instock %"],
-        datasets: [
-          {
-            label: selectedItem,
-            data: [selectedItemData.avgInstockPct * 100],
-            backgroundColor: COLORS.blue,
-          },
-        ],
-      }
-    : null;
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: "24px" }}>
@@ -139,229 +93,101 @@ export function WalmartInventory({ filters }) {
       <div
         style={{
           display: "grid",
-          gridTemplateColumns: "repeat(6, 1fr)",
+          gridTemplateColumns: "repeat(3, 1fr)",
           gap: "12px",
         }}
       >
-        <KPICard
-          label="Total Store OH"
-          value={fN(kpis.totalStoreOh)}
-          delta={0}
-        />
-        <KPICard label="Avg Instock %" value={fPct(kpis.avgInstockPct)} />
-        <KPICard label="Retail Inventory" value={f$(kpis.retailInventory)} />
+        <KPICard label="Total OH Units" value={fN(kpis.totalOhUnits)} />
+        <KPICard label="Avg Instock %" value={kpis.avgInstockPct != null ? Number(kpis.avgInstockPct).toFixed(1) + "%" : "—"} />
         <KPICard label="Weeks of Supply" value={fN(kpis.weeksOfSupply)} />
-        <KPICard
-          label="Clearance Instock %"
-          value={fPct(kpis.clearanceInstockPct)}
-        />
-        <KPICard label="CVP Instock %" value={fPct(kpis.cvpInstockPct)} />
       </div>
 
       {/* Instock % Trend */}
       <Card>
-        <CardHdr title="Instock % Trend (52 weeks)" />
+        <CardHdr title="Instock % Trend by Item" />
         {instockChartLines.length > 0 ? (
-          <ChartCanvas
-            type="line"
-            data={{
-              labels: periodLabels,
-              datasets: instockChartLines,
-            }}
-            height={300}
-          />
+          <div style={{ position: "relative", height: 300 }}>
+            <ChartCanvas
+              type="line"
+              data={{
+                labels: periodLabels,
+                datasets: instockChartLines,
+              }}
+              height={300}
+            />
+          </div>
         ) : (
           <p style={{ ...SG(11), color: "var(--txt3)" }}>No trend data</p>
         )}
       </Card>
 
-      {/* OH Distribution */}
-      <Card>
-        <CardHdr title="OH per Traited Store" />
-        <div style={{ marginBottom: "12px" }}>
-          <label style={{ ...SG(11, 500), marginRight: "12px" }}>
-            Period:
-          </label>
-          <select
-            value={selectedPeriod}
-            onChange={(e) => setSelectedPeriod(e.target.value)}
-            style={{
-              padding: "6px 8px",
-              ...SG(11),
-              borderRadius: "4px",
-              border: "1px solid var(--border)",
-            }}
-          >
-            {Object.keys(ohDistribution).map((p) => (
-              <option key={p} value={p}>
-                {p}
-              </option>
-            ))}
-          </select>
+      {/* OH Distribution by Sales Type */}
+      {ohLabels.length > 0 && (
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "12px" }}>
+          <Card>
+            <CardHdr title="OH Distribution by Type" />
+            <div style={{ position: "relative", height: 250 }}>
+              <ChartCanvas type="bar" data={ohChartData} height={250} />
+            </div>
+          </Card>
+          <Card>
+            <CardHdr title="OH Breakdown" />
+            <div style={{ position: "relative", height: 250 }}>
+              <ChartCanvas type="doughnut" data={ohChartData} height={250} />
+            </div>
+          </Card>
         </div>
-        <ChartCanvas
-          type="bar"
-          data={ohChartData}
-          height={300}
-        />
-      </Card>
-
-      {/* Two charts side by side */}
-      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "12px" }}>
-        <Card>
-          <CardHdr title="Instock by Type" />
-          <ChartCanvas type="bar" data={catChartData} height={250} />
-        </Card>
-        <Card>
-          <CardHdr title="Category Sales" />
-          <p style={{ ...SG(11), color: "var(--txt3)" }}>Chart placeholder</p>
-        </Card>
-      </div>
-
-      {/* Item Instock Chart */}
-      <Card>
-        <CardHdr title="Item Instock Detail" />
-        <div style={{ marginBottom: "12px" }}>
-          <label style={{ ...SG(11, 500), marginRight: "12px" }}>
-            Item:
-          </label>
-          <select
-            value={selectedItem || ""}
-            onChange={(e) => setSelectedItem(e.target.value)}
-            style={{
-              padding: "6px 8px",
-              ...SG(11),
-              borderRadius: "4px",
-              border: "1px solid var(--border)",
-            }}
-          >
-            {instockDetail.map((row) => (
-              <option key={row.itemDesc} value={row.itemDesc}>
-                {row.itemDesc}
-              </option>
-            ))}
-          </select>
-        </div>
-        {itemInstockChartData && (
-          <ChartCanvas type="bar" data={itemInstockChartData} height={250} />
-        )}
-      </Card>
+      )}
 
       {/* Instock Detail Table */}
-      <Card>
-        <CardHdr title="Instock Detail" />
-        <div
-          style={{
-            overflowX: "auto",
-            fontSize: "11px",
-            lineHeight: "1.6",
-          }}
-        >
-          <table
-            style={{
-              width: "100%",
-              borderCollapse: "collapse",
-            }}
-          >
-            <thead>
-              <tr style={{ borderBottom: "1px solid var(--border)" }}>
-                <th style={{ textAlign: "left", padding: "8px", ...SG(10, 600) }}>Item Desc</th>
-                <th style={{ textAlign: "right", padding: "8px", ...SG(10, 600) }}>Traited TY</th>
-                <th style={{ textAlign: "right", padding: "8px", ...SG(10, 600) }}>Avg Instock %</th>
-                <th style={{ textAlign: "right", padding: "8px", ...SG(10, 600) }}>On Order TY</th>
-                <th style={{ textAlign: "right", padding: "8px", ...SG(10, 600) }}>Repl Instock %</th>
-              </tr>
-            </thead>
-            <tbody>
-              {instockDetail.map((row, idx) => (
-                <tr
-                  key={idx}
-                  style={{
-                    borderBottom: "1px solid var(--border)",
-                    backgroundColor: idx % 2 === 0 ? "var(--bg2)" : "transparent",
-                  }}
-                >
-                  <td style={{ padding: "8px", ...SG(11) }}>{row.itemDesc}</td>
-                  <td style={{ padding: "8px", textAlign: "right", ...SG(11) }}>
-                    {fN(row.traitedTy)}
-                  </td>
-                  <td style={{ padding: "8px", textAlign: "right", ...SG(11) }}>
-                    {fPct(row.avgInstockPct)}
-                  </td>
-                  <td style={{ padding: "8px", textAlign: "right", ...SG(11) }}>
-                    {fN(row.onOrderTy)}
-                  </td>
-                  <td style={{ padding: "8px", textAlign: "right", ...SG(11) }}>
-                    {fPct(row.replInstockPct)}
-                  </td>
+      {itemNames.length > 0 && (
+        <Card>
+          <CardHdr title="Instock % by Item & Period" />
+          <div style={{ overflowX: "auto", fontSize: "11px", lineHeight: "1.6" }}>
+            <table style={{ width: "100%", borderCollapse: "collapse" }}>
+              <thead>
+                <tr style={{ borderBottom: "1px solid var(--border)" }}>
+                  <th style={{ textAlign: "left", padding: "8px", ...SG(10, 600) }}>
+                    Item
+                  </th>
+                  {periodLabels.map((lbl) => (
+                    <th
+                      key={lbl}
+                      style={{ textAlign: "right", padding: "8px", ...SG(10, 600) }}
+                    >
+                      {lbl}
+                    </th>
+                  ))}
                 </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      </Card>
-
-      {/* Inventory Detail Table */}
-      <Card>
-        <CardHdr title="Inventory Detail" />
-        <div
-          style={{
-            overflowX: "auto",
-            fontSize: "11px",
-            lineHeight: "1.6",
-          }}
-        >
-          <table
-            style={{
-              width: "100%",
-              borderCollapse: "collapse",
-            }}
-          >
-            <thead>
-              <tr style={{ borderBottom: "1px solid var(--border)" }}>
-                <th style={{ textAlign: "left", padding: "8px", ...SG(10, 600) }}>Item Desc</th>
-                <th style={{ textAlign: "right", padding: "8px", ...SG(10, 600) }}>OH TY</th>
-                <th style={{ textAlign: "right", padding: "8px", ...SG(10, 600) }}>OH LY</th>
-                <th style={{ textAlign: "right", padding: "8px", ...SG(10, 600) }}>Traited TY</th>
-                <th style={{ textAlign: "right", padding: "8px", ...SG(10, 600) }}>Traited LY</th>
-                <th style={{ textAlign: "right", padding: "8px", ...SG(10, 600) }}>Instock TY</th>
-                <th style={{ textAlign: "right", padding: "8px", ...SG(10, 600) }}>Clearance OH TY</th>
-              </tr>
-            </thead>
-            <tbody>
-              {inventoryDetail.map((row, idx) => (
-                <tr
-                  key={idx}
-                  style={{
-                    borderBottom: "1px solid var(--border)",
-                    backgroundColor: idx % 2 === 0 ? "var(--bg2)" : "transparent",
-                  }}
-                >
-                  <td style={{ padding: "8px", ...SG(11) }}>{row.itemDesc}</td>
-                  <td style={{ padding: "8px", textAlign: "right", ...SG(11) }}>
-                    {fN(row.ohTy)}
-                  </td>
-                  <td style={{ padding: "8px", textAlign: "right", ...SG(11) }}>
-                    {fN(row.ohLy)}
-                  </td>
-                  <td style={{ padding: "8px", textAlign: "right", ...SG(11) }}>
-                    {fN(row.traitedTy)}
-                  </td>
-                  <td style={{ padding: "8px", textAlign: "right", ...SG(11) }}>
-                    {fN(row.traitedLy)}
-                  </td>
-                  <td style={{ padding: "8px", textAlign: "right", ...SG(11) }}>
-                    {fN(row.instockTy)}
-                  </td>
-                  <td style={{ padding: "8px", textAlign: "right", ...SG(11) }}>
-                    {fN(row.clearanceOhTy)}
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      </Card>
+              </thead>
+              <tbody>
+                {itemNames.map((item, idx) => (
+                  <tr
+                    key={idx}
+                    style={{
+                      borderBottom: "1px solid var(--border)",
+                      backgroundColor: idx % 2 === 0 ? "var(--bg2)" : "transparent",
+                    }}
+                  >
+                    <td style={{ padding: "8px", ...SG(11) }}>{item}</td>
+                    {periodKeys.map((pk) => {
+                      const val = instockTrend[item]?.[pk];
+                      return (
+                        <td
+                          key={pk}
+                          style={{ padding: "8px", textAlign: "right", ...SG(11) }}
+                        >
+                          {val != null ? Number(val).toFixed(1) + "%" : "—"}
+                        </td>
+                      );
+                    })}
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </Card>
+      )}
     </div>
   );
 }

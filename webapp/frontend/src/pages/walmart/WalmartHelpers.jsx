@@ -240,5 +240,9 @@ export function ChartCanvas({ type, labels, datasets, periods, data, height, con
     };
   }, [type, stableKey]);
 
-  return <canvas ref={canvasRef} style={{ height: height || 200 }} />;
+  return (
+    <div style={{ position: "relative", width: "100%", height: height || 200 }}>
+      <canvas ref={canvasRef} />
+    </div>
+  );
 }

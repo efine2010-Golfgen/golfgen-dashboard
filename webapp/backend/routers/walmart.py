@@ -600,7 +600,8 @@ def get_store_analytics(
 
         # Validate sort column (whitelist)
         allowed_sorts = {
-            "pos_sales_ty", "pos_qty_ty", "instock_pct_ty", "returns_qty_ty",
+            "pos_sales_ty", "pos_sales_ly", "pos_qty_ty", "pos_qty_ly",
+            "instock_pct_ty", "returns_qty_ty",
             "on_hand_qty_ty", "store_name", "store_number", "walmart_week",
         }
         sort_col = sort_by if sort_by in allowed_sorts else "pos_sales_ty"

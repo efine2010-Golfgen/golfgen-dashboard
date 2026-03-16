@@ -169,9 +169,9 @@ export function WalmartStoreAnalytics({ filters }) {
                     cursor: "pointer",
                     userSelect: "none",
                   }}
-                  onClick={() => handleSort("storeName")}
+                  onClick={() => handleSort("store_name")}
                 >
-                  Store Name{renderSortIcon("storeName")}
+                  Store Name{renderSortIcon("store_name")}
                 </th>
                 <th
                   style={{
@@ -181,9 +181,9 @@ export function WalmartStoreAnalytics({ filters }) {
                     cursor: "pointer",
                     userSelect: "none",
                   }}
-                  onClick={() => handleSort("storeNumber")}
+                  onClick={() => handleSort("store_number")}
                 >
-                  Store #{renderSortIcon("storeNumber")}
+                  Store #{renderSortIcon("store_number")}
                 </th>
                 <th
                   style={{
@@ -193,9 +193,9 @@ export function WalmartStoreAnalytics({ filters }) {
                     cursor: "pointer",
                     userSelect: "none",
                   }}
-                  onClick={() => handleSort("posSalesTy")}
+                  onClick={() => handleSort("pos_sales_ty")}
                 >
-                  POS Sales TY{renderSortIcon("posSalesTy")}
+                  POS Sales TY{renderSortIcon("pos_sales_ty")}
                 </th>
                 <th
                   style={{
@@ -205,9 +205,9 @@ export function WalmartStoreAnalytics({ filters }) {
                     cursor: "pointer",
                     userSelect: "none",
                   }}
-                  onClick={() => handleSort("posSalesLy")}
+                  onClick={() => handleSort("pos_sales_ly")}
                 >
-                  POS Sales LY{renderSortIcon("posSalesLy")}
+                  POS Sales LY{renderSortIcon("pos_sales_ly")}
                 </th>
                 <th
                   style={{
@@ -217,9 +217,9 @@ export function WalmartStoreAnalytics({ filters }) {
                     cursor: "pointer",
                     userSelect: "none",
                   }}
-                  onClick={() => handleSort("posQtyTy")}
+                  onClick={() => handleSort("pos_qty_ty")}
                 >
-                  POS Qty TY{renderSortIcon("posQtyTy")}
+                  POS Qty TY{renderSortIcon("pos_qty_ty")}
                 </th>
                 <th
                   style={{
@@ -229,9 +229,9 @@ export function WalmartStoreAnalytics({ filters }) {
                     cursor: "pointer",
                     userSelect: "none",
                   }}
-                  onClick={() => handleSort("posQtyLy")}
+                  onClick={() => handleSort("pos_qty_ly")}
                 >
-                  POS Qty LY{renderSortIcon("posQtyLy")}
+                  POS Qty LY{renderSortIcon("pos_qty_ly")}
                 </th>
                 <th
                   style={{
@@ -241,9 +241,9 @@ export function WalmartStoreAnalytics({ filters }) {
                     cursor: "pointer",
                     userSelect: "none",
                   }}
-                  onClick={() => handleSort("returnsQtyTy")}
+                  onClick={() => handleSort("returns_qty_ty")}
                 >
-                  Returns{renderSortIcon("returnsQtyTy")}
+                  Returns{renderSortIcon("returns_qty_ty")}
                 </th>
                 <th
                   style={{
@@ -253,9 +253,9 @@ export function WalmartStoreAnalytics({ filters }) {
                     cursor: "pointer",
                     userSelect: "none",
                   }}
-                  onClick={() => handleSort("onHandTy")}
+                  onClick={() => handleSort("on_hand_qty_ty")}
                 >
-                  OH{renderSortIcon("onHandTy")}
+                  OH{renderSortIcon("on_hand_qty_ty")}
                 </th>
                 <th
                   style={{
@@ -265,9 +265,9 @@ export function WalmartStoreAnalytics({ filters }) {
                     cursor: "pointer",
                     userSelect: "none",
                   }}
-                  onClick={() => handleSort("instockPctTy")}
+                  onClick={() => handleSort("instock_pct_ty")}
                 >
-                  Instock %{renderSortIcon("instockPctTy")}
+                  Instock %{renderSortIcon("instock_pct_ty")}
                 </th>
               </tr>
             </thead>
@@ -300,10 +300,10 @@ export function WalmartStoreAnalytics({ filters }) {
                     {fN(store.returnsQtyTy)}
                   </td>
                   <td style={{ padding: "8px", textAlign: "right", ...SG(11) }}>
-                    {fN(store.onHandTy)}
+                    {fN(store.onHandQtyTy)}
                   </td>
                   <td style={{ padding: "8px", textAlign: "right", ...SG(11) }}>
-                    {fPct(store.instockPctTy)}
+                    {store.instockPctTy != null ? Number(store.instockPctTy).toFixed(1) + "%" : "—"}
                   </td>
                 </tr>
               ))}

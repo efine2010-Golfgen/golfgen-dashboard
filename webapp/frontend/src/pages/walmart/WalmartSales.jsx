@@ -20,7 +20,7 @@ export function SalesPage({ filters }) {
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
-  const [selectedPeriod, setSelectedPeriod] = useState("lw");
+  const [selectedPeriod, setSelectedPeriod] = useState("l4w");
   const [expandedItem, setExpandedItem] = useState(null);
 
   // Fetch data on mount and when filters change
@@ -82,11 +82,13 @@ export function SalesPage({ filters }) {
   const items = data.items || [];
   const categories = data.categories || {};
 
-  // Calculate Reg % of Total
-  const regPct =
-    kpis.regularSalesTy && kpis.regularSalesTy + kpis.clearanceSalesTy > 0
-      ? kpis.regularSalesTy / (kpis.regularSalesTy + kpis.clearanceSalesTy)
-      : 0;
+  // Extract Regular/Clearance from salesByType for selected period
+  const typeData = salesByType[backendPeriod] || {};
+  const regSalesTy = typeData["Regular"]?.salesTy || 0;
+  const regSalesLy = typeData["Regular"]?.salesLy || 0;
+  const clrSalesTy = typeData["Clearance"]?.salesTy || 0;
+  const clrSalesLy = typeData["Clearance"]?.salesLy || 0;
+  const regPct = regSalesTy + clrSalesTy > 0 ? regSalesTy / (regSalesTy + clrSalesTy) : 0;
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
@@ -110,18 +112,18 @@ export function SalesPage({ filters }) {
         />
         <KPICard
           label="Regular Sales TY"
-          value={f$(kpis.regularSalesTy)}
-          delta={delta(kpis.regularSalesTy, kpis.regularSalesLy)}
+          value={f$(regSalesTy)}
+          delta={delta(regSalesTy, regSalesLy)}
         />
         <KPICard
           label="Clearance TY"
-          value={f$(kpis.clearanceSalesTy)}
-          delta={delta(kpis.clearanceSalesTy, kpis.clearanceSalesLy)}
+          value={f$(clrSalesTy)}
+          delta={delta(clrSalesTy, clrSalesLy)}
         />
         <KPICard
           label="Returns TY"
-          value={f$(kpis.returnsTy || 0)}
-          delta={delta(kpis.returnsTy, 0)}
+          value={fN(kpis.returnsTy || 0)}
+          delta={delta(kpis.returnsTy, kpis.returnsLy)}
           color={COLORS.purple}
         />
         <KPICard
@@ -289,8 +291,24 @@ export function SalesPage({ filters }) {
               </tr>
             </thead>
             <tbody>
-              {Object.entries(salesByType).length > 0 ? (
-                Object.entries(salesByType).map(([type, typeByPeriod]) => (
+              {(() => {
+                // Pivot: salesByType is {period: {type: {salesTy, salesLy, ...}}}
+                // We need to iterate by type across all periods
+                const allTypes = new Set();
+                Object.values(salesByType).forEach((types) =>
+                  Object.keys(types).forEach((t) => allTypes.add(t))
+                );
+                const typeList = [...allTypes].sort();
+                if (typeList.length === 0) {
+                  return (
+                    <tr>
+                      <td colSpan={16} style={{ padding: "12px", textAlign: "center", color: "var(--txt3)" }}>
+                        No sales by type data available.
+                      </td>
+                    </tr>
+                  );
+                }
+                return typeList.map((type) => (
                   <tr key={type} style={{ borderBottom: "1px solid var(--brd)" }}>
                     <td
                       style={{
@@ -303,11 +321,9 @@ export function SalesPage({ filters }) {
                     </td>
                     {PERIODS.map((p) => {
                       const bk = periodKeyMap[p] || p;
-                      const pVals = typeByPeriod?.[bk] || {
+                      const pVals = salesByType[bk]?.[type] || {
                         salesTy: 0,
                         salesLy: 0,
-                        qtyTy: 0,
-                        qtyLy: 0,
                       };
                       const d = delta(pVals.salesTy, pVals.salesLy);
                       return (
@@ -346,14 +362,8 @@ export function SalesPage({ filters }) {
                       );
                     })}
                   </tr>
-                ))
-              ) : (
-                <tr>
-                  <td colSpan={16} style={{ padding: "12px", textAlign: "center", color: "var(--txt3)" }}>
-                    No sales by type data available.
-                  </td>
-                </tr>
-              )}
+                ));
+              })()}
             </tbody>
           </table>
         </div>
@@ -451,7 +461,8 @@ export function SalesPage({ filters }) {
             <tbody>
               {items.length > 0 ? (
                 items.map((item, i) => {
-                  const d = delta(item.lw?.posSalesTy, item.lw?.posSalesLy);
+                  const itemPeriod = item[selectedPeriod] || {};
+                  const d = delta(itemPeriod.posTy, itemPeriod.posLy);
                   return (
                     <Fragment key={i}>
                       <tr style={{ borderBottom: "1px solid var(--brd)" }}>
@@ -493,7 +504,7 @@ export function SalesPage({ filters }) {
                             color: "var(--txt)",
                           }}
                         >
-                          {f$(item.lw?.posSalesTy)}
+                          {f$(itemPeriod.posTy)}
                         </td>
                         <td
                           style={{
@@ -502,7 +513,7 @@ export function SalesPage({ filters }) {
                             color: "var(--txt2)",
                           }}
                         >
-                          {f$(item.lw?.posSalesLy)}
+                          {f$(itemPeriod.posLy)}
                         </td>
                         <td
                           style={{
@@ -551,83 +562,47 @@ export function SalesPage({ filters }) {
                                     </div>
                                     <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
                                       <div>
-                                        <div
-                                          style={{
-                                            ...SG(7),
-                                            color: "var(--txt3)",
-                                            marginBottom: 1,
-                                          }}
-                                        >
+                                        <div style={{ ...SG(7), color: "var(--txt3)", marginBottom: 1 }}>
                                           POS Sales TY
                                         </div>
                                         <div style={{ color: "var(--txt)" }}>
-                                          {f$(pData.posSalesTy)}
+                                          {f$(pData.posTy)}
                                         </div>
                                       </div>
                                       <div>
-                                        <div
-                                          style={{
-                                            ...SG(7),
-                                            color: "var(--txt3)",
-                                            marginBottom: 1,
-                                          }}
-                                        >
+                                        <div style={{ ...SG(7), color: "var(--txt3)", marginBottom: 1 }}>
+                                          POS Sales LY
+                                        </div>
+                                        <div style={{ color: "var(--txt2)" }}>
+                                          {f$(pData.posLy)}
+                                        </div>
+                                      </div>
+                                      <div>
+                                        <div style={{ ...SG(7), color: "var(--txt3)", marginBottom: 1 }}>
                                           POS Qty TY
                                         </div>
                                         <div style={{ color: "var(--txt)" }}>
-                                          {fN(pData.posQtyTy)}
+                                          {fN(pData.qtyTy)}
                                         </div>
                                       </div>
                                       <div>
-                                        <div
-                                          style={{
-                                            ...SG(7),
-                                            color: "var(--txt3)",
-                                            marginBottom: 1,
-                                          }}
-                                        >
-                                          Traited TY
-                                        </div>
-                                        <div style={{ color: "var(--txt)" }}>
-                                          {fN(pData.traitedTy)}
-                                        </div>
-                                      </div>
-                                      <div>
-                                        <div
-                                          style={{
-                                            ...SG(7),
-                                            color: "var(--txt3)",
-                                            marginBottom: 1,
-                                          }}
-                                        >
-                                          AUR
-                                        </div>
-                                        <div style={{ color: "var(--txt)" }}>
-                                          {f$(pData.aurTy)}
-                                        </div>
-                                      </div>
-                                      <div>
-                                        <div
-                                          style={{
-                                            ...SG(7),
-                                            color: "var(--txt3)",
-                                            marginBottom: 1,
-                                          }}
-                                        >
-                                          OH
+                                        <div style={{ ...SG(7), color: "var(--txt3)", marginBottom: 1 }}>
+                                          OH TY
                                         </div>
                                         <div style={{ color: "var(--txt)" }}>
                                           {fN(pData.ohTy)}
                                         </div>
                                       </div>
                                       <div>
-                                        <div
-                                          style={{
-                                            ...SG(7),
-                                            color: "var(--txt3)",
-                                            marginBottom: 1,
-                                          }}
-                                        >
+                                        <div style={{ ...SG(7), color: "var(--txt3)", marginBottom: 1 }}>
+                                          OH LY
+                                        </div>
+                                        <div style={{ color: "var(--txt2)" }}>
+                                          {fN(pData.ohLy)}
+                                        </div>
+                                      </div>
+                                      <div>
+                                        <div style={{ ...SG(7), color: "var(--txt3)", marginBottom: 1 }}>
                                           Instock %
                                         </div>
                                         <div style={{ color: "var(--txt)" }}>
