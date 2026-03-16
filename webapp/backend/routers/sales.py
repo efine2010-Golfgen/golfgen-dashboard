@@ -502,7 +502,9 @@ def sales_summary(
         ty_ctr = _ads_ctr(sd, ed, hp)
         ly_ctr = _ads_ctr(ly_sd, ly_ed, hp)
 
-        # Amazon fees from financial_events
+        # Amazon fees from financial_events — exclude refund events to avoid
+        # double-counting fee reversals (refund rows have positive fba_fees/commission
+        # which represent fee credits back, ABS() would incorrectly add them as fees).
         def _sum_fees(s, e, extra_params):
             try:
                 r = con.execute(f"""
@@ -511,7 +513,8 @@ def sales_summary(
                            COALESCE(SUM(ABS(promotion_amount)), 0),
                            COALESCE(SUM(ABS(shipping_charges)), 0)
                     FROM financial_events
-                    WHERE date >= ? AND date <= ? {hw}
+                    WHERE date >= ? AND date <= ?
+                      AND (event_type IS NULL OR event_type NOT ILIKE '%%refund%%') {hw}
                 """, [str(s), str(e)] + extra_params).fetchone()
                 fba_ref = float(r[0]) if r else 0
                 other = float(r[1]) if r else 0
@@ -740,6 +743,9 @@ def sales_period_comparison(
             },
             "daily": {
                 "Today": "today", "Yesterday": "yesterday",
+                "2 Days Ago": "2_days_ago", "3 Days Ago": "3_days_ago",
+                "4 Days Ago": "4_days_ago", "5 Days Ago": "5_days_ago",
+                "6 Days Ago": "6_days_ago",
             },
             "weekly": {
                 "WTD": "wtd", "Last Week": "last_week",
@@ -748,6 +754,7 @@ def sales_period_comparison(
             },
             "monthly": {
                 "MTD": "mtd", "Last Month": "last_month",
+                "2 Months Ago": "2_months_ago", "3 Months Ago": "3_months_ago",
                 "Last 12 Months": "last_12m",
             },
             "yearly": {
@@ -847,15 +854,60 @@ def sales_period_comparison(
             ly_aur = round(float(ly_sales) / ly_units, 2) if ly_units else 0
             ly_aov = round(float(ly_sales) / ly_orders, 2) if ly_orders else 0
             ly_conv = round(float(ly_units) / ly_sessions, 4) if ly_sessions else 0
+
+            # Amazon fees — exclude refund events to avoid double-counting fee reversals
+            def _pc_fees(s, e, extra_params):
+                try:
+                    r = con.execute(f"""
+                        SELECT COALESCE(SUM(ABS(fba_fees)), 0) + COALESCE(SUM(ABS(commission)), 0),
+                               COALESCE(SUM(ABS(other_fees)), 0),
+                               COALESCE(SUM(ABS(promotion_amount)), 0),
+                               COALESCE(SUM(ABS(shipping_charges)), 0)
+                        FROM financial_events
+                        WHERE date >= ? AND date <= ?
+                          AND (event_type IS NULL OR event_type NOT ILIKE '%%refund%%') {hw}
+                    """, [str(s), str(e)] + extra_params).fetchone()
+                    return round(float(r[0]) + float(r[1]) + float(r[2]) + float(r[3]), 2)
+                except Exception:
+                    return 0
+
+            ty_fees = _pc_fees(sd, ed, hp)
+            ly_fees_val = _pc_fees(ly_sd, ly_ed, hp)
+            # Fallback: estimate fees at 27% when no financial_events data
+            if sales > 0 and ty_fees == 0:
+                ty_fees = round(sales * 0.27, 2)
+            if ly_sales > 0 and ly_fees_val == 0:
+                ly_fees_val = round(ly_sales * 0.27, 2)
+
+            # Returns / refunds
+            def _pc_refunds(s, e, extra_params):
+                try:
+                    r = con.execute(f"""
+                        SELECT COALESCE(COUNT(*), 0),
+                               COALESCE(SUM(ABS(product_charges)), 0)
+                        FROM financial_events
+                        WHERE date >= ? AND date <= ? AND event_type ILIKE '%%refund%%' {hw}
+                    """, [str(s), str(e)] + extra_params).fetchone()
+                    return int(r[0]) if r else 0, round(float(r[1]), 2) if r else 0
+                except Exception:
+                    return 0, 0
+
+            ty_ret_units, ty_ret_amt = _pc_refunds(sd, ed, hp)
+            ly_ret_units, ly_ret_amt = _pc_refunds(ly_sd, ly_ed, hp)
+
             result[label] = {
                 "sales": round(sales, 2), "units": units, "aur": aur,
                 "orders": orders, "aov": aov,
                 "sessions": sessions, "glance_views": glance_views,
                 "ctr": ctr, "conversion": conv,
+                "amazon_fees": ty_fees, "returns": ty_ret_units,
+                "returns_amount": ty_ret_amt,
                 "ly_sales": round(ly_sales, 2), "ly_units": ly_units,
                 "ly_aur": ly_aur, "ly_orders": ly_orders, "ly_aov": ly_aov,
                 "ly_sessions": ly_sessions, "ly_glance_views": ly_gv,
                 "ly_conversion": ly_conv,
+                "ly_amazon_fees": ly_fees_val, "ly_returns": ly_ret_units,
+                "ly_returns_amount": ly_ret_amt,
             }
 
         con.close()
@@ -1090,9 +1142,30 @@ def sales_heatmap(
                         merged.append(r)
                 rows = sorted(merged, key=lambda r: fmt_date(r[0]))
 
+        # Supplement today's data from orders table if daily_sales hasn't synced yet
+        # (S&T report lags behind — the orders sync is more current for today)
+        today_str = str(today)
+        today_in_data = any(fmt_date(r[0]) == today_str for r in rows)
+        if not today_in_data:
+            try:
+                s_iso = datetime(today.year, today.month, today.day, 0, 0, 0, tzinfo=CENTRAL).isoformat()
+                e_iso = datetime(today.year, today.month, today.day, 23, 59, 59, tzinfo=CENTRAL).isoformat()
+                o_row = con.execute(f"""
+                    SELECT COALESCE(SUM(number_of_items), 0)
+                    FROM orders
+                    WHERE purchase_date >= ? AND purchase_date <= ?
+                      AND (order_status IS NULL OR order_status NOT IN ('Cancelled')) {hw}
+                """, [s_iso, e_iso] + hp).fetchone()
+                today_units = int(o_row[0]) if o_row and o_row[0] else 0
+                if today_units > 0:
+                    rows = list(rows) + [(today_str, today_units)]
+            except Exception:
+                pass
+
         con.close()
 
         result = []
+        day_names = ['Mon','Tue','Wed','Thu','Fri','Sat','Sun']
         for r in rows:
             d_str = fmt_date(r[0])
             units = int(r[1])
@@ -1103,7 +1176,6 @@ def sales_heatmap(
             days_ago = (today - dt).days
             week = days_ago // 7
             day = dt.weekday()  # 0=Mon, 6=Sun
-            day_names = ['Mon','Tue','Wed','Thu','Fri','Sat','Sun']
             if week < 26:
                 result.append({
                     "week": week, "day": day,
@@ -1238,6 +1310,7 @@ def sales_fee_breakdown(
         hw, hp = _hier_where(division, customer, marketplace=marketplace)
 
         # Sum every fee column separately for granular breakdown
+        # Exclude refund events — fee reversals on refunds would inflate totals
         row = con.execute(f"""
             SELECT COALESCE(SUM(ABS(fba_fees)), 0),
                    COALESCE(SUM(ABS(commission)), 0),
@@ -1245,7 +1318,8 @@ def sales_fee_breakdown(
                    COALESCE(SUM(ABS(promotion_amount)), 0),
                    COALESCE(SUM(ABS(shipping_charges)), 0)
             FROM financial_events
-            WHERE date >= ? AND date <= ? {hw}
+            WHERE date >= ? AND date <= ?
+              AND (event_type IS NULL OR event_type NOT ILIKE '%%refund%%') {hw}
         """, [str(sd), str(ed)] + hp).fetchone()
 
         fba = round(float(row[0]), 2)

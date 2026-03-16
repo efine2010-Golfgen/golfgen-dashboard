@@ -261,7 +261,7 @@ export default function Products({ filters = {} }) {
       const gradeOrder = { "A+": 5, "A": 4, "B+": 3, "B": 2, "C": 1 };
       const diff = (gradeOrder[b.grade] || 0) - (gradeOrder[a.grade] || 0);
       return diff !== 0 ? diff : b.rev - a.rev;
-    }).slice(0, 3);
+    }).slice(0, 5);
   const needsAction = enriched.filter(p => p.grade === "C").sort((a, b) => b.rev - a.rev)[0];
 
   /* ── Heatmap rows — top 9 by revenue ── */
@@ -366,10 +366,10 @@ export default function Products({ filters = {} }) {
 
       {/* ══ TOP PERFORMERS CARDS ══ */}
       <SecDiv label="Top Performers This Period" />
-      <div style={{ display: "grid", gridTemplateColumns: `repeat(${needsAction ? 4 : Math.min(topPerformers.length, 4)}, 1fr)`, gap: 10, marginBottom: 12 }}>
+      <div style={{ display: "grid", gridTemplateColumns: `repeat(${Math.min(topPerformers.length + (needsAction ? 1 : 0), 6)}, 1fr)`, gap: 10, marginBottom: 12 }}>
         {topPerformers.map((p, i) => {
-          const accent = i === 0 ? "#2ECFAA" : i === 1 ? "#E87830" : "#F5B731";
-          const rank = i === 0 ? "🏆 #1 by Score" : i === 1 ? "🥈 #2 by Score" : "🥉 #3 by Score";
+          const accent = i === 0 ? "#2ECFAA" : i === 1 ? "#E87830" : i === 2 ? "#F5B731" : i === 3 ? "#5B9FD4" : "#a78bfa";
+          const rank = i === 0 ? "🏆 #1 by Score" : i === 1 ? "🥈 #2 by Score" : i === 2 ? "🥉 #3 by Score" : `#${i+1} by Score`;
           return (
             <div key={p.asin} style={{ background: "linear-gradient(145deg,var(--card),var(--card2))", borderRadius: 11, padding: "12px 14px", border: "1px solid var(--brd)", position: "relative", overflow: "hidden", cursor: "pointer", borderTop: `2px solid ${accent}` }}>
               <div style={{ ...SG(), fontSize: 7, fontWeight: 700, textTransform: "uppercase", letterSpacing: ".1em", color: "var(--txt3)", marginBottom: 5, display: "flex", alignItems: "center", justifyContent: "space-between" }}>

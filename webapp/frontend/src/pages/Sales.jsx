@@ -134,7 +134,11 @@ function yoyBarSVG(data, W=1100, H=180) {
       const hh = h(v);
       const bx = x(mi,yi);
       s += `<rect x="${bx.toFixed(1)}" y="${(pad.t+ih-hh).toFixed(1)}" width="${bw.toFixed(1)}" height="${hh.toFixed(1)}" fill="${CC[k]}" rx="2" opacity="${k==='y2026'?1:.82}"/>`;
-      if (v > 0 && k === 'y2026') s += `<text x="${(bx+bw/2).toFixed(1)}" y="${(pad.t+ih-hh-3).toFixed(1)}" text-anchor="middle" font-size="7" fill="${B.o3}">${f$(v)}</text>`;
+      if (v > 0) {
+        const barLabelColor = k === 'y2024' ? '#8899aa' : k === 'y2025' ? B.b3 : B.o3;
+        const barLabel = v >= 1e6 ? `$${(v/1e6).toFixed(1)}M` : v >= 1000 ? `$${Math.round(v/1000)}k` : `$${Math.round(v)}`;
+        s += `<text x="${(bx+bw/2).toFixed(1)}" y="${(pad.t+ih-hh-3).toFixed(1)}" text-anchor="middle" font-size="7" font-weight="600" fill="${barLabelColor}">${barLabel}</text>`;
+      }
     });
     s += `<text x="${(pad.l+(mi+.5)/data.length*iw).toFixed(1)}" y="${H-6}" text-anchor="middle" font-size="9" fill="#374f66">${d.month}</text>`;
   });
@@ -637,10 +641,12 @@ export default function Sales({ filters = {} }) {
               ['Sales $',      f$(d.sales),         f$(d.ly_sales),         pct(d.sales, d.ly_sales),         false],
               ['Units',        fN(d.units),          fN(d.ly_units),         pct(d.units, d.ly_units),          false],
               ['AUR',          f$(d.aur),            f$(d.ly_aur),           pct(d.aur, d.ly_aur),              false],
+              ['Amazon Fees',  f$(d.amazon_fees),    f$(d.ly_amazon_fees),   pct(d.amazon_fees, d.ly_amazon_fees), true],
+              ['Returns',      d.returns_amount > 0 ? `${d.returns} · ${f$(d.returns_amount)}` : fN(d.returns),
+                               d.ly_returns_amount > 0 ? `${d.ly_returns} · ${f$(d.ly_returns_amount)}` : fN(d.ly_returns),
+                               pct(d.returns_amount || d.returns, d.ly_returns_amount || d.ly_returns), true],
               ['Orders',       fN(d.orders),         fN(d.ly_orders),        pct(d.orders, d.ly_orders),        false],
-              ['AOV',          f$(d.aov),            f$(d.ly_aov),           pct(d.aov, d.ly_aov),              false],
               ['Sessions',     fN(d.sessions),       fN(d.ly_sessions),      pct(d.sessions, d.ly_sessions),    false],
-              ['Glance Views', fN(d.glance_views),   fN(d.ly_glance_views),  pct(d.glance_views, d.ly_glance_views), false],
               ['Conv %',       fP(d.conversion),     fP(d.ly_conversion),    pct(d.conversion, d.ly_conversion), false],
             ];
             return (
