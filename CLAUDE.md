@@ -435,6 +435,31 @@ WalmartAnalytics.jsx split into 7 sub-components in walmart/ directory for stabi
   brighter colors (#f59e0b amber, #ef4444 red, #3b82f6 blue), TY bars semi-transparent
 - Clearance/Regular lines: renamed "Clearance TY"/"Regular TY", thicker (2.5px)
 
+#### Scorecard Charts & Formatting (March 16, 2026): COMPLETE ✓
+- Replaced 4 bar charts with: 4 quarterly pie/doughnut charts (POS $, POS Units, Gross Margin $, Return $)
+  + bar graph: Maintained Margin vs Gross Margin by quarter
+  + bar graph: Replenishment In Stock % TY vs LY by quarter
+- Fixed metric formatting: Store Returns as dollar (not %), Unit Turns/Weeks of Supply as 1-decimal numbers,
+  Retail Turns as number (not %). New getMetricFormat() with NUMBER_1D_METRICS and DOLLAR_OVERRIDE_METRICS arrays.
+- Added vendor comparison hide/show toggle button (showComparison state)
+- ChartCanvas: Added options prop with deep merge for plugins, scales, and top-level overrides (indexAxis)
+
+#### eCommerce & Inventory Fixes (March 16, 2026): COMPLETE ✓
+- eCommerce Top Items chart: horizontal bars (indexAxis: "y"), labels up to 40 chars, increased height (320px)
+- Inventory Weekly Instock chart: bars now show dept instock % (left axis, 0-100% scale),
+  colored lines show per-item instock % by week. OH Breakdown doughnut chart deleted.
+- Backend: /api/walmart/weekly-trend now returns instockPct per week, itemInstock map (per-item per-week), weekOrder
+
+#### Store Analytics Map Overhaul (March 16, 2026): COMPLETE ✓
+- WM_DATA expanded to 46 states with correct FIPS codes + returns field
+- CITY_DATA expanded to 100 cities with lat/lng and returns field
+- 20 METRO_AREAS with center coordinates and radius (DFW, Houston, Atlanta, Phoenix, LA, etc.)
+- Smooth D3 gradient heat map (scaleLinear, dark blue → light blue → red) instead of discrete tiers
+- Metric toggle: Sales $ / Sales U / Return $ — updates heat map colors for state, city, and metro views
+- City name labels shown when Cities checkbox is ON
+- Metro outlines (dashed purple circles) when Metro checkbox is ON
+- REGIONS now computed from WM_DATA, STATE_TO_REGION auto-built from REGIONS.states arrays
+
 Remaining: First Tee, Belk, Hobby Lobby, Albertsons, Family Dollar
 ingestion (same table schemas, different channel value). Google Drive watched folder. Email ingestion.
 
