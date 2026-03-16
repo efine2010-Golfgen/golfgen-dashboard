@@ -610,10 +610,18 @@ def get_store_analytics(
         # Clamp limit
         limit = min(max(limit, 1), 500)
 
-        # ── Query 1: Total count for pagination
-        count_query = f"SELECT COUNT(*) FROM walmart_store_weekly {where_clause}"
+        # ── Query 1: Total count + aggregate KPIs for pagination
+        count_query = f"""
+            SELECT COUNT(*),
+                   SUM(COALESCE(pos_sales_ty, 0)),
+                   SUM(COALESCE(returns_qty_ty, 0))
+            FROM walmart_store_weekly {where_clause}
+        """
         count_row = con.execute(count_query, hp).fetchone()
         total = _safe_int(count_row[0]) if count_row else 0
+        total_pos_sales = _n(count_row[1]) if count_row else 0.0
+        total_returns = _n(count_row[2]) if count_row else 0.0
+        avg_pos_per_store = total_pos_sales / total if total > 0 else 0.0
 
         # ── Query 2: Paginated store data
         data_query = f"""
@@ -671,6 +679,9 @@ def get_store_analytics(
         return {
             "kpis": {
                 "totalStores": total,
+                "posSalesTy": total_pos_sales,
+                "avgPosSalesPerStore": round(avg_pos_per_store, 2),
+                "returnsQtyTy": total_returns,
             },
             "stores": stores,
             "total": total,
