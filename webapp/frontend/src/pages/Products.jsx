@@ -133,15 +133,28 @@ const unitsHmBgFg = (v, max, isDeclining, isHW) => {
 };
 
 /* ── Grade calculator ── */
+/* Scoring: Revenue (0-25), CVR (0-25), Margin (0-20), ACOS (0-15), Returns (0-15)
+   Revenue is weighted heavily so low-revenue items can't score A+ on ratios alone.
+   Items with <$500 rev are capped at B+ max. */
 function calcGrade(p) {
   let score = 0;
-  if (p.convRate >= 5) score += 30; else if (p.convRate >= 3.5) score += 20; else if (p.convRate >= 2.5) score += 10;
-  if (p.margin >= 50) score += 25; else if (p.margin >= 38) score += 15; else if (p.margin >= 25) score += 5;
+  // Revenue (0-25) — heavily weighted so niche/low-volume items don't rank top
+  if (p.rev >= 10000) score += 25;
+  else if (p.rev >= 5000) score += 20;
+  else if (p.rev >= 2000) score += 12;
+  else if (p.rev >= 500) score += 5;
+  // CVR (0-25)
+  if (p.convRate >= 5) score += 25; else if (p.convRate >= 3.5) score += 18; else if (p.convRate >= 2.5) score += 10;
+  // Margin (0-20)
+  if (p.margin >= 50) score += 20; else if (p.margin >= 38) score += 12; else if (p.margin >= 25) score += 5;
+  // ACOS (0-15) — no ad spend gets partial credit
   const acos = p.adSpend > 0 && p.rev > 0 ? (p.adSpend / p.rev * 100) : 0;
-  if (acos === 0 || acos <= 20) score += 20; else if (acos <= 35) score += 10;
+  if (acos === 0) score += 8; else if (acos <= 20) score += 15; else if (acos <= 35) score += 8;
+  // Returns (0-15)
   const ret = p.refundRate || 0;
   if (ret <= 3) score += 15; else if (ret <= 6) score += 8;
-  if (p.rev > 5000) score += 10; else if (p.rev > 2000) score += 5;
+  // Cap: items under $500 revenue can't exceed B+
+  if (p.rev < 500 && score >= 55) score = 54;
   if (score >= 85) return "A+"; if (score >= 70) return "A"; if (score >= 55) return "B+"; if (score >= 40) return "B";
   return "C";
 }
@@ -544,12 +557,9 @@ export default function Products({ filters = {} }) {
         <div style={{ display: "flex", alignItems: "center", gap: 5, padding: "10px 16px 0", flexWrap: "wrap" }}>
           {[
             { key: "all", label: "All SKUs" },
-            { key: "golf", label: "Golf" },
-            { key: "hw", label: "Housewares" },
-            { key: "amazon", label: "Amazon" },
-            { key: "star", label: "⭐ A Grade" },
-            { key: "warn", label: "⚠ Needs Action" },
-            { key: "highspend", label: "💸 High Ad Spend" },
+            { key: "star", label: "A Grade" },
+            { key: "warn", label: "Needs Action" },
+            { key: "highspend", label: "High Ad Spend" },
           ].map(f => (
             <button key={f.key} onClick={() => setFilterTag(f.key)} style={{
               display: "inline-flex", alignItems: "center", height: 24, padding: "0 9px", borderRadius: 7,
@@ -561,19 +571,6 @@ export default function Products({ filters = {} }) {
               {f.label}
             </button>
           ))}
-          <span style={{ ...SG(), fontSize: 9, color: "var(--txt3)", whiteSpace: "nowrap", marginLeft: 8 }}>Sort by</span>
-          <select value={sortKey} onChange={e => { setSortKey(e.target.value); setSortDir("desc"); }} style={{
-            height: 24, padding: "0 8px", borderRadius: 7, border: "1px solid var(--brd2)",
-            background: "var(--ibg)", color: "var(--txt2)", ...SG(), fontSize: 9, outline: "none", cursor: "pointer",
-          }}>
-            <option value="rev">Revenue</option>
-            <option value="convRate">CVR %</option>
-            <option value="margin">Margin %</option>
-            <option value="acos">ACOS</option>
-            <option value="velocity">Velocity</option>
-            <option value="units">Units</option>
-            <option value="ret">Return Rate</option>
-          </select>
           <input
             value={searchQ}
             onChange={e => setSearchQ(e.target.value)}

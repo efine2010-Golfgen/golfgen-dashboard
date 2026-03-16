@@ -505,22 +505,21 @@ def sales_summary(
         # Amazon fees from financial_events — exclude refund events to avoid
         # double-counting fee reversals (refund rows have positive fba_fees/commission
         # which represent fee credits back, ABS() would incorrectly add them as fees).
+        # NOTE: Only include actual Amazon fees: fba_fees + commission + other_fees.
+        # shipping_charges are CREDITS (money to seller), NOT fees.
+        # promotion_amount is a discount that reduces revenue, not an Amazon service fee.
         def _sum_fees(s, e, extra_params):
             try:
                 r = con.execute(f"""
                     SELECT COALESCE(SUM(ABS(fba_fees)), 0) + COALESCE(SUM(ABS(commission)), 0),
-                           COALESCE(SUM(ABS(other_fees)), 0),
-                           COALESCE(SUM(ABS(promotion_amount)), 0),
-                           COALESCE(SUM(ABS(shipping_charges)), 0)
+                           COALESCE(SUM(ABS(other_fees)), 0)
                     FROM financial_events
                     WHERE date >= ? AND date <= ?
                       AND (event_type IS NULL OR event_type NOT ILIKE '%%refund%%') {hw}
                 """, [str(s), str(e)] + extra_params).fetchone()
                 fba_ref = float(r[0]) if r else 0
                 other = float(r[1]) if r else 0
-                promo = float(r[2]) if r else 0
-                ship = float(r[3]) if r else 0
-                return fba_ref + other + promo + ship
+                return fba_ref + other
             except Exception as fee_err:
                 logger.error(f"_sum_fees error: {fee_err} | s={s} e={e} hw={hw}")
                 return 0
@@ -779,6 +778,7 @@ def sales_period_comparison(
             """, [str(s), str(e)] + extra_params).fetchone()
             return float(r[0]), int(r[1]), int(r[2]), int(r[3])
 
+        today = _today_central()
         for label, period_key in periods_map.items():
             sd, ed = _period_to_dates(period_key)
             sales, units, sessions, glance_views = _daily_sales_sum(sd, ed, hp)
@@ -798,8 +798,24 @@ def sales_period_comparison(
                 elif o_units > units:
                     units = o_units
 
-            elif sales == 0 and units == 0:
-                # For longer periods (WTD, MTD, etc.) only: step back up to 3 days if no data
+            elif ed >= today and sd < today:
+                # Multi-day period that includes today (WTD, MTD, YTD).
+                # S&T report lags for today — supplement with orders data for today.
+                today_sales_row = con.execute(f"""
+                    SELECT COALESCE(SUM(ordered_product_sales), 0),
+                           COALESCE(SUM(units_ordered), 0)
+                    FROM daily_sales
+                    WHERE asin = 'ALL' AND date = ? {hw}
+                """, [str(today)] + hp).fetchone()
+                today_ds_sales = float(today_sales_row[0]) if today_sales_row else 0
+                if today_ds_sales == 0:
+                    o_sales, o_units, o_cnt = _orders_supplement(con, today, today, hw, hp)
+                    if o_sales > 0 or o_cnt > 0:
+                        sales += o_sales
+                        units += o_units
+
+            if sales == 0 and units == 0:
+                # For any period still at zero: step back up to 3 days if no data
                 for step in range(1, 4):
                     sd_fb = sd - timedelta(days=step)
                     ed_fb = ed - timedelta(days=step)
@@ -856,18 +872,18 @@ def sales_period_comparison(
             ly_conv = round(float(ly_units) / ly_sessions, 4) if ly_sessions else 0
 
             # Amazon fees — exclude refund events to avoid double-counting fee reversals
+            # Only fba_fees + commission + other_fees. NOT shipping_charges (credits) or
+            # promotion_amount (discounts already reflected in lower revenue).
             def _pc_fees(s, e, extra_params):
                 try:
                     r = con.execute(f"""
                         SELECT COALESCE(SUM(ABS(fba_fees)), 0) + COALESCE(SUM(ABS(commission)), 0),
-                               COALESCE(SUM(ABS(other_fees)), 0),
-                               COALESCE(SUM(ABS(promotion_amount)), 0),
-                               COALESCE(SUM(ABS(shipping_charges)), 0)
+                               COALESCE(SUM(ABS(other_fees)), 0)
                         FROM financial_events
                         WHERE date >= ? AND date <= ?
                           AND (event_type IS NULL OR event_type NOT ILIKE '%%refund%%') {hw}
                     """, [str(s), str(e)] + extra_params).fetchone()
-                    return round(float(r[0]) + float(r[1]) + float(r[2]) + float(r[3]), 2)
+                    return round(float(r[0]) + float(r[1]), 2)
                 except Exception:
                     return 0
 

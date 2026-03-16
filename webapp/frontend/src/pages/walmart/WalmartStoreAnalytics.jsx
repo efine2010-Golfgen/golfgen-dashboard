@@ -445,8 +445,8 @@ function USMap({ showCities, showRegions, selectedMetric, onSelectState }) {
             .attr("opacity", 0.85)
             .style("pointer-events", "none");
 
-          // City name labels (top 30 only to avoid clutter)
-          const topCities = validCities.slice(0, 30);
+          // City name labels (top 50 to show more coverage)
+          const topCities = validCities.slice(0, 50);
           g.selectAll("text.city-label")
             .data(topCities)
             .enter()
@@ -569,6 +569,7 @@ function DataPanel({ selectedMetric }) {
         <button onClick={() => setPanelTab("states")} style={tabStyle("states")}>States</button>
         <button onClick={() => setPanelTab("cities")} style={tabStyle("cities")}>Cities</button>
         <button onClick={() => setPanelTab("metro")} style={tabStyle("metro")}>Metro</button>
+        <button onClick={() => setPanelTab("regions")} style={tabStyle("regions")}>Regions</button>
       </div>
 
       {/* Content */}
@@ -632,6 +633,46 @@ function DataPanel({ selectedMetric }) {
                 <span style={{ textAlign: "right", color: "var(--txt2)", fontSize: "10px" }}>{m.stores > 0 ? fmtK(m.avg) : "—"}</span>
               </div>
             ))}
+          </div>
+        )}
+
+        {/* REGIONS */}
+        {panelTab === "regions" && (
+          <div>
+            <div style={headerRow}>
+              <span>Region</span>
+              <span style={{ textAlign: "right" }}>Total $</span>
+              <span style={{ textAlign: "right" }}>Stores</span>
+              <span style={{ textAlign: "right" }}>Avg $/St</span>
+            </div>
+            {Object.entries(REGIONS).sort((a, b) => (b[1].pos || 0) - (a[1].pos || 0)).map(([name, r], i) => (
+              <div key={name} style={rowStyle(i)}>
+                <span style={{ ...SG(10, 600), color: r.color }}>{name}</span>
+                <span style={{ textAlign: "right", color: "#2ECFAA", fontWeight: "600", fontSize: "10px" }}>{fmtK(r.pos || 0)}</span>
+                <span style={{ textAlign: "right", color: "var(--txt2)", fontSize: "10px" }}>{r.stores || 0}</span>
+                <span style={{ textAlign: "right", color: "var(--txt2)", fontSize: "10px" }}>{r.stores > 0 ? fmtK(Math.round((r.pos || 0) / r.stores)) : "—"}</span>
+              </div>
+            ))}
+            {/* States within each region */}
+            <div style={{ marginTop: 12, borderTop: "1px solid var(--brd)", paddingTop: 8 }}>
+              <div style={{ ...SG(9, 600), color: "var(--txt3)", padding: "4px 8px", textTransform: "uppercase", letterSpacing: ".06em" }}>States by Region</div>
+              {Object.entries(REGIONS).sort((a, b) => (b[1].pos || 0) - (a[1].pos || 0)).map(([name, r]) => (
+                <div key={name} style={{ marginBottom: 8 }}>
+                  <div style={{ ...SG(9, 700), color: r.color, padding: "4px 8px" }}>{name}</div>
+                  {Object.values(WM_DATA)
+                    .filter((s) => r.states.includes(s.abbr))
+                    .sort((a, b) => b.pos - a.pos)
+                    .map((s, i) => (
+                      <div key={s.abbr} style={{ ...rowStyle(i), gridTemplateColumns: "1fr 70px 45px 60px" }}>
+                        <span style={{ ...SG(9, 400), color: "var(--txt2)" }}>{s.abbr} — {s.name}</span>
+                        <span style={{ textAlign: "right", color: "var(--txt2)", fontSize: "9px" }}>{fmtK(s.pos)}</span>
+                        <span style={{ textAlign: "right", color: "var(--txt3)", fontSize: "9px" }}>{s.traited}</span>
+                        <span style={{ textAlign: "right", color: "var(--txt3)", fontSize: "9px" }}>{fmtAvg(s.pos, s.traited)}</span>
+                      </div>
+                    ))}
+                </div>
+              ))}
+            </div>
           </div>
         )}
       </div>
@@ -735,6 +776,184 @@ export function WalmartStoreAnalytics() {
         {/* RIGHT: DATA PANEL */}
         <Card style={{ padding: "0", display: "flex", flexDirection: "column", maxHeight: "620px" }}>
           <DataPanel selectedMetric={selectedMetric} />
+        </Card>
+      </div>
+
+      {/* ═══════════ 4 CHARTS — 2×2 Grid ═══════════ */}
+      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14 }}>
+        {/* Top 20 States — Horizontal Bar */}
+        <Card>
+          <CardHdr title="Top 20 States — POS Sales" />
+          <ChartCanvas
+            type="bar"
+            height={360}
+            configKey={`states-bar-${selectedMetric}`}
+            labels={statesSorted.slice(0, 20).map((s) => s.abbr)}
+            datasets={[
+              {
+                label: selectedMetric === "qty" ? "Units" : selectedMetric === "returns" ? "Return $" : "Sales $",
+                data: statesSorted.slice(0, 20).map((s) =>
+                  selectedMetric === "qty" ? s.qty : selectedMetric === "returns" ? (s.returns || 0) : s.pos
+                ),
+                backgroundColor: statesSorted.slice(0, 20).map((_, i) => {
+                  const pct = 1 - i / 20;
+                  return selectedMetric === "returns"
+                    ? `rgba(232,120,48,${0.35 + pct * 0.6})`
+                    : selectedMetric === "qty"
+                    ? `rgba(123,174,208,${0.35 + pct * 0.6})`
+                    : `rgba(46,207,170,${0.35 + pct * 0.6})`;
+                }),
+                borderColor: selectedMetric === "returns" ? "#E87830" : selectedMetric === "qty" ? "#7BAED0" : "#2ECFAA",
+                borderWidth: 1,
+                borderRadius: 3,
+              },
+            ]}
+            options={{
+              indexAxis: "y",
+              plugins: {
+                legend: { display: false },
+              },
+              scales: {
+                x: {
+                  ticks: {
+                    callback: (v) => selectedMetric === "qty" ? v.toLocaleString() : "$" + (v >= 1000 ? (v / 1000).toFixed(0) + "K" : v),
+                  },
+                },
+                y: {
+                  ticks: { font: { size: 10 } },
+                },
+              },
+            }}
+          />
+        </Card>
+
+        {/* Top 20 Cities — Horizontal Bar */}
+        <Card>
+          <CardHdr title="Top 20 Cities — POS Sales" />
+          <ChartCanvas
+            type="bar"
+            height={360}
+            configKey={`cities-bar-${selectedMetric}`}
+            labels={citiesSorted.slice(0, 20).map((c) => {
+              const name = c.city.length > 12 ? c.city.substring(0, 12) : c.city;
+              return name + ", " + c.state;
+            })}
+            datasets={[
+              {
+                label: selectedMetric === "qty" ? "Units" : selectedMetric === "returns" ? "Return $" : "Sales $",
+                data: citiesSorted.slice(0, 20).map((c) =>
+                  selectedMetric === "qty" ? c.qty : selectedMetric === "returns" ? (c.returns || 0) : c.pos
+                ),
+                backgroundColor: citiesSorted.slice(0, 20).map((_, i) => {
+                  const pct = 1 - i / 20;
+                  return `rgba(167,139,250,${0.35 + pct * 0.6})`;
+                }),
+                borderColor: "#a78bfa",
+                borderWidth: 1,
+                borderRadius: 3,
+              },
+            ]}
+            options={{
+              indexAxis: "y",
+              plugins: {
+                legend: { display: false },
+              },
+              scales: {
+                x: {
+                  ticks: {
+                    callback: (v) => selectedMetric === "qty" ? v.toLocaleString() : "$" + (v >= 1000 ? (v / 1000).toFixed(0) + "K" : v),
+                  },
+                },
+                y: {
+                  ticks: { font: { size: 9 } },
+                },
+              },
+            }}
+          />
+        </Card>
+
+        {/* Metro Areas — Horizontal Bar */}
+        <Card>
+          <CardHdr title="Metro Areas — POS Sales" />
+          <ChartCanvas
+            type="bar"
+            height={360}
+            configKey={`metro-bar-${selectedMetric}`}
+            labels={getMetroStats().map((m) => m.name)}
+            datasets={[
+              {
+                label: "Sales $",
+                data: getMetroStats().map((m) => m.pos),
+                backgroundColor: getMetroStats().map((_, i) => {
+                  const pct = 1 - i / 20;
+                  return `rgba(245,183,49,${0.35 + pct * 0.6})`;
+                }),
+                borderColor: "#F5B731",
+                borderWidth: 1,
+                borderRadius: 3,
+              },
+            ]}
+            options={{
+              indexAxis: "y",
+              plugins: {
+                legend: { display: false },
+              },
+              scales: {
+                x: {
+                  ticks: {
+                    callback: (v) => "$" + (v >= 1000 ? (v / 1000).toFixed(0) + "K" : v),
+                  },
+                },
+                y: {
+                  ticks: { font: { size: 10 } },
+                },
+              },
+            }}
+          />
+        </Card>
+
+        {/* Regional Sales Mix — Doughnut */}
+        <Card>
+          <CardHdr title="Regional Sales Mix" />
+          <ChartCanvas
+            type="doughnut"
+            height={360}
+            configKey={`regions-doughnut-${selectedMetric}`}
+            labels={Object.keys(REGIONS)}
+            datasets={[
+              {
+                data: Object.values(REGIONS).map((r) =>
+                  selectedMetric === "qty" ? (r.qty || 0) : selectedMetric === "returns" ? (r.returns || 0) : (r.pos || 0)
+                ),
+                backgroundColor: Object.values(REGIONS).map((r) => r.color),
+                borderColor: "#0d1b2a",
+                borderWidth: 2,
+              },
+            ]}
+            options={{
+              plugins: {
+                legend: {
+                  position: "right",
+                  labels: {
+                    padding: 16,
+                    font: { family: "'Space Grotesk', monospace", size: 11 },
+                    color: "rgba(255,255,255,.7)",
+                    generateLabels: (chart) => {
+                      const data = chart.data;
+                      const total = data.datasets[0].data.reduce((a, v) => a + v, 0);
+                      return data.labels.map((label, i) => ({
+                        text: label + " (" + (total > 0 ? ((data.datasets[0].data[i] / total) * 100).toFixed(1) : 0) + "%)",
+                        fillStyle: data.datasets[0].backgroundColor[i],
+                        strokeStyle: "#0d1b2a",
+                        lineWidth: 2,
+                        index: i,
+                      }));
+                    },
+                  },
+                },
+              },
+            }}
+          />
         </Card>
       </div>
 
