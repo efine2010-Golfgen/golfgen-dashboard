@@ -684,7 +684,7 @@ def get_store_analytics(
 # ═════════════════════════════════════════════════════════════════════════════
 
 
-@router.get("/api/walmart/debug-counts")
+@router.get("/api/debug/walmart-counts")
 def debug_counts():
     """Quick row count check for all Walmart tables (no auth)."""
     con = get_db()
