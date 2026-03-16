@@ -56,12 +56,11 @@ def _get_drive_service():
     """
     from googleapiclient.discovery import build
 
-    # Prefer OAuth2 user credentials (has storage quota)
-    # NOTE: Uses DRIVE_OAUTH_* vars, NOT the SSO GOOGLE_OAUTH_* vars.
-    # The SSO client is not authorized for Drive API scope.
-    refresh_token = os.environ.get("DRIVE_OAUTH_REFRESH_TOKEN", "")
-    client_id = os.environ.get("DRIVE_OAUTH_CLIENT_ID", "") or os.environ.get("GOOGLE_OAUTH_CLIENT_ID", "")
-    client_secret = os.environ.get("DRIVE_OAUTH_CLIENT_SECRET", "") or os.environ.get("GOOGLE_OAUTH_CLIENT_SECRET", "")
+    # Prefer OAuth2 user credentials (has storage quota on personal Drive)
+    # Service accounts cannot upload to personal Drive (no storage quota).
+    refresh_token = os.environ.get("GOOGLE_DRIVE_REFRESH_TOKEN", "") or os.environ.get("GOOGLE_OAUTH_REFRESH_TOKEN", "")
+    client_id = os.environ.get("GOOGLE_OAUTH_CLIENT_ID", "")
+    client_secret = os.environ.get("GOOGLE_OAUTH_CLIENT_SECRET", "")
 
     if refresh_token and client_id and client_secret:
         from google.oauth2.credentials import Credentials
