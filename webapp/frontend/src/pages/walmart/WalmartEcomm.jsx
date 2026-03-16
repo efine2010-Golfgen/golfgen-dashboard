@@ -1,27 +1,70 @@
-import { SG, Card, fN, f$, delta, COLORS, KPICard, ChartCanvas } from "./WalmartHelpers";
+import { useState, useEffect } from "react";
+import { api } from "../../lib/api";
+import {
+  SG,
+  Card,
+  CardHdr,
+  fN,
+  f$,
+  delta,
+  COLORS,
+  KPICard,
+  ChartCanvas,
+} from "./WalmartHelpers";
 
-export function EcommPage({ data }) {
-  if (!data?.ecommerce)
+export function WalmartEcomm({ filters }) {
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(null);
+  const [data, setData] = useState(null);
+
+  useEffect(() => {
+    (async () => {
+      try {
+        setLoading(true);
+        setError(null);
+        const result = await api.walmartEcommerce(filters);
+        setData(result);
+      } catch (err) {
+        setError(err.message);
+      } finally {
+        setLoading(false);
+      }
+    })();
+  }, [filters.division, filters.customer]);
+
+  if (loading) {
     return (
       <Card>
-        <p style={{ ...SG(12), color: "var(--txt3)" }}>
-          No eComm data available.
-        </p>
+        <p style={{ ...SG(12), color: "var(--txt3)" }}>Loading...</p>
       </Card>
     );
+  }
+  if (error) {
+    return (
+      <Card>
+        <p style={{ ...SG(12), color: "#f87171" }}>Error: {error}</p>
+      </Card>
+    );
+  }
+  if (!data) {
+    return (
+      <Card>
+        <p style={{ ...SG(12), color: "var(--txt3)" }}>No data</p>
+      </Card>
+    );
+  }
 
-  const ec = data.ecommerce;
-  const kpis = ec.kpis || {};
-  const items = ec.items || [];
+  const kpis = data.kpis || {};
+  const items = data.items || [];
 
   return (
-    <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+    <div style={{ display: "flex", flexDirection: "column", gap: "24px" }}>
       {/* KPI Cards */}
       <div
         style={{
           display: "grid",
-          gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))",
-          gap: 12,
+          gridTemplateColumns: "repeat(5, 1fr)",
+          gap: "12px",
         }}
       >
         <KPICard
@@ -43,165 +86,114 @@ export function EcommPage({ data }) {
           value={f$(kpis.shippedSalesLy)}
         />
         <KPICard
-          label="Item Count"
-          value={fN(kpis.itemCount)}
+          label="Total Items"
+          value={fN(kpis.totalItems)}
         />
       </div>
 
       {/* Auth vs Shipped Chart */}
-      <Card>
-        <div style={{ ...SG(12, 700), color: "var(--txt)", marginBottom: 8 }}>
-          Auth vs Shipped
-        </div>
-        <ChartCanvas
-          type="bar"
-          labels={["Auth", "Shipped"]}
-          datasets={[
-            {
-              label: "TY",
-              data: [
-                kpis.authSalesTy || 0,
-                kpis.shippedSalesTy || 0,
+      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "12px" }}>
+        <Card>
+          <CardHdr title="Auth vs Shipped Sales" />
+          <ChartCanvas
+            type="bar"
+            data={{
+              labels: ["Auth", "Shipped"],
+              datasets: [
+                {
+                  label: "TY",
+                  data: [kpis.authSalesTy || 0, kpis.shippedSalesTy || 0],
+                  backgroundColor: COLORS.teal,
+                },
+                {
+                  label: "LY",
+                  data: [kpis.authSalesLy || 0, kpis.shippedSalesLy || 0],
+                  backgroundColor: COLORS.orange,
+                },
               ],
-              backgroundColor: COLORS.teal,
-            },
-            {
-              label: "LY",
-              data: [
-                kpis.authSalesLy || 0,
-                kpis.shippedSalesLy || 0,
+            }}
+            height={250}
+          />
+        </Card>
+        <Card>
+          <CardHdr title="eComm Items" />
+          <ChartCanvas
+            type="bar"
+            data={{
+              labels: items.slice(0, 5).map((item) => item.productName),
+              datasets: [
+                {
+                  label: "Auth Sales",
+                  data: items.slice(0, 5).map((item) => item.authSalesTy || 0),
+                  backgroundColor: COLORS.blue,
+                },
               ],
-              backgroundColor: COLORS.orange,
-            },
-          ]}
-        />
-      </Card>
+            }}
+            height={250}
+          />
+        </Card>
+      </div>
 
-      {/* Items Table */}
+      {/* Item Detail Table */}
       <Card>
-        <div style={{ ...SG(12, 700), color: "var(--txt)", marginBottom: 8 }}>
-          Item Detail
-        </div>
-        <div style={{ overflowX: "auto" }}>
+        <CardHdr title="Item Detail" />
+        <div style={{ overflowX: "auto", fontSize: "11px", lineHeight: "1.6" }}>
           <table
             style={{
               width: "100%",
               borderCollapse: "collapse",
-              ...SG(9),
             }}
           >
             <thead>
-              <tr style={{ borderBottom: "2px solid var(--brd)" }}>
-                <th
-                  style={{
-                    textAlign: "left",
-                    padding: "6px 8px",
-                    color: "var(--txt3)",
-                  }}
-                >
-                  Item #
+              <tr style={{ borderBottom: "1px solid var(--border)" }}>
+                <th style={{ textAlign: "left", padding: "8px", ...SG(10, 600) }}>
+                  Product Name
                 </th>
-                <th
-                  style={{
-                    textAlign: "left",
-                    padding: "6px 8px",
-                    color: "var(--txt3)",
-                  }}
-                >
-                  Product
+                <th style={{ textAlign: "left", padding: "8px", ...SG(10, 600) }}>
+                  Fineline
                 </th>
-                <th
-                  style={{
-                    textAlign: "right",
-                    padding: "6px 8px",
-                    color: "var(--txt3)",
-                  }}
-                >
-                  Auth $ TY
+                <th style={{ textAlign: "right", padding: "8px", ...SG(10, 600) }}>
+                  Auth Sales TY
                 </th>
-                <th
-                  style={{
-                    textAlign: "right",
-                    padding: "6px 8px",
-                    color: "var(--txt3)",
-                  }}
-                >
-                  Auth $ LY
+                <th style={{ textAlign: "right", padding: "8px", ...SG(10, 600) }}>
+                  Auth Sales LY
                 </th>
-                <th
-                  style={{
-                    textAlign: "right",
-                    padding: "6px 8px",
-                    color: "var(--txt3)",
-                  }}
-                >
-                  Shipped $ TY
+                <th style={{ textAlign: "right", padding: "8px", ...SG(10, 600) }}>
+                  Shipped Sales TY
                 </th>
-                <th
-                  style={{
-                    textAlign: "right",
-                    padding: "6px 8px",
-                    color: "var(--txt3)",
-                  }}
-                >
+                <th style={{ textAlign: "right", padding: "8px", ...SG(10, 600) }}>
                   Auth Qty TY
+                </th>
+                <th style={{ textAlign: "right", padding: "8px", ...SG(10, 600) }}>
+                  Auth Qty LY
                 </th>
               </tr>
             </thead>
             <tbody>
-              {items.map((item, i) => (
-                <tr key={i} style={{ borderBottom: "1px solid var(--brd)" }}>
-                  <td
-                    style={{
-                      padding: "4px 8px",
-                      color: "var(--txt)",
-                    }}
-                  >
-                    {item.itemNumber}
-                  </td>
-                  <td
-                    style={{
-                      padding: "4px 8px",
-                      color: "var(--txt)",
-                    }}
-                  >
-                    {item.productName}
-                  </td>
-                  <td
-                    style={{
-                      textAlign: "right",
-                      padding: "4px 8px",
-                      color: "var(--txt)",
-                    }}
-                  >
+              {items.map((item, idx) => (
+                <tr
+                  key={idx}
+                  style={{
+                    borderBottom: "1px solid var(--border)",
+                    backgroundColor: idx % 2 === 0 ? "var(--bg2)" : "transparent",
+                  }}
+                >
+                  <td style={{ padding: "8px", ...SG(11) }}>{item.productName}</td>
+                  <td style={{ padding: "8px", ...SG(11) }}>{item.fineline}</td>
+                  <td style={{ padding: "8px", textAlign: "right", ...SG(11) }}>
                     {f$(item.authSalesTy)}
                   </td>
-                  <td
-                    style={{
-                      textAlign: "right",
-                      padding: "4px 8px",
-                      color: "var(--txt2)",
-                    }}
-                  >
+                  <td style={{ padding: "8px", textAlign: "right", ...SG(11) }}>
                     {f$(item.authSalesLy)}
                   </td>
-                  <td
-                    style={{
-                      textAlign: "right",
-                      padding: "4px 8px",
-                      color: "var(--txt)",
-                    }}
-                  >
+                  <td style={{ padding: "8px", textAlign: "right", ...SG(11) }}>
                     {f$(item.shippedSalesTy)}
                   </td>
-                  <td
-                    style={{
-                      textAlign: "right",
-                      padding: "4px 8px",
-                      color: "var(--txt)",
-                    }}
-                  >
+                  <td style={{ padding: "8px", textAlign: "right", ...SG(11) }}>
                     {fN(item.authQtyTy)}
+                  </td>
+                  <td style={{ padding: "8px", textAlign: "right", ...SG(11) }}>
+                    {fN(item.authQtyLy)}
                   </td>
                 </tr>
               ))}

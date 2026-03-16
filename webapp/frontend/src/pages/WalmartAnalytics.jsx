@@ -2,35 +2,29 @@ import { useState, useEffect, useRef } from "react";
 import { api } from "../lib/api";
 import { SG, DM, Card } from "./walmart/WalmartHelpers";
 import { SalesPage } from "./walmart/WalmartSales";
-import { InventoryPage } from "./walmart/WalmartInventory";
-import { ScorecardPage } from "./walmart/WalmartScorecard";
-import { EcommPage } from "./walmart/WalmartEcomm";
-import { ForecastPage } from "./walmart/WalmartForecast";
+import { WalmartInventory as InventoryPage } from "./walmart/WalmartInventory";
+import { WalmartScorecard as ScorecardPage } from "./walmart/WalmartScorecard";
+import { WalmartEcomm as EcommPage } from "./walmart/WalmartEcomm";
+import { WalmartForecast as ForecastPage } from "./walmart/WalmartForecast";
+import { WalmartStoreAnalytics as StoreAnalyticsPage } from "./walmart/WalmartStoreAnalytics";
 
 export default function WalmartAnalytics({ filters = {} }) {
   const [page, setPage] = useState("sales");
-  const [data, setData] = useState(null);
+  const [availability, setAvailability] = useState(null);
   const [loading, setLoading] = useState(true);
-  const [error, setError] = useState(null);
   const [uploading, setUploading] = useState(false);
   const [uploadResult, setUploadResult] = useState(null);
   const fileRef = useRef(null);
 
   const h = filters;
 
+  // Check data availability on mount
   useEffect(() => {
     setLoading(true);
-    setError(null);
     api
-      .walmartAnalytics(h)
-      .then((d) => {
-        setData(d);
-        setError(null);
-      })
-      .catch((e) => {
-        setData(null);
-        setError(e.message);
-      })
+      .walmartAvailability(h)
+      .then((d) => setAvailability(d))
+      .catch(() => setAvailability(null))
       .finally(() => setLoading(false));
   }, [filters.division, filters.customer]);
 
@@ -42,9 +36,9 @@ export default function WalmartAnalytics({ filters = {} }) {
     try {
       const res = await api.retailUpload(file);
       setUploadResult(res);
-      // Reload data after successful upload
-      const fresh = await api.walmartAnalytics(h);
-      setData(fresh);
+      // Refresh availability after upload
+      const fresh = await api.walmartAvailability(h);
+      setAvailability(fresh);
     } catch (e) {
       setUploadResult({ status: "error", error: e.message });
     }
@@ -58,7 +52,21 @@ export default function WalmartAnalytics({ filters = {} }) {
       </div>
     );
 
-  const isDataAvailable = data?.dataAvailable === true;
+  const hasAnyData =
+    availability?.hasItemData ||
+    availability?.hasScorecardData ||
+    availability?.hasStoreData ||
+    availability?.hasEcommData ||
+    availability?.hasForecastData;
+
+  const TABS = [
+    { key: "sales", label: "SALES PERFORMANCE" },
+    { key: "inventory", label: "INVENTORY HEALTH" },
+    { key: "scorecard", label: "VENDOR SCORECARD" },
+    { key: "ecomm", label: "ECOMMERCE" },
+    { key: "forecast", label: "ORDER FORECAST" },
+    { key: "store-analytics", label: "STORE ANALYTICS" },
+  ];
 
   return (
     <div style={{ padding: "0 24px 40px" }}>
@@ -136,13 +144,7 @@ export default function WalmartAnalytics({ filters = {} }) {
           borderBottom: "1px solid var(--brd)",
         }}
       >
-        {[
-          { key: "sales", label: "SALES PERFORMANCE" },
-          { key: "inventory", label: "INVENTORY HEALTH" },
-          { key: "scorecard", label: "VENDOR SCORECARD" },
-          { key: "ecomm", label: "ECOMMERCE" },
-          { key: "forecast", label: "ORDER FORECAST" },
-        ].map((t) => (
+        {TABS.map((t) => (
           <button
             key={t.key}
             onClick={() => setPage(t.key)}
@@ -168,7 +170,7 @@ export default function WalmartAnalytics({ filters = {} }) {
       </div>
 
       {/* ── No data state ── */}
-      {!isDataAvailable && (
+      {!hasAnyData && (
         <Card
           style={{
             background: "rgba(165, 107, 225, 0.05)",
@@ -199,12 +201,13 @@ export default function WalmartAnalytics({ filters = {} }) {
         </Card>
       )}
 
-      {/* ── Page content ── */}
-      {page === "sales" && <SalesPage data={data} />}
-      {page === "inventory" && <InventoryPage data={data} />}
-      {page === "scorecard" && <ScorecardPage data={data} />}
-      {page === "ecomm" && <EcommPage data={data} />}
-      {page === "forecast" && <ForecastPage data={data} />}
+      {/* ── Page content — each tab fetches its own data ── */}
+      {page === "sales" && <SalesPage filters={h} />}
+      {page === "inventory" && <InventoryPage filters={h} />}
+      {page === "scorecard" && <ScorecardPage filters={h} />}
+      {page === "ecomm" && <EcommPage filters={h} />}
+      {page === "forecast" && <ForecastPage filters={h} />}
+      {page === "store-analytics" && <StoreAnalyticsPage filters={h} />}
     </div>
   );
 }

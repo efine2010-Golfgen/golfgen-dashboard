@@ -328,6 +328,25 @@ export const api = {
     fetchJSON(`/api/retail/ecomm?limit=${limit}&offset=${offset}${week ? '&week=' + week : ''}${_hq(h)}`),
   retailOrderForecast: (h = {}) => fetchJSON(`/api/retail/order-forecast${_hq(h) ? '?' + _hq(h).slice(1) : ''}`),
   walmartAnalytics: (h = {}) => fetchJSON('/api/retail/walmart-analytics' + (_hq(h) ? '?' + _hq(h).slice(1) : '')),
+
+  // Walmart modular endpoints (new architecture)
+  walmartAvailability: (h = {}) => fetchJSON('/api/walmart/availability' + (_hq(h) ? '?' + _hq(h).slice(1) : '')),
+  walmartSales: (h = {}) => fetchJSON('/api/walmart/sales' + (_hq(h) ? '?' + _hq(h).slice(1) : '')),
+  walmartInventory: (h = {}) => fetchJSON('/api/walmart/inventory' + (_hq(h) ? '?' + _hq(h).slice(1) : '')),
+  walmartScorecard: (h = {}) => fetchJSON('/api/walmart/scorecard' + (_hq(h) ? '?' + _hq(h).slice(1) : '')),
+  walmartEcommerce: (h = {}) => fetchJSON('/api/walmart/ecommerce' + (_hq(h) ? '?' + _hq(h).slice(1) : '')),
+  walmartForecast: (h = {}) => fetchJSON('/api/walmart/forecast' + (_hq(h) ? '?' + _hq(h).slice(1) : '')),
+  walmartStoreAnalytics: (h = {}, opts = {}) => {
+    const { week, sortBy, sortDir, limit, offset } = opts;
+    let q = _hq(h) ? '?' + _hq(h).slice(1) : '?';
+    if (week) q += `&week=${week}`;
+    if (sortBy) q += `&sort_by=${sortBy}`;
+    if (sortDir) q += `&sort_dir=${sortDir}`;
+    if (limit) q += `&limit=${limit}`;
+    if (offset) q += `&offset=${offset}`;
+    return fetchJSON('/api/walmart/store-analytics' + q);
+  },
+
   retailUpload: (file) => {
     const fd = new FormData();
     fd.append("file", file);

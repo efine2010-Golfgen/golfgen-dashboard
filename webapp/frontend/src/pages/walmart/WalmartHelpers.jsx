@@ -36,6 +36,24 @@ export const Card = ({ children, style }) => (
 );
 
 // ═════════════════════════════════════════════════════════════════════════════
+// CARD HEADER COMPONENT
+// ═════════════════════════════════════════════════════════════════════════════
+
+export const CardHdr = ({ title, right }) => (
+  <div
+    style={{
+      display: "flex",
+      justifyContent: "space-between",
+      alignItems: "center",
+      marginBottom: 14,
+    }}
+  >
+    <span style={{ ...SG(13, 700), color: "var(--txt)" }}>{title}</span>
+    {right && <span>{right}</span>}
+  </div>
+);
+
+// ═════════════════════════════════════════════════════════════════════════════
 // FORMATTING HELPERS
 // ═════════════════════════════════════════════════════════════════════════════
 
@@ -143,16 +161,20 @@ export function KPICard({ label, value, delta: d, color = COLORS.teal }) {
 // CHART CANVAS COMPONENT
 // ═════════════════════════════════════════════════════════════════════════════
 
-export function ChartCanvas({ type, labels, datasets, periods, configKey }) {
+export function ChartCanvas({ type, labels, datasets, periods, data, height, configKey }) {
+  // Support both {labels, datasets} props and {data: {labels, datasets}} prop
+  const resolvedLabels = labels || (data && data.labels);
+  const resolvedDatasets = datasets || (data && data.datasets);
+
   const canvasRef = useRef(null);
   const chartRef = useRef(null);
-  const dataRef = useRef({ labels, datasets, periods });
-  dataRef.current = { labels, datasets, periods };
+  const dataRef = useRef({ labels: resolvedLabels, datasets: resolvedDatasets, periods });
+  dataRef.current = { labels: resolvedLabels, datasets: resolvedDatasets, periods };
 
   // Use configKey or JSON.stringify a stable key to avoid infinite re-renders
   const stableKey =
     configKey ||
-    JSON.stringify({ labels, datasets: (datasets || []).map((d) => d.data) });
+    JSON.stringify({ labels: resolvedLabels, datasets: (resolvedDatasets || []).map((d) => d.data) });
 
   useEffect(() => {
     if (!canvasRef.current || !window.Chart) return;
@@ -218,5 +240,5 @@ export function ChartCanvas({ type, labels, datasets, periods, configKey }) {
     };
   }, [type, stableKey]);
 
-  return <canvas ref={canvasRef} style={{ height: 200 }} />;
+  return <canvas ref={canvasRef} style={{ height: height || 200 }} />;
 }

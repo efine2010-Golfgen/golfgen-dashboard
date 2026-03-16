@@ -1,173 +1,157 @@
-import { SG, Card, fN, f$, delta, COLORS, KPICard, ChartCanvas } from "./WalmartHelpers";
+import { useState, useEffect } from "react";
+import { api } from "../../lib/api";
+import {
+  SG,
+  Card,
+  CardHdr,
+  fN,
+  f$,
+  delta,
+  COLORS,
+  KPICard,
+  ChartCanvas,
+} from "./WalmartHelpers";
 
-export function ForecastPage({ data }) {
-  if (!data?.orderForecast)
+export function WalmartForecast({ filters }) {
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(null);
+  const [data, setData] = useState(null);
+
+  useEffect(() => {
+    (async () => {
+      try {
+        setLoading(true);
+        setError(null);
+        const result = await api.walmartForecast(filters);
+        setData(result);
+      } catch (err) {
+        setError(err.message);
+      } finally {
+        setLoading(false);
+      }
+    })();
+  }, [filters.division, filters.customer]);
+
+  if (loading) {
     return (
       <Card>
-        <p style={{ ...SG(12), color: "var(--txt3)" }}>
-          No forecast data available.
-        </p>
+        <p style={{ ...SG(12), color: "var(--txt3)" }}>Loading...</p>
       </Card>
     );
+  }
+  if (error) {
+    return (
+      <Card>
+        <p style={{ ...SG(12), color: "#f87171" }}>Error: {error}</p>
+      </Card>
+    );
+  }
+  if (!data) {
+    return (
+      <Card>
+        <p style={{ ...SG(12), color: "var(--txt3)" }}>No data</p>
+      </Card>
+    );
+  }
 
-  const of = data.orderForecast;
-  const kpis = of.kpis || {};
-  const items = of.items || [];
+  const kpis = data.kpis || {};
+  const items = data.items || [];
 
   return (
-    <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+    <div style={{ display: "flex", flexDirection: "column", gap: "24px" }}>
       {/* KPI Cards */}
       <div
         style={{
           display: "grid",
-          gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))",
-          gap: 12,
+          gridTemplateColumns: "repeat(4, 1fr)",
+          gap: "12px",
         }}
       >
         <KPICard
-          label="Cost on Order TY"
-          value={f$(kpis.costOnOrderTy)}
-          delta={delta(
-            kpis.costOnOrderTy,
-            kpis.costOnOrderLy
-          )}
+          label="DC Count"
+          value={fN(kpis.dcCount)}
         />
         <KPICard
-          label="Cost on Order LY"
-          value={f$(kpis.costOnOrderLy)}
+          label="Latest Date"
+          value={kpis.latestDate ? new Date(kpis.latestDate).toLocaleDateString() : "—"}
+        />
+        <KPICard
+          label="Cost on Order TY"
+          value={f$(kpis.costOnOrderTy)}
+          delta={delta(kpis.costOnOrderTy, kpis.costOnOrderLy)}
+        />
+        <KPICard
+          label="Whse Cost on Order TY"
+          value={f$(kpis.whseCostOnOrderTy)}
         />
       </div>
 
-      {/* Forecast Trend Chart */}
+      {/* On-Order Trend Chart */}
       <Card>
-        <div style={{ ...SG(12, 700), color: "var(--txt)", marginBottom: 8 }}>
-          On-Order Trend (TY vs LY)
-        </div>
+        <CardHdr title="On-Order Trend (TY vs LY)" />
         <ChartCanvas
           type="line"
-          labels={["Week 1", "Week 2", "Week 3", "Week 4"]}
-          datasets={[
-            {
-              label: "TY",
-              data: [0, 0, 0, 0],
-              borderColor: COLORS.teal,
-            },
-            {
-              label: "LY",
-              data: [0, 0, 0, 0],
-              borderColor: COLORS.orange,
-            },
-          ]}
+          data={{
+            labels: ["Week 1", "Week 2", "Week 3", "Week 4"],
+            datasets: [
+              {
+                label: "TY",
+                data: [kpis.costOnOrderTy || 0, 0, 0, 0],
+                borderColor: COLORS.teal,
+                fill: false,
+              },
+              {
+                label: "LY",
+                data: [kpis.costOnOrderLy || 0, 0, 0, 0],
+                borderColor: COLORS.orange,
+                fill: false,
+              },
+            ],
+          }}
+          height={250}
         />
       </Card>
 
-      {/* Items Table */}
+      {/* DC Details Table */}
       <Card>
-        <div style={{ ...SG(12, 700), color: "var(--txt)", marginBottom: 8 }}>
-          Order Details
-        </div>
-        <div style={{ overflowX: "auto" }}>
+        <CardHdr title="Order Details by DC" />
+        <div style={{ overflowX: "auto", fontSize: "11px", lineHeight: "1.6" }}>
           <table
             style={{
               width: "100%",
               borderCollapse: "collapse",
-              ...SG(9),
             }}
           >
             <thead>
-              <tr style={{ borderBottom: "2px solid var(--brd)" }}>
-                <th
-                  style={{
-                    textAlign: "left",
-                    padding: "6px 8px",
-                    color: "var(--txt3)",
-                  }}
-                >
-                  Item #
+              <tr style={{ borderBottom: "1px solid var(--border)" }}>
+                <th style={{ textAlign: "left", padding: "8px", ...SG(10, 600) }}>
+                  Snapshot Date
                 </th>
-                <th
-                  style={{
-                    textAlign: "left",
-                    padding: "6px 8px",
-                    color: "var(--txt3)",
-                  }}
-                >
-                  Description
+                <th style={{ textAlign: "left", padding: "8px", ...SG(10, 600) }}>
+                  Store DC #
                 </th>
-                <th
-                  style={{
-                    textAlign: "right",
-                    padding: "6px 8px",
-                    color: "var(--txt3)",
-                  }}
-                >
-                  Qty
-                </th>
-                <th
-                  style={{
-                    textAlign: "right",
-                    padding: "6px 8px",
-                    color: "var(--txt3)",
-                  }}
-                >
-                  Unit Cost
-                </th>
-                <th
-                  style={{
-                    textAlign: "right",
-                    padding: "6px 8px",
-                    color: "var(--txt3)",
-                  }}
-                >
-                  Total
+                <th style={{ textAlign: "left", padding: "8px", ...SG(10, 600) }}>
+                  DC Type
                 </th>
               </tr>
             </thead>
             <tbody>
-              {items.map((item, i) => (
-                <tr key={i} style={{ borderBottom: "1px solid var(--brd)" }}>
-                  <td
-                    style={{
-                      padding: "4px 8px",
-                      color: "var(--txt)",
-                    }}
-                  >
-                    {item.itemNumber || "—"}
+              {items.map((item, idx) => (
+                <tr
+                  key={idx}
+                  style={{
+                    borderBottom: "1px solid var(--border)",
+                    backgroundColor: idx % 2 === 0 ? "var(--bg2)" : "transparent",
+                  }}
+                >
+                  <td style={{ padding: "8px", ...SG(11) }}>
+                    {item.snapshotDate ? new Date(item.snapshotDate).toLocaleDateString() : "—"}
                   </td>
-                  <td
-                    style={{
-                      padding: "4px 8px",
-                      color: "var(--txt)",
-                    }}
-                  >
-                    {item.description || "—"}
+                  <td style={{ padding: "8px", ...SG(11) }}>
+                    {item.storeDcNbr || "—"}
                   </td>
-                  <td
-                    style={{
-                      textAlign: "right",
-                      padding: "4px 8px",
-                      color: "var(--txt)",
-                    }}
-                  >
-                    {fN(item.qty)}
-                  </td>
-                  <td
-                    style={{
-                      textAlign: "right",
-                      padding: "4px 8px",
-                      color: "var(--txt)",
-                    }}
-                  >
-                    {f$(item.unitCost)}
-                  </td>
-                  <td
-                    style={{
-                      textAlign: "right",
-                      padding: "4px 8px",
-                      color: "var(--txt)",
-                    }}
-                  >
-                    {f$(item.total)}
+                  <td style={{ padding: "8px", ...SG(11) }}>
+                    {item.storeDcType || "—"}
                   </td>
                 </tr>
               ))}

@@ -586,6 +586,7 @@ from routers.mfa import router as mfa_router
 from routers.supply_chain import router as supply_chain_router
 from routers.ask_claude import router as ask_claude_router
 from routers.retail import router as retail_router
+from routers.walmart import router as walmart_router
 
 app.include_router(sales_router)
 app.include_router(profitability_router)
@@ -600,6 +601,7 @@ app.include_router(mfa_router)
 app.include_router(supply_chain_router)
 app.include_router(ask_claude_router)
 app.include_router(retail_router)
+app.include_router(walmart_router)
 
 
 # ── Static Frontend (React SPA) ──────────────────────────
