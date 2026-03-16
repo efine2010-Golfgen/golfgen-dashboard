@@ -232,6 +232,7 @@ async def tab_permission_middleware(request: Request, call_next):
         path.startswith("/api/upload/") or
         path.startswith("/api/debug/") or
         path == "/api/sales/debug-today" or
+        path == "/api/retail/import-scorecard" or
         path in ("/api/health", "/api/sync", "/api/backfill") or
         path.startswith("/api/refresh")):
         return await call_next(request)
