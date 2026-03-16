@@ -21,7 +21,7 @@ from collections import defaultdict
 
 from fastapi import APIRouter, Query
 
-from core.database import get_db, get_db_rw
+from core.database import get_db
 from core.hierarchy import hierarchy_filter
 
 logger = logging.getLogger("golfgen")
@@ -723,62 +723,5 @@ def debug_counts():
     finally:
         con.close()
 
-
-@router.get("/api/debug/walmart-division-audit")
-def debug_division_audit():
-    """Check division values across all Walmart tables."""
-    con = get_db()
-    try:
-        result = {}
-        for tbl in ["walmart_item_weekly", "walmart_store_weekly", "walmart_scorecard",
-                     "walmart_ecomm_weekly", "walmart_order_forecast"]:
-            try:
-                rows = con.execute(
-                    f"SELECT division, COUNT(*) FROM {tbl} GROUP BY division ORDER BY division"
-                ).fetchall()
-                result[tbl] = {str(r[0]): int(r[1]) for r in rows}
-            except Exception as e:
-                result[tbl] = f"ERROR: {e}"
-        return result
-    finally:
-        con.close()
-
-
-@router.post("/api/debug/walmart-cleanup-housewares")
-def debug_cleanup_housewares():
-    """Delete all housewares division rows from Walmart tables."""
-    con = get_db_rw()
-    try:
-        results = {}
-        for tbl in ["walmart_item_weekly", "walmart_store_weekly", "walmart_scorecard",
-                     "walmart_ecomm_weekly", "walmart_order_forecast"]:
-            try:
-                r = con.execute(f"DELETE FROM {tbl} WHERE division = ?", ["housewares"])
-                results[f"{tbl}_deleted"] = r.rowcount if hasattr(r, 'rowcount') else "executed"
-            except Exception as e:
-                results[f"{tbl}_deleted"] = f"ERROR: {e}"
-
-        # Also delete non-dept-9 from tables that have dept columns
-        for tbl, col in [("walmart_store_weekly", "vendor_dept_number"),
-                         ("walmart_ecomm_weekly", "dept_number"),
-                         ("walmart_order_forecast", "vendor_dept_number")]:
-            try:
-                r = con.execute(f"DELETE FROM {tbl} WHERE {col} IS NOT NULL AND {col} != ?", ["9"])
-                results[f"{tbl}_non_dept9_deleted"] = r.rowcount if hasattr(r, 'rowcount') else "executed"
-            except Exception as e:
-                results[f"{tbl}_non_dept9_deleted"] = f"ERROR: {e}"
-
-        # Verify remaining counts
-        for tbl in ["walmart_item_weekly", "walmart_store_weekly", "walmart_scorecard",
-                     "walmart_ecomm_weekly", "walmart_order_forecast"]:
-            try:
-                r = con.execute(f"SELECT COUNT(*) FROM {tbl}").fetchone()
-                results[f"{tbl}_remaining"] = int(r[0]) if r else 0
-            except Exception as e:
-                results[f"{tbl}_remaining"] = f"ERROR: {e}"
-
-        return results
-    finally:
-        con.close()
 
 
