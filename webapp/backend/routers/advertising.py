@@ -729,6 +729,84 @@ def ads_profiles():
         return {"error": str(e)}
 
 
+@router.get("/api/debug/ads-budget-usage")
+def ads_budget_usage_test():
+    """Test campaign budget usage endpoint — returns actual spend data without reports."""
+    ads_creds = _load_ads_credentials()
+    if not ads_creds:
+        return {"error": "No credentials"}
+
+    result = {"tests": []}
+    try:
+        token_resp = http_requests.post("https://api.amazon.com/auth/o2/token", data={
+            "grant_type": "refresh_token",
+            "refresh_token": ads_creds["refresh_token"],
+            "client_id": ads_creds["client_id"],
+            "client_secret": ads_creds["client_secret"],
+        }, timeout=30)
+        access_token = token_resp.json().get("access_token", "")
+        if not access_token:
+            return {"error": "Token refresh failed"}
+
+        headers = {
+            "Authorization": f"Bearer {access_token}",
+            "Amazon-Advertising-API-ClientId": ads_creds["client_id"],
+            "Amazon-Advertising-API-Scope": str(ads_creds["profile_id"]),
+        }
+
+        # Test 1: Campaign budget usage (daily spend for each campaign)
+        today = datetime.now(ZoneInfo("America/Chicago"))
+        usage_body = {
+            "campaignIds": [],  # empty = all campaigns
+            "startDate": (today - timedelta(days=7)).strftime("%Y%m%d"),
+            "endDate": (today - timedelta(days=1)).strftime("%Y%m%d"),
+        }
+        usage_resp = http_requests.post(
+            "https://advertising-api.amazon.com/sp/campaigns/budget/usage",
+            headers={**headers, "Content-Type": "application/json", "Accept": "application/json"},
+            json=usage_body,
+            timeout=30,
+        )
+        result["tests"].append({
+            "name": "budget_usage",
+            "status": usage_resp.status_code,
+            "body": usage_resp.text[:2000],
+        })
+
+        # Test 2: Campaign recommendations (may have performance data)
+        rec_resp = http_requests.post(
+            "https://advertising-api.amazon.com/sp/campaigns/budgetRecommendations",
+            headers={**headers, "Content-Type": "application/vnd.spbudgetrecommendation.v4+json",
+                     "Accept": "application/vnd.spbudgetrecommendation.v4+json"},
+            json={"campaignIds": []},
+            timeout=30,
+        )
+        result["tests"].append({
+            "name": "budget_recommendations",
+            "status": rec_resp.status_code,
+            "body": rec_resp.text[:2000],
+        })
+
+        # Test 3: List all campaigns with extended info (POST)
+        camp_resp = http_requests.post(
+            "https://advertising-api.amazon.com/sp/campaigns/list",
+            headers={**headers, "Accept": "application/vnd.spCampaign.v3+json",
+                     "Content-Type": "application/vnd.spCampaign.v3+json"},
+            json={"maxResults": 100, "stateFilter": {"include": ["ENABLED", "PAUSED"]}},
+            timeout=30,
+        )
+        result["tests"].append({
+            "name": "campaigns_list_full",
+            "status": camp_resp.status_code,
+            "body": camp_resp.text[:3000],
+        })
+
+        return result
+
+    except Exception as e:
+        return {"error": str(e)}
+
+
 @router.get("/api/debug/ads-v3-test")
 def ads_v3_variations_test():
     """Test multiple v3 report configurations to find one that works."""
