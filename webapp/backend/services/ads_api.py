@@ -104,107 +104,118 @@ def _sync_pricing_data():
         logger.info("Pricing sync: sp_api not installed, skipping")
         return
 
-    credentials = _load_sp_api_credentials()
-    if not credentials:
-        logger.info("Pricing sync: no SP-API credentials, skipping")
-        return
-
-    # Get all ASINs from item master
-    items = load_item_master()
-    asins = [i["asin"] for i in items if i.get("asin")]
-    if not asins:
-        logger.warning("Pricing sync: no ASINs in item_master, skipping")
-        return
-
-    logger.info(f"Pricing sync: fetching prices for {len(asins)} ASINs via getPricing...")
     import time as _t
+    import traceback as _tb
 
     cache = _load_pricing_cache()
     prices = cache.get("prices", {})
 
-    # SP-API allows up to 20 ASINs per getPricing call
-    products_api = ProductsAPI(credentials=credentials, marketplace=Marketplaces.US)
-    batch_size = 20
+    try:
+        credentials = _load_sp_api_credentials()
+        if not credentials:
+            logger.info("Pricing sync: no SP-API credentials, skipping")
+            return
 
-    for i in range(0, len(asins), batch_size):
-        batch = asins[i:i + batch_size]
-        batch_num = i // batch_size + 1
-        try:
-            result = products_api.get_pricing(
-                ItemType="Asin",
-                Asins=batch,
-                MarketplaceId="ATVPDKIKX0DER",
-            )
-            payload = result.payload if hasattr(result, "payload") else result
+        # Get all ASINs from item master
+        items = load_item_master()
+        asins = [i["asin"] for i in items if i.get("asin")]
+        if not asins:
+            logger.warning("Pricing sync: no ASINs in item_master, skipping")
+            return
 
-            if payload is None:
-                logger.warning(f"  Batch {batch_num}: API returned None payload")
-                continue
+        logger.info(f"Pricing sync: fetching prices for {len(asins)} ASINs via getPricing...")
 
-            if not isinstance(payload, list):
-                logger.warning(f"  Batch {batch_num}: unexpected payload type={type(payload).__name__} — wrapping")
-                payload = [payload] if payload else []
+        # SP-API allows up to 20 ASINs per getPricing call
+        logger.info(f"Pricing sync: building ProductsAPI client (credentials keys: {list(credentials.keys()) if isinstance(credentials, dict) else type(credentials).__name__})")
+        products_api = ProductsAPI(credentials=credentials, marketplace=Marketplaces.US)
+        logger.info("Pricing sync: ProductsAPI client created successfully")
+        batch_size = 20
 
-            logger.info(f"  Batch {batch_num}: {len(payload)} items returned")
+        for i in range(0, len(asins), batch_size):
+            batch = asins[i:i + batch_size]
+            batch_num = i // batch_size + 1
+            try:
+                result = products_api.get_pricing(
+                    ItemType="Asin",
+                    Asins=batch,
+                    MarketplaceId="ATVPDKIKX0DER",
+                )
+                payload = result.payload if hasattr(result, "payload") else result
 
-            for item_resp in payload:
-                item_dict = _to_dict_safe(item_resp)
-                asin = item_dict.get("ASIN") or item_dict.get("asin") or ""
-                status = item_dict.get("status", "Success")
-
-                if not asin:
-                    logger.warning(f"  Batch {batch_num}: item missing ASIN: {list(item_dict.keys())[:5]}")
+                if payload is None:
+                    logger.warning(f"  Batch {batch_num}: API returned None payload")
                     continue
-                if status != "Success":
-                    logger.warning(f"  {asin}: status={status}, skipping")
-                    continue
 
-                product = _to_dict_safe(item_dict.get("Product") or item_dict.get("product"))
-                offers_raw = product.get("Offers") or product.get("offers") or []
-                offers = list(offers_raw) if offers_raw else []
+                if not isinstance(payload, list):
+                    logger.warning(f"  Batch {batch_num}: unexpected payload type={type(payload).__name__} — wrapping")
+                    payload = [payload] if payload else []
 
-                listing_price = None
-                sale_price = None
-                regular_price = None
-                buy_box_price = None
+                logger.info(f"  Batch {batch_num}: {len(payload)} items returned")
 
-                for offer in offers[:1]:  # Use first offer (our own FBA offer)
-                    o = _to_dict_safe(offer)
-                    buying_price = _to_dict_safe(o.get("BuyingPrice") or o.get("buying_price"))
-                    lp = _to_dict_safe(buying_price.get("ListingPrice") or buying_price.get("listing_price"))
-                    sp = _to_dict_safe(buying_price.get("SalePrice") or buying_price.get("sale_price"))
-                    landed = _to_dict_safe(buying_price.get("LandedPrice") or buying_price.get("landed_price"))
-                    rp = _to_dict_safe(o.get("RegularPrice") or o.get("regular_price"))
+                for item_resp in payload:
+                    item_dict = _to_dict_safe(item_resp)
+                    asin = item_dict.get("ASIN") or item_dict.get("asin") or ""
+                    status = item_dict.get("status", "Success")
 
-                    listing_price = _parse_price_amount(lp)
-                    sale_price = _parse_price_amount(sp)
-                    regular_price = _parse_price_amount(rp)
-                    buy_box_price = _parse_price_amount(landed) or _parse_price_amount(lp)
+                    if not asin:
+                        logger.warning(f"  Batch {batch_num}: item missing ASIN: {list(item_dict.keys())[:5]}")
+                        continue
+                    if status != "Success":
+                        logger.warning(f"  {asin}: status={status}, skipping")
+                        continue
 
-                prices[asin] = {
-                    "listingPrice": listing_price,
-                    "regularPrice": regular_price,
-                    "salePrice": sale_price,
-                    "buyBoxPrice": buy_box_price,
-                    "landedPrice": buy_box_price,
-                    "fetchedAt": datetime.utcnow().isoformat(),
-                }
-                logger.info(f"  {asin}: list=${listing_price}, sale=${sale_price}, reg=${regular_price}, buybox=${buy_box_price}")
+                    product = _to_dict_safe(item_dict.get("Product") or item_dict.get("product"))
+                    offers_raw = product.get("Offers") or product.get("offers") or []
+                    offers = list(offers_raw) if offers_raw else []
 
-            # Rate limit: SP-API throttles pricing calls
-            if i + batch_size < len(asins):
-                _t.sleep(0.5)
+                    listing_price = None
+                    sale_price = None
+                    regular_price = None
+                    buy_box_price = None
 
-        except Exception as e:
-            logger.error(f"Pricing sync batch {batch_num} error: {e}")
-            import traceback
-            logger.error(traceback.format_exc())
-            _t.sleep(2)
+                    for offer in offers[:1]:  # Use first offer (our own FBA offer)
+                        o = _to_dict_safe(offer)
+                        buying_price = _to_dict_safe(o.get("BuyingPrice") or o.get("buying_price"))
+                        lp = _to_dict_safe(buying_price.get("ListingPrice") or buying_price.get("listing_price"))
+                        sp = _to_dict_safe(buying_price.get("SalePrice") or buying_price.get("sale_price"))
+                        landed = _to_dict_safe(buying_price.get("LandedPrice") or buying_price.get("landed_price"))
+                        rp = _to_dict_safe(o.get("RegularPrice") or o.get("regular_price"))
 
-    cache["prices"] = prices
-    cache["lastSync"] = datetime.utcnow().isoformat()
-    _save_pricing_cache(cache)
-    logger.info(f"Pricing sync complete: {len(prices)} ASINs cached")
+                        listing_price = _parse_price_amount(lp)
+                        sale_price = _parse_price_amount(sp)
+                        regular_price = _parse_price_amount(rp)
+                        buy_box_price = _parse_price_amount(landed) or _parse_price_amount(lp)
+
+                    prices[asin] = {
+                        "listingPrice": listing_price,
+                        "regularPrice": regular_price,
+                        "salePrice": sale_price,
+                        "buyBoxPrice": buy_box_price,
+                        "landedPrice": buy_box_price,
+                        "fetchedAt": datetime.utcnow().isoformat(),
+                    }
+                    logger.info(f"  {asin}: list=${listing_price}, sale=${sale_price}, reg=${regular_price}, buybox=${buy_box_price}")
+
+                # Rate limit: SP-API throttles pricing calls
+                if i + batch_size < len(asins):
+                    _t.sleep(0.5)
+
+            except Exception as e:
+                logger.error(f"Pricing sync batch {batch_num} error ({type(e).__name__}): {e}")
+                logger.error(_tb.format_exc())
+                _t.sleep(2)
+
+    except Exception as e:
+        logger.error(f"Pricing sync: fatal error ({type(e).__name__}): {e}")
+        logger.error(_tb.format_exc())
+
+    finally:
+        # Always save the cache — even on error — so lastSync updates and we can
+        # confirm the function ran.  prices dict may be empty on hard failure.
+        cache["prices"] = prices
+        cache["lastSync"] = datetime.utcnow().isoformat()
+        _save_pricing_cache(cache)
+        logger.info(f"Pricing sync complete: {len(prices)} ASINs cached")
 
 
 def _sync_coupon_data():
