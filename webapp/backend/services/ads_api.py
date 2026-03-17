@@ -585,19 +585,154 @@ def _get_ads_access_token(creds):
 
 
 def _pull_ads_report(creds, report_type_id, columns, start_date, end_date, handler, group_by=None):
-    """Pull ads data using v2 reporting API, with v3 as fallback.
+    """Pull ads data using v3 reporting API (day-by-day for reliability).
 
-    v2 API: POST /v2/sp/{recordType}/report — simpler, more reliable.
-    v3 API: POST /reporting/reports — async, but often stuck in PENDING.
+    Creates one v3 async report per day (smaller = faster to complete).
+    If a day returns 425 (duplicate), extracts the existing report ID and polls it.
     """
-    # Try v2 first
-    ok = _pull_ads_report_v2(creds, report_type_id, columns, start_date, end_date, handler)
-    if ok:
+    _pull_ads_report_v3_daywise(creds, report_type_id, columns, start_date, end_date, handler, group_by)
+
+
+def _pull_ads_report_v3_daywise(creds, report_type_id, columns, start_date, end_date, handler, group_by=None):
+    """Create one v3 report per day for reliability. Handles 425 duplicates."""
+    import time as _time
+    import gzip as gz
+    import requests as req
+    import re
+
+    access_token = _get_ads_access_token(creds)
+    if not access_token:
         return
 
-    # If v2 fails, try v3 as fallback
-    logger.info(f"Ads sync: v2 failed for {report_type_id}, trying v3 async API...")
-    _pull_ads_report_v3(creds, report_type_id, columns, start_date, end_date, handler, group_by)
+    headers_create = {
+        "Authorization": f"Bearer {access_token}",
+        "Amazon-Advertising-API-ClientId": creds["client_id"],
+        "Amazon-Advertising-API-Scope": str(creds["profile_id"]),
+        "Content-Type": "application/vnd.createasyncreportrequest.v3+json",
+        "Accept": "application/vnd.createasyncreportrequest.v3+json",
+    }
+    headers_poll = {
+        "Authorization": f"Bearer {access_token}",
+        "Amazon-Advertising-API-ClientId": creds["client_id"],
+        "Amazon-Advertising-API-Scope": str(creds["profile_id"]),
+    }
+
+    from datetime import datetime as _dt
+    all_rows = []
+    d_start = _dt.strptime(start_date, "%Y-%m-%d")
+    d_end = _dt.strptime(end_date, "%Y-%m-%d")
+    current = d_start
+
+    while current <= d_end:
+        day_str = current.strftime("%Y-%m-%d")
+        current += timedelta(days=1)
+
+        body = {
+            "name": f"{report_type_id}_{day_str}",
+            "startDate": day_str,
+            "endDate": day_str,
+            "configuration": {
+                "adProduct": "SPONSORED_PRODUCTS",
+                "groupBy": group_by or ["campaign"],
+                "columns": columns,
+                "reportTypeId": report_type_id,
+                "timeUnit": "SUMMARY",
+                "format": "GZIP_JSON",
+            }
+        }
+
+        try:
+            logger.info(f"Ads v3 daywise: creating {report_type_id} for {day_str}...")
+            create_resp = req.post(
+                "https://advertising-api.amazon.com/reporting/reports",
+                headers=headers_create,
+                json=body,
+                timeout=30,
+            )
+
+            report_id = None
+            if create_resp.status_code in (200, 202):
+                report_id = create_resp.json().get("reportId")
+            elif create_resp.status_code == 425:
+                # Duplicate — extract existing report ID
+                match = re.search(r'([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})',
+                                  create_resp.text)
+                if match:
+                    report_id = match.group(1)
+                    logger.info(f"Ads v3 daywise: {day_str} duplicate, using existing {report_id}")
+            elif create_resp.status_code == 429:
+                logger.warning(f"Ads v3 daywise: throttled on {day_str}, waiting 60s...")
+                _time.sleep(60)
+                continue  # retry on next iteration
+            else:
+                logger.warning(f"Ads v3 daywise: create failed {day_str}: {create_resp.status_code} {create_resp.text[:200]}")
+                continue
+
+            if not report_id:
+                logger.warning(f"Ads v3 daywise: no reportId for {day_str}")
+                continue
+
+            # Poll for completion (up to 3 minutes per day report)
+            download_url = None
+            last_status = "UNKNOWN"
+            for attempt in range(18):
+                _time.sleep(10)
+                poll_resp = req.get(
+                    f"https://advertising-api.amazon.com/reporting/reports/{report_id}",
+                    headers=headers_poll,
+                    timeout=30,
+                )
+                pdata = poll_resp.json()
+                last_status = pdata.get("status", "UNKNOWN")
+
+                if attempt == 0 or attempt % 6 == 0:
+                    logger.info(f"Ads v3 daywise: poll {day_str} #{attempt+1}: {last_status}")
+
+                if last_status == "COMPLETED":
+                    download_url = pdata.get("url")
+                    break
+                elif last_status in ("FAILED", "CANCELLED"):
+                    logger.warning(f"Ads v3 daywise: {day_str} {last_status}: {pdata.get('failureReason', '')}")
+                    break
+
+            if not download_url:
+                logger.warning(f"Ads v3 daywise: {day_str} no download (last_status={last_status})")
+                continue
+
+            # Download and decompress
+            dl_resp = req.get(download_url, timeout=60)
+            try:
+                day_data = json.loads(gz.decompress(dl_resp.content).decode("utf-8"))
+            except Exception:
+                try:
+                    day_data = json.loads(dl_resp.text)
+                except Exception:
+                    logger.warning(f"Ads v3 daywise: failed to parse {day_str}")
+                    continue
+
+            if isinstance(day_data, str):
+                day_data = json.loads(day_data)
+
+            if isinstance(day_data, list):
+                # Inject date if not present (SUMMARY mode omits it)
+                for row in day_data:
+                    if "date" not in row:
+                        row["date"] = day_str
+                all_rows.extend(day_data)
+                logger.info(f"Ads v3 daywise: {report_type_id} {day_str} → {len(day_data)} rows")
+
+            # Small delay between days
+            _time.sleep(2)
+
+        except Exception as e:
+            logger.error(f"Ads v3 daywise: error on {day_str}: {e}")
+            continue
+
+    if all_rows:
+        handler(all_rows)
+        logger.info(f"Ads v3 daywise: {report_type_id} total — {len(all_rows)} rows")
+    else:
+        logger.warning(f"Ads v3 daywise: {report_type_id} — 0 rows across date range")
 
 
 def _pull_ads_report_v2(creds, report_type_id, columns, start_date, end_date, handler):

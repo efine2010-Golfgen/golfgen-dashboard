@@ -729,6 +729,160 @@ def ads_profiles():
         return {"error": str(e)}
 
 
+@router.get("/api/debug/ads-v3-test")
+def ads_v3_variations_test():
+    """Test multiple v3 report configurations to find one that works."""
+    ads_creds = _load_ads_credentials()
+    if not ads_creds:
+        return {"error": "No credentials"}
+
+    import time as _time
+
+    result = {"tests": []}
+
+    try:
+        token_resp = http_requests.post("https://api.amazon.com/auth/o2/token", data={
+            "grant_type": "refresh_token",
+            "refresh_token": ads_creds["refresh_token"],
+            "client_id": ads_creds["client_id"],
+            "client_secret": ads_creds["client_secret"],
+        }, timeout=30)
+        access_token = token_resp.json().get("access_token", "")
+        if not access_token:
+            return {"error": "Token refresh failed"}
+
+        headers = {
+            "Authorization": f"Bearer {access_token}",
+            "Amazon-Advertising-API-ClientId": ads_creds["client_id"],
+            "Amazon-Advertising-API-Scope": str(ads_creds["profile_id"]),
+        }
+
+        today = datetime.now(ZoneInfo("America/Chicago"))
+        # Use a single date 3 days ago to avoid "too recent" issues
+        test_date = (today - timedelta(days=3)).strftime("%Y-%m-%d")
+
+        # Test 1: Minimal columns, SUMMARY timeUnit (no daily breakdown)
+        configs = [
+            {
+                "name": "minimal_summary",
+                "body": {
+                    "startDate": test_date,
+                    "endDate": test_date,
+                    "configuration": {
+                        "adProduct": "SPONSORED_PRODUCTS",
+                        "groupBy": ["campaign"],
+                        "columns": ["impressions", "clicks", "spend"],
+                        "reportTypeId": "spCampaigns",
+                        "timeUnit": "SUMMARY",
+                        "format": "GZIP_JSON",
+                    }
+                }
+            },
+            {
+                "name": "daily_minimal",
+                "body": {
+                    "startDate": test_date,
+                    "endDate": test_date,
+                    "configuration": {
+                        "adProduct": "SPONSORED_PRODUCTS",
+                        "groupBy": ["campaign"],
+                        "columns": ["date", "impressions", "clicks", "spend"],
+                        "reportTypeId": "spCampaigns",
+                        "timeUnit": "DAILY",
+                        "format": "GZIP_JSON",
+                    }
+                }
+            },
+            {
+                "name": "advertiser_group",
+                "body": {
+                    "startDate": test_date,
+                    "endDate": test_date,
+                    "configuration": {
+                        "adProduct": "SPONSORED_PRODUCTS",
+                        "groupBy": ["advertiser"],
+                        "columns": ["impressions", "clicks", "spend"],
+                        "reportTypeId": "spAdvertised",
+                        "timeUnit": "SUMMARY",
+                        "format": "GZIP_JSON",
+                    }
+                }
+            },
+        ]
+
+        for cfg in configs:
+            test_result = {"name": cfg["name"]}
+            try:
+                create_resp = http_requests.post(
+                    "https://advertising-api.amazon.com/reporting/reports",
+                    headers={
+                        **headers,
+                        "Content-Type": "application/vnd.createasyncreportrequest.v3+json",
+                        "Accept": "application/vnd.createasyncreportrequest.v3+json",
+                    },
+                    json=cfg["body"],
+                    timeout=30,
+                )
+                test_result["create_status"] = create_resp.status_code
+                test_result["create_body"] = create_resp.text[:300]
+
+                report_id = ""
+                if create_resp.status_code in (200, 202):
+                    cdata = create_resp.json()
+                    report_id = cdata.get("reportId", "")
+                elif create_resp.status_code == 425:
+                    # Duplicate — extract the existing report ID
+                    try:
+                        dup_text = create_resp.text
+                        if "duplicate of" in dup_text.lower():
+                            import re
+                            match = re.search(r'([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})', dup_text)
+                            if match:
+                                report_id = match.group(1)
+                                test_result["note"] = f"Duplicate, checking existing report {report_id}"
+                    except Exception:
+                        pass
+
+                if report_id:
+                    test_result["report_id"] = report_id
+                    # Poll a few times
+                    for attempt in range(4):
+                        _time.sleep(8)
+                        poll_resp = http_requests.get(
+                            f"https://advertising-api.amazon.com/reporting/reports/{report_id}",
+                            headers=headers,
+                            timeout=30,
+                        )
+                        pdata = poll_resp.json()
+                        test_result[f"poll_{attempt+1}"] = pdata.get("status", "UNKNOWN")
+
+                        if pdata.get("status") == "COMPLETED":
+                            test_result["download_url"] = "present"
+                            # Download
+                            import gzip as _gz
+                            dl = http_requests.get(pdata["url"], timeout=30)
+                            try:
+                                rows = json.loads(_gz.decompress(dl.content).decode("utf-8"))
+                            except Exception:
+                                rows = dl.text[:300]
+                            test_result["rows"] = len(rows) if isinstance(rows, list) else "parse_error"
+                            test_result["sample"] = str(rows[:2])[:400] if isinstance(rows, list) else str(rows)[:300]
+                            break
+                        elif pdata.get("status") in ("FAILED", "CANCELLED"):
+                            test_result["failure_reason"] = pdata.get("failureReason", "unknown")
+                            break
+
+            except Exception as e:
+                test_result["error"] = str(e)
+
+            result["tests"].append(test_result)
+
+        return result
+
+    except Exception as e:
+        return {"error": str(e)}
+
+
 @router.get("/api/debug/ads-test")
 @router.get("/api/ads/debug-test")
 def ads_debug_test():
@@ -896,6 +1050,7 @@ def ads_debug_test():
         return result
 
 
+@router.get("/api/debug/ads-report/{report_id}")
 @router.get("/api/ads/report-status/{report_id}")
 def ads_report_status(report_id: str):
     """Check the status of an existing ads report by ID."""
