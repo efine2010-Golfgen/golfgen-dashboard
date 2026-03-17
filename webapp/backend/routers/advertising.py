@@ -18,6 +18,19 @@ from services.ads_api import _sync_ads_data, _load_ads_credentials
 logger = logging.getLogger("golfgen")
 router = APIRouter()
 
+
+def _n(v, default=0):
+    """Coerce Decimal/None to float for safe JSON serialization."""
+    from decimal import Decimal
+    if v is None:
+        return default
+    if isinstance(v, Decimal):
+        return float(v)
+    try:
+        return float(v)
+    except (TypeError, ValueError):
+        return default
+
 # ── App Settings Helpers ─────────────────────────────────────────
 def _get_setting(key: str) -> str | None:
     """Read a value from app_settings table."""
@@ -407,7 +420,12 @@ def ads_summary(days: int = Query(30), division: Optional[str] = None, customer:
             "cpc": 0, "ctr": 0, "cvr": 0,
         }
 
-    spend, ad_sales, impressions, clicks, orders, units = row[0]
+    spend = _n(row[0][0])
+    ad_sales = _n(row[0][1])
+    impressions = _n(row[0][2])
+    clicks = _n(row[0][3])
+    orders = _n(row[0][4])
+    units = _n(row[0][5])
 
     # Get total organic revenue for TACOS
     org_row = con.execute(f"""
@@ -415,7 +433,7 @@ def ads_summary(days: int = Query(30), division: Optional[str] = None, customer:
         FROM daily_sales
         WHERE date >= ? AND asin = 'ALL'{div_cust_sql}
     """, [cutoff] + div_cust_params).fetchone()
-    total_revenue = org_row[0] if org_row else 0
+    total_revenue = _n(org_row[0]) if org_row else 0
 
     con.close()
 
@@ -430,10 +448,10 @@ def ads_summary(days: int = Query(30), division: Optional[str] = None, customer:
         "days": days, "connected": True,
         "spend": round(spend, 2),
         "adSales": round(ad_sales, 2),
-        "impressions": impressions,
-        "clicks": clicks,
-        "orders": orders,
-        "units": units,
+        "impressions": int(impressions),
+        "clicks": int(clicks),
+        "orders": int(orders),
+        "units": int(units),
         "acos": acos,
         "roas": roas,
         "tacos": tacos,
@@ -469,18 +487,23 @@ def ads_daily(days: int = Query(30), division: Optional[str] = None, customer: O
 
     data = []
     for r in rows:
+        spend = _n(r[1])
+        ad_sales = _n(r[2])
+        impr = _n(r[3])
+        clk = _n(r[4])
+        ords = _n(r[5])
         data.append({
             "date": fmt_date(r[0]),
-            "spend": round(r[1], 2),
-            "adSales": round(r[2], 2),
-            "impressions": r[3],
-            "clicks": r[4],
-            "orders": r[5],
-            "acos": r[6],
-            "roas": r[7],
-            "tacos": r[8],
-            "cpc": r[9],
-            "ctr": r[10],
+            "spend": round(spend, 2),
+            "adSales": round(ad_sales, 2),
+            "impressions": int(impr),
+            "clicks": int(clk),
+            "orders": int(ords),
+            "acos": round(spend / ad_sales * 100, 2) if ad_sales > 0 else 0,
+            "roas": round(ad_sales / spend, 2) if spend > 0 else 0,
+            "tacos": 0,
+            "cpc": round(spend / clk, 2) if clk > 0 else 0,
+            "ctr": round(clk / impr * 100, 2) if impr > 0 else 0,
         })
 
     return {"days": days, "data": data}
@@ -519,21 +542,25 @@ def ads_campaigns(days: int = Query(30), division: Optional[str] = None, custome
 
     campaigns = []
     for r in rows:
-        impressions, clicks, spend, sales = r[5], r[6], r[7], r[8]
-        orders, units = r[9], r[10]
+        impressions = _n(r[5])
+        clicks = _n(r[6])
+        spend = _n(r[7])
+        sales = _n(r[8])
+        orders = _n(r[9])
+        units = _n(r[10])
 
         campaigns.append({
             "campaignId": r[0],
             "campaignName": r[1],
             "campaignType": r[2],
             "status": r[3],
-            "dailyBudget": round(r[4] or 0, 2),
-            "impressions": impressions,
-            "clicks": clicks,
+            "dailyBudget": round(_n(r[4]), 2),
+            "impressions": int(impressions),
+            "clicks": int(clicks),
             "spend": round(spend, 2),
             "sales": round(sales, 2),
-            "orders": orders,
-            "units": units,
+            "orders": int(orders),
+            "units": int(units),
             "acos": round(spend / sales * 100, 2) if sales > 0 else 0,
             "roas": round(sales / spend, 2) if spend > 0 else 0,
             "cpc": round(spend / clicks, 2) if clicks > 0 else 0,
@@ -574,20 +601,24 @@ def ads_keywords(days: int = Query(30), sort: str = Query("spend"), limit: int =
 
     keywords = []
     for r in rows:
-        impressions, clicks, spend, sales = r[4], r[5], r[6], r[7]
-        orders, units = r[8], r[9]
+        impressions = _n(r[4])
+        clicks = _n(r[5])
+        spend = _n(r[6])
+        sales = _n(r[7])
+        orders = _n(r[8])
+        units = _n(r[9])
 
         keywords.append({
             "keyword": r[0],
             "matchType": r[1],
             "campaignName": r[2],
             "adGroupName": r[3],
-            "impressions": impressions,
-            "clicks": clicks,
+            "impressions": int(impressions),
+            "clicks": int(clicks),
             "spend": round(spend, 2),
             "sales": round(sales, 2),
-            "orders": orders,
-            "units": units,
+            "orders": int(orders),
+            "units": int(units),
             "acos": round(spend / sales * 100, 2) if sales > 0 else 0,
             "roas": round(sales / spend, 2) if spend > 0 else 0,
             "cpc": round(spend / clicks, 2) if clicks > 0 else 0,
@@ -628,20 +659,24 @@ def ads_search_terms(days: int = Query(30), limit: int = Query(50), division: Op
 
     terms = []
     for r in rows:
-        impressions, clicks, spend, sales = r[4], r[5], r[6], r[7]
-        orders, units = r[8], r[9]
+        impressions = _n(r[4])
+        clicks = _n(r[5])
+        spend = _n(r[6])
+        sales = _n(r[7])
+        orders = _n(r[8])
+        units = _n(r[9])
 
         terms.append({
             "searchTerm": r[0],
             "keyword": r[1],
             "matchType": r[2],
             "campaignName": r[3],
-            "impressions": impressions,
-            "clicks": clicks,
+            "impressions": int(impressions),
+            "clicks": int(clicks),
             "spend": round(spend, 2),
             "sales": round(sales, 2),
-            "orders": orders,
-            "units": units,
+            "orders": int(orders),
+            "units": int(units),
             "acos": round(spend / sales * 100, 2) if sales > 0 else 0,
             "roas": round(sales / spend, 2) if spend > 0 else 0,
             "cpc": round(spend / clicks, 2) if clicks > 0 else 0,
