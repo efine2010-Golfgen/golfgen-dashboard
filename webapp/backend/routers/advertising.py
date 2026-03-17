@@ -758,8 +758,8 @@ def ads_debug_test():
             "Amazon-Advertising-API-Scope": str(ads_creds["profile_id"]),
         }
 
-        # Step 2: List SP campaigns
-        camp_resp = http_requests.get(
+        # Step 2: List SP campaigns (POST, not GET)
+        camp_resp = http_requests.post(
             "https://advertising-api.amazon.com/sp/campaigns/list",
             headers={**headers, "Accept": "application/vnd.spCampaign.v3+json", "Content-Type": "application/vnd.spCampaign.v3+json"},
             json={"maxResults": 10},
@@ -768,7 +768,7 @@ def ads_debug_test():
         result["steps"].append({
             "step": "list_campaigns",
             "status_code": camp_resp.status_code,
-            "body": camp_resp.text[:1000],
+            "body": camp_resp.text[:2000],
         })
 
         # Step 3: Create a small test report (1 day)
@@ -839,6 +839,48 @@ def ads_debug_test():
     except Exception as e:
         result["error"] = str(e)
         return result
+
+
+@router.get("/api/ads/report-status/{report_id}")
+def ads_report_status(report_id: str):
+    """Check the status of an existing ads report by ID."""
+    ads_creds = _load_ads_credentials()
+    if not ads_creds:
+        return {"error": "No credentials"}
+    try:
+        token_resp = http_requests.post("https://api.amazon.com/auth/o2/token", data={
+            "grant_type": "refresh_token",
+            "refresh_token": ads_creds["refresh_token"],
+            "client_id": ads_creds["client_id"],
+            "client_secret": ads_creds["client_secret"],
+        }, timeout=30)
+        access_token = token_resp.json().get("access_token", "")
+        if not access_token:
+            return {"error": "Token refresh failed"}
+        resp = http_requests.get(
+            f"https://advertising-api.amazon.com/reporting/reports/{report_id}",
+            headers={
+                "Authorization": f"Bearer {access_token}",
+                "Amazon-Advertising-API-ClientId": ads_creds["client_id"],
+                "Amazon-Advertising-API-Scope": str(ads_creds["profile_id"]),
+            },
+            timeout=30,
+        )
+        data = resp.json()
+        result = {"status_code": resp.status_code, "report_status": data.get("status"), "data": data}
+        # If completed, try to download
+        if data.get("status") == "COMPLETED" and data.get("url"):
+            import gzip
+            dl = http_requests.get(data["url"], timeout=30)
+            try:
+                rows = json.loads(gzip.decompress(dl.content).decode("utf-8"))
+            except Exception:
+                rows = dl.text[:500]
+            result["rows"] = len(rows) if isinstance(rows, list) else "N/A"
+            result["sample"] = str(rows[:3])[:500] if isinstance(rows, list) and rows else str(rows)[:500]
+        return result
+    except Exception as e:
+        return {"error": str(e)}
 
 
 @router.post("/api/ads/sync")
