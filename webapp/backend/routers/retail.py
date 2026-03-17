@@ -1333,3 +1333,360 @@ async def pull_from_drive():
         "status": "not_implemented",
         "message": "Google Drive integration coming soon. Use manual upload for now.",
     }
+
+
+# ════════════════════════════════════════════════════════════════════════════
+# NIF (New Item Forecast) Item Master — upload + query
+# ════════════════════════════════════════════════════════════════════════════
+
+_NIF_SECTION_KEYWORDS = {
+    "new": ["NEW OMNI ITEMS", "NEW ITEMS"],
+    "go_forward": ["GO FORWARD OMNI ITEMS", "GO FORWARD ITEMS"],
+    "deleted": ["DELETED STORE ITEMS", "DELETED ITEMS"],
+    "dotcom": ["GO FORWARD OWNED DOTCOM", "ECOMMERCE ITEMS", "1P OWNED ITEMS",
+               "GO FORWARD DOTCOM"],
+}
+
+
+def _classify_section(text: str) -> str | None:
+    """Return item_status from a section header row, or None if not a header."""
+    if not text:
+        return None
+    t = text.strip().upper()
+    for status, keywords in _NIF_SECTION_KEYWORDS.items():
+        for kw in keywords:
+            if kw in t:
+                return status
+    return None
+
+
+def _parse_nif_fcst(ws, event_year: int) -> list[dict]:
+    """Parse FCST sheet → list of item dicts with status classification."""
+    items = []
+    current_status = "new"  # default until first section header
+
+    # Data starts at row 12 (row 11 is headers)
+    for r in range(12, ws.max_row + 1):
+        c1 = ws.cell(r, 1).value
+        c3 = ws.cell(r, 3).value  # Description
+
+        # Check if this row is a section header
+        section = _classify_section(str(c1) if c1 else "")
+        if section:
+            current_status = section
+            continue
+
+        # Skip empty rows or rows without description
+        if not c3 or not str(c3).strip():
+            continue
+
+        # Skip if c1 looks like another header (all caps, no data cols)
+        c7 = ws.cell(r, 7).value  # UPC
+        c8 = ws.cell(r, 8).value  # VSN
+        if not c7 and not c8 and not ws.cell(r, 15).value:
+            continue
+
+        brand = _safe_str(c1, 80) or ""
+        # Clean brand — remove leading category prefix like "PGA TOUR - "
+        # but keep it as-is since user wants to see the full brand
+
+        item = {
+            "event_year": event_year,
+            "item_status": current_status,
+            "brand": brand,
+            "mod_type": _safe_str(ws.cell(r, 2).value, 40),
+            "description": _safe_str(c3, 200),
+            "wmt_item_number": _safe_str(ws.cell(r, 4).value, 20),
+            "upc": _safe_str(c7, 20),
+            "vendor_stock_number": _safe_str(c8, 40),
+            "brand_id": _safe_str(ws.cell(r, 9).value, 20),
+            "wholesale_cost": _n(ws.cell(r, 15).value),  # WM First Cost Collect Suppliers
+            "walmart_retail": _n(ws.cell(r, 21).value),  # Unit Retail SRP
+            "vendor_pack": _safe_int(ws.cell(r, 23).value),
+            "whse_pack": _safe_int(ws.cell(r, 24).value),
+            "old_store_count": _safe_int(ws.cell(r, 25).value),
+            "new_store_count": _safe_int(ws.cell(r, 26).value),
+            "store_count_diff": _safe_int(ws.cell(r, 27).value),
+        }
+        items.append(item)
+
+    return items
+
+
+def _enrich_dimensions(items: list[dict], ws_setup) -> None:
+    """Merge carton dimensions from ITEM SET UP sheet into items (by VSN match)."""
+    # Build VSN → dimensions map from ITEM SET UP
+    dim_map = {}
+    for r in range(3, ws_setup.max_row + 1):
+        vsn = ws_setup.cell(r, 3).value  # col 3 = VSN in ITEM SET UP
+        if not vsn:
+            continue
+        vsn = str(vsn).strip()
+        length = _n(ws_setup.cell(r, 26).value)
+        width = _n(ws_setup.cell(r, 27).value)
+        height = _n(ws_setup.cell(r, 28).value)
+        if length or width or height:
+            # CBM = L*W*H in meters (convert from inches: /39.37 each)
+            l_m = length / 39.37 if length else 0
+            w_m = width / 39.37 if width else 0
+            h_m = height / 39.37 if height else 0
+            cbm = l_m * w_m * h_m
+            cbf = (length * width * height) / 1728 if (length and width and height) else 0
+            dim_map[vsn] = {
+                "carton_length": length,
+                "carton_width": width,
+                "carton_height": height,
+                "cbm": round(cbm, 4),
+                "cbf": round(cbf, 4),
+            }
+
+    for item in items:
+        vsn = item.get("vendor_stock_number", "")
+        if vsn and vsn in dim_map:
+            item.update(dim_map[vsn])
+
+
+def _enrich_color_dexterity(items: list[dict], ws_commit) -> None:
+    """Merge color/dexterity from COMMIT sheet into items (by VSN match)."""
+    # Build VSN → color/dex map
+    cd_map = {}
+    for r in range(3, ws_commit.max_row + 1):
+        vsn = ws_commit.cell(r, 17).value  # col 17 = Vendor Stk Nbr
+        if not vsn:
+            continue
+        vsn = str(vsn).strip()
+        color = _safe_str(ws_commit.cell(r, 18).value, 60)
+        dex = _safe_str(ws_commit.cell(r, 19).value, 60)
+        if color and color.upper() != "NA":
+            cd_map.setdefault(vsn, {})["color"] = color
+        if dex and dex.upper() != "NA":
+            cd_map.setdefault(vsn, {})["dexterity"] = dex
+
+    for item in items:
+        vsn = item.get("vendor_stock_number", "")
+        if vsn and vsn in cd_map:
+            if "color" in cd_map[vsn]:
+                item["color"] = cd_map[vsn]["color"]
+            if "dexterity" in cd_map[vsn]:
+                item["dexterity"] = cd_map[vsn]["dexterity"]
+
+
+def _detect_event_year(ws) -> int | None:
+    """Read event year from cell B3 of FCST sheet."""
+    val = ws.cell(3, 2).value
+    if val:
+        try:
+            return int(float(val))
+        except (TypeError, ValueError):
+            pass
+    return None
+
+
+def _detect_effective_week(ws, filename: str = "") -> int:
+    """Read effective week — check filename first (e.g. 'WK4'), then IN-STORE row."""
+    import re as _re
+    # Check filename first (more reliable — e.g. "GG NIF S26 MOD WK4.xlsx")
+    if filename:
+        m = _re.search(r'WK\s*(\d+)', filename, _re.IGNORECASE)
+        if m:
+            return int(m.group(1))
+    # Fallback: IN-STORE row (row 8) of FCST sheet
+    val = ws.cell(8, 2).value
+    if val and "WK" in str(val).upper():
+        m = _re.search(r'WK\s*(\d+)', str(val), _re.IGNORECASE)
+        if m:
+            return int(m.group(1))
+    return 7  # default
+
+
+@router.post("/api/retail/upload-nif")
+async def upload_nif(file: UploadFile = File(...)):
+    """Parse a NIF (New Item Forecast) Excel file and load into walmart_nif_items."""
+    import openpyxl
+
+    try:
+        data = await file.read()
+        wb = openpyxl.load_workbook(BytesIO(data), data_only=True, keep_links=False)
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"Cannot read Excel file: {e}")
+
+    if "FCST" not in wb.sheetnames:
+        raise HTTPException(status_code=400, detail="No FCST sheet found — not a NIF file")
+
+    ws_fcst = wb["FCST"]
+    event_year = _detect_event_year(ws_fcst)
+    if not event_year:
+        raise HTTPException(status_code=400, detail="Cannot detect Event year from cell B3")
+
+    effective_week = _detect_effective_week(ws_fcst, file.filename or "")
+
+    # Parse FCST sheet
+    items = _parse_nif_fcst(ws_fcst, event_year)
+    if not items:
+        raise HTTPException(status_code=400, detail="No items found in FCST sheet")
+
+    # Set effective week on all items
+    for item in items:
+        item["effective_week"] = effective_week
+
+    # Enrich with carton dimensions from ITEM SET UP
+    if "ITEM SET UP" in wb.sheetnames:
+        _enrich_dimensions(items, wb["ITEM SET UP"])
+
+    # Enrich with color/dexterity from COMMIT
+    if "COMMIT" in wb.sheetnames:
+        _enrich_color_dexterity(items, wb["COMMIT"])
+
+    # Derive category from brand
+    for item in items:
+        brand = (item.get("brand") or "").upper()
+        if "LPGA" in brand:
+            item["category"] = "LPGA"
+        elif "G2 SERIES" in brand:
+            item["category"] = "G2 Series"
+        elif "G1 SERIES" in brand:
+            item["category"] = "G1 Series"
+        elif "TEE UP" in brand:
+            item["category"] = "Tee Up"
+        else:
+            item["category"] = "Other"
+
+    # Insert into database — clear existing data for this event year first
+    con = get_db_rw()
+    try:
+        con.execute("DELETE FROM walmart_nif_items WHERE event_year = ?", [event_year])
+
+        for item in items:
+            con.execute("""
+                INSERT INTO walmart_nif_items (
+                    event_year, effective_week, item_status, description, brand,
+                    wmt_item_number, upc, vendor_stock_number, brand_id,
+                    wholesale_cost, walmart_retail, vendor_pack, whse_pack,
+                    old_store_count, new_store_count, store_count_diff,
+                    carton_length, carton_width, carton_height, cbm, cbf,
+                    color, dexterity, category, mod_type,
+                    division, customer, platform
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'golf', 'walmart_stores', 'scintilla')
+            """, [
+                item.get("event_year"), item.get("effective_week"),
+                item.get("item_status"), item.get("description"), item.get("brand"),
+                item.get("wmt_item_number"), item.get("upc"),
+                item.get("vendor_stock_number"), item.get("brand_id"),
+                item.get("wholesale_cost", 0), item.get("walmart_retail", 0),
+                item.get("vendor_pack", 0), item.get("whse_pack", 0),
+                item.get("old_store_count", 0), item.get("new_store_count", 0),
+                item.get("store_count_diff", 0),
+                item.get("carton_length", 0), item.get("carton_width", 0),
+                item.get("carton_height", 0), item.get("cbm", 0), item.get("cbf", 0),
+                item.get("color"), item.get("dexterity"),
+                item.get("category"), item.get("mod_type"),
+            ])
+    finally:
+        con.close()
+
+    logger.info(f"NIF upload: {file.filename} → {len(items)} items for {event_year}")
+    return {
+        "status": "success",
+        "event_year": event_year,
+        "effective_week": effective_week,
+        "items_loaded": len(items),
+        "filename": file.filename,
+        "breakdown": {
+            "new": sum(1 for i in items if i["item_status"] == "new"),
+            "go_forward": sum(1 for i in items if i["item_status"] == "go_forward"),
+            "deleted": sum(1 for i in items if i["item_status"] == "deleted"),
+            "dotcom": sum(1 for i in items if i["item_status"] == "dotcom"),
+        },
+    }
+
+
+@router.get("/api/retail/nif-items")
+async def get_nif_items(year: int = Query(None)):
+    """Return NIF item master data, optionally filtered by year."""
+    con = get_db()
+    try:
+        if year:
+            rows = con.execute("""
+                SELECT id, event_year, effective_week, item_status, description, brand,
+                       wmt_item_number, upc, vendor_stock_number, brand_id,
+                       wholesale_cost, walmart_retail, vendor_pack, whse_pack,
+                       old_store_count, new_store_count, store_count_diff,
+                       carton_length, carton_width, carton_height, cbm, cbf,
+                       color, dexterity, category, mod_type
+                FROM walmart_nif_items
+                WHERE event_year = ?
+                ORDER BY
+                    CASE item_status
+                        WHEN 'new' THEN 1
+                        WHEN 'go_forward' THEN 2
+                        WHEN 'dotcom' THEN 3
+                        WHEN 'deleted' THEN 4
+                    END,
+                    brand, description
+            """, [year]).fetchall()
+        else:
+            rows = con.execute("""
+                SELECT id, event_year, effective_week, item_status, description, brand,
+                       wmt_item_number, upc, vendor_stock_number, brand_id,
+                       wholesale_cost, walmart_retail, vendor_pack, whse_pack,
+                       old_store_count, new_store_count, store_count_diff,
+                       carton_length, carton_width, carton_height, cbm, cbf,
+                       color, dexterity, category, mod_type
+                FROM walmart_nif_items
+                ORDER BY event_year DESC,
+                    CASE item_status
+                        WHEN 'new' THEN 1
+                        WHEN 'go_forward' THEN 2
+                        WHEN 'dotcom' THEN 3
+                        WHEN 'deleted' THEN 4
+                    END,
+                    brand, description
+            """).fetchall()
+    finally:
+        con.close()
+
+    items = []
+    for r in rows:
+        items.append({
+            "id": r[0],
+            "eventYear": r[1],
+            "effectiveWeek": r[2],
+            "itemStatus": r[3],
+            "description": r[4],
+            "brand": r[5],
+            "wmtItemNumber": r[6],
+            "upc": r[7],
+            "vendorStockNumber": r[8],
+            "brandId": r[9],
+            "wholesaleCost": _n(r[10]),
+            "walmartRetail": _n(r[11]),
+            "vendorPack": _safe_int(r[12]),
+            "whsePack": _safe_int(r[13]),
+            "oldStoreCount": _safe_int(r[14]),
+            "newStoreCount": _safe_int(r[15]),
+            "storeCountDiff": _safe_int(r[16]),
+            "cartonLength": _n(r[17]),
+            "cartonWidth": _n(r[18]),
+            "cartonHeight": _n(r[19]),
+            "cbm": _n(r[20]),
+            "cbf": _n(r[21]),
+            "color": r[22],
+            "dexterity": r[23],
+            "category": r[24],
+            "modType": r[25],
+        })
+
+    # Get available years
+    con2 = get_db()
+    try:
+        year_rows = con2.execute(
+            "SELECT DISTINCT event_year FROM walmart_nif_items ORDER BY event_year"
+        ).fetchall()
+    finally:
+        con2.close()
+
+    return {
+        "items": items,
+        "availableYears": [r[0] for r in year_rows],
+        "totalItems": len(items),
+    }

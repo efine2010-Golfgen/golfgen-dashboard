@@ -260,13 +260,6 @@ class DbConnection:
         except Exception:
             pass
 
-    @property
-    def description(self):
-        """Proxy cursor/connection description for column metadata."""
-        if self._is_postgres and self._cursor:
-            return self._cursor.description
-        return getattr(self._conn, "description", None)
-
     # Allow use as context manager
     def __enter__(self):
         return self
@@ -1588,6 +1581,50 @@ def _init_retail_tables():
         )
     """)
 
+    # Table 7: NIF Item Master (New Item Forecast data from Excel uploads)
+    try:
+        con.execute("CREATE SEQUENCE IF NOT EXISTS walmart_nif_items_seq START 1")
+    except Exception:
+        try:
+            con.execute("CREATE SEQUENCE walmart_nif_items_seq")
+        except Exception:
+            pass
+
+    con.execute("""
+        CREATE TABLE IF NOT EXISTS walmart_nif_items (
+            id                  SERIAL PRIMARY KEY,
+            event_year          INTEGER NOT NULL,
+            effective_week      INTEGER NOT NULL,
+            item_status         VARCHAR(20) NOT NULL,
+            description         VARCHAR(200),
+            brand               VARCHAR(80),
+            wmt_item_number     VARCHAR(20),
+            upc                 VARCHAR(20),
+            vendor_stock_number VARCHAR(40),
+            brand_id            VARCHAR(20),
+            wholesale_cost      DOUBLE PRECISION DEFAULT 0,
+            walmart_retail      DOUBLE PRECISION DEFAULT 0,
+            vendor_pack         INTEGER DEFAULT 0,
+            whse_pack           INTEGER DEFAULT 0,
+            old_store_count     INTEGER DEFAULT 0,
+            new_store_count     INTEGER DEFAULT 0,
+            store_count_diff    INTEGER DEFAULT 0,
+            carton_length       DOUBLE PRECISION DEFAULT 0,
+            carton_width        DOUBLE PRECISION DEFAULT 0,
+            carton_height       DOUBLE PRECISION DEFAULT 0,
+            cbm                 DOUBLE PRECISION DEFAULT 0,
+            cbf                 DOUBLE PRECISION DEFAULT 0,
+            color               VARCHAR(60),
+            dexterity           VARCHAR(60),
+            category            VARCHAR(80),
+            mod_type            VARCHAR(40),
+            division            VARCHAR(20) DEFAULT 'golf',
+            customer            VARCHAR(30) DEFAULT 'walmart_stores',
+            platform            VARCHAR(20) DEFAULT 'scintilla',
+            UNIQUE(event_year, wmt_item_number, item_status)
+        )
+    """)
+
     con.close()
 
 
@@ -1624,6 +1661,7 @@ def _fix_pg_sequences():
         "walmart_ecomm_weekly_seq": "walmart_ecomm_weekly",
         "walmart_order_forecast_seq": "walmart_order_forecast",
         "retail_upload_log_seq": "retail_upload_log",
+        "walmart_nif_items_seq": "walmart_nif_items",
     }
     try:
         con = get_db_rw()

@@ -183,6 +183,13 @@ async def lifespan(app: FastAPI):
     except Exception as e:
         logger.error(f"Scorecard migration error (non-fatal): {e}")
 
+    # NIF Item Master migration — load embedded data if table is empty
+    try:
+        from scripts.nif_migration import run_nif_migration
+        run_nif_migration()
+    except Exception as e:
+        logger.error(f"NIF migration error (non-fatal): {e}")
+
     # Start background sync (imports scheduler module which imports services)
     task = None
     try:

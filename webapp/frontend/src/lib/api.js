@@ -354,6 +354,14 @@ export const api = {
     return fetchJSON('/api/walmart/store-analytics' + q);
   },
   walmartStoreGeography: (h = {}) => fetchJSON('/api/walmart/store-geography' + (_hq(h) ? '?' + _hq(h).slice(1) : '')),
+  walmartNifItems: (year) => fetchJSON('/api/retail/nif-items' + (year ? '?year=' + year : '')),
+  walmartNifUpload: (file) => {
+    const fd = new FormData();
+    fd.append("file", file);
+    return fetch(`${API_BASE}/api/retail/upload-nif`, {
+      method: "POST", credentials: "include", body: fd,
+    }).then(r => { if (!r.ok) throw new Error(`NIF upload failed: ${r.status}`); return r.json(); });
+  },
 
   // Passkey (WebAuthn)
   passkeyList: () => fetchJSON(`/api/mfa/passkeys`),

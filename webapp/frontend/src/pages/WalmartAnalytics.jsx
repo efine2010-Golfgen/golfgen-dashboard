@@ -7,6 +7,7 @@ import { WalmartScorecard as ScorecardPage } from "./walmart/WalmartScorecard";
 import { WalmartEcomm as EcommPage } from "./walmart/WalmartEcomm";
 import { WalmartForecast as ForecastPage } from "./walmart/WalmartForecast";
 import { WalmartStoreAnalytics as StoreAnalyticsPage } from "./walmart/WalmartStoreAnalytics";
+import { WalmartItemMaster as ItemMasterPage } from "./walmart/WalmartItemMaster";
 
 export default function WalmartAnalytics({ filters = {} }) {
   const [page, setPage] = useState("sales");
@@ -52,6 +53,7 @@ export default function WalmartAnalytics({ filters = {} }) {
     { key: "ecomm", label: "ECOMMERCE", title: "E-Commerce" },
     { key: "forecast", label: "ORDER FORECAST", title: "Order Forecast" },
     { key: "store-analytics", label: "STORE ANALYTICS", title: "Store Analytics" },
+    { key: "item-master", label: "ITEM MASTER", title: "Item Master" },
   ];
   const activeTab = TABS.find(t => t.key === page) || TABS[0];
 
@@ -156,6 +158,7 @@ export default function WalmartAnalytics({ filters = {} }) {
       {page === "ecomm" && <EcommPage filters={h} />}
       {page === "forecast" && <ForecastPage filters={h} />}
       {page === "store-analytics" && <StoreAnalyticsPage filters={h} />}
+      {page === "item-master" && <ItemMasterPage filters={h} />}
 
       {/* ── Recent Uploads (bottom, collapsible) ── */}
       {uploads.length > 0 && (
