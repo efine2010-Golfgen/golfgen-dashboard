@@ -1,5 +1,6 @@
 """Amazon Advertising routes."""
 import os
+import json
 import logging
 import asyncio
 from datetime import datetime, timedelta
@@ -832,6 +833,59 @@ def ads_debug_test():
                     "rows": len(data) if isinstance(data, list) else "N/A",
                     "sample": str(data[:2])[:500] if isinstance(data, list) and data else str(data)[:500],
                 })
+
+        # Step 5: Test v2 reporting API (campaigns report for one day)
+        try:
+            v2_body = {
+                "reportDate": (today - timedelta(days=2)).strftime("%Y%m%d"),
+                "metrics": "impressions,clicks,cost,attributedSales7d,attributedConversions7d",
+            }
+            v2_resp = http_requests.post(
+                "https://advertising-api.amazon.com/v2/sp/campaigns/report",
+                headers={**headers, "Content-Type": "application/json"},
+                json=v2_body,
+                timeout=30,
+            )
+            v2_data = v2_resp.json() if v2_resp.status_code in (200, 202) else {}
+            v2_report_id = v2_data.get("reportId", "")
+            result["steps"].append({
+                "step": "v2_create_report",
+                "status_code": v2_resp.status_code,
+                "reportId": v2_report_id,
+                "body": v2_resp.text[:500],
+            })
+
+            # Poll v2 report once after 15s
+            if v2_report_id:
+                import time as _t2
+                _t2.sleep(15)
+                v2_poll = http_requests.get(
+                    f"https://advertising-api.amazon.com/v2/reports/{v2_report_id}",
+                    headers=headers,
+                    timeout=30,
+                )
+                v2_poll_data = v2_poll.json()
+                v2_step = {
+                    "step": "v2_poll_report",
+                    "status_code": v2_poll.status_code,
+                    "report_status": v2_poll_data.get("status", "UNKNOWN"),
+                    "body": str(v2_poll_data)[:500],
+                }
+
+                # Try to download if complete
+                if v2_poll_data.get("status") == "SUCCESS" and v2_poll_data.get("location"):
+                    import gzip as _gz2
+                    v2_dl = http_requests.get(v2_poll_data["location"], headers=headers, timeout=30)
+                    try:
+                        v2_rows = json.loads(_gz2.decompress(v2_dl.content).decode("utf-8"))
+                    except Exception:
+                        v2_rows = v2_dl.text[:500]
+                    v2_step["rows"] = len(v2_rows) if isinstance(v2_rows, list) else "N/A"
+                    v2_step["sample"] = str(v2_rows[:2])[:500] if isinstance(v2_rows, list) and v2_rows else str(v2_rows)[:500]
+
+                result["steps"].append(v2_step)
+        except Exception as v2_err:
+            result["steps"].append({"step": "v2_test", "error": str(v2_err)})
 
         result["profile_id"] = ads_creds.get("profile_id", "")
         return result

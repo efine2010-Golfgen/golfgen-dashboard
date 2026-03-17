@@ -497,10 +497,21 @@ def _sync_ads_data_inner():
     if not profile_id:
         logger.warning("Ads sync: no profile_id set, attempting to discover profiles...")
         try:
-            from ad_api.api import Profiles
-            result = Profiles(credentials=ads_creds).get_profiles()
-            profiles = result.payload
-            if profiles:
+            import requests as _req
+            access_token = _get_ads_access_token(ads_creds)
+            if not access_token:
+                logger.error("Ads sync: cannot get token to discover profiles")
+                return
+            prof_resp = _req.get(
+                "https://advertising-api.amazon.com/v2/profiles",
+                headers={
+                    "Authorization": f"Bearer {access_token}",
+                    "Amazon-Advertising-API-ClientId": ads_creds["client_id"],
+                },
+                timeout=30,
+            )
+            profiles = prof_resp.json() if prof_resp.status_code == 200 else []
+            if profiles and isinstance(profiles, list):
                 for p in profiles:
                     if p.get("accountInfo", {}).get("marketplaceStringId") == "ATVPDKIKX0DER":
                         profile_id = str(p.get("profileId", ""))
@@ -510,7 +521,7 @@ def _sync_ads_data_inner():
                 logger.info(f"Ads sync: discovered profile_id={profile_id}")
                 ads_creds["profile_id"] = profile_id
             else:
-                logger.error("Ads sync: no profiles found")
+                logger.error(f"Ads sync: no profiles found (status={prof_resp.status_code})")
                 return
         except Exception as e:
             logger.error(f"Ads sync: failed to discover profiles: {e}")
@@ -557,12 +568,237 @@ def _sync_ads_data_inner():
     logger.info("Ads sync complete")
 
 
+def _get_ads_access_token(creds):
+    """Get a fresh access token from Amazon Ads OAuth."""
+    import requests as req
+    token_resp = req.post("https://api.amazon.com/auth/o2/token", data={
+        "grant_type": "refresh_token",
+        "refresh_token": creds["refresh_token"],
+        "client_id": creds["client_id"],
+        "client_secret": creds["client_secret"],
+    }, timeout=30)
+    token_data = token_resp.json()
+    access_token = token_data.get("access_token", "")
+    if not access_token:
+        logger.error(f"Ads sync: token refresh failed: {token_data}")
+    return access_token
+
+
 def _pull_ads_report(creds, report_type_id, columns, start_date, end_date, handler, group_by=None):
-    """Create, poll, download, and process a single Amazon Ads v3 report."""
+    """Pull ads data using v2 reporting API, with v3 as fallback.
+
+    v2 API: POST /v2/sp/{recordType}/report — simpler, more reliable.
+    v3 API: POST /reporting/reports — async, but often stuck in PENDING.
+    """
+    # Try v2 first
+    ok = _pull_ads_report_v2(creds, report_type_id, columns, start_date, end_date, handler)
+    if ok:
+        return
+
+    # If v2 fails, try v3 as fallback
+    logger.info(f"Ads sync: v2 failed for {report_type_id}, trying v3 async API...")
+    _pull_ads_report_v3(creds, report_type_id, columns, start_date, end_date, handler, group_by)
+
+
+def _pull_ads_report_v2(creds, report_type_id, columns, start_date, end_date, handler):
+    """Pull ads data using Amazon Ads v2 reporting API.
+
+    v2 endpoints:
+      POST /v2/sp/campaigns/report  (recordType=campaigns)
+      POST /v2/sp/keywords/report   (recordType=keywords)
+      POST /v2/sp/targets/report    (recordType=targets)
+
+    Returns True if data was successfully pulled and handled, False otherwise.
+    """
     import time as _time
     import gzip as gz
     import requests as req
-    from ad_api.api import reports as ads_reports
+
+    access_token = _get_ads_access_token(creds)
+    if not access_token:
+        return False
+
+    # Map v3 reportTypeId → v2 recordType
+    record_type_map = {
+        "spCampaigns": "campaigns",
+        "spTargeting": "targets",
+        "spSearchTerm": "keywords",  # v2 uses keywords for search term data
+    }
+    record_type = record_type_map.get(report_type_id)
+    if not record_type:
+        logger.error(f"Ads v2: unknown report type mapping for {report_type_id}")
+        return False
+
+    # Map v3 column names → v2 metric names
+    # v2 uses different metric names than v3
+    v2_metrics_map = {
+        "campaigns": [
+            "impressions", "clicks", "cost", "attributedSales7d",
+            "attributedConversions7d", "attributedUnitsOrdered7d",
+        ],
+        "targets": [
+            "impressions", "clicks", "cost", "attributedSales7d",
+            "attributedConversions7d", "attributedUnitsOrdered7d",
+        ],
+        "keywords": [
+            "impressions", "clicks", "cost", "attributedSales7d",
+            "attributedConversions7d", "attributedUnitsOrdered7d",
+        ],
+    }
+
+    v2_metrics = v2_metrics_map.get(record_type, [])
+
+    headers = {
+        "Authorization": f"Bearer {access_token}",
+        "Amazon-Advertising-API-ClientId": creds["client_id"],
+        "Amazon-Advertising-API-Scope": str(creds["profile_id"]),
+        "Content-Type": "application/json",
+    }
+
+    # v2 creates one report per date — but we can request a date range via
+    # reportDate (single date) or use the segment=query approach.
+    # Actually, v2 only supports a single reportDate per request.
+    # We'll iterate day-by-day for the date range.
+    from datetime import datetime as _dt
+    all_rows = []
+
+    # Parse date range
+    d_start = _dt.strptime(start_date, "%Y-%m-%d")
+    d_end = _dt.strptime(end_date, "%Y-%m-%d")
+    current = d_start
+
+    while current <= d_end:
+        report_date = current.strftime("%Y%m%d")  # v2 uses YYYYMMDD format
+        current += timedelta(days=1)
+
+        body = {
+            "reportDate": report_date,
+            "metrics": ",".join(v2_metrics),
+        }
+
+        # Add segment for search terms
+        if report_type_id == "spSearchTerm":
+            body["segment"] = "query"
+
+        url = f"https://advertising-api.amazon.com/v2/sp/{record_type}/report"
+        logger.info(f"Ads v2: creating {record_type} report for {report_date}...")
+
+        try:
+            create_resp = req.post(url, headers=headers, json=body, timeout=30)
+
+            if create_resp.status_code == 429:
+                logger.warning(f"Ads v2: throttled on {report_date}, waiting 60s...")
+                _time.sleep(60)
+                create_resp = req.post(url, headers=headers, json=body, timeout=30)
+
+            if create_resp.status_code not in (200, 202):
+                logger.warning(f"Ads v2: create report failed for {record_type} {report_date}: "
+                             f"{create_resp.status_code} {create_resp.text[:300]}")
+                continue
+
+            create_data = create_resp.json()
+            report_id = create_data.get("reportId")
+            if not report_id:
+                logger.warning(f"Ads v2: no reportId for {record_type} {report_date}: {create_data}")
+                continue
+
+            # Poll for completion — v2 reports typically complete in <60 seconds
+            download_url = None
+            for attempt in range(30):  # up to 5 minutes per report
+                _time.sleep(10)
+                poll_resp = req.get(
+                    f"https://advertising-api.amazon.com/v2/reports/{report_id}",
+                    headers={
+                        "Authorization": f"Bearer {access_token}",
+                        "Amazon-Advertising-API-ClientId": creds["client_id"],
+                        "Amazon-Advertising-API-Scope": str(creds["profile_id"]),
+                    },
+                    timeout=30,
+                )
+                poll_data = poll_resp.json()
+                status = poll_data.get("status")
+
+                if attempt == 0:
+                    logger.info(f"Ads v2: poll {record_type} {report_date} #{attempt+1}: {status} "
+                              f"resp={str(poll_data)[:200]}")
+                elif attempt % 5 == 0:
+                    logger.info(f"Ads v2: poll {record_type} {report_date} #{attempt+1}: {status}")
+
+                if status == "SUCCESS":
+                    download_url = poll_data.get("location")
+                    break
+                elif status in ("FAILURE", "CANCELLED"):
+                    logger.warning(f"Ads v2: {record_type} {report_date} {status}: "
+                                 f"{poll_data.get('statusDetails', '')}")
+                    break
+
+            if not download_url:
+                if status != "SUCCESS":
+                    logger.warning(f"Ads v2: {record_type} {report_date} did not complete (last status={status})")
+                continue
+
+            # Download — v2 returns gzipped JSON
+            dl_resp = req.get(download_url, headers={
+                "Authorization": f"Bearer {access_token}",
+                "Amazon-Advertising-API-ClientId": creds["client_id"],
+                "Amazon-Advertising-API-Scope": str(creds["profile_id"]),
+            }, timeout=60)
+
+            try:
+                day_data = json.loads(gz.decompress(dl_resp.content).decode("utf-8"))
+            except Exception:
+                try:
+                    day_data = json.loads(dl_resp.text)
+                except Exception:
+                    logger.warning(f"Ads v2: failed to parse {record_type} {report_date} response")
+                    continue
+
+            if isinstance(day_data, str):
+                day_data = json.loads(day_data)
+
+            if isinstance(day_data, list):
+                # v2 doesn't include date in each row — inject it
+                date_formatted = f"{report_date[:4]}-{report_date[4:6]}-{report_date[6:8]}"
+                for row in day_data:
+                    row["date"] = date_formatted
+                    # Map v2 field names → v3 field names for handler compatibility
+                    if "cost" in row and "spend" not in row:
+                        row["spend"] = row["cost"]
+                    if "attributedSales7d" in row:
+                        row["sales7d"] = row["attributedSales7d"]
+                    if "attributedConversions7d" in row:
+                        row["purchases7d"] = row["attributedConversions7d"]
+                    if "attributedUnitsOrdered7d" in row:
+                        row["unitsSoldClicks7d"] = row["attributedUnitsOrdered7d"]
+                    # Search term data from segment=query
+                    if "query" in row and "searchTerm" not in row:
+                        row["searchTerm"] = row["query"]
+                all_rows.extend(day_data)
+                logger.info(f"Ads v2: {record_type} {report_date} → {len(day_data)} rows")
+            else:
+                logger.warning(f"Ads v2: {record_type} {report_date} unexpected data type: {type(day_data)}")
+
+            # Small delay between date requests to avoid throttling
+            _time.sleep(2)
+
+        except Exception as e:
+            logger.error(f"Ads v2: error pulling {record_type} {report_date}: {e}")
+            continue
+
+    if all_rows:
+        handler(all_rows)
+        logger.info(f"Ads v2: {report_type_id} total — {len(all_rows)} rows processed across date range")
+        return True
+    else:
+        logger.warning(f"Ads v2: {report_type_id} — 0 rows across entire date range")
+        return False
+
+
+def _pull_ads_report_v3(creds, report_type_id, columns, start_date, end_date, handler, group_by=None):
+    """Fallback: Create, poll, download a single Amazon Ads v3 async report."""
+    import time as _time
+    import gzip as gz
+    import requests as req
 
     body = {
         "name": f"{report_type_id}_{start_date}_{end_date}",
@@ -579,21 +815,10 @@ def _pull_ads_report(creds, report_type_id, columns, start_date, end_date, handl
     }
 
     try:
-        logger.info(f"Ads sync: creating {report_type_id} report ({start_date} to {end_date})...")
-        reports_api = ads_reports.Reports(credentials=creds)
+        logger.info(f"Ads v3: creating {report_type_id} report ({start_date} to {end_date})...")
 
-        # Use direct HTTP for v3 reporting API (library has JSON parse issues)
-        # First get an access token
-        token_resp = req.post("https://api.amazon.com/auth/o2/token", data={
-            "grant_type": "refresh_token",
-            "refresh_token": creds["refresh_token"],
-            "client_id": creds["client_id"],
-            "client_secret": creds["client_secret"],
-        }, timeout=30)
-        token_data = token_resp.json()
-        access_token = token_data.get("access_token", "")
+        access_token = _get_ads_access_token(creds)
         if not access_token:
-            logger.error(f"Ads sync: token refresh failed: {token_data}")
             return
 
         headers = {
@@ -610,22 +835,22 @@ def _pull_ads_report(creds, report_type_id, columns, start_date, end_date, handl
             json=body,
             timeout=30,
         )
-        logger.info(f"Ads sync: create report response: {create_resp.status_code} {create_resp.text[:500]}")
+        logger.info(f"Ads v3: create report response: {create_resp.status_code} {create_resp.text[:500]}")
 
         if create_resp.status_code not in (200, 202):
-            logger.error(f"Ads sync: create report failed for {report_type_id}: {create_resp.status_code} {create_resp.text[:500]}")
+            logger.error(f"Ads v3: create report failed for {report_type_id}: {create_resp.status_code} {create_resp.text[:500]}")
             return
 
         create_data = create_resp.json()
         report_id = create_data.get("reportId")
 
         if not report_id:
-            logger.error(f"Ads sync: no reportId returned for {report_type_id}, response: {create_data}")
+            logger.error(f"Ads v3: no reportId returned for {report_type_id}, response: {create_data}")
             return
 
-        # Poll for completion (max ~10 min)
+        # Poll for completion — reduced to 3 minutes (v3 often stalls forever)
         download_url = None
-        for attempt in range(60):
+        for attempt in range(18):
             _time.sleep(10)
             poll_resp = req.get(
                 f"https://advertising-api.amazon.com/reporting/reports/{report_id}",
@@ -643,17 +868,17 @@ def _pull_ads_report(creds, report_type_id, columns, start_date, end_date, handl
                 extra = f" reason={poll_data.get('failureReason', 'unknown')}"
             elif attempt == 0:
                 extra = f" full_resp={str(poll_data)[:300]}"
-            logger.info(f"Ads sync: poll {report_type_id} attempt {attempt+1}: {status}{extra}")
+            logger.info(f"Ads v3: poll {report_type_id} attempt {attempt+1}: {status}{extra}")
 
             if status == "COMPLETED":
                 download_url = poll_data.get("url")
                 break
             elif status in ("FAILED", "CANCELLED"):
-                logger.error(f"Ads sync: {report_type_id} report {status}: {poll_data.get('failureReason', '')}")
+                logger.error(f"Ads v3: {report_type_id} report {status}: {poll_data.get('failureReason', '')}")
                 return
 
         if not download_url:
-            logger.error(f"Ads sync: {report_type_id} report timed out")
+            logger.error(f"Ads v3: {report_type_id} report timed out after 3 min")
             return
 
         # Download and decompress
@@ -667,10 +892,10 @@ def _pull_ads_report(creds, report_type_id, columns, start_date, end_date, handl
             data = json.loads(data)
 
         handler(data)
-        logger.info(f"Ads sync: {report_type_id} — {len(data) if isinstance(data, list) else 'N/A'} rows processed")
+        logger.info(f"Ads v3: {report_type_id} — {len(data) if isinstance(data, list) else 'N/A'} rows processed")
 
     except Exception as e:
-        logger.error(f"Ads sync error ({report_type_id}): {e}")
+        logger.error(f"Ads v3 error ({report_type_id}): {e}")
 
 
 def _handle_campaign_report(data):
