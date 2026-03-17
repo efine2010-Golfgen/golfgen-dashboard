@@ -127,12 +127,12 @@ export function WalmartItemMaster({ filters = {} }) {
                 onClick={() => setYear(y)}
                 style={{
                   ...SG(11, active ? 700 : 500),
-                  background: active ? "rgba(165,107,225,0.15)" : "none",
-                  border: active ? "1px solid rgba(165,107,225,0.4)" : "1px solid var(--brd)",
+                  background: active ? "rgba(46,207,170,0.15)" : "none",
+                  border: active ? "1px solid rgba(46,207,170,0.3)" : "1px solid var(--brd)",
                   cursor: "pointer",
                   padding: "6px 16px",
                   borderRadius: 6,
-                  color: active ? "#a56be1" : hasData ? "var(--txt2)" : "var(--txt3)",
+                  color: active ? "#2ecf99" : hasData ? "var(--txt2)" : "var(--txt3)",
                   opacity: hasData ? 1 : 0.5,
                 }}
               >
@@ -159,9 +159,9 @@ export function WalmartItemMaster({ filters = {} }) {
             padding: "6px 14px",
             borderRadius: 6,
             cursor: uploading ? "wait" : "pointer",
-            background: "rgba(165,107,225,0.12)",
-            border: "1px solid rgba(165,107,225,0.3)",
-            color: "#a56be1",
+            background: "rgba(46,207,170,0.12)",
+            border: "1px solid rgba(46,207,170,0.3)",
+            color: "#2ecf99",
           }}
         >
           {uploading ? "Uploading..." : "Upload NIF File"}
@@ -212,7 +212,7 @@ export function WalmartItemMaster({ filters = {} }) {
       {loading ? (
         <div style={{ ...SG(12), color: "var(--txt3)", padding: 24 }}>Loading...</div>
       ) : Object.keys(grouped).length === 0 ? (
-        <Card style={{ background: "rgba(165,107,225,0.05)", border: "1px solid rgba(165,107,225,0.2)" }}>
+        <Card style={{ background: "rgba(46,207,170,0.05)", border: "1px solid rgba(46,207,170,0.2)" }}>
           <div style={{ ...DM(16), color: "var(--txt)", marginBottom: 8 }}>No Items Found</div>
           <p style={{ ...SG(11), color: "var(--txt3)", margin: 0, lineHeight: "1.4" }}>
             Upload a NIF (New Item Forecast) Excel file to populate this tab.
@@ -296,7 +296,7 @@ export function WalmartItemMaster({ filters = {} }) {
                           <td style={tdStyle}>{item.brand}</td>
                           <td style={tdStyle}>{item.wmtItemNumber || "—"}</td>
                           <td style={tdStyle}>{item.upc || "—"}</td>
-                          <td style={{ ...tdStyle, color: "#a56be1" }}>{item.vendorStockNumber || "—"}</td>
+                          <td style={{ ...tdStyle, color: "#2ecf99" }}>{item.vendorStockNumber || "—"}</td>
                           <td style={tdStyle}>{item.brandId || "—"}</td>
                           <td style={{ ...tdStyle, textAlign: "right" }}>
                             {item.wholesaleCost ? f$(item.wholesaleCost) : "—"}

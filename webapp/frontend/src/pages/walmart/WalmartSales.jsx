@@ -171,15 +171,16 @@ export function SalesPage({ filters }) {
 
       {/* ═══════════ POS Revenue / Units / Returns Chart — 52 Weekly Bars + Lines ═══════════ */}
       <Card>
-        {/* Title line above */}
-        <div style={{ ...SG(10, 600), color: "var(--txt3)", textTransform: "uppercase", letterSpacing: ".06em", marginBottom: 4 }}>
+        {/* Main title */}
+        <div style={{ ...DM(18), color: "#fff", marginBottom: 4 }}>
           52 Week Trend
         </div>
-        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
-          <div style={{ ...SG(13, 700), color: "var(--txt)" }}>
+        {/* Subtitle + toggle buttons on same line */}
+        <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 12 }}>
+          <div style={{ ...SG(11, 500), color: "var(--txt3)" }}>
             {chartMetric === "sales" ? "POS Revenue" : chartMetric === "qty" ? "POS Units" : "Return $"}
           </div>
-          <div style={{ display: "flex", gap: 8 }}>
+          <div style={{ display: "flex", gap: 6 }}>
             {[
               { key: "sales", label: "POS $" },
               { key: "qty", label: "POS Units" },
@@ -189,13 +190,13 @@ export function SalesPage({ filters }) {
                 key={btn.key}
                 onClick={() => setChartMetric(btn.key)}
                 style={{
-                  ...SG(10, chartMetric === btn.key ? 700 : 500),
-                  padding: "4px 10px",
-                  borderRadius: 4,
+                  ...SG(8, chartMetric === btn.key ? 700 : 500),
+                  padding: "2px 8px",
+                  borderRadius: 3,
                   cursor: "pointer",
-                  background: chartMetric === btn.key ? "var(--acc1)" : "var(--card)",
-                  color: chartMetric === btn.key ? "#fff" : "var(--txt3)",
-                  border: chartMetric === btn.key ? "none" : "1px solid var(--brd)",
+                  background: chartMetric === btn.key ? "rgba(46,207,170,0.15)" : "rgba(255,255,255,0.04)",
+                  color: chartMetric === btn.key ? "#2ecf99" : "var(--txt3)",
+                  border: `1px solid ${chartMetric === btn.key ? "rgba(46,207,170,0.3)" : "rgba(255,255,255,0.08)"}`,
                 }}
               >
                 {btn.label}
@@ -341,7 +342,7 @@ export function SalesPage({ filters }) {
                           ? w.regularSalesTy || 0
                           : w.regularQtyTy || 0
                       ),
-                      borderColor: "#2563eb",
+                      borderColor: "#60a5fa",
                       backgroundColor: "transparent",
                       borderWidth: 2.5,
                       pointRadius: 0,
@@ -482,11 +483,11 @@ export function SalesPage({ filters }) {
             <button onClick={hideAllItems} style={{ ...SG(9, 600), padding: "2px 8px", borderRadius: 4, cursor: "pointer", background: "none", border: "1px solid var(--brd)", color: "var(--txt3)" }}>Hide All</button>
           </div>
         </div>
-        <div style={{ overflowX: "auto" }}>
+        <div style={{ overflowX: "auto", maxHeight: 600, overflowY: "auto" }}>
           <table style={{ width: "100%", borderCollapse: "collapse", ...SG(9) }}>
-            <thead>
+            <thead style={{ position: "sticky", top: 0, zIndex: 3, background: "var(--card)" }}>
               <tr style={{ borderBottom: "1px solid var(--brd)" }}>
-                <th style={{ width: 20 }} />
+                <th style={{ width: 20, background: "var(--card)" }} />
                 <th
                   style={{
                     textAlign: "left",
@@ -495,17 +496,17 @@ export function SalesPage({ filters }) {
                     position: "sticky",
                     left: 0,
                     background: "var(--card)",
-                    zIndex: 2,
+                    zIndex: 4,
                     minWidth: 160,
                   }}
                 >
                   Item
                 </th>
-                <th style={{ textAlign: "left", padding: "6px 4px", color: "var(--txt3)", minWidth: 70 }}>WM Item #</th>
-                <th style={{ textAlign: "left", padding: "6px 4px", color: "var(--txt3)", width: 70 }}>Metric</th>
+                <th style={{ textAlign: "left", padding: "6px 4px", color: "var(--txt3)", minWidth: 70, background: "var(--card)" }}>WM Item #</th>
+                <th style={{ textAlign: "left", padding: "6px 4px", color: "var(--txt3)", width: 70, background: "var(--card)" }}>Metric</th>
                 {PERIODS.map((p, pi) => (
                   <Fragment key={p}>
-                    {pi > 0 && <th style={{ width: 8 }} />}
+                    {pi > 0 && <th style={{ width: 8, background: "var(--card)" }} />}
                     <th
                       colSpan={3}
                       style={{
@@ -513,6 +514,7 @@ export function SalesPage({ filters }) {
                         padding: "4px 2px",
                         color: "var(--txt3)",
                         borderBottom: `2px solid ${COLORS.teal}`,
+                        background: "var(--card)",
                       }}
                     >
                       {PERIOD_LABELS[p]}
@@ -521,15 +523,15 @@ export function SalesPage({ filters }) {
                 ))}
               </tr>
               <tr style={{ borderBottom: "2px solid var(--brd)" }}>
-                <th />
-                <th style={{ position: "sticky", left: 0, background: "var(--card)", zIndex: 2 }} />
-                <th />
-                <th />
+                <th style={{ background: "var(--card)" }} />
+                <th style={{ position: "sticky", left: 0, background: "var(--card)", zIndex: 4 }} />
+                <th style={{ background: "var(--card)" }} />
+                <th style={{ background: "var(--card)" }} />
                 {PERIODS.map((p, pi) => (
                   <Fragment key={p}>
-                    {pi > 0 && <th style={{ width: 8 }} />}
+                    {pi > 0 && <th style={{ width: 8, background: "var(--card)" }} />}
                     {["TY", "LY", "%Chg"].map((h) => (
-                      <th key={h} style={{ textAlign: "right", padding: "2px 4px", color: "var(--txt3)", fontSize: 8 }}>
+                      <th key={h} style={{ textAlign: "right", padding: "2px 4px", color: "var(--txt3)", fontSize: 8, background: "var(--card)" }}>
                         {h}
                       </th>
                     ))}
