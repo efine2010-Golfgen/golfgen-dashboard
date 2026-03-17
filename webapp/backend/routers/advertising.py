@@ -754,31 +754,45 @@ def ads_budget_usage_test():
             "Amazon-Advertising-API-Scope": str(ads_creds["profile_id"]),
         }
 
-        # Test 1: Campaign budget usage (daily spend for each campaign)
+        # First, get campaign IDs for subsequent tests
         today = datetime.now(ZoneInfo("America/Chicago"))
-        usage_body = {
-            "campaignIds": [],  # empty = all campaigns
-            "startDate": (today - timedelta(days=7)).strftime("%Y%m%d"),
-            "endDate": (today - timedelta(days=1)).strftime("%Y%m%d"),
-        }
-        usage_resp = http_requests.post(
-            "https://advertising-api.amazon.com/sp/campaigns/budget/usage",
-            headers={**headers, "Content-Type": "application/json", "Accept": "application/json"},
-            json=usage_body,
+        camp_list_resp = http_requests.post(
+            "https://advertising-api.amazon.com/sp/campaigns/list",
+            headers={**headers, "Accept": "application/vnd.spCampaign.v3+json",
+                     "Content-Type": "application/vnd.spCampaign.v3+json"},
+            json={"maxResults": 100, "stateFilter": {"include": ["ENABLED"]}},
             timeout=30,
         )
-        result["tests"].append({
-            "name": "budget_usage",
-            "status": usage_resp.status_code,
-            "body": usage_resp.text[:2000],
-        })
+        campaign_ids = []
+        if camp_list_resp.status_code == 200:
+            camps = camp_list_resp.json().get("campaigns", [])
+            campaign_ids = [str(c["campaignId"]) for c in camps[:5]]
 
-        # Test 2: Campaign recommendations (may have performance data)
+        # Test 1: Campaign budget usage with actual campaign IDs
+        if campaign_ids:
+            usage_body = {
+                "campaignIds": campaign_ids,
+                "startDate": (today - timedelta(days=7)).strftime("%Y%m%d"),
+                "endDate": (today - timedelta(days=1)).strftime("%Y%m%d"),
+            }
+            usage_resp = http_requests.post(
+                "https://advertising-api.amazon.com/sp/campaigns/budget/usage",
+                headers={**headers, "Content-Type": "application/json", "Accept": "application/json"},
+                json=usage_body,
+                timeout=30,
+            )
+            result["tests"].append({
+                "name": "budget_usage_with_ids",
+                "campaign_ids": campaign_ids,
+                "status": usage_resp.status_code,
+                "body": usage_resp.text[:2000],
+            })
+
+        # Test 2: Campaign recommendations with actual IDs
         rec_resp = http_requests.post(
             "https://advertising-api.amazon.com/sp/campaigns/budgetRecommendations",
-            headers={**headers, "Content-Type": "application/vnd.spbudgetrecommendation.v4+json",
-                     "Accept": "application/vnd.spbudgetrecommendation.v4+json"},
-            json={"campaignIds": []},
+            headers={**headers, "Content-Type": "application/json", "Accept": "application/json"},
+            json={"campaignIds": campaign_ids[:3] if campaign_ids else []},
             timeout=30,
         )
         result["tests"].append({
