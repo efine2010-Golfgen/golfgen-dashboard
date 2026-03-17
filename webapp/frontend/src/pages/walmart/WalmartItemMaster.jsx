@@ -175,10 +175,15 @@ export function WalmartItemMaster({ filters = {} }) {
     setCollapsedSections((prev) => ({ ...prev, [status]: !prev[status] }));
   };
 
+  // snake_case (API field) → camelCase (React state key) mapping
+  const snakeToCamel = (s) => s.replace(/_([a-z])/g, (_, c) => c.toUpperCase());
+
   const handleCellSave = async (itemId, field, value) => {
     try {
       await api.walmartNifUpdate(itemId, { [field]: value });
-      setItems(prev => prev.map(i => i.id === itemId ? { ...i, [field]: value } : i));
+      const camelKey = snakeToCamel(field);
+      setItems(prev => prev.map(i => i.id === itemId ? { ...i, [camelKey]: value } : i));
+      showToast("Saved", true);
     } catch (err) { showToast(err.message, false); }
   };
 
