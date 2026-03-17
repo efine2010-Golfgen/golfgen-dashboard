@@ -1744,14 +1744,14 @@ async def update_nif_item(item_id: int, body: dict = Body(...)):
     sets, vals = [], []
     for k, v in body.items():
         if k in updatable:
-            sets.append(f"{k} = %s")
+            sets.append(f"{k} = ?")
             vals.append(v)
     if not sets:
         raise HTTPException(status_code=400, detail="No updatable fields provided")
     vals.append(item_id)
     con = get_db_rw()
     try:
-        con.execute(f"UPDATE walmart_nif_items SET {', '.join(sets)} WHERE id = %s", vals)
+        con.execute(f"UPDATE walmart_nif_items SET {', '.join(sets)} WHERE id = ?", vals)
     finally:
         con.close()
     return {"status": "ok", "id": item_id}
@@ -1762,7 +1762,7 @@ async def delete_nif_item(item_id: int):
     """Delete a single NIF item."""
     con = get_db_rw()
     try:
-        cur = con.execute("DELETE FROM walmart_nif_items WHERE id = %s RETURNING id", [item_id])
+        cur = con.execute("DELETE FROM walmart_nif_items WHERE id = ? RETURNING id", [item_id])
         deleted = cur.fetchone()
         if not deleted:
             raise HTTPException(status_code=404, detail=f"NIF item {item_id} not found")
@@ -1788,12 +1788,12 @@ async def add_nif_item(body: dict = Body(...)):
                 carton_length, carton_width, carton_height, cbm, cbf,
                 color, dexterity, category, division, customer, platform
             ) VALUES (
-                %s, %s, %s, %s, %s,
-                %s, %s, %s, %s,
-                %s, %s, %s, %s,
-                %s, %s, %s,
-                %s, %s, %s, %s, %s,
-                %s, %s, %s, 'golf', 'walmart_stores', 'scintilla'
+                ?, ?, ?, ?, ?,
+                ?, ?, ?, ?,
+                ?, ?, ?, ?,
+                ?, ?, ?,
+                ?, ?, ?, ?, ?,
+                ?, ?, ?, 'golf', 'walmart_stores', 'scintilla'
             )
         """, [
             int(event_year),
