@@ -292,6 +292,51 @@ def trigger_pricing_sync():
     return {"status": "started", "message": "Pricing & coupon sync started in background"}
 
 
+@router.post("/api/item-master/add")
+def add_item_master(body: dict = Body(...)):
+    """Add a new item to the item master CSV."""
+    asin = (body.get("asin") or "").strip()
+    if not asin:
+        raise HTTPException(status_code=400, detail="ASIN is required")
+    items = load_item_master()
+    if any(i["asin"] == asin for i in items):
+        raise HTTPException(status_code=409, detail=f"ASIN {asin} already exists")
+    new_item = {
+        "asin": asin,
+        "sku": (body.get("sku") or "").strip(),
+        "productName": (body.get("productName") or "").strip(),
+        "color": (body.get("color") or "").strip(),
+        "brand": (body.get("brand") or "").strip(),
+        "series": (body.get("series") or "").strip(),
+        "productType": (body.get("productType") or "").strip(),
+        "pieceCount": int(float(body.get("pieceCount") or 0)),
+        "orientation": (body.get("orientation") or "").strip(),
+        "category": (body.get("category") or "").strip(),
+        "unitCost": float(body.get("unitCost") or 0),
+        "fbsStock": int(float(body.get("fbsStock") or 0)),
+        "lyAur": round(float(body.get("lyAur") or 0), 2),
+        "lyRevenue": round(float(body.get("lyRevenue") or 0), 2),
+        "lyUnits": int(float(body.get("lyUnits") or 0)),
+        "lyProfit": round(float(body.get("lyProfit") or 0), 2),
+        "plannedAnnualUnits": int(float(body.get("plannedAnnualUnits") or 0)),
+        "listPrice": float(body.get("listPrice") or 0),
+        "salePrice": float(body.get("salePrice") or 0),
+        "salePriceStartDate": (body.get("salePriceStartDate") or "").strip(),
+        "salePriceEndDate": (body.get("salePriceEndDate") or "").strip(),
+        "referralPct": float(body.get("referralPct") or 15),
+        "couponType": (body.get("couponType") or "").strip(),
+        "couponValue": float(body.get("couponValue") or 0),
+        "cartonPack": int(float(body.get("cartonPack") or 0)),
+        "cartonLength": float(body.get("cartonLength") or 0),
+        "cartonWidth": float(body.get("cartonWidth") or 0),
+        "cartonHeight": float(body.get("cartonHeight") or 0),
+        "cartonWeight": float(body.get("cartonWeight") or 0),
+    }
+    items.append(new_item)
+    save_item_master(items)
+    return {"status": "ok", "asin": asin, "item": new_item}
+
+
 @router.put("/api/item-master/{asin}")
 def update_item_master(asin: str, body: dict = Body(...)):
     """Update a single item in the item master by ASIN."""
@@ -301,12 +346,13 @@ def update_item_master(asin: str, body: dict = Body(...)):
         if item["asin"] == asin:
             # Only update fields that are provided
             updatable = [
+                "sku", "productName", "brand",
                 "listPrice", "salePrice", "salePriceStartDate", "salePriceEndDate",
                 "referralPct", "couponType",
                 "couponValue", "cartonPack", "cartonLength", "cartonWidth",
                 "cartonHeight", "cartonWeight", "unitCost", "plannedAnnualUnits",
                 "color", "series", "productType", "pieceCount", "orientation",
-                "category",
+                "category", "fbsStock", "lyAur", "lyRevenue", "lyUnits", "lyProfit",
             ]
             for key in updatable:
                 if key in body:
@@ -317,6 +363,18 @@ def update_item_master(asin: str, body: dict = Body(...)):
         raise HTTPException(status_code=404, detail=f"ASIN {asin} not found")
     save_item_master(items)
     return {"status": "ok", "asin": asin}
+
+
+@router.delete("/api/item-master/{asin}")
+def delete_item_master(asin: str):
+    """Delete a single item from the item master CSV by ASIN."""
+    items = load_item_master()
+    original_len = len(items)
+    items = [i for i in items if i["asin"] != asin]
+    if len(items) == original_len:
+        raise HTTPException(status_code=404, detail=f"ASIN {asin} not found")
+    save_item_master(items)
+    return {"status": "ok", "asin": asin, "remaining": len(items)}
 
 
 @router.post("/api/item-master/bulk-update")

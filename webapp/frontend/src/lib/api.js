@@ -149,6 +149,18 @@ export const api = {
       body: JSON.stringify(data),
       credentials: "include",
     }).then(r => r.json()),
+  addItem: (data) =>
+    fetch(`${API_BASE}/api/item-master/add`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(data),
+      credentials: "include",
+    }).then(r => { if (!r.ok) return r.json().then(d => { throw new Error(d.detail || "Add failed"); }); return r.json(); }),
+  deleteItem: (asin) =>
+    fetch(`${API_BASE}/api/item-master/${asin}`, {
+      method: "DELETE",
+      credentials: "include",
+    }).then(r => { if (!r.ok) return r.json().then(d => { throw new Error(d.detail || "Delete failed"); }); return r.json(); }),
   itemMasterWalmart: () => fetchJSON(`/api/item-master/walmart`),
   updateWalmartItem: (golfgenItem, data) =>
     fetch(`${API_BASE}/api/item-master/walmart/${encodeURIComponent(golfgenItem)}`, {

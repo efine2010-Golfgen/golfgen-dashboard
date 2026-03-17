@@ -1,6 +1,69 @@
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import { api, fmt$ } from "../lib/api";
 import { COLOR_BADGES } from "../lib/constants";
+
+/* ── Add Item Modal ──────────────────────────────────────── */
+function AddItemModal({ open, onClose, onAdd }) {
+  const [form, setForm] = useState({ asin: "", sku: "", productName: "", brand: "", color: "", series: "", productType: "", category: "", unitCost: "", listPrice: "", pieceCount: "" });
+  const [error, setError] = useState("");
+  const [saving, setSaving] = useState(false);
+  if (!open) return null;
+  const handleSubmit = async (e) => {
+    e.preventDefault();
+    if (!form.asin.trim()) { setError("ASIN is required"); return; }
+    setSaving(true); setError("");
+    try { await onAdd(form); setForm({ asin: "", sku: "", productName: "", brand: "", color: "", series: "", productType: "", category: "", unitCost: "", listPrice: "", pieceCount: "" }); onClose(); }
+    catch (err) { setError(err.message || "Failed to add item"); }
+    finally { setSaving(false); }
+  };
+  const F = ({ label, field, required }) => (
+    <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+      <label style={{ fontSize: 11, color: "var(--muted)", fontWeight: 600 }}>{label}{required && <span style={{ color: "#dc2626" }}> *</span>}</label>
+      <input value={form[field]} onChange={e => setForm(f => ({ ...f, [field]: e.target.value }))} style={{ padding: "6px 10px", border: "1px solid rgba(14,31,45,0.15)", borderRadius: 6, fontSize: 13, outline: "none" }} />
+    </div>
+  );
+  return (
+    <div style={{ position: "fixed", inset: 0, zIndex: 9999, display: "flex", alignItems: "center", justifyContent: "center", background: "rgba(0,0,0,0.4)" }} onClick={onClose}>
+      <div onClick={e => e.stopPropagation()} style={{ background: "#fff", borderRadius: 12, padding: 28, width: 520, maxHeight: "85vh", overflowY: "auto", boxShadow: "0 8px 40px rgba(0,0,0,0.15)" }}>
+        <h3 style={{ margin: "0 0 16px 0", fontSize: 18 }}>Add New Item</h3>
+        {error && <div style={{ background: "#fee2e2", color: "#dc2626", padding: "8px 12px", borderRadius: 6, marginBottom: 12, fontSize: 13 }}>{error}</div>}
+        <form onSubmit={handleSubmit}>
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12, marginBottom: 16 }}>
+            <F label="ASIN" field="asin" required /><F label="SKU" field="sku" />
+            <div style={{ gridColumn: "1 / -1" }}><F label="Product Name" field="productName" /></div>
+            <F label="Brand" field="brand" /><F label="Color" field="color" />
+            <F label="Series" field="series" /><F label="Product Type" field="productType" />
+            <F label="Category" field="category" /><F label="Piece Count" field="pieceCount" />
+            <F label="Unit Cost" field="unitCost" /><F label="List Price" field="listPrice" />
+          </div>
+          <div style={{ display: "flex", gap: 10, justifyContent: "flex-end" }}>
+            <button type="button" onClick={onClose} style={{ padding: "8px 18px", borderRadius: 6, background: "#f3f4f6", border: "none", cursor: "pointer" }}>Cancel</button>
+            <button type="submit" disabled={saving} style={{ padding: "8px 18px", borderRadius: 6, background: "var(--teal)", border: "none", color: "#fff", fontWeight: 700, cursor: "pointer", opacity: saving ? 0.6 : 1 }}>{saving ? "Adding..." : "Add Item"}</button>
+          </div>
+        </form>
+      </div>
+    </div>
+  );
+}
+
+/* ── Delete Confirmation Modal ───────────────────────────── */
+function DeleteConfirm({ item, onConfirm, onCancel }) {
+  if (!item) return null;
+  return (
+    <div style={{ position: "fixed", inset: 0, zIndex: 9999, display: "flex", alignItems: "center", justifyContent: "center", background: "rgba(0,0,0,0.4)" }} onClick={onCancel}>
+      <div onClick={e => e.stopPropagation()} style={{ background: "#fff", borderRadius: 12, padding: 28, width: 420, textAlign: "center", boxShadow: "0 8px 40px rgba(0,0,0,0.15)" }}>
+        <h3 style={{ margin: "0 0 8px 0" }}>Delete Item?</h3>
+        <p style={{ color: "#555", fontSize: 13 }}><strong>{item.productName || item.asin}</strong></p>
+        <p style={{ color: "#888", fontSize: 12 }}>ASIN: {item.asin} &middot; SKU: {item.sku || "—"}</p>
+        <p style={{ color: "#dc2626", fontSize: 12, marginBottom: 20 }}>This cannot be undone.</p>
+        <div style={{ display: "flex", gap: 10, justifyContent: "center" }}>
+          <button onClick={onCancel} style={{ padding: "8px 24px", borderRadius: 6, background: "#f3f4f6", border: "none", cursor: "pointer" }}>Cancel</button>
+          <button onClick={() => onConfirm(item.asin)} style={{ padding: "8px 24px", borderRadius: 6, background: "#dc2626", border: "none", color: "#fff", fontWeight: 700, cursor: "pointer" }}>Delete</button>
+        </div>
+      </div>
+    </div>
+  );
+}
 
 const COLOR_SECTIONS = ["All", "Green", "Blue", "Red", "Orange", "Accessories"];
 const DIVISIONS = ["Golf", "Housewares"];
@@ -111,6 +174,11 @@ export default function ItemMaster() {
   const [untaggedItems, setUntaggedItems] = useState([]);
   const [propagating, setPropagating] = useState(false);
   const [seeding, setSeeding] = useState(false);
+  const [showAdd, setShowAdd] = useState(false);
+  const [deleteTarget, setDeleteTarget] = useState(null);
+  const [toast, setToast] = useState(null);
+
+  const showToast = (msg, type = "success") => { setToast({ msg, type }); setTimeout(() => setToast(null), 3000); };
 
   // Load Amazon items (main item master) on mount
   const loadAmazon = useCallback(() => {
@@ -269,6 +337,22 @@ export default function ItemMaster() {
     setSaving(null);
   };
 
+  const handleAdd = async (formData) => {
+    const data = { ...formData, unitCost: parseFloat(formData.unitCost) || 0, listPrice: parseFloat(formData.listPrice) || 0, pieceCount: parseInt(formData.pieceCount) || 0 };
+    await api.addItem(data);
+    showToast(`Added ${data.asin}`);
+    loadAmazon();
+  };
+
+  const handleDelete = async (asin) => {
+    try {
+      await api.deleteItem(asin);
+      setAmazonItems(prev => prev.filter(i => i.asin !== asin));
+      setDeleteTarget(null);
+      showToast(`Deleted ${asin}`);
+    } catch (err) { showToast(`Delete failed: ${err.message}`, "error"); }
+  };
+
   const handleWalmartUpdate = async (golfgenItem, field, value) => {
     setSaving(golfgenItem);
     try {
@@ -292,6 +376,10 @@ export default function ItemMaster() {
   );
 
   if (loading) return <div className="loading"><div className="spinner" /> Loading item master...</div>;
+
+  const toastEl = toast && (
+    <div style={{ position: "fixed", top: 20, right: 20, zIndex: 10000, padding: "10px 20px", borderRadius: 8, fontSize: 13, fontWeight: 600, background: toast.type === "error" ? "#dc2626" : "var(--teal)", color: "#fff", boxShadow: "0 4px 20px rgba(0,0,0,0.2)" }}>{toast.msg}</div>
+  );
 
   /* ═══════════════════════════════════════════════════════════
      HOUSEWARES DIVISION
@@ -790,12 +878,17 @@ export default function ItemMaster() {
 
   return (
     <>
+      {toastEl}
+      <AddItemModal open={showAdd} onClose={() => setShowAdd(false)} onAdd={handleAdd} />
+      <DeleteConfirm item={deleteTarget} onConfirm={handleDelete} onCancel={() => setDeleteTarget(null)} />
+
       <div className="page-header" style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
         <div>
           <h1>Item Master</h1>
           <p>Golf &middot; Amazon &middot; {totalItems} SKUs &middot; {colorsCount} colors</p>
         </div>
         <div style={{ display: "flex", gap: 12, alignItems: "center" }}>
+          <button onClick={() => setShowAdd(true)} style={{ padding: "6px 14px", borderRadius: 8, fontSize: 12, fontWeight: 600, background: "var(--teal)", color: "#fff", border: "none", cursor: "pointer" }}>+ Add Item</button>
           {pricingLastSync && (
             <span style={{ fontSize: 11, color: "var(--muted)" }}>
               Pricing: {formatSyncTime(pricingLastSync)}
@@ -916,6 +1009,7 @@ export default function ItemMaster() {
               <SortHeader label="LY Rev" field="lyRevenue" style={{ textAlign: "right" }} />
               <SortHeader label="LY Units" field="lyUnits" style={{ textAlign: "right" }} />
               <th style={{ width: 30 }}></th>
+              <th style={{ width: 30 }}></th>
             </tr>
           </thead>
           <tbody>
@@ -1005,6 +1099,11 @@ export default function ItemMaster() {
                     >
                       {expandedAsin === item.asin ? "▲" : "▼"}
                     </button>
+                  </td>
+                  <td>
+                    <button onClick={() => setDeleteTarget(item)} title="Delete item"
+                      style={{ background: "none", border: "none", color: "#dc2626", cursor: "pointer", fontSize: 14, padding: "2px 6px", opacity: 0.5 }}
+                      onMouseEnter={e => e.target.style.opacity = 1} onMouseLeave={e => e.target.style.opacity = 0.5}>✕</button>
                   </td>
                 </tr>
                 {expandedAsin === item.asin && (
