@@ -36,15 +36,15 @@ def run_nif_migration():
         try:
             row = con.execute("SELECT COUNT(*) FROM walmart_nif_items").fetchone()
             if row and row[0] > 0:
-                # Check if existing data has category/color (v2 migration)
-                cat_row = con.execute(
-                    "SELECT COUNT(*) FROM walmart_nif_items WHERE category IS NOT NULL AND category != ''"
+                # Check if existing data has dexterity/color from FCST (v2 migration)
+                dex_row = con.execute(
+                    "SELECT COUNT(*) FROM walmart_nif_items WHERE dexterity IS NOT NULL AND dexterity != ''"
                 ).fetchone()
-                if cat_row and cat_row[0] > 0:
-                    logger.info(f"NIF migration: table has {row[0]} rows with category data, skipping")
+                if dex_row and dex_row[0] > 0:
+                    logger.info(f"NIF migration: table has {row[0]} rows with v2 data, skipping")
                     return
                 else:
-                    logger.info("NIF migration: existing data lacks category/color — will reload")
+                    logger.info("NIF migration: existing data lacks dexterity/color from FCST — will reload")
                     needs_reload = True
         except Exception:
             logger.info("NIF migration: table doesn't exist yet, will create on next startup")
