@@ -1650,9 +1650,9 @@ def nif_check():
             ).fetchall()
             result["by_year"] = {r[0]: r[1] for r in years}
             sample = con.execute(
-                "SELECT event_year, item_status, description, wmt_item_number FROM walmart_nif_items LIMIT 5"
+                "SELECT event_year, item_status, description, wmt_item_number, dexterity, category, color FROM walmart_nif_items LIMIT 5"
             ).fetchall()
-            result["sample"] = [{"year": r[0], "status": r[1], "desc": r[2], "wm": r[3]} for r in sample]
+            result["sample"] = [{"year": r[0], "status": r[1], "desc": r[2], "wm": r[3], "dex": r[4], "cat": r[5], "color": r[6]} for r in sample]
         else:
             # Table exists but empty — try migration now
             result["action"] = "attempting_migration"
