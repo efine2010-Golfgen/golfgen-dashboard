@@ -1325,15 +1325,17 @@ def ads_ingest_report(report_id: str):
 
 @router.post("/api/debug/ads-backfill")
 @router.get("/api/debug/ads-backfill")
-async def ads_backfill():
-    """Create v3 reports for last 30 days and poll until complete (up to 60 min).
+async def ads_backfill(days: int = Query(default=90, ge=7, le=90)):
+    """Create v3 reports for last N days and poll until complete.
 
-    This is a long-running endpoint — it blocks until all reports finish or timeout.
-    Ideal for one-time historical backfill.
+    Amazon Ads API max is 60 days per report, so >60 days auto-splits into chunks.
+    Each chunk polls up to 60 min. Default: 90 days (2 chunks of 60+30).
+
+    Usage: /api/debug/ads-backfill?days=90
     """
     try:
         loop = asyncio.get_event_loop()
-        result = await loop.run_in_executor(None, ads_backfill_30days)
+        result = await loop.run_in_executor(None, lambda: ads_backfill_30days(days=days))
         return result
     except Exception as e:
         return {"error": str(e)}
