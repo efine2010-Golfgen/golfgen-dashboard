@@ -1360,10 +1360,31 @@ def _classify_section(text: str) -> str | None:
     return None
 
 
+def _find_fcst_extra_cols(ws) -> dict:
+    """Scan row 11 headers to find DEXTERITY, CATEGORY, COLOR columns dynamically.
+    These shift between NIF file versions (S24/S25 at AZ-BB, S26 at AY-BA)."""
+    col_map = {}
+    for c in range(37, 60):  # AK through ~BH
+        val = ws.cell(11, c).value
+        if not val:
+            continue
+        val_upper = str(val).strip().upper()
+        if "DEXTERITY" in val_upper:
+            col_map["dexterity"] = c
+        elif "CATEGORY" in val_upper:
+            col_map["category"] = c
+        elif "COLOR" in val_upper:
+            col_map["color"] = c
+    return col_map
+
+
 def _parse_nif_fcst(ws, event_year: int) -> list[dict]:
     """Parse FCST sheet → list of item dicts with status classification."""
     items = []
     current_status = "new"  # default until first section header
+
+    # Find Dexterity/Category/Color column positions from row 11 headers
+    extra_cols = _find_fcst_extra_cols(ws)
 
     # Data starts at row 12 (row 11 is headers)
     for r in range(12, ws.max_row + 1):
@@ -1408,6 +1429,21 @@ def _parse_nif_fcst(ws, event_year: int) -> list[dict]:
             "new_store_count": _safe_int(ws.cell(r, 26).value),
             "store_count_diff": _safe_int(ws.cell(r, 27).value),
         }
+
+        # Read Dexterity/Category/Color from FCST columns (found dynamically)
+        if "dexterity" in extra_cols:
+            dex = _safe_str(ws.cell(r, extra_cols["dexterity"]).value, 60)
+            if dex and dex.upper() not in ("NA", "N/A"):
+                item["dexterity"] = dex
+        if "category" in extra_cols:
+            cat = _safe_str(ws.cell(r, extra_cols["category"]).value, 80)
+            if cat and cat.upper() not in ("NA", "N/A"):
+                item["category"] = cat
+        if "color" in extra_cols:
+            col = _safe_str(ws.cell(r, extra_cols["color"]).value, 60)
+            if col and col.upper() not in ("NA", "N/A"):
+                item["color"] = col
+
         items.append(item)
 
     return items
@@ -1465,9 +1501,9 @@ def _enrich_color_dexterity(items: list[dict], ws_commit) -> None:
     for item in items:
         vsn = item.get("vendor_stock_number", "")
         if vsn and vsn in cd_map:
-            if "color" in cd_map[vsn]:
+            if "color" in cd_map[vsn] and not item.get("color"):
                 item["color"] = cd_map[vsn]["color"]
-            if "dexterity" in cd_map[vsn]:
+            if "dexterity" in cd_map[vsn] and not item.get("dexterity"):
                 item["dexterity"] = cd_map[vsn]["dexterity"]
 
 
@@ -1533,23 +1569,24 @@ async def upload_nif(file: UploadFile = File(...)):
     if "ITEM SET UP" in wb.sheetnames:
         _enrich_dimensions(items, wb["ITEM SET UP"])
 
-    # Enrich with color/dexterity from COMMIT
+    # Fallback: enrich color/dexterity from COMMIT sheet if FCST didn't have them
     if "COMMIT" in wb.sheetnames:
         _enrich_color_dexterity(items, wb["COMMIT"])
 
-    # Derive category from brand
+    # Fallback: derive category from brand only if FCST didn't provide one
     for item in items:
-        brand = (item.get("brand") or "").upper()
-        if "LPGA" in brand:
-            item["category"] = "LPGA"
-        elif "G2 SERIES" in brand:
-            item["category"] = "G2 Series"
-        elif "G1 SERIES" in brand:
-            item["category"] = "G1 Series"
-        elif "TEE UP" in brand:
-            item["category"] = "Tee Up"
-        else:
-            item["category"] = "Other"
+        if not item.get("category"):
+            brand = (item.get("brand") or "").upper()
+            if "LPGA" in brand:
+                item["category"] = "LPGA"
+            elif "G2 SERIES" in brand:
+                item["category"] = "G2 Series"
+            elif "G1 SERIES" in brand:
+                item["category"] = "G1 Series"
+            elif "TEE UP" in brand:
+                item["category"] = "Tee Up"
+            else:
+                item["category"] = "Other"
 
     # Insert into database — clear existing data for this event year first
     con = get_db_rw()
