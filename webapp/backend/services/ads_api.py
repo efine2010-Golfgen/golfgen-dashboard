@@ -627,19 +627,26 @@ def _sync_ads_data_inner():
     report_configs = [
         {
             "report_type": "spCampaigns",
-            "columns": ["date", "impressions", "clicks", "spend",
+            "columns": ["date", "campaignId", "campaignName", "campaignStatus",
+                        "campaignBudgetAmount",
+                        "impressions", "clicks", "spend",
                         "purchases7d", "unitsSoldClicks7d", "sales7d"],
             "group_by": ["campaign"],
         },
         {
             "report_type": "spTargeting",
-            "columns": ["date", "impressions", "clicks", "cost",
+            "columns": ["date", "campaignId", "campaignName",
+                        "adGroupId", "adGroupName",
+                        "keywordId", "keyword", "matchType",
+                        "impressions", "clicks", "cost",
                         "purchases7d", "unitsSoldClicks7d", "sales7d"],
             "group_by": ["targeting"],
         },
         {
             "report_type": "spSearchTerm",
-            "columns": ["date", "impressions", "clicks", "spend",
+            "columns": ["date", "campaignId", "campaignName",
+                        "adGroupName", "keyword", "matchType", "searchTerm",
+                        "impressions", "clicks", "spend",
                         "purchases7d", "unitsSoldClicks7d", "sales7d"],
             "group_by": ["searchTerm"],
         },
@@ -1328,7 +1335,7 @@ def _handle_campaign_report(data):
     inserted = 0
     errors = 0
     try:
-        for row in data:
+        for idx, row in enumerate(data):
             try:
                 date = row.get("date", "")
                 campaign_id = str(row.get("campaignId", ""))
@@ -1342,8 +1349,13 @@ def _handle_campaign_report(data):
                 status = row.get("campaignStatus", "")
                 budget = float(row.get("campaignBudgetAmount", 0) or 0)
 
-                if not date or not campaign_id:
+                if not date:
                     continue
+                # If campaignId missing (old reports without dimension columns),
+                # use a synthetic ID so data still gets inserted
+                if not campaign_id:
+                    campaign_id = f"unknown_{idx}"
+                    campaign_name = campaign_name or f"Campaign {idx}"
 
                 # Aggregate table — DELETE+INSERT (DuckDB doesn't support INSERT OR REPLACE)
                 con.execute("DELETE FROM advertising WHERE date = CAST(? AS DATE) AND campaign_id = ?",
@@ -1396,12 +1408,14 @@ def _handle_targeting_report(data):
     inserted = 0
     errors = 0
     try:
-        for row in data:
+        for idx, row in enumerate(data):
             try:
                 date = row.get("date", "")
                 keyword_id = str(row.get("keywordId", row.get("targetId", "")))
-                if not date or not keyword_id:
+                if not date:
                     continue
+                if not keyword_id:
+                    keyword_id = f"unknown_{idx}"
 
                 con.execute("DELETE FROM ads_keywords WHERE date = CAST(? AS DATE) AND keyword_id = ?",
                             [date, keyword_id])
@@ -1458,12 +1472,12 @@ def _handle_search_term_report(data):
     inserted = 0
     errors = 0
     try:
-        for row in data:
+        for idx, row in enumerate(data):
             try:
                 date = row.get("date", "")
-                search_term = row.get("searchTerm", "")
+                search_term = row.get("searchTerm", "") or f"unknown_{idx}"
                 campaign_id = str(row.get("campaignId", ""))
-                if not date or not search_term:
+                if not date:
                     continue
 
                 con.execute("""DELETE FROM ads_search_terms

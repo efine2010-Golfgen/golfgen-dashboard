@@ -1198,3 +1198,91 @@ async def trigger_ads_sync():
         return {"status": "ads_sync_complete"}
     except Exception as e:
         return {"error": str(e)}
+
+
+@router.post("/api/debug/ads-clear-pending")
+@router.get("/api/debug/ads-clear-pending")
+def ads_clear_pending():
+    """Clear pending reports file so next sync creates fresh reports with correct columns."""
+    from pathlib import Path
+    from core.config import DB_DIR
+    pending_file = Path(DB_DIR) / "ads_pending_reports.json"
+    old_count = 0
+    if pending_file.exists():
+        try:
+            old = json.loads(pending_file.read_text())
+            old_count = len(old) if isinstance(old, list) else 0
+        except Exception:
+            pass
+        pending_file.write_text("[]")
+    return {"status": "cleared", "old_pending_count": old_count}
+
+
+@router.get("/api/debug/ads-ingest-report/{report_id}")
+def ads_ingest_report(report_id: str):
+    """Download a completed v3 report and ingest it into the DB immediately."""
+    import gzip
+    from services.ads_api import _handle_campaign_report, _handle_targeting_report, _handle_search_term_report
+
+    ads_creds = _load_ads_credentials()
+    if not ads_creds:
+        return {"error": "No credentials"}
+
+    try:
+        token_resp = http_requests.post("https://api.amazon.com/auth/o2/token", data={
+            "grant_type": "refresh_token",
+            "refresh_token": ads_creds["refresh_token"],
+            "client_id": ads_creds["client_id"],
+            "client_secret": ads_creds["client_secret"],
+        }, timeout=30)
+        access_token = token_resp.json().get("access_token", "")
+        if not access_token:
+            return {"error": "Token refresh failed"}
+
+        resp = http_requests.get(
+            f"https://advertising-api.amazon.com/reporting/reports/{report_id}",
+            headers={
+                "Authorization": f"Bearer {access_token}",
+                "Amazon-Advertising-API-ClientId": ads_creds["client_id"],
+                "Amazon-Advertising-API-Scope": str(ads_creds["profile_id"]),
+            },
+            timeout=30,
+        )
+        data = resp.json()
+        status = data.get("status", "")
+        if status != "COMPLETED":
+            return {"error": f"Report not completed (status={status})"}
+
+        url = data.get("url")
+        if not url:
+            return {"error": "No download URL"}
+
+        dl = http_requests.get(url, timeout=60)
+        try:
+            rows = json.loads(gzip.decompress(dl.content).decode("utf-8"))
+        except Exception:
+            rows = json.loads(dl.text)
+        if isinstance(rows, str):
+            rows = json.loads(rows)
+
+        report_type = data.get("configuration", {}).get("reportTypeId", "")
+        sample_keys = list(rows[0].keys()) if isinstance(rows, list) and rows else []
+
+        if report_type == "spCampaigns":
+            _handle_campaign_report(rows)
+        elif report_type == "spTargeting":
+            _handle_targeting_report(rows)
+        elif report_type == "spSearchTerm":
+            _handle_search_term_report(rows)
+        else:
+            return {"error": f"Unknown report type: {report_type}", "sample_keys": sample_keys}
+
+        return {
+            "status": "ingested",
+            "report_type": report_type,
+            "rows": len(rows) if isinstance(rows, list) else 0,
+            "sample_keys": sample_keys,
+            "sample": rows[:3] if isinstance(rows, list) else str(rows)[:200],
+        }
+    except Exception as e:
+        return {"error": str(e)}
