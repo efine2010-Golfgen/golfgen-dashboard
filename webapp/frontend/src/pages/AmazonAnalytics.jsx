@@ -6,6 +6,7 @@ import Inventory from "./Inventory";
 import FBAShipments from "./FBAShipments";
 import Advertising from "./Advertising";
 import ItemPlanning from "./ItemPlanning";
+import ItemMaster from "./ItemMaster";
 
 const TABS = [
   { key: "exec-summary", label: "EXEC SUMMARY" },
@@ -15,6 +16,7 @@ const TABS = [
   { key: "fba-shipments", label: "FBA SHIPMENTS" },
   { key: "advertising", label: "ADVERTISING" },
   { key: "forecasting", label: "FORECASTING" },
+  { key: "item-master", label: "ITEM MASTER" },
 ];
 
 const SG = (sz = 12, wt = 400) => ({
@@ -143,6 +145,7 @@ export default function AmazonAnalytics({ filters = {}, onMarketplaceChange }) {
       {page === "fba-shipments" && <FBAShipments filters={filters} />}
       {page === "advertising" && <Advertising filters={filters} />}
       {page === "forecasting" && <ItemPlanning />}
+      {page === "item-master" && <ItemMaster />}
     </div>
   );
 }
