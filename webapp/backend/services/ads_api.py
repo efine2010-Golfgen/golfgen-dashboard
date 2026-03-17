@@ -627,6 +627,10 @@ def _pull_ads_report_v3_daywise(creds, report_type_id, columns, start_date, end_
         day_str = current.strftime("%Y-%m-%d")
         current += timedelta(days=1)
 
+        # SUMMARY mode doesn't support "date" column — strip it since we
+        # inject the date from the request params anyway
+        safe_columns = [c for c in columns if c != "date"]
+
         body = {
             "name": f"{report_type_id}_{day_str}",
             "startDate": day_str,
@@ -634,7 +638,7 @@ def _pull_ads_report_v3_daywise(creds, report_type_id, columns, start_date, end_
             "configuration": {
                 "adProduct": "SPONSORED_PRODUCTS",
                 "groupBy": group_by or ["campaign"],
-                "columns": columns,
+                "columns": safe_columns,
                 "reportTypeId": report_type_id,
                 "timeUnit": "SUMMARY",
                 "format": "GZIP_JSON",
