@@ -794,10 +794,12 @@ def fee_detail(days: int = Query(30), division: Optional[str] = None,
     except Exception:
         pass
 
-    # Use daily_sales revenue as primary; fall back to financial_events
+    # Use daily_sales revenue as primary (it's the most current data source);
+    # fall back to financial_events revenue if daily_sales is empty
     revenue = ds_revenue if ds_revenue > 0 else fin_revenue
 
-    # If financial_events has no fee data, use fee fallback rates
+    # If financial_events has no fee data for this period, use fee fallback rates
+    # per metrics.py: referral 15% + FBA 12% = 27% of revenue
     if referral_total == 0 and revenue > 0:
         referral_total = round(revenue * 0.15, 2)
     if fba_total == 0 and revenue > 0:
@@ -817,6 +819,9 @@ def fee_detail(days: int = Query(30), division: Optional[str] = None,
     # Other fees estimate (IPF, subscription, etc.) — 2% of revenue as fallback
     other_est = round(revenue * 0.02, 2) if revenue > 0 else 0
     total_fees = referral_total + fba_total + storage_est + other_est
+
+    # Determine data source label for frontend
+    fee_source = "financial_events" if fin_row_count > 0 and fin_revenue > 0 else "estimated"
 
     # Build categories
     categories = [
@@ -1016,20 +1021,25 @@ def get_amazon_pricing():
         listing = data.get("listingPrice")
         buy_box = data.get("buyBoxPrice")
         landed = data.get("landedPrice")
-        # If buy box < listing, that's effectively a sale price
-        sale = None
-        if listing and buy_box and buy_box < listing:
+        regular = data.get("regularPrice")
+        sale = data.get("salePrice")
+        # Fall back: if API didn't return explicit sale price, infer from buy box < listing
+        if sale is None and listing and buy_box and buy_box < listing:
             sale = buy_box
+        # Use regular price as the "full" price if listing is not set
+        display_list = listing or regular
+        disc_pct = round((1 - buy_box / display_list) * 100, 1) if display_list and buy_box and display_list > 0 else 0
         pricing_rows.append({
             "asin": asin,
             "sku": info.get("sku", ""),
             "productName": info.get("name", ""),
             "division": info.get("division", "unknown"),
-            "listPrice": _n(listing),
+            "listPrice": _n(display_list),
+            "regularPrice": _n(regular),
             "buyBoxPrice": _n(buy_box),
             "landedPrice": _n(landed),
             "salePrice": _n(sale),
-            "discountPct": round((1 - buy_box / listing) * 100, 1) if listing and buy_box and listing > 0 else 0,
+            "discountPct": disc_pct,
             "fetchedAt": data.get("fetchedAt"),
         })
     pricing_rows.sort(key=lambda x: x["productName"] or x["asin"])

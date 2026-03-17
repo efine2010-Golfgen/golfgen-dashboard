@@ -1711,6 +1711,7 @@ def marketplace_check():
 def pricing_status():
     """Debug: check pricing cache file status and contents summary."""
     import json
+    from pathlib import Path
     from core.config import DB_DIR
     cache_path = DB_DIR / "pricing_sync.json"
     result = {
@@ -1726,12 +1727,15 @@ def pricing_status():
             result["lastSync"] = data.get("lastSync")
             result["price_count"] = len(prices)
             result["coupon_count"] = len(coupons)
+            # Show sample of first 5 ASINs with prices
             result["sample_prices"] = {k: v for i, (k, v) in enumerate(prices.items()) if i < 5}
             result["sample_coupons"] = {k: v for i, (k, v) in enumerate(coupons.items()) if i < 5}
         except Exception as e:
             result["parse_error"] = str(e)
     else:
         result["note"] = "pricing_sync.json does not exist — pricing sync may not have run yet"
+
+    # Also check item_master ASIN count (used by pricing sync)
     try:
         from core.database import get_db
         con = get_db()
@@ -1742,6 +1746,8 @@ def pricing_status():
         con.close()
     except Exception as e:
         result["item_master_error"] = str(e)
+
+    # Check financial_events revenue for last 30 days
     try:
         from core.database import get_db
         from datetime import datetime, timedelta
@@ -1764,4 +1770,83 @@ def pricing_status():
         con.close()
     except Exception as e:
         result["fin_events_error"] = str(e)
+
+    return result
+
+
+@router.get("/api/debug/financial-events-status")
+def financial_events_status():
+    """Debug: show date range, monthly distribution, and settlement group check for financial_events."""
+    from core.database import get_db
+    from datetime import datetime, timedelta
+    result = {}
+
+    # 1. Min/max dates and total count in DB
+    try:
+        con = get_db()
+        row = con.execute("""
+            SELECT MIN(date), MAX(date), COUNT(*), COUNT(DISTINCT date)
+            FROM financial_events
+        """).fetchone()
+        result["db_summary"] = {
+            "min_date": str(row[0]) if row[0] else None,
+            "max_date": str(row[1]) if row[1] else None,
+            "total_rows": int(row[2] or 0),
+            "distinct_dates": int(row[3] or 0),
+        }
+    except Exception as e:
+        result["db_summary_error"] = str(e)
+
+    # 2. Monthly distribution — how many rows per calendar month
+    try:
+        con = get_db()
+        rows = con.execute("""
+            SELECT SUBSTR(date, 1, 7) as month,
+                   COUNT(*) as rows,
+                   ROUND(SUM(product_charges)::numeric, 2) as revenue
+            FROM financial_events
+            GROUP BY 1
+            ORDER BY 1 DESC
+            LIMIT 12
+        """).fetchall()
+        result["monthly_distribution"] = [
+            {"month": r[0], "rows": int(r[1]), "revenue": float(r[2] or 0)} for r in rows
+        ]
+        con.close()
+    except Exception as e:
+        result["monthly_distribution_error"] = str(e)
+
+    # 3. Try calling listFinancialEventGroups to check Amazon settlement status
+    try:
+        from services.sp_api import _load_sp_api_credentials
+        from sp_api.api import Finances as FinancesAPI
+        from sp_api.base import Marketplaces
+        credentials = _load_sp_api_credentials()
+        if credentials:
+            finances = FinancesAPI(credentials=credentials, marketplace=Marketplaces.US)
+            # Fetch last 90 days of settlement groups
+            start = (datetime.utcnow() - timedelta(days=90)).strftime("%Y-%m-%dT%H:%M:%SZ")
+            resp = finances.list_financial_event_groups(
+                FinancialEventGroupStartedAfter=start,
+                MaxResultsPerPage=20
+            )
+            payload = resp.payload if hasattr(resp, "payload") else (resp if isinstance(resp, dict) else {})
+            groups_raw = payload.get("FinancialEventGroupList", []) or []
+            groups = []
+            for g in groups_raw:
+                gd = g if isinstance(g, dict) else (g.to_dict() if hasattr(g, "to_dict") else {})
+                groups.append({
+                    "groupId": gd.get("FinancialEventGroupId", ""),
+                    "status": gd.get("ProcessingStatus", ""),
+                    "start": str(gd.get("FinancialEventGroupStart", "")),
+                    "end": str(gd.get("FinancialEventGroupEnd", "")),
+                    "convertedTotal": float(gd.get("ConvertedTotal", {}).get("Amount", 0) if isinstance(gd.get("ConvertedTotal"), dict) else 0),
+                })
+            result["settlement_groups"] = groups
+            result["settlement_group_count"] = len(groups)
+        else:
+            result["settlement_groups"] = "no SP-API credentials"
+    except Exception as e:
+        result["settlement_groups_error"] = str(e)
+
     return result
