@@ -587,30 +587,35 @@ export function WalmartScorecard({ filters }) {
         const groupMap = buildSectionMap(activeVendor);
         if (Object.keys(groupMap).length === 0) return null;
 
-        // Frozen: use viewport-height container so you can scroll the full table
-        const containerStyle = freezeHeaders
-          ? { overflowX: "auto", overflowY: "auto", maxHeight: "calc(100vh - 180px)", position: "relative" }
-          : { overflowX: "auto" };
+        // Frozen: sticky thead rows stick to viewport top as you scroll the page.
+        // No maxHeight or overflowY — the full page scrolls freely (down to Recent Uploads etc.)
+        // overflowX: "auto" only for horizontal scrolling when many period columns are shown.
+        const containerStyle = { overflowX: "auto" };
 
-        const stickyHead = freezeHeaders
-          ? { position: "sticky", top: 0, zIndex: 10 }
-          : {};
+        // For sticky header: apply position:sticky + top to each th individually
+        // Row 1 ths stick at top:0, Row 2 ths stick at top:~28px (below row 1)
+        const stickyR1 = freezeHeaders ? { position: "sticky", top: 0, zIndex: 10 } : {};
+        const stickyR2 = freezeHeaders ? { position: "sticky", top: 28, zIndex: 10 } : {};
+        // Corner th (metric label) needs sticky left AND top
+        const stickyCornerR1 = freezeHeaders ? { position: "sticky", top: 0, left: 0, zIndex: 14 } : { position: "sticky", left: 0, zIndex: 12 };
+        const stickyCornerR2 = freezeHeaders ? { position: "sticky", top: 28, left: 0, zIndex: 14 } : { position: "sticky", left: 0, zIndex: 12 };
 
         return (
-          <Card style={freezeHeaders ? { padding: "10px 12px" } : undefined}>
+          <Card>
             <CardHdr
               title={activeVendor === "All Vendors" ? "All Vendors — Full Scorecard" : activeVendor}
             />
             <div style={containerStyle}>
               <table style={{ width: "100%", borderCollapse: "collapse", ...SG(10) }}>
-                <thead style={stickyHead}>
+                <thead>
                   {/* Row 1: Time period names (green font, spans 3 cols each) */}
                   <tr style={{ background: "var(--card)" }}>
                     <th
                       style={{
                         padding: "6px 8px", textAlign: "left", ...SG(9, 700), color: "var(--txt3)",
-                        whiteSpace: "nowrap", position: "sticky", left: 0, background: "var(--card)", zIndex: 12, minWidth: 160,
+                        whiteSpace: "nowrap", background: "var(--card)", minWidth: 160,
                         borderBottom: "none",
+                        ...stickyCornerR1,
                       }}
                     />
                     {activePeriods.map((period) => (
@@ -622,6 +627,7 @@ export function WalmartScorecard({ filters }) {
                           ...SG(9, 700), color: COLORS.teal,
                           whiteSpace: "nowrap", borderLeft: "2px solid var(--brd)",
                           borderBottom: "none", background: "var(--card)",
+                          ...stickyR1,
                         }}
                       >
                         {SHORT_PERIOD[period] || period}
@@ -633,20 +639,21 @@ export function WalmartScorecard({ filters }) {
                     <th
                       style={{
                         padding: "2px 8px 6px", textAlign: "left", ...SG(8, 700), color: "var(--txt3)",
-                        whiteSpace: "nowrap", position: "sticky", left: 0, background: "var(--card)", zIndex: 12, minWidth: 160,
+                        whiteSpace: "nowrap", background: "var(--card)", minWidth: 160,
+                        ...stickyCornerR2,
                       }}
                     >
                       Metric
                     </th>
                     {activePeriods.map((period) => (
                       <Fragment key={period}>
-                        <th style={{ padding: "2px 6px 6px", textAlign: "right", ...SG(8, 600), color: "var(--txt3)", whiteSpace: "nowrap", borderLeft: "2px solid var(--brd)", background: "var(--card)" }}>
+                        <th style={{ padding: "2px 6px 6px", textAlign: "right", ...SG(8, 600), color: "var(--txt3)", whiteSpace: "nowrap", borderLeft: "2px solid var(--brd)", background: "var(--card)", ...stickyR2 }}>
                           TY
                         </th>
-                        <th style={{ padding: "2px 6px 6px", textAlign: "right", ...SG(8, 600), color: "var(--txt3)", whiteSpace: "nowrap", background: "var(--card)" }}>
+                        <th style={{ padding: "2px 6px 6px", textAlign: "right", ...SG(8, 600), color: "var(--txt3)", whiteSpace: "nowrap", background: "var(--card)", ...stickyR2 }}>
                           LY
                         </th>
-                        <th style={{ padding: "2px 6px 6px", textAlign: "right", ...SG(8, 600), color: "var(--txt3)", whiteSpace: "nowrap", background: "var(--card)" }}>
+                        <th style={{ padding: "2px 6px 6px", textAlign: "right", ...SG(8, 600), color: "var(--txt3)", whiteSpace: "nowrap", background: "var(--card)", ...stickyR2 }}>
                           % Chg
                         </th>
                       </Fragment>

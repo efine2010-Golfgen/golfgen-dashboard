@@ -46,13 +46,14 @@ export default function WalmartAnalytics({ filters = {} }) {
   const latestWeek = availability?.latestWeek;
 
   const TABS = [
-    { key: "sales", label: "SALES PERFORMANCE" },
-    { key: "inventory", label: "INVENTORY HEALTH" },
-    { key: "scorecard", label: "VENDOR SCORECARD" },
-    { key: "ecomm", label: "ECOMMERCE" },
-    { key: "forecast", label: "ORDER FORECAST" },
-    { key: "store-analytics", label: "STORE ANALYTICS" },
+    { key: "sales", label: "SALES PERFORMANCE", title: "Sales Performance" },
+    { key: "inventory", label: "INVENTORY HEALTH", title: "Inventory Health" },
+    { key: "scorecard", label: "VENDOR SCORECARD", title: "Vendor Scorecard" },
+    { key: "ecomm", label: "ECOMMERCE", title: "E-Commerce" },
+    { key: "forecast", label: "ORDER FORECAST", title: "Order Forecast" },
+    { key: "store-analytics", label: "STORE ANALYTICS", title: "Store Analytics" },
   ];
+  const activeTab = TABS.find(t => t.key === page) || TABS[0];
 
   return (
     <div style={{ padding: "0 24px 40px" }}>
@@ -67,7 +68,7 @@ export default function WalmartAnalytics({ filters = {} }) {
       >
         <div>
           <h1 style={{ ...DM(22), margin: 0, color: "var(--txt)" }}>
-            Performance Dashboard
+            {activeTab.title}
           </h1>
           <p
             style={{
@@ -159,21 +160,23 @@ export default function WalmartAnalytics({ filters = {} }) {
       {/* ── Recent Uploads (bottom, collapsible) ── */}
       {uploads.length > 0 && (
         <div style={{ marginTop: 24 }}>
-          <button
+          <span
             onClick={() => setShowUploads(!showUploads)}
             style={{
-              ...SG(10, 600),
-              background: "none",
-              border: "1px solid var(--brd)",
-              borderRadius: 6,
-              padding: "4px 12px",
+              ...SG(8, 600),
+              padding: "2px 8px",
+              borderRadius: 3,
               cursor: "pointer",
-              color: "var(--txt3)",
+              background: showUploads ? "rgba(46,207,170,0.15)" : "rgba(255,255,255,0.04)",
+              color: showUploads ? "#2ecf99" : "var(--txt3)",
+              border: `1px solid ${showUploads ? "rgba(46,207,170,0.3)" : "rgba(255,255,255,0.08)"}`,
+              userSelect: "none",
+              display: "inline-block",
               marginBottom: showUploads ? 8 : 0,
             }}
           >
-            {showUploads ? "Hide Uploads ▲" : "Recent Uploads ▼"}
-          </button>
+            {showUploads ? "Hide Uploads" : "Recent Uploads"}
+          </span>
           {showUploads && (
             <Card>
               <div style={{ ...SG(12, 700), color: "var(--txt)", marginBottom: 8 }}>
