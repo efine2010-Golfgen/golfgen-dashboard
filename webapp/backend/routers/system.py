@@ -1627,6 +1627,56 @@ def return_rate_debug():
     return result
 
 
+@router.get("/api/debug/nif-check")
+def nif_check():
+    """Debug: check walmart_nif_items table state and attempt migration if empty."""
+    con = get_db()
+    result = {}
+    try:
+        try:
+            row = con.execute("SELECT COUNT(*) FROM walmart_nif_items").fetchone()
+            result["table_exists"] = True
+            result["row_count"] = row[0] if row else 0
+        except Exception as e:
+            result["table_exists"] = False
+            result["error"] = str(e)
+            con.close()
+            return result
+
+        if row and row[0] > 0:
+            # Show sample + year breakdown
+            years = con.execute(
+                "SELECT event_year, COUNT(*) FROM walmart_nif_items GROUP BY event_year ORDER BY event_year"
+            ).fetchall()
+            result["by_year"] = {r[0]: r[1] for r in years}
+            sample = con.execute(
+                "SELECT event_year, item_status, description, wmt_item_number FROM walmart_nif_items LIMIT 5"
+            ).fetchall()
+            result["sample"] = [{"year": r[0], "status": r[1], "desc": r[2], "wm": r[3]} for r in sample]
+        else:
+            # Table exists but empty — try migration now
+            result["action"] = "attempting_migration"
+            con.close()
+            try:
+                from scripts.nif_migration import run_nif_migration
+                run_nif_migration()
+                result["migration_result"] = "completed"
+                # Re-check count
+                con2 = get_db()
+                row2 = con2.execute("SELECT COUNT(*) FROM walmart_nif_items").fetchone()
+                result["row_count_after"] = row2[0] if row2 else 0
+                con2.close()
+            except Exception as e2:
+                result["migration_error"] = str(e2)
+            return result
+    finally:
+        try:
+            con.close()
+        except Exception:
+            pass
+    return result
+
+
 @router.get("/api/debug/marketplace-check")
 def marketplace_check():
     """Debug: check marketplace column values across key tables."""
