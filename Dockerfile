@@ -15,6 +15,7 @@ COPY webapp/backend/main.py ./webapp/backend/main.py
 COPY webapp/backend/core/ ./webapp/backend/core/
 COPY webapp/backend/routers/ ./webapp/backend/routers/
 COPY webapp/backend/services/ ./webapp/backend/services/
+COPY webapp/backend/scripts/ ./webapp/backend/scripts/
 RUN touch ./webapp/__init__.py ./webapp/backend/__init__.py
 
 # Copy pre-built frontend from backend/dist (fully git-tracked copy)
