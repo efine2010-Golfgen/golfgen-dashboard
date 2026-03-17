@@ -13,7 +13,7 @@ import requests as http_requests
 from core.config import DB_PATH, TIMEZONE
 from core.database import get_db, get_db_rw
 from core.hierarchy import hierarchy_filter
-from services.ads_api import _sync_ads_data, _load_ads_credentials
+from services.ads_api import _sync_ads_data, _load_ads_credentials, ads_backfill_30days
 
 logger = logging.getLogger("golfgen")
 router = APIRouter()
@@ -1319,5 +1319,21 @@ def ads_ingest_report(report_id: str):
             "sample_keys": sample_keys,
             "sample": rows[:3] if isinstance(rows, list) else str(rows)[:200],
         }
+    except Exception as e:
+        return {"error": str(e)}
+
+
+@router.post("/api/debug/ads-backfill")
+@router.get("/api/debug/ads-backfill")
+async def ads_backfill():
+    """Create v3 reports for last 30 days and poll until complete (up to 60 min).
+
+    This is a long-running endpoint — it blocks until all reports finish or timeout.
+    Ideal for one-time historical backfill.
+    """
+    try:
+        loop = asyncio.get_event_loop()
+        result = await loop.run_in_executor(None, ads_backfill_30days)
+        return result
     except Exception as e:
         return {"error": str(e)}

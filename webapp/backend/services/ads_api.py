@@ -620,8 +620,8 @@ def _sync_ads_data_inner():
         logger.info("Ads sync: no pending reports to check")
 
     # ── Phase B: Create new v3 reports ──
-    # Create one report per type covering the full 14-day range
-    start_date = (today - timedelta(days=14)).strftime("%Y-%m-%d")
+    # Create one report per type covering the full 30-day range
+    start_date = (today - timedelta(days=30)).strftime("%Y-%m-%d")
     end_date = (today - timedelta(days=1)).strftime("%Y-%m-%d")
 
     report_configs = [
@@ -1521,5 +1521,210 @@ def _handle_search_term_report(data):
     finally:
         con.close()
     logger.info(f"Search term report handler: {inserted} inserted, {errors} errors out of {len(data)} rows")
+
+
+def ads_backfill_30days():
+    """Create v3 reports for the last 30 days and poll until they complete.
+
+    This is a BLOCKING call — it polls every 60 seconds for up to 60 minutes.
+    Designed to be called from a background thread/executor so it doesn't block
+    the event loop.
+
+    Returns a dict with status info for each report type.
+    """
+    import time as _time
+    import gzip as gz
+    import requests as req
+    import re
+
+    ads_creds = _load_ads_credentials()
+    if not ads_creds:
+        return {"error": "No Amazon Ads credentials configured"}
+
+    _ensure_ads_tables()
+
+    profile_id = ads_creds.get("profile_id", "")
+    if not profile_id:
+        return {"error": "No profile_id configured"}
+
+    access_token = _get_ads_access_token(ads_creds)
+    if not access_token:
+        return {"error": "Failed to get access token"}
+
+    headers = {
+        "Authorization": f"Bearer {access_token}",
+        "Amazon-Advertising-API-ClientId": ads_creds["client_id"],
+        "Amazon-Advertising-API-Scope": str(profile_id),
+    }
+
+    today = datetime.now(ZoneInfo("America/Chicago"))
+    start_date = (today - timedelta(days=30)).strftime("%Y-%m-%d")
+    end_date = (today - timedelta(days=1)).strftime("%Y-%m-%d")
+
+    report_configs = [
+        {
+            "report_type": "spCampaigns",
+            "columns": ["date", "campaignId", "campaignName", "campaignStatus",
+                        "campaignBudgetAmount",
+                        "impressions", "clicks", "spend",
+                        "purchases7d", "unitsSoldClicks7d", "sales7d"],
+            "group_by": ["campaign"],
+            "handler": _handle_campaign_report,
+        },
+        {
+            "report_type": "spTargeting",
+            "columns": ["date", "campaignId", "campaignName",
+                        "adGroupId", "adGroupName",
+                        "keywordId", "keyword", "matchType",
+                        "impressions", "clicks", "cost",
+                        "purchases7d", "unitsSoldClicks7d", "sales7d"],
+            "group_by": ["targeting"],
+            "handler": _handle_targeting_report,
+        },
+        {
+            "report_type": "spSearchTerm",
+            "columns": ["date", "campaignId", "campaignName",
+                        "adGroupName", "keyword", "matchType", "searchTerm",
+                        "impressions", "clicks", "spend",
+                        "purchases7d", "unitsSoldClicks7d", "sales7d"],
+            "group_by": ["searchTerm"],
+            "handler": _handle_search_term_report,
+        },
+    ]
+
+    headers_create = {
+        **headers,
+        "Content-Type": "application/vnd.createasyncreportrequest.v3+json",
+        "Accept": "application/vnd.createasyncreportrequest.v3+json",
+    }
+
+    # Step 1: Create all 3 reports
+    created = {}  # report_type -> report_id
+    results = {}
+
+    for cfg in report_configs:
+        rt = cfg["report_type"]
+        body = {
+            "name": f"backfill_{rt}_{start_date}_{end_date}",
+            "startDate": start_date,
+            "endDate": end_date,
+            "configuration": {
+                "adProduct": "SPONSORED_PRODUCTS",
+                "groupBy": cfg["group_by"],
+                "columns": cfg["columns"],
+                "reportTypeId": rt,
+                "timeUnit": "DAILY",
+                "format": "GZIP_JSON",
+            }
+        }
+
+        try:
+            resp = req.post(
+                "https://advertising-api.amazon.com/reporting/reports",
+                headers=headers_create,
+                json=body,
+                timeout=30,
+            )
+
+            report_id = None
+            if resp.status_code in (200, 202):
+                report_id = resp.json().get("reportId")
+            elif resp.status_code == 425:
+                match = re.search(r'([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})', resp.text)
+                if match:
+                    report_id = match.group(1)
+                    logger.info(f"Backfill: {rt} duplicate, using existing {report_id}")
+            else:
+                results[rt] = {"error": f"Create failed: {resp.status_code} {resp.text[:200]}"}
+                logger.warning(f"Backfill: create {rt} failed: {resp.status_code}")
+
+            if report_id:
+                created[rt] = {"report_id": report_id, "handler": cfg["handler"]}
+                results[rt] = {"report_id": report_id, "status": "CREATED"}
+                logger.info(f"Backfill: created {rt} report {report_id}")
+        except Exception as e:
+            results[rt] = {"error": str(e)}
+            logger.error(f"Backfill: error creating {rt}: {e}")
+
+    if not created:
+        return {"status": "no_reports_created", "results": results}
+
+    # Step 2: Poll every 60 seconds for up to 60 minutes
+    max_polls = 60
+    poll_interval = 60
+    remaining = dict(created)
+
+    for poll_num in range(max_polls):
+        if not remaining:
+            break
+
+        _time.sleep(poll_interval)
+
+        # Refresh token every 20 minutes (tokens last ~60 min)
+        if poll_num > 0 and poll_num % 20 == 0:
+            new_token = _get_ads_access_token(ads_creds)
+            if new_token:
+                access_token = new_token
+                headers["Authorization"] = f"Bearer {access_token}"
+                logger.info("Backfill: refreshed access token")
+
+        completed_this_round = []
+        for rt, info in remaining.items():
+            rid = info["report_id"]
+            handler = info["handler"]
+
+            try:
+                poll_resp = req.get(
+                    f"https://advertising-api.amazon.com/reporting/reports/{rid}",
+                    headers=headers,
+                    timeout=30,
+                )
+                pdata = poll_resp.json()
+                status = pdata.get("status", "UNKNOWN")
+
+                if status == "COMPLETED":
+                    download_url = pdata.get("url")
+                    if download_url:
+                        dl_resp = req.get(download_url, timeout=120)
+                        try:
+                            data = json.loads(gz.decompress(dl_resp.content).decode("utf-8"))
+                        except Exception:
+                            data = json.loads(dl_resp.text)
+                        if isinstance(data, str):
+                            data = json.loads(data)
+
+                        handler(data)
+                        row_count = len(data) if isinstance(data, list) else 0
+                        results[rt] = {
+                            "report_id": rid,
+                            "status": "INGESTED",
+                            "rows": row_count,
+                            "poll_minutes": (poll_num + 1),
+                        }
+                        logger.info(f"Backfill: {rt} completed and ingested — {row_count} rows "
+                                   f"(after {poll_num + 1} min)")
+                    completed_this_round.append(rt)
+
+                elif status in ("FAILED", "CANCELLED"):
+                    results[rt] = {"report_id": rid, "status": status}
+                    completed_this_round.append(rt)
+                    logger.warning(f"Backfill: {rt} report {status}")
+                else:
+                    results[rt]["status"] = f"PENDING (poll #{poll_num + 1})"
+                    logger.info(f"Backfill: {rt} still {status} (poll #{poll_num + 1})")
+
+            except Exception as e:
+                logger.error(f"Backfill: error polling {rt}: {e}")
+
+        for rt in completed_this_round:
+            del remaining[rt]
+
+    # Mark any still-remaining as timed out
+    for rt in remaining:
+        results[rt]["status"] = "TIMEOUT (60 min)"
+        logger.warning(f"Backfill: {rt} timed out after 60 min")
+
+    logger.info(f"Backfill complete: {json.dumps({k: v.get('status', '?') for k, v in results.items() if isinstance(v, dict)})}")
+    return {"status": "backfill_complete", "date_range": f"{start_date} to {end_date}", "results": results}
 
 
