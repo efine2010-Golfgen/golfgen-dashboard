@@ -9,7 +9,6 @@ node_modules/
 
 # Dev/local files not needed in cloud
 templates/
-scripts/
 *.md
 *.pdf
 config/
