@@ -98,10 +98,10 @@ def _sync_pricing_data():
     Falls back gracefully if SP-API is not configured.
     """
     try:
-        from sp_api.api import ProductPricing as ProductsAPI
+        from sp_api.api import ProductsV0 as ProductsAPI
         from sp_api.base import Marketplaces
-    except ImportError:
-        logger.info("Pricing sync: sp_api not installed, skipping")
+    except ImportError as e:
+        logger.error(f"Pricing sync: sp_api import failed: {e}")
         return
 
     import time as _t
@@ -135,9 +135,9 @@ def _sync_pricing_data():
             batch = asins[i:i + batch_size]
             batch_num = i // batch_size + 1
             try:
-                result = products_api.get_pricing(
+                result = products_api.get_product_pricing_for_asins(
+                    batch,
                     ItemType="Asin",
-                    Asins=batch,
                     MarketplaceId="ATVPDKIKX0DER",
                 )
                 payload = result.payload if hasattr(result, "payload") else result
