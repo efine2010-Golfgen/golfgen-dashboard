@@ -1801,9 +1801,9 @@ def financial_events_status():
     try:
         con = get_db()
         rows = con.execute("""
-            SELECT SUBSTR(date, 1, 7) as month,
+            SELECT SUBSTR(CAST(date AS TEXT), 1, 7) as month,
                    COUNT(*) as rows,
-                   ROUND(SUM(product_charges)::numeric, 2) as revenue
+                   ROUND(CAST(SUM(product_charges) AS numeric), 2) as revenue
             FROM financial_events
             GROUP BY 1
             ORDER BY 1 DESC

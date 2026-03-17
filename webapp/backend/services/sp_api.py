@@ -611,7 +611,7 @@ def _run_sp_api_sync_inner():
         page = 0
         next_token = None
 
-        while page < 20:
+        while page < 100:  # 100 pages × 100/page = 10,000 max events (covers ~6 months)
             page += 1
             kwargs = {"PostedAfter": fin_start, "MaxResultsPerPage": 100}
             if next_token:
