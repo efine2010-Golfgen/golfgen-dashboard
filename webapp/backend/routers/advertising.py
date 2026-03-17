@@ -729,6 +729,7 @@ def ads_profiles():
         return {"error": str(e)}
 
 
+@router.get("/api/debug/ads-test")
 @router.get("/api/ads/debug-test")
 def ads_debug_test():
     """Debug endpoint: test Ads API connectivity, list campaigns, check report status."""
@@ -937,6 +938,7 @@ def ads_report_status(report_id: str):
         return {"error": str(e)}
 
 
+@router.post("/api/debug/ads-sync")
 @router.post("/api/ads/sync")
 async def trigger_ads_sync():
     """Manually trigger an ads data sync."""
