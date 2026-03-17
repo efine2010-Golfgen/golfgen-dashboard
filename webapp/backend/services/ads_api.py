@@ -481,9 +481,16 @@ def _sync_ads_data():
 
 
 def _sync_ads_data_inner():
-    """Inner implementation of ads sync (called under mutex)."""
+    """Inner implementation of ads sync (called under mutex).
+
+    Strategy: Amazon Ads v3 reporting API reports stay PENDING forever for this
+    account, and v2 is deprecated (404). Instead, we use:
+      1. Campaign list API (POST /sp/campaigns/list) → campaign metadata
+      2. Budget usage API (POST /sp/campaigns/budget/usage) → daily spend
+    This gives us campaign names, budgets, status, and actual spend.
+    Impressions/clicks/orders/sales require working reports (future fix).
+    """
     import time as _time
-    import gzip as gz
     import requests as req
 
     ads_creds = _load_ads_credentials()
@@ -497,12 +504,11 @@ def _sync_ads_data_inner():
     if not profile_id:
         logger.warning("Ads sync: no profile_id set, attempting to discover profiles...")
         try:
-            import requests as _req
             access_token = _get_ads_access_token(ads_creds)
             if not access_token:
                 logger.error("Ads sync: cannot get token to discover profiles")
                 return
-            prof_resp = _req.get(
+            prof_resp = req.get(
                 "https://advertising-api.amazon.com/v2/profiles",
                 headers={
                     "Authorization": f"Bearer {access_token}",
@@ -527,45 +533,222 @@ def _sync_ads_data_inner():
             logger.error(f"Ads sync: failed to discover profiles: {e}")
             return
 
-    # Pull last 14 days of data (shorter range = faster report generation)
+    # Get access token
+    access_token = _get_ads_access_token(ads_creds)
+    if not access_token:
+        logger.error("Ads sync: failed to get access token")
+        return
+
+    headers = {
+        "Authorization": f"Bearer {access_token}",
+        "Amazon-Advertising-API-ClientId": ads_creds["client_id"],
+        "Amazon-Advertising-API-Scope": str(profile_id),
+    }
+
+    # ── Step 1: List all SP campaigns ──
+    logger.info("Ads sync: fetching campaign list...")
+    all_campaigns = []
+    next_token = None
+    for page in range(10):  # max 10 pages
+        list_body = {
+            "maxResults": 100,
+            "stateFilter": {"include": ["ENABLED", "PAUSED", "ARCHIVED"]},
+        }
+        if next_token:
+            list_body["nextToken"] = next_token
+
+        camp_resp = req.post(
+            "https://advertising-api.amazon.com/sp/campaigns/list",
+            headers={**headers, "Accept": "application/vnd.spCampaign.v3+json",
+                     "Content-Type": "application/vnd.spCampaign.v3+json"},
+            json=list_body,
+            timeout=30,
+        )
+        if camp_resp.status_code != 200:
+            logger.error(f"Ads sync: campaign list failed: {camp_resp.status_code} {camp_resp.text[:300]}")
+            break
+
+        data = camp_resp.json()
+        campaigns = data.get("campaigns", [])
+        all_campaigns.extend(campaigns)
+        next_token = data.get("nextToken")
+        if not next_token:
+            break
+        _time.sleep(1)
+
+    logger.info(f"Ads sync: found {len(all_campaigns)} campaigns")
+    if not all_campaigns:
+        logger.warning("Ads sync: no campaigns found, stopping")
+        return
+
+    # Build campaign lookup
+    campaign_map = {}
+    for c in all_campaigns:
+        cid = str(c.get("campaignId", ""))
+        campaign_map[cid] = {
+            "name": c.get("name", ""),
+            "state": c.get("state", ""),
+            "budget": float(c.get("budget", {}).get("budget", 0)),
+            "targeting": c.get("targetingType", ""),
+            "start_date": c.get("startDate", ""),
+        }
+
+    # ── Step 2: Get budget usage (daily spend) for ENABLED campaigns ──
+    enabled_ids = [cid for cid, info in campaign_map.items() if info["state"] == "ENABLED"]
+    logger.info(f"Ads sync: fetching budget usage for {len(enabled_ids)} enabled campaigns...")
+
     today = datetime.now(ZoneInfo("America/Chicago"))
-    start_date = (today - timedelta(days=14)).strftime("%Y-%m-%d")
-    end_date = (today - timedelta(days=1)).strftime("%Y-%m-%d")
+    # Budget usage API supports up to 14 days
+    usage_start = (today - timedelta(days=14)).strftime("%Y%m%d")
+    usage_end = (today - timedelta(days=1)).strftime("%Y%m%d")
 
-    # v3 API: each reportTypeId has its own allowed columns and groupBy values.
-    # Dimension columns are returned automatically — only specify metric columns.
-    # ── Report 1: Campaign-level daily data ──
-    _pull_ads_report(
-        ads_creds, "spCampaigns",
-        columns=["date", "impressions", "clicks", "spend",
-                 "purchases7d", "unitsSoldClicks7d", "sales7d"],
-        start_date=start_date, end_date=end_date,
-        handler=_handle_campaign_report,
-        group_by=["campaign"],
-    )
+    spend_data = {}  # {campaign_id: {date: spend_amount}}
 
-    # ── Report 2: Targeting/Keywords daily data ──
-    # Note: spTargeting uses "cost" not "spend"
-    _pull_ads_report(
-        ads_creds, "spTargeting",
-        columns=["date", "impressions", "clicks", "cost",
-                 "purchases7d", "unitsSoldClicks7d", "sales7d"],
-        start_date=start_date, end_date=end_date,
-        handler=_handle_targeting_report,
-        group_by=["targeting"],
-    )
+    # Process in batches of 20 (API limit)
+    batch_size = 20
+    for i in range(0, len(enabled_ids), batch_size):
+        batch = enabled_ids[i:i + batch_size]
+        try:
+            usage_resp = req.post(
+                "https://advertising-api.amazon.com/sp/campaigns/budget/usage",
+                headers={**headers, "Content-Type": "application/json", "Accept": "application/json"},
+                json={
+                    "campaignIds": batch,
+                    "startDate": usage_start,
+                    "endDate": usage_end,
+                },
+                timeout=30,
+            )
+            if usage_resp.status_code == 200:
+                usage_list = usage_resp.json()
+                if isinstance(usage_list, list):
+                    for item in usage_list:
+                        cid = str(item.get("campaignId", ""))
+                        budget = float(item.get("budget", 0))
+                        usage_pct = float(item.get("usagePercent", item.get("percentTimeInBudget", 0)) or 0)
+                        # Budget usage returns percentage — calculate actual spend
+                        actual_spend = budget * (usage_pct / 100.0) if usage_pct > 0 else 0
 
-    # ── Report 3: Search terms ──
-    _pull_ads_report(
-        ads_creds, "spSearchTerm",
-        columns=["date", "impressions", "clicks", "spend",
-                 "purchases7d", "unitsSoldClicks7d", "sales7d"],
-        start_date=start_date, end_date=end_date,
-        handler=_handle_search_term_report,
-        group_by=["searchTerm"],
-    )
+                        # Also check for budgetUsageData (daily breakdown)
+                        daily_usage = item.get("budgetUsageData", [])
+                        if daily_usage:
+                            for day_entry in daily_usage:
+                                day_date = day_entry.get("date", "")
+                                day_spend = float(day_entry.get("spend", 0) or 0)
+                                day_pct = float(day_entry.get("usagePercent", 0) or 0)
+                                if day_date:
+                                    if cid not in spend_data:
+                                        spend_data[cid] = {}
+                                    spend_data[cid][day_date] = day_spend if day_spend > 0 else budget * (day_pct / 100.0)
+                        elif actual_spend > 0:
+                            # No daily breakdown — use today's date with aggregate spend
+                            date_str = today.strftime("%Y-%m-%d")
+                            if cid not in spend_data:
+                                spend_data[cid] = {}
+                            spend_data[cid][date_str] = actual_spend
+                elif isinstance(usage_list, dict):
+                    # Some API versions return dict format
+                    for cid_key, usage_info in usage_list.items():
+                        if isinstance(usage_info, dict):
+                            spend = float(usage_info.get("spend", 0) or 0)
+                            if spend > 0:
+                                if cid_key not in spend_data:
+                                    spend_data[cid_key] = {}
+                                spend_data[cid_key][today.strftime("%Y-%m-%d")] = spend
+            else:
+                logger.warning(f"Ads sync: budget usage failed for batch: {usage_resp.status_code} {usage_resp.text[:200]}")
+            _time.sleep(1)
+        except Exception as e:
+            logger.error(f"Ads sync: budget usage error: {e}")
+
+    logger.info(f"Ads sync: got spend data for {len(spend_data)} campaigns")
+
+    # ── Step 3: Insert campaign data into advertising + ads_campaigns ──
+    con = get_db_rw()
+    con.execute("BEGIN TRANSACTION")
+    inserted = 0
+    errors = 0
+
+    try:
+        # Insert today's snapshot for each campaign (campaign metadata + spend)
+        today_str = today.strftime("%Y-%m-%d")
+
+        for cid, info in campaign_map.items():
+            try:
+                # Only insert enabled campaigns (or those with spend data)
+                if info["state"] != "ENABLED" and cid not in spend_data:
+                    continue
+
+                # Get spend for today (or most recent day with data)
+                campaign_spend = spend_data.get(cid, {})
+
+                # Insert one row per day that has spend data
+                dates_to_insert = list(campaign_spend.keys()) if campaign_spend else [today_str]
+
+                for date_str in dates_to_insert:
+                    spend = campaign_spend.get(date_str, 0)
+
+                    # DELETE + INSERT for idempotency
+                    con.execute("DELETE FROM advertising WHERE date = CAST(? AS DATE) AND campaign_id = ?",
+                                [date_str, cid])
+                    con.execute("""
+                        INSERT INTO advertising
+                        (date, campaign_id, campaign_name, impressions, clicks, spend, sales, orders, units,
+                         division, customer, platform)
+                        VALUES (CAST(? AS DATE), ?, ?, 0, 0, ?, 0, 0, 0, 'golf', 'amazon', 'sp_api')
+                    """, [date_str, cid, info["name"], spend])
+
+                    con.execute("DELETE FROM ads_campaigns WHERE date = CAST(? AS DATE) AND campaign_id = ?",
+                                [date_str, cid])
+                    con.execute("""
+                        INSERT INTO ads_campaigns
+                        (date, campaign_id, campaign_name, campaign_type, campaign_status,
+                         daily_budget, impressions, clicks, spend, sales, orders, units,
+                         division, customer, platform)
+                        VALUES (CAST(? AS DATE), ?, ?, 'SP', ?, ?, 0, 0, ?, 0, 0, 0, 'golf', 'amazon', 'sp_api')
+                    """, [date_str, cid, info["name"], info["state"], info["budget"], spend])
+
+                    inserted += 1
+
+            except Exception as e:
+                errors += 1
+                if errors <= 5:
+                    logger.error(f"Ads sync: insert error for {cid}: {e}")
+
+        con.execute("COMMIT")
+    except Exception as e:
+        logger.error(f"Ads sync: transaction error: {e}")
+        try:
+            con.execute("ROLLBACK")
+        except Exception:
+            pass
+    finally:
+        con.close()
+
+    logger.info(f"Ads sync: {inserted} campaign-date rows inserted, {errors} errors")
+
+    # Also try v3 reports in background (may start working eventually)
+    # This is non-blocking — if they fail, we still have campaign + spend data
+    _try_v3_reports_background(ads_creds, today)
 
     logger.info("Ads sync complete")
+
+
+def _try_v3_reports_background(ads_creds, today):
+    """Attempt v3 reports as supplementary data source. Non-critical."""
+    try:
+        start_date = (today - timedelta(days=7)).strftime("%Y-%m-%d")
+        end_date = (today - timedelta(days=1)).strftime("%Y-%m-%d")
+
+        _pull_ads_report_v3_daywise(
+            ads_creds, "spCampaigns",
+            columns=["impressions", "clicks", "spend", "purchases7d", "unitsSoldClicks7d", "sales7d"],
+            start_date=start_date, end_date=end_date,
+            handler=_handle_campaign_report,
+            group_by=["campaign"],
+        )
+    except Exception as e:
+        logger.warning(f"Ads sync: v3 background reports failed (non-critical): {e}")
 
 
 def _get_ads_access_token(creds):

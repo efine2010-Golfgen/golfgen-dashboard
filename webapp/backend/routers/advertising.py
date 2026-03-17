@@ -785,7 +785,7 @@ def ads_budget_usage_test():
                 "name": "budget_usage_with_ids",
                 "campaign_ids": campaign_ids,
                 "status": usage_resp.status_code,
-                "body": usage_resp.text[:2000],
+                "body": usage_resp.text[:4000],
             })
 
         # Test 2: Campaign recommendations with actual IDs
