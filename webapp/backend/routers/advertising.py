@@ -13,7 +13,7 @@ import requests as http_requests
 from core.config import DB_PATH, TIMEZONE
 from core.database import get_db, get_db_rw
 from core.hierarchy import hierarchy_filter
-from services.ads_api import _sync_ads_data, _load_ads_credentials, ads_backfill_30days
+from services.ads_api import _sync_ads_data, _load_ads_credentials, ads_backfill_30days, ads_backfill_range
 
 logger = logging.getLogger("golfgen")
 router = APIRouter()
@@ -1325,17 +1325,27 @@ def ads_ingest_report(report_id: str):
 
 @router.post("/api/debug/ads-backfill")
 @router.get("/api/debug/ads-backfill")
-async def ads_backfill(days: int = Query(default=90, ge=7, le=90)):
-    """Create v3 reports for last N days and poll until complete.
+async def ads_backfill(
+    days: int = Query(default=90, ge=7, le=90),
+    start: Optional[str] = Query(default=None, description="Start date YYYY-MM-DD"),
+    end: Optional[str] = Query(default=None, description="End date YYYY-MM-DD"),
+):
+    """Create v3 reports and poll until complete.
 
-    Amazon Ads API max is 60 days per report, so >60 days auto-splits into chunks.
-    Each chunk polls up to 60 min. Default: 90 days (2 chunks of 60+30).
+    Two modes:
+      1. ?days=90 — auto-compute date range from today, split into 60-day chunks
+      2. ?start=2026-01-16&end=2026-02-14 — exact date range (max 60 days)
 
-    Usage: /api/debug/ads-backfill?days=90
+    Each chunk polls up to 60 min.
     """
     try:
         loop = asyncio.get_event_loop()
-        result = await loop.run_in_executor(None, lambda: ads_backfill_30days(days=days))
+        if start and end:
+            result = await loop.run_in_executor(
+                None, lambda: ads_backfill_range(start_date=start, end_date=end))
+        else:
+            result = await loop.run_in_executor(
+                None, lambda: ads_backfill_30days(days=days))
         return result
     except Exception as e:
         return {"error": str(e)}
