@@ -761,6 +761,8 @@ def fee_detail(days: int = Query(30), division: Optional[str] = None,
     cutoff = (now - timedelta(days=days)).strftime("%Y-%m-%d")
     # financial_events has NO marketplace column — exclude it from filter
     hf, hp = hierarchy_filter(division, customer, platform, marketplace=None)
+    # daily_sales may have marketplace — use full filter for it
+    ds_hf, ds_hp = hierarchy_filter(division, customer, platform, marketplace)
 
     # Aggregate fee totals from financial_events
     fin_filter = f"WHERE date >= ?" + hf
@@ -769,14 +771,37 @@ def fee_detail(days: int = Query(30), division: Optional[str] = None,
     row = con.execute(f"""
         SELECT COALESCE(SUM(ABS(commission)), 0) AS referral,
                COALESCE(SUM(ABS(fba_fees)), 0) AS fba,
-               COALESCE(SUM(product_charges), 0) AS revenue
+               COALESCE(SUM(product_charges), 0) AS revenue,
+               COUNT(*) AS row_count
         FROM financial_events
         {fin_filter}
     """, fin_params).fetchone()
 
     referral_total = _n(row[0])
     fba_total = _n(row[1])
-    revenue = _n(row[2])
+    fin_revenue = _n(row[2])
+    fin_row_count = int(row[3] or 0)
+
+    # Get daily_sales revenue as primary revenue source (more reliable/current)
+    ds_revenue = 0
+    try:
+        ds_row = con.execute(f"""
+            SELECT COALESCE(SUM(ordered_product_sales), 0)
+            FROM daily_sales
+            WHERE date >= ? AND asin = 'ALL'{ds_hf}
+        """, [cutoff] + ds_hp).fetchone()
+        ds_revenue = _n(ds_row[0]) if ds_row else 0
+    except Exception:
+        pass
+
+    # Use daily_sales revenue as primary; fall back to financial_events
+    revenue = ds_revenue if ds_revenue > 0 else fin_revenue
+
+    # If financial_events has no fee data, use fee fallback rates
+    if referral_total == 0 and revenue > 0:
+        referral_total = round(revenue * 0.15, 2)
+    if fba_total == 0 and revenue > 0:
+        fba_total = round(revenue * 0.12, 2)
 
     # Storage fees — estimate from inventory
     storage_est = 0
@@ -845,12 +870,16 @@ def fee_detail(days: int = Query(30), division: Optional[str] = None,
         },
     ]
 
+    fee_source = "financial_events" if fin_row_count > 0 and fin_revenue > 0 else "estimated"
+
     con.close()
     return {
         "days": days,
         "total_fees": round(total_fees, 2),
         "revenue": round(revenue, 2),
         "categories": categories,
+        "fee_source": fee_source,
+        "fin_events_in_range": fin_row_count,
     }
 
 

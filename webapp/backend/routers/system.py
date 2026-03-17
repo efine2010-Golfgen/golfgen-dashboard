@@ -1705,3 +1705,63 @@ def marketplace_check():
         result["column_check_error"] = str(e)
     con.close()
     return result
+
+
+@router.get("/api/debug/pricing-status")
+def pricing_status():
+    """Debug: check pricing cache file status and contents summary."""
+    import json
+    from core.config import DB_DIR
+    cache_path = DB_DIR / "pricing_sync.json"
+    result = {
+        "cache_path": str(cache_path),
+        "file_exists": cache_path.exists(),
+    }
+    if cache_path.exists():
+        try:
+            with open(cache_path, encoding="utf-8") as f:
+                data = json.load(f)
+            prices = data.get("prices", {})
+            coupons = data.get("coupons", {})
+            result["lastSync"] = data.get("lastSync")
+            result["price_count"] = len(prices)
+            result["coupon_count"] = len(coupons)
+            result["sample_prices"] = {k: v for i, (k, v) in enumerate(prices.items()) if i < 5}
+            result["sample_coupons"] = {k: v for i, (k, v) in enumerate(coupons.items()) if i < 5}
+        except Exception as e:
+            result["parse_error"] = str(e)
+    else:
+        result["note"] = "pricing_sync.json does not exist — pricing sync may not have run yet"
+    try:
+        from core.database import get_db
+        con = get_db()
+        row = con.execute("SELECT COUNT(*) FROM item_master WHERE asin IS NOT NULL").fetchone()
+        result["item_master_asin_count"] = int(row[0]) if row else 0
+        asin_rows = con.execute("SELECT asin, sku, product_name FROM item_master WHERE asin IS NOT NULL LIMIT 5").fetchall()
+        result["sample_asins"] = [{"asin": r[0], "sku": r[1], "name": r[2]} for r in asin_rows]
+        con.close()
+    except Exception as e:
+        result["item_master_error"] = str(e)
+    try:
+        from core.database import get_db
+        from datetime import datetime, timedelta
+        from zoneinfo import ZoneInfo
+        con = get_db()
+        cutoff = (datetime.now(ZoneInfo("America/Chicago")) - timedelta(days=30)).strftime("%Y-%m-%d")
+        row = con.execute("""
+            SELECT SUM(product_charges) as revenue,
+                   SUM(ABS(fba_fees)) as fba,
+                   SUM(ABS(commission)) as referral,
+                   COUNT(*) as rows
+            FROM financial_events WHERE date >= ?
+        """, [cutoff]).fetchone()
+        result["fin_events_30d"] = {
+            "revenue": float(row[0] or 0),
+            "fba_fees": float(row[1] or 0),
+            "referral_fees": float(row[2] or 0),
+            "row_count": int(row[3] or 0),
+        }
+        con.close()
+    except Exception as e:
+        result["fin_events_error"] = str(e)
+    return result

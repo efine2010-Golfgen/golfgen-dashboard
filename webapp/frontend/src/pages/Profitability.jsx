@@ -321,14 +321,24 @@ function FeeDetail({ filters, days }) {
 
   const categories = data.categories || [];
   const totalFees = data.total_fees || 0;
+  const revenue = data.revenue || 0;
+  const feeSource = data.fee_source || "unknown";
 
   return (
     <>
       <div className="sec-div"><span>Amazon Fee Breakdown — {days} Days</span></div>
       <div className="table-card" style={{ padding: 0 }}>
         <div style={{ padding: "10px 16px", borderBottom: "1px solid var(--brd)", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-          <span style={SG(12, 700)}>Complete Fee Breakdown</span>
-          <span style={SG(10, 700, "#f87171")}>Total: {fmt$2(totalFees)}</span>
+          <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+            <span style={SG(12, 700)}>Complete Fee Breakdown</span>
+            {feeSource === "estimated" && (
+              <span style={{ ...SG(7.5, 700), padding: "2px 7px", borderRadius: 5, background: "rgba(251,191,36,.15)", color: "#fbbf24" }}>Estimated</span>
+            )}
+          </div>
+          <div style={{ display: "flex", gap: 16, alignItems: "center" }}>
+            <span style={SG(10, 600, "var(--txt3)")}>Revenue: {fmt$2(revenue)}</span>
+            <span style={SG(10, 700, "#f87171")}>Total Fees: {fmt$2(totalFees)}</span>
+          </div>
         </div>
         {/* Header */}
         <div style={{ display: "grid", gridTemplateColumns: "220px 1fr 80px 70px 70px", gap: 8, padding: "7px 14px", borderBottom: "1px solid var(--brd)", background: "var(--card2)" }}>

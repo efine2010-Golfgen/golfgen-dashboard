@@ -620,8 +620,8 @@ def _sync_ads_data_inner():
         logger.info("Ads sync: no pending reports to check")
 
     # ── Phase B: Create new v3 reports ──
-    # Create one report per type covering the full 60-day range (API max)
-    start_date = (today - timedelta(days=60)).strftime("%Y-%m-%d")
+    # Create one report per type covering 30 days (API max is 31 days)
+    start_date = (today - timedelta(days=30)).strftime("%Y-%m-%d")
     end_date = (today - timedelta(days=1)).strftime("%Y-%m-%d")
 
     report_configs = [
