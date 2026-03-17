@@ -23,6 +23,7 @@ export function SalesPage({ filters }) {
   const [error, setError] = useState(null);
   const [selectedPeriod, setSelectedPeriod] = useState("l4w");
   const [chartMetric, setChartMetric] = useState("sales"); // "sales" | "qty" | "returns"
+  const [hiddenItems, setHiddenItems] = useState({}); // { itemName: true } for hidden items
 
   useEffect(() => {
     async function fetchData() {
@@ -79,9 +80,54 @@ export function SalesPage({ filters }) {
   // Weekly trend data for chart
   const weeks = weeklyData?.weeks || [];
   const weekLabels = weeks.map((w) => {
-    // Format "202604" → "Wk04" or just show the raw week
     const s = String(w.week);
     return s.length >= 6 ? "Wk" + s.slice(4) : s;
+  });
+
+  // Build year annotation labels for x-axis
+  // Find the boundary where year changes (e.g. 2025 → 2026)
+  const yearAnnotations = [];
+  if (weeks.length > 0) {
+    const firstWeek = String(weeks[0].week);
+    const lastWeek = String(weeks[weeks.length - 1].week);
+    const firstYear = firstWeek.slice(0, 4);
+    const lastYear = lastWeek.slice(0, 4);
+    if (firstYear !== lastYear) {
+      // Find the first week of the later year
+      const boundaryIdx = weeks.findIndex(w => String(w.week).startsWith(lastYear));
+      if (boundaryIdx > 0) {
+        yearAnnotations.push({ year: firstYear, idx: 0 });
+        yearAnnotations.push({ year: lastYear, idx: boundaryIdx });
+      }
+    } else {
+      yearAnnotations.push({ year: firstYear, idx: 0 });
+    }
+  }
+
+  // Chart axis label
+  const yAxisLabel = chartMetric === "qty" ? "Units" : "$";
+
+  // Toggle item visibility
+  const toggleItem = (name) => {
+    setHiddenItems(prev => {
+      const next = { ...prev };
+      if (next[name]) delete next[name];
+      else next[name] = true;
+      return next;
+    });
+  };
+  const showAllItems = () => setHiddenItems({});
+  const hideAllItems = () => {
+    const h = {};
+    items.forEach(item => { h[item.name] = true; });
+    setHiddenItems(h);
+  };
+
+  // Sort items by descending POS sales (L4W primary, fallback LW)
+  const sortedItems = [...items].sort((a, b) => {
+    const aVal = (a.l4w?.posTy || 0) || (a.lw?.posTy || 0);
+    const bVal = (b.l4w?.posTy || 0) || (b.lw?.posTy || 0);
+    return bVal - aVal;
   });
 
   return (
@@ -94,12 +140,12 @@ export function SalesPage({ filters }) {
           gap: 12,
         }}
       >
-        <KPICard label="POS Sales TY" value={f$(kpis.posSalesTy)} delta={delta(kpis.posSalesTy, kpis.posSalesLy)} />
-        <KPICard label="POS Units TY" value={fN(kpis.posQtyTy)} delta={delta(kpis.posQtyTy, kpis.posQtyLy)} />
-        <KPICard label="Regular Sales TY" value={f$(regSalesTy)} delta={delta(regSalesTy, regSalesLy)} />
-        <KPICard label="Clearance TY" value={f$(clrSalesTy)} delta={delta(clrSalesTy, clrSalesLy)} />
-        <KPICard label="Returns TY" value={fN(kpis.returnsTy || 0)} delta={delta(kpis.returnsTy, kpis.returnsLy)} color={COLORS.purple} />
-        <KPICard label="Reg % of Total" value={fPct(regPct)} delta={null} />
+        <KPICard label="POS Sales TY" value={f$(kpis.posSalesTy)} subLabel="LY" subValue={f$(kpis.posSalesLy)} delta={delta(kpis.posSalesTy, kpis.posSalesLy)} />
+        <KPICard label="POS Units TY" value={fN(kpis.posQtyTy)} subLabel="LY" subValue={fN(kpis.posQtyLy)} delta={delta(kpis.posQtyTy, kpis.posQtyLy)} />
+        <KPICard label="Regular Sales TY" value={f$(regSalesTy)} subLabel="LY" subValue={f$(regSalesLy)} delta={delta(regSalesTy, regSalesLy)} />
+        <KPICard label="Clearance TY" value={f$(clrSalesTy)} subLabel="LY" subValue={f$(clrSalesLy)} delta={delta(clrSalesTy, clrSalesLy)} />
+        <KPICard label="Returns TY" value={fN(kpis.returnsTy || 0)} subLabel="LY" subValue={fN(kpis.returnsLy || 0)} delta={delta(kpis.returnsTy, kpis.returnsLy)} color={COLORS.purple} />
+        <KPICard label="Reg / Clr % of Total" value={fPct(regPct) + " / " + fPct(1 - regPct)} delta={null} />
       </div>
 
       {/* Period selector */}
@@ -125,9 +171,13 @@ export function SalesPage({ filters }) {
 
       {/* ═══════════ POS Revenue / Units / Returns Chart — 52 Weekly Bars + Lines ═══════════ */}
       <Card>
+        {/* Title line above */}
+        <div style={{ ...SG(10, 600), color: "var(--txt3)", textTransform: "uppercase", letterSpacing: ".06em", marginBottom: 4 }}>
+          52 Week Trend
+        </div>
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
-          <div style={{ ...SG(12, 700), color: "var(--txt)" }}>
-            {chartMetric === "sales" ? "POS Revenue — 52 Week Trend" : chartMetric === "qty" ? "POS Units — 52 Week Trend" : "Return $ — 52 Week Trend"}
+          <div style={{ ...SG(13, 700), color: "var(--txt)" }}>
+            {chartMetric === "sales" ? "POS Revenue" : chartMetric === "qty" ? "POS Units" : "Return $"}
           </div>
           <div style={{ display: "flex", gap: 8 }}>
             {[
@@ -159,6 +209,62 @@ export function SalesPage({ filters }) {
             labels={weekLabels}
             configKey={`weekly-${chartMetric}-${weeks.length}`}
             height={280}
+            options={{
+              scales: {
+                y: {
+                  title: {
+                    display: true,
+                    text: yAxisLabel,
+                    font: { family: "'Space Grotesk', monospace", size: 10, weight: 600 },
+                    color: "rgba(255,255,255,.5)",
+                  },
+                  ticks: {
+                    callback: (v) => chartMetric === "qty" ? fN(v) : "$" + fN(v),
+                  },
+                },
+                x: {
+                  ticks: {
+                    font: { family: "'Space Grotesk', monospace", size: 8 },
+                    color: "rgba(255,255,255,.4)",
+                    maxRotation: 0,
+                    autoSkip: true,
+                    autoSkipPadding: 6,
+                  },
+                  afterFit: (axis) => {
+                    // Add extra padding for year labels below
+                    axis.paddingBottom = (axis.paddingBottom || 0) + 14;
+                  },
+                },
+              },
+              plugins: {
+                legend: {
+                  labels: {
+                    font: { family: "'Space Grotesk', monospace", size: 10 },
+                    color: "rgba(255,255,255,.5)",
+                  },
+                },
+              },
+            }}
+            chartPlugins={[
+              {
+                id: "yearLabels",
+                afterDraw: (chart) => {
+                  if (yearAnnotations.length < 2) return;
+                  const ctx = chart.ctx;
+                  const xScale = chart.scales.x;
+                  const bottom = chart.chartArea.bottom + 28;
+                  ctx.save();
+                  ctx.font = "600 9px 'Space Grotesk', monospace";
+                  ctx.fillStyle = "rgba(255,255,255,.45)";
+                  ctx.textAlign = "center";
+                  yearAnnotations.forEach(({ year, idx }) => {
+                    const x = xScale.getPixelForValue(idx);
+                    ctx.fillText(year, x, bottom);
+                  });
+                  ctx.restore();
+                },
+              },
+            ]}
             datasets={
               chartMetric === "returns"
                 ? [
@@ -176,7 +282,7 @@ export function SalesPage({ filters }) {
                       data: weeks.map((w) => Math.abs(w.returnsAmtLy || 0)),
                       borderColor: COLORS.orange,
                       backgroundColor: "transparent",
-                      borderWidth: 3,
+                      borderWidth: 2,
                       pointRadius: 2,
                       pointBackgroundColor: COLORS.orange,
                       fill: false,
@@ -191,11 +297,11 @@ export function SalesPage({ filters }) {
                       data: weeks.map((w) =>
                         chartMetric === "sales" ? w.posSalesLy : w.posQtyLy
                       ),
-                      borderColor: "#f59e0b",
+                      borderColor: "#d4a017",
                       backgroundColor: "transparent",
-                      borderWidth: 3,
-                      pointRadius: 2.5,
-                      pointBackgroundColor: "#f59e0b",
+                      borderWidth: 2,
+                      pointRadius: 2,
+                      pointBackgroundColor: "#d4a017",
                       fill: false,
                       tension: 0.3,
                       order: 0,
@@ -235,7 +341,7 @@ export function SalesPage({ filters }) {
                           ? w.regularSalesTy || 0
                           : w.regularQtyTy || 0
                       ),
-                      borderColor: "#3b82f6",
+                      borderColor: "#2563eb",
                       backgroundColor: "transparent",
                       borderWidth: 2.5,
                       pointRadius: 0,
@@ -367,13 +473,20 @@ export function SalesPage({ filters }) {
         </div>
       </Card>
 
-      {/* ═══════════ Item Performance Table — NO % Total column ═══════════ */}
+      {/* ═══════════ Item Performance Table — with WM Item #, hide/show per item ═══════════ */}
       <Card>
-        <CardHdr title="Item Performance" />
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 10 }}>
+          <CardHdr title="Item Performance" />
+          <div style={{ display: "flex", gap: 6 }}>
+            <button onClick={showAllItems} style={{ ...SG(9, 600), padding: "2px 8px", borderRadius: 4, cursor: "pointer", background: "none", border: "1px solid var(--brd)", color: "var(--txt3)" }}>Show All</button>
+            <button onClick={hideAllItems} style={{ ...SG(9, 600), padding: "2px 8px", borderRadius: 4, cursor: "pointer", background: "none", border: "1px solid var(--brd)", color: "var(--txt3)" }}>Hide All</button>
+          </div>
+        </div>
         <div style={{ overflowX: "auto" }}>
           <table style={{ width: "100%", borderCollapse: "collapse", ...SG(9) }}>
             <thead>
               <tr style={{ borderBottom: "1px solid var(--brd)" }}>
+                <th style={{ width: 20 }} />
                 <th
                   style={{
                     textAlign: "left",
@@ -383,11 +496,12 @@ export function SalesPage({ filters }) {
                     left: 0,
                     background: "var(--card)",
                     zIndex: 2,
-                    minWidth: 180,
+                    minWidth: 160,
                   }}
                 >
                   Item
                 </th>
+                <th style={{ textAlign: "left", padding: "6px 4px", color: "var(--txt3)", minWidth: 70 }}>WM Item #</th>
                 <th style={{ textAlign: "left", padding: "6px 4px", color: "var(--txt3)", width: 70 }}>Metric</th>
                 {PERIODS.map((p, pi) => (
                   <Fragment key={p}>
@@ -407,7 +521,9 @@ export function SalesPage({ filters }) {
                 ))}
               </tr>
               <tr style={{ borderBottom: "2px solid var(--brd)" }}>
+                <th />
                 <th style={{ position: "sticky", left: 0, background: "var(--card)", zIndex: 2 }} />
+                <th />
                 <th />
                 {PERIODS.map((p, pi) => (
                   <Fragment key={p}>
@@ -423,17 +539,10 @@ export function SalesPage({ filters }) {
             </thead>
             <tbody>
               {(() => {
-                // Sort items by descending POS sales (L4W primary, fallback LW)
-                const sortedItems = [...items].sort((a, b) => {
-                  const aVal = (a.l4w?.posTy || 0) || (a.lw?.posTy || 0);
-                  const bVal = (b.l4w?.posTy || 0) || (b.lw?.posTy || 0);
-                  return bVal - aVal;
-                });
-
                 if (sortedItems.length === 0)
                   return (
                     <tr>
-                      <td colSpan={2 + PERIODS.length * 4} style={{ padding: "12px", textAlign: "center", color: "var(--txt3)" }}>
+                      <td colSpan={4 + PERIODS.length * 4} style={{ padding: "12px", textAlign: "center", color: "var(--txt3)" }}>
                         No item data available.
                       </td>
                     </tr>
@@ -448,8 +557,38 @@ export function SalesPage({ filters }) {
 
                 return (
                   <>
-                    {sortedItems.map((item, i) =>
-                      metrics.map((m, mi) => (
+                    {sortedItems.map((item, i) => {
+                      const isHidden = hiddenItems[item.name];
+                      const wmItemNum = item.walmartItemNumber || "—";
+
+                      // Collapsed row: just the item name with expand button
+                      if (isHidden) {
+                        return (
+                          <tr key={`${i}-collapsed`} style={{ borderBottom: "2px solid var(--brd)", background: i % 2 === 0 ? "rgba(255,255,255,0.01)" : "transparent" }}>
+                            <td style={{ padding: "4px 2px", textAlign: "center", verticalAlign: "middle" }}>
+                              <button onClick={() => toggleItem(item.name)} style={{ background: "none", border: "none", cursor: "pointer", color: "var(--txt3)", fontSize: 10, padding: 0, lineHeight: 1 }} title="Show item">▶</button>
+                            </td>
+                            <td
+                              style={{
+                                padding: "4px 8px",
+                                color: "var(--txt2)",
+                                ...SG(10, 500),
+                                position: "sticky",
+                                left: 0,
+                                background: "var(--card)",
+                                zIndex: 1,
+                                fontStyle: "italic",
+                              }}
+                            >
+                              {item.name}
+                            </td>
+                            <td style={{ padding: "4px 4px", color: "var(--txt3)", ...SG(9) }}>{wmItemNum}</td>
+                            <td colSpan={1 + PERIODS.length * 4} style={{ padding: "4px", color: "var(--txt3)", ...SG(9) }}>— hidden —</td>
+                          </tr>
+                        );
+                      }
+
+                      return metrics.map((m, mi) => (
                         <tr
                           key={`${i}-${m.key}`}
                           style={{
@@ -458,25 +597,45 @@ export function SalesPage({ filters }) {
                           }}
                         >
                           {mi === 0 ? (
-                            <td
-                              rowSpan={metrics.length}
-                              style={{
-                                padding: "4px 8px",
-                                color: "var(--txt)",
-                                ...SG(10, 600),
-                                position: "sticky",
-                                left: 0,
-                                background: "var(--card)",
-                                zIndex: 1,
-                                verticalAlign: "top",
-                                borderBottom: "2px solid var(--brd)",
-                              }}
-                            >
-                              {item.name}
-                              {item.brand && (
-                                <div style={{ ...SG(8), color: "var(--txt3)", marginTop: 2 }}>{item.brand}</div>
-                              )}
-                            </td>
+                            <>
+                              <td
+                                rowSpan={metrics.length}
+                                style={{ padding: "4px 2px", textAlign: "center", verticalAlign: "top" }}
+                              >
+                                <button onClick={() => toggleItem(item.name)} style={{ background: "none", border: "none", cursor: "pointer", color: "var(--txt3)", fontSize: 10, padding: 0, lineHeight: 1 }} title="Hide item">▼</button>
+                              </td>
+                              <td
+                                rowSpan={metrics.length}
+                                style={{
+                                  padding: "4px 8px",
+                                  color: "var(--txt)",
+                                  ...SG(10, 600),
+                                  position: "sticky",
+                                  left: 0,
+                                  background: "var(--card)",
+                                  zIndex: 1,
+                                  verticalAlign: "top",
+                                  borderBottom: "2px solid var(--brd)",
+                                }}
+                              >
+                                {item.name}
+                                {item.brand && (
+                                  <div style={{ ...SG(8), color: "var(--txt3)", marginTop: 2 }}>{item.brand}</div>
+                                )}
+                              </td>
+                              <td
+                                rowSpan={metrics.length}
+                                style={{
+                                  padding: "4px 4px",
+                                  color: "var(--txt2)",
+                                  ...SG(9),
+                                  verticalAlign: "top",
+                                  borderBottom: "2px solid var(--brd)",
+                                }}
+                              >
+                                {wmItemNum}
+                              </td>
+                            </>
                           ) : null}
                           <td style={{ padding: "3px 4px", color: "var(--txt3)", ...SG(8, 600) }}>{m.label}</td>
                           {PERIODS.map((p, pi) => {
@@ -515,15 +674,17 @@ export function SalesPage({ filters }) {
                             );
                           })}
                         </tr>
-                      ))
-                    )}
+                      ));
+                    })}
                     {/* Total row */}
                     {sortedItems.length > 0 &&
                       (() => {
+                        // Only sum visible items
+                        const visibleItems = sortedItems.filter(item => !hiddenItems[item.name]);
                         const totals = {};
                         PERIODS.forEach((p) => {
-                          const n = sortedItems.length || 1;
-                          totals[p] = sortedItems.reduce(
+                          const n = visibleItems.length || 1;
+                          totals[p] = visibleItems.reduce(
                             (acc, item) => {
                               const pd = item[p] || {};
                               const raw = pd.instockPct || 0;
@@ -558,21 +719,25 @@ export function SalesPage({ filters }) {
                             }}
                           >
                             {mi === 0 && (
-                              <td
-                                rowSpan={totalMetrics.length}
-                                style={{
-                                  padding: "4px 8px",
-                                  color: COLORS.teal,
-                                  ...SG(10, 700),
-                                  position: "sticky",
-                                  left: 0,
-                                  background: "var(--card)",
-                                  zIndex: 1,
-                                  borderBottom: "2px solid var(--brd)",
-                                }}
-                              >
-                                TOTAL
-                              </td>
+                              <>
+                                <td rowSpan={totalMetrics.length} />
+                                <td
+                                  rowSpan={totalMetrics.length}
+                                  style={{
+                                    padding: "4px 8px",
+                                    color: COLORS.teal,
+                                    ...SG(10, 700),
+                                    position: "sticky",
+                                    left: 0,
+                                    background: "var(--card)",
+                                    zIndex: 1,
+                                    borderBottom: "2px solid var(--brd)",
+                                  }}
+                                >
+                                  TOTAL
+                                </td>
+                                <td rowSpan={totalMetrics.length} style={{ borderBottom: "2px solid var(--brd)" }} />
+                              </>
                             )}
                             <td style={{ padding: "3px 4px", color: COLORS.teal, ...SG(8, 700) }}>{m.label}</td>
                             {PERIODS.map((p, pi) => {

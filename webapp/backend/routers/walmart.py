@@ -238,6 +238,7 @@ def get_sales(division: str = None, customer: str = None):
             SELECT
               prime_item_desc,
               brand_name,
+              prime_item_number,
               CASE WHEN period_type IN ('L1W','LW') THEN 'LW' ELSE period_type END as period,
               pos_sales_ty, pos_sales_ly, pos_qty_ty, pos_qty_ly,
               COALESCE(instock_pct_ty, 0) as instock_pct_ty,
@@ -252,11 +253,12 @@ def get_sales(division: str = None, customer: str = None):
         # Pivot per-item data by period (since we have multiple rows per item, one per period)
         items_dict = {}
         for row in item_rows:
-            item_name, brand, period, pos_sales_ty, pos_sales_ly, pos_qty_ty, pos_qty_ly, instock_pct_ty, oh_ty, oh_ly = row
+            item_name, brand, item_number, period, pos_sales_ty, pos_sales_ly, pos_qty_ty, pos_qty_ly, instock_pct_ty, oh_ty, oh_ly = row
             if item_name not in items_dict:
                 items_dict[item_name] = {
                     "name": item_name,
                     "brand": brand,
+                    "walmartItemNumber": item_number,
                     "lw": {}, "l4w": {}, "l13w": {}, "l26w": {}, "l52w": {}
                 }
 
