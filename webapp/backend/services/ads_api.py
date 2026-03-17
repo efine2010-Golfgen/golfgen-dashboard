@@ -90,7 +90,15 @@ def _sync_pricing_data():
                 Asins=batch,
                 MarketplaceId="ATVPDKIKX0DER",
             )
-            for item_data in (result.payload or []):
+            payload = result.payload if hasattr(result, 'payload') else result
+            if not payload:
+                logger.warning(f"Pricing sync: empty payload for batch {i//batch_size + 1} ({len(batch)} ASINs)")
+            elif isinstance(payload, list):
+                logger.info(f"Pricing sync: batch {i//batch_size + 1} returned {len(payload)} items")
+            else:
+                logger.warning(f"Pricing sync: unexpected payload type {type(payload)}: {str(payload)[:200]}")
+                payload = [payload] if isinstance(payload, dict) else []
+            for item_data in (payload or []):
                 asin = item_data.get("ASIN", "")
                 if not asin:
                     continue
