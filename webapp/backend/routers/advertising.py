@@ -684,26 +684,161 @@ def ads_negative_keywords(division: Optional[str] = None, customer: Optional[str
 
 @router.get("/api/ads/profiles")
 def ads_profiles():
-    """Discover Amazon Ads profiles for this account."""
+    """Discover Amazon Ads profiles using direct HTTP (library has compatibility issues)."""
     ads_creds = _load_ads_credentials()
     if not ads_creds:
         return {"error": "No Amazon Ads credentials configured. Set AMAZON_ADS_CLIENT_ID, AMAZON_ADS_CLIENT_SECRET, AMAZON_ADS_REFRESH_TOKEN env vars."}
 
     try:
-        from ad_api.api import Profiles
-        result = Profiles(credentials=ads_creds).get_profiles()
+        # Get access token
+        token_resp = http_requests.post("https://api.amazon.com/auth/o2/token", data={
+            "grant_type": "refresh_token",
+            "refresh_token": ads_creds["refresh_token"],
+            "client_id": ads_creds["client_id"],
+            "client_secret": ads_creds["client_secret"],
+        }, timeout=30)
+        token_data = token_resp.json()
+        access_token = token_data.get("access_token", "")
+        if not access_token:
+            return {"error": f"Token refresh failed: {token_data}"}
+
+        # List profiles via direct HTTP
+        headers = {
+            "Authorization": f"Bearer {access_token}",
+            "Amazon-Advertising-API-ClientId": ads_creds["client_id"],
+        }
+        resp = http_requests.get(
+            "https://advertising-api.amazon.com/v2/profiles",
+            headers=headers,
+            timeout=30,
+        )
+        profiles_data = resp.json()
         profiles = []
-        for p in result.payload:
-            profiles.append({
-                "profileId": p.get("profileId"),
-                "countryCode": p.get("countryCode"),
-                "accountName": p.get("accountInfo", {}).get("name", ""),
-                "marketplace": p.get("accountInfo", {}).get("marketplaceStringId", ""),
-                "type": p.get("accountInfo", {}).get("type", ""),
-            })
-        return {"profiles": profiles, "configured_profile_id": ads_creds.get("profile_id", "")}
+        if isinstance(profiles_data, list):
+            for p in profiles_data:
+                profiles.append({
+                    "profileId": p.get("profileId"),
+                    "countryCode": p.get("countryCode"),
+                    "accountName": p.get("accountInfo", {}).get("name", ""),
+                    "marketplace": p.get("accountInfo", {}).get("marketplaceStringId", ""),
+                    "type": p.get("accountInfo", {}).get("type", ""),
+                })
+        return {"profiles": profiles, "configured_profile_id": ads_creds.get("profile_id", ""), "raw_count": len(profiles_data) if isinstance(profiles_data, list) else 0}
     except Exception as e:
         return {"error": str(e)}
+
+
+@router.get("/api/ads/debug-test")
+def ads_debug_test():
+    """Debug endpoint: test Ads API connectivity, list campaigns, check report status."""
+    ads_creds = _load_ads_credentials()
+    if not ads_creds:
+        return {"error": "No Amazon Ads credentials configured"}
+
+    result = {"steps": []}
+
+    try:
+        # Step 1: Get access token
+        token_resp = http_requests.post("https://api.amazon.com/auth/o2/token", data={
+            "grant_type": "refresh_token",
+            "refresh_token": ads_creds["refresh_token"],
+            "client_id": ads_creds["client_id"],
+            "client_secret": ads_creds["client_secret"],
+        }, timeout=30)
+        token_data = token_resp.json()
+        access_token = token_data.get("access_token", "")
+        if not access_token:
+            result["steps"].append({"step": "token", "status": "FAILED", "detail": str(token_data)[:500]})
+            return result
+        result["steps"].append({"step": "token", "status": "OK"})
+
+        headers = {
+            "Authorization": f"Bearer {access_token}",
+            "Amazon-Advertising-API-ClientId": ads_creds["client_id"],
+            "Amazon-Advertising-API-Scope": str(ads_creds["profile_id"]),
+        }
+
+        # Step 2: List SP campaigns
+        camp_resp = http_requests.get(
+            "https://advertising-api.amazon.com/sp/campaigns/list",
+            headers={**headers, "Accept": "application/vnd.spCampaign.v3+json", "Content-Type": "application/vnd.spCampaign.v3+json"},
+            json={"maxResults": 10},
+            timeout=30,
+        )
+        result["steps"].append({
+            "step": "list_campaigns",
+            "status_code": camp_resp.status_code,
+            "body": camp_resp.text[:1000],
+        })
+
+        # Step 3: Create a small test report (1 day)
+        today = datetime.now(ZoneInfo("America/Chicago"))
+        test_date = (today - timedelta(days=2)).strftime("%Y-%m-%d")
+        test_body = {
+            "name": f"debug_test_{test_date}",
+            "startDate": test_date,
+            "endDate": test_date,
+            "configuration": {
+                "adProduct": "SPONSORED_PRODUCTS",
+                "groupBy": ["campaign"],
+                "columns": ["date", "impressions", "clicks", "spend", "sales7d"],
+                "reportTypeId": "spCampaigns",
+                "timeUnit": "DAILY",
+                "format": "GZIP_JSON",
+            }
+        }
+        create_resp = http_requests.post(
+            "https://advertising-api.amazon.com/reporting/reports",
+            headers={**headers, "Content-Type": "application/vnd.createasyncreportrequest.v3+json", "Accept": "application/vnd.createasyncreportrequest.v3+json"},
+            json=test_body,
+            timeout=30,
+        )
+        create_data = create_resp.json() if create_resp.status_code in (200, 202) else {}
+        report_id = create_data.get("reportId", "")
+        result["steps"].append({
+            "step": "create_report",
+            "status_code": create_resp.status_code,
+            "reportId": report_id,
+            "body": create_resp.text[:500],
+        })
+
+        # Step 4: Poll once (10s wait)
+        if report_id:
+            import time
+            time.sleep(10)
+            poll_resp = http_requests.get(
+                f"https://advertising-api.amazon.com/reporting/reports/{report_id}",
+                headers=headers,
+                timeout=30,
+            )
+            poll_data = poll_resp.json()
+            result["steps"].append({
+                "step": "poll_report",
+                "status_code": poll_resp.status_code,
+                "report_status": poll_data.get("status", "UNKNOWN"),
+                "body": str(poll_data)[:800],
+            })
+
+            # If completed already, try downloading
+            if poll_data.get("status") == "COMPLETED" and poll_data.get("url"):
+                import gzip
+                dl_resp = http_requests.get(poll_data["url"], timeout=30)
+                try:
+                    data = json.loads(gzip.decompress(dl_resp.content).decode("utf-8"))
+                except Exception:
+                    data = dl_resp.text[:500]
+                result["steps"].append({
+                    "step": "download_report",
+                    "rows": len(data) if isinstance(data, list) else "N/A",
+                    "sample": str(data[:2])[:500] if isinstance(data, list) and data else str(data)[:500],
+                })
+
+        result["profile_id"] = ads_creds.get("profile_id", "")
+        return result
+
+    except Exception as e:
+        result["error"] = str(e)
+        return result
 
 
 @router.post("/api/ads/sync")

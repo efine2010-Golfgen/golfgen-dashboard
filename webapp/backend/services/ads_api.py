@@ -610,7 +610,7 @@ def _pull_ads_report(creds, report_type_id, columns, start_date, end_date, handl
             json=body,
             timeout=30,
         )
-        logger.info(f"Ads sync: create report response: {create_resp.status_code} {create_resp.text[:300]}")
+        logger.info(f"Ads sync: create report response: {create_resp.status_code} {create_resp.text[:500]}")
 
         if create_resp.status_code not in (200, 202):
             logger.error(f"Ads sync: create report failed for {report_type_id}: {create_resp.status_code} {create_resp.text[:500]}")
@@ -638,7 +638,12 @@ def _pull_ads_report(creds, report_type_id, columns, start_date, end_date, handl
             )
             poll_data = poll_resp.json()
             status = poll_data.get("status")
-            logger.info(f"Ads sync: poll {report_type_id} attempt {attempt+1}: {status}")
+            extra = ""
+            if status in ("FAILED", "CANCELLED"):
+                extra = f" reason={poll_data.get('failureReason', 'unknown')}"
+            elif attempt == 0:
+                extra = f" full_resp={str(poll_data)[:300]}"
+            logger.info(f"Ads sync: poll {report_type_id} attempt {attempt+1}: {status}{extra}")
 
             if status == "COMPLETED":
                 download_url = poll_data.get("url")
