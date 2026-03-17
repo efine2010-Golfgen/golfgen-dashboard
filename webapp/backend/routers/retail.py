@@ -1727,3 +1727,100 @@ async def get_nif_items(year: int = Query(None)):
         "availableYears": [r[0] for r in year_rows],
         "totalItems": len(items),
     }
+
+
+# ── NIF Item CRUD — update, delete, add ─────────────────────────────
+
+@router.put("/api/retail/nif-items/{item_id}")
+async def update_nif_item(item_id: int, body: dict = Body(...)):
+    """Update a single NIF item field."""
+    updatable = [
+        "description", "brand", "wmt_item_number", "upc", "vendor_stock_number",
+        "brand_id", "wholesale_cost", "walmart_retail", "vendor_pack", "whse_pack",
+        "old_store_count", "new_store_count", "store_count_diff",
+        "carton_length", "carton_width", "carton_height", "cbm", "cbf",
+        "item_status", "color", "dexterity", "category",
+    ]
+    sets, vals = [], []
+    for k, v in body.items():
+        if k in updatable:
+            sets.append(f"{k} = %s")
+            vals.append(v)
+    if not sets:
+        raise HTTPException(status_code=400, detail="No updatable fields provided")
+    vals.append(item_id)
+    con = get_db_rw()
+    try:
+        con.execute(f"UPDATE walmart_nif_items SET {', '.join(sets)} WHERE id = %s", vals)
+    finally:
+        con.close()
+    return {"status": "ok", "id": item_id}
+
+
+@router.delete("/api/retail/nif-items/{item_id}")
+async def delete_nif_item(item_id: int):
+    """Delete a single NIF item."""
+    con = get_db_rw()
+    try:
+        cur = con.execute("DELETE FROM walmart_nif_items WHERE id = %s RETURNING id", [item_id])
+        deleted = cur.fetchone()
+        if not deleted:
+            raise HTTPException(status_code=404, detail=f"NIF item {item_id} not found")
+    finally:
+        con.close()
+    return {"status": "ok", "id": item_id}
+
+
+@router.post("/api/retail/nif-items")
+async def add_nif_item(body: dict = Body(...)):
+    """Add a new NIF item."""
+    event_year = body.get("event_year") or body.get("eventYear")
+    if not event_year:
+        raise HTTPException(status_code=400, detail="event_year is required")
+    con = get_db_rw()
+    try:
+        con.execute("""
+            INSERT INTO walmart_nif_items (
+                event_year, effective_week, item_status, description, brand,
+                wmt_item_number, upc, vendor_stock_number, brand_id,
+                wholesale_cost, walmart_retail, vendor_pack, whse_pack,
+                old_store_count, new_store_count, store_count_diff,
+                carton_length, carton_width, carton_height, cbm, cbf,
+                color, dexterity, category, division, customer, platform
+            ) VALUES (
+                %s, %s, %s, %s, %s,
+                %s, %s, %s, %s,
+                %s, %s, %s, %s,
+                %s, %s, %s,
+                %s, %s, %s, %s, %s,
+                %s, %s, %s, 'golf', 'walmart_stores', 'scintilla'
+            )
+        """, [
+            int(event_year),
+            int(body.get("effective_week") or body.get("effectiveWeek") or 0),
+            body.get("item_status") or body.get("itemStatus") or "new",
+            body.get("description") or "",
+            body.get("brand") or "",
+            body.get("wmt_item_number") or body.get("wmtItemNumber") or "",
+            body.get("upc") or "",
+            body.get("vendor_stock_number") or body.get("vendorStockNumber") or "",
+            body.get("brand_id") or body.get("brandId") or "",
+            float(body.get("wholesale_cost") or body.get("wholesaleCost") or 0),
+            float(body.get("walmart_retail") or body.get("walmartRetail") or 0),
+            int(body.get("vendor_pack") or body.get("vendorPack") or 0),
+            int(body.get("whse_pack") or body.get("whsePack") or 0),
+            int(body.get("old_store_count") or body.get("oldStoreCount") or 0),
+            int(body.get("new_store_count") or body.get("newStoreCount") or 0),
+            int(body.get("store_count_diff") or body.get("storeCountDiff") or 0),
+            float(body.get("carton_length") or body.get("cartonLength") or 0),
+            float(body.get("carton_width") or body.get("cartonWidth") or 0),
+            float(body.get("carton_height") or body.get("cartonHeight") or 0),
+            float(body.get("cbm") or 0),
+            float(body.get("cbf") or 0),
+            body.get("color") or "",
+            body.get("dexterity") or "",
+            body.get("category") or "",
+        ])
+    finally:
+        con.close()
+    return {"status": "ok", "eventYear": int(event_year)}

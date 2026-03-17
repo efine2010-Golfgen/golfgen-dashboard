@@ -374,6 +374,20 @@ export const api = {
       method: "POST", credentials: "include", body: fd,
     }).then(r => { if (!r.ok) throw new Error(`NIF upload failed: ${r.status}`); return r.json(); });
   },
+  walmartNifUpdate: (id, data) =>
+    fetch(`${API_BASE}/api/retail/nif-items/${id}`, {
+      method: "PUT", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(data), credentials: "include",
+    }).then(r => { if (!r.ok) return r.json().then(d => { throw new Error(d.detail || "Update failed"); }); return r.json(); }),
+  walmartNifDelete: (id) =>
+    fetch(`${API_BASE}/api/retail/nif-items/${id}`, {
+      method: "DELETE", credentials: "include",
+    }).then(r => { if (!r.ok) return r.json().then(d => { throw new Error(d.detail || "Delete failed"); }); return r.json(); }),
+  walmartNifAdd: (data) =>
+    fetch(`${API_BASE}/api/retail/nif-items`, {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(data), credentials: "include",
+    }).then(r => { if (!r.ok) return r.json().then(d => { throw new Error(d.detail || "Add failed"); }); return r.json(); }),
 
   // Passkey (WebAuthn)
   passkeyList: () => fetchJSON(`/api/mfa/passkeys`),
