@@ -587,18 +587,28 @@ export function WalmartScorecard({ filters }) {
         const groupMap = buildSectionMap(activeVendor);
         if (Object.keys(groupMap).length === 0) return null;
 
-        // Frozen: sticky thead rows stick to viewport top as you scroll the page.
-        // No maxHeight or overflowY — the full page scrolls freely (down to Recent Uploads etc.)
-        // overflowX: "auto" only for horizontal scrolling when many period columns are shown.
-        const containerStyle = { overflowX: "auto" };
+        // Frozen: give the container its OWN vertical scroll context (overflowY: auto +
+        // maxHeight).  This means position:sticky on the thead rows resolves against the
+        // container — not the window — so top:0 / top:28 work exactly right regardless of
+        // the app's nav-header height or whether Show Comparison is open.
+        // The CardHdr ("All Vendors — Full Scorecard") lives ABOVE the container and is
+        // always visible without needing to be sticky.
+        // When not frozen: overflowX only, page scrolls freely.
+        const containerStyle = freezeHeaders
+          ? { overflowX: "auto", overflowY: "auto", maxHeight: "62vh" }
+          : { overflowX: "auto" };
 
-        // For sticky header: apply position:sticky + top to each th individually
-        // Row 1 ths stick at top:0, Row 2 ths stick at top:~28px (below row 1)
-        const stickyR1 = freezeHeaders ? { position: "sticky", top: 0, zIndex: 10 } : {};
-        const stickyR2 = freezeHeaders ? { position: "sticky", top: 28, zIndex: 10 } : {};
-        // Corner th (metric label) needs sticky left AND top
-        const stickyCornerR1 = freezeHeaders ? { position: "sticky", top: 0, left: 0, zIndex: 14 } : { position: "sticky", left: 0, zIndex: 12 };
-        const stickyCornerR2 = freezeHeaders ? { position: "sticky", top: 28, left: 0, zIndex: 14 } : { position: "sticky", left: 0, zIndex: 12 };
+        // Row 1 thead: stick at top of scroll container
+        // Row 2 thead: stick just below row 1 (~28px)
+        const stickyR1 = freezeHeaders ? { position: "sticky", top: 0, zIndex: 10, background: "var(--card)" } : {};
+        const stickyR2 = freezeHeaders ? { position: "sticky", top: 28, zIndex: 10, background: "var(--card)" } : {};
+        // Corner cells also need sticky left so the metric label column stays pinned
+        const stickyCornerR1 = freezeHeaders
+          ? { position: "sticky", top: 0, left: 0, zIndex: 14, background: "var(--card)" }
+          : { position: "sticky", left: 0, zIndex: 12, background: "var(--card)" };
+        const stickyCornerR2 = freezeHeaders
+          ? { position: "sticky", top: 28, left: 0, zIndex: 14, background: "var(--card)" }
+          : { position: "sticky", left: 0, zIndex: 12, background: "var(--card)" };
 
         return (
           <Card>
