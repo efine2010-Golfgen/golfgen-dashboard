@@ -91,7 +91,7 @@ export function WalmartInventory({ filters }) {
   const itemInstock = weeklyData?.itemInstock || {};
   const weekOrder = weeklyData?.weekOrder || weeks.map((w) => w.week);
 
-  // Get last 52 weeks for dept chart, last 26 weeks for item chart/table
+  // Get last 52 weeks for combined chart; last 26 weeks for the detail table
   const last52WeekOrder = weekOrder.slice(-52);
   const last52Weeks = weeks.filter((w) => last52WeekOrder.includes(w.week));
   const last26WeekOrder = weekOrder.slice(-26);
@@ -132,84 +132,55 @@ export function WalmartInventory({ filters }) {
         />
       </div>
 
-      {/* Weekly In Stock % Bar Chart — last 52 weeks */}
+      {/* Combined In Stock % — bars (dept) + lines (per-item) — last 52 weeks */}
       {last52Weeks.length > 0 && (
         <Card>
-          <CardHdr title="Weekly In Stock % — Last 52 Weeks" />
+          <CardHdr title="In Stock % — Last 52 Weeks" />
           <div style={{ ...SG(9), color: "var(--txt3)", marginBottom: 8 }}>
-            Bars show total department in stock % by week.
+            Bars = department in stock %. Colored lines = per-item in stock %.
           </div>
           <ChartCanvas
             type="bar"
-            height={280}
-            configKey={`inv-weekly-52wk-${last52Weeks.length}`}
+            height={320}
+            configKey={`inv-combined-52wk-${last52Weeks.length}-${itemsWithWeeklyInstock.length}`}
             labels={last52Weeks.map((w) => fmtWeek(w.week))}
             datasets={[
               {
                 label: "Dept In Stock %",
                 data: last52Weeks.map((w) => toPercent(w.instockPct)),
-                backgroundColor: "rgba(46,207,170,0.3)",
-                borderColor: COLORS.teal,
+                backgroundColor: "rgba(46,207,170,0.18)",
+                borderColor: "rgba(46,207,170,0.5)",
                 borderWidth: 1,
                 yAxisID: "y",
+                order: 2,
               },
+              ...itemsWithWeeklyInstock.slice(0, 8).map((item, idx) => ({
+                type: "line",
+                label: item.length > 28 ? item.substring(0, 28) + "…" : item,
+                data: last52WeekOrder.map((wk) => {
+                  const v = itemInstock[item]?.[wk];
+                  return v != null && v > 0 ? toPercent(v) : null;
+                }),
+                borderColor: ITEM_COLORS[idx % ITEM_COLORS.length],
+                backgroundColor: "transparent",
+                borderWidth: 2,
+                pointRadius: 2,
+                fill: false,
+                tension: 0.3,
+                spanGaps: true,
+                yAxisID: "y",
+                order: 1,
+              })),
             ]}
             options={{
               scales: {
                 y: {
                   min: 0,
                   max: 100,
-                  ticks: {
-                    callback: (v) => v + "%",
-                  },
+                  ticks: { callback: (v) => v + "%" },
                 },
                 x: {
-                  ticks: { maxRotation: 45, autoSkip: true, maxTicksLimit: 52 },
-                },
-              },
-            }}
-          />
-        </Card>
-      )}
-
-      {/* Item-Level In Stock % — last 26 weeks */}
-      {last26Weeks.length > 0 && itemsWithWeeklyInstock.length > 0 && (
-        <Card>
-          <CardHdr title="Item In Stock % — Last 26 Weeks" />
-          <div style={{ ...SG(9), color: "var(--txt3)", marginBottom: 8 }}>
-            Colored lines show per-item in stock % by week.
-          </div>
-          <ChartCanvas
-            type="line"
-            height={280}
-            configKey={`inv-item-26wk-${last26Weeks.length}-${itemsWithWeeklyInstock.length}`}
-            labels={last26Weeks.map((w) => fmtWeek(w.week))}
-            datasets={
-              itemsWithWeeklyInstock.slice(0, 8).map((item, idx) => ({
-                label: item.length > 25 ? item.substring(0, 25) + "…" : item,
-                data: last26WeekOrder.map((wk) => {
-                  const v = itemInstock[item]?.[wk];
-                  return v != null && v > 0 ? toPercent(v) : null;
-                }),
-                borderColor: ITEM_COLORS[idx % ITEM_COLORS.length],
-                borderWidth: 2,
-                pointRadius: 2,
-                fill: false,
-                tension: 0.3,
-                spanGaps: true,
-              }))
-            }
-            options={{
-              scales: {
-                y: {
-                  min: 0,
-                  max: 100,
-                  ticks: {
-                    callback: (v) => v + "%",
-                  },
-                },
-                x: {
-                  ticks: { maxRotation: 45, autoSkip: true, maxTicksLimit: 13 },
+                  ticks: { maxRotation: 45, autoSkip: true, maxTicksLimit: 26 },
                 },
               },
             }}
