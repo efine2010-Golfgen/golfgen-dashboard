@@ -40,11 +40,23 @@ const ITEM_COLORS = [
   "#ef4444", "#f59e0b", "#ec4899", "#14b8a6",
 ];
 
+// Period options for the instock chart
+const PERIOD_OPTIONS = [
+  { label: "LW",   weeks: 1  },
+  { label: "L4W",  weeks: 4  },
+  { label: "L8W",  weeks: 8  },
+  { label: "L13W", weeks: 13 },
+  { label: "L26W", weeks: 26 },
+  { label: "L52W", weeks: 52 },
+];
+
 export function WalmartInventory({ filters }) {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [data, setData] = useState(null);
   const [weeklyData, setWeeklyData] = useState(null);
+  const [instockPeriod, setInstockPeriod] = useState(52);
+  const [hiddenItems, setHiddenItems] = useState(new Set());
 
   useEffect(() => {
     (async () => {
@@ -91,7 +103,11 @@ export function WalmartInventory({ filters }) {
   const itemInstock = weeklyData?.itemInstock || {};
   const weekOrder = weeklyData?.weekOrder || weeks.map((w) => w.week);
 
-  // Get last 52 weeks for combined chart; last 26 weeks for the detail table
+  // Active window driven by period selector
+  const activeWeekOrder = weekOrder.slice(-instockPeriod);
+  const activeWeeks = weeks.filter((w) => activeWeekOrder.includes(w.week));
+
+  // Always keep full 52w for availability check; 26w for detail table
   const last52WeekOrder = weekOrder.slice(-52);
   const last52Weeks = weeks.filter((w) => last52WeekOrder.includes(w.week));
   const last26WeekOrder = weekOrder.slice(-26);
@@ -132,56 +148,114 @@ export function WalmartInventory({ filters }) {
         />
       </div>
 
-      {/* Combined In Stock % — bars (dept) + lines (per-item) — last 52 weeks */}
+      {/* Combined In Stock % — period selector + item toggles + overlay chart */}
       {last52Weeks.length > 0 && (
         <Card>
-          <CardHdr title="In Stock % — Last 52 Weeks" />
-          <div style={{ ...SG(9), color: "var(--txt3)", marginBottom: 8 }}>
-            Bars = department in stock %. Colored lines = per-item in stock %.
+          <CardHdr title="In Stock % — Weekly Trend" />
+
+          {/* Period selector */}
+          <div style={{ display: "flex", alignItems: "center", gap: 4, marginBottom: 10, flexWrap: "wrap" }}>
+            {PERIOD_OPTIONS.map((p) => (
+              <button
+                key={p.weeks}
+                onClick={() => setInstockPeriod(p.weeks)}
+                style={{
+                  ...SG(9, instockPeriod === p.weeks ? 700 : 500),
+                  padding: "3px 10px", borderRadius: 6,
+                  border: `1px solid ${instockPeriod === p.weeks ? "transparent" : "var(--brd)"}`,
+                  background: instockPeriod === p.weeks ? "var(--card2)" : "transparent",
+                  color: instockPeriod === p.weeks ? "#fff" : "var(--txt3)",
+                  cursor: "pointer",
+                }}
+              >{p.label}</button>
+            ))}
+            <span style={{ ...SG(9), color: "var(--txt3)", marginLeft: 6 }}>
+              Bars = dept &nbsp;·&nbsp; Lines = per item
+            </span>
           </div>
+
+          {/* Item toggle pills */}
+          {itemsWithWeeklyInstock.length > 0 && (
+            <div style={{ display: "flex", flexWrap: "wrap", gap: 5, marginBottom: 12 }}>
+              {itemsWithWeeklyInstock.map((item, idx) => {
+                const hidden = hiddenItems.has(item);
+                const color = ITEM_COLORS[idx % ITEM_COLORS.length];
+                const label = item.length > 32 ? item.substring(0, 32) + "…" : item;
+                return (
+                  <button
+                    key={item}
+                    onClick={() =>
+                      setHiddenItems((prev) => {
+                        const next = new Set(prev);
+                        if (next.has(item)) next.delete(item); else next.add(item);
+                        return next;
+                      })
+                    }
+                    style={{
+                      ...SG(9, 500),
+                      display: "flex", alignItems: "center", gap: 5,
+                      padding: "3px 9px", borderRadius: 12,
+                      border: `1px solid ${hidden ? "var(--brd)" : color}`,
+                      background: hidden ? "transparent" : `${color}1a`,
+                      color: hidden ? "var(--txt3)" : color,
+                      cursor: "pointer", opacity: hidden ? 0.45 : 1,
+                      transition: "all 0.15s",
+                    }}
+                  >
+                    <span style={{
+                      width: 8, height: 8, borderRadius: "50%", flexShrink: 0,
+                      background: hidden ? "var(--txt3)" : color,
+                      display: "inline-block",
+                    }} />
+                    {label}
+                  </button>
+                );
+              })}
+            </div>
+          )}
+
           <ChartCanvas
             type="bar"
             height={320}
-            configKey={`inv-combined-52wk-${last52Weeks.length}-${itemsWithWeeklyInstock.length}`}
-            labels={last52Weeks.map((w) => fmtWeek(w.week))}
+            configKey={`inv-combined-${instockPeriod}-${activeWeeks.length}-${[...hiddenItems].sort().join("|")}`}
+            labels={activeWeeks.map((w) => fmtWeek(w.week))}
             datasets={[
               {
                 label: "Dept In Stock %",
-                data: last52Weeks.map((w) => toPercent(w.instockPct)),
+                data: activeWeeks.map((w) => toPercent(w.instockPct)),
                 backgroundColor: "rgba(46,207,170,0.18)",
                 borderColor: "rgba(46,207,170,0.5)",
                 borderWidth: 1,
                 yAxisID: "y",
                 order: 2,
               },
-              ...itemsWithWeeklyInstock.slice(0, 8).map((item, idx) => ({
-                type: "line",
-                label: item.length > 28 ? item.substring(0, 28) + "…" : item,
-                data: last52WeekOrder.map((wk) => {
-                  const v = itemInstock[item]?.[wk];
-                  return v != null && v > 0 ? toPercent(v) : null;
+              ...itemsWithWeeklyInstock
+                .filter((item) => !hiddenItems.has(item))
+                .map((item) => {
+                  const origIdx = itemsWithWeeklyInstock.indexOf(item);
+                  return {
+                    type: "line",
+                    label: item.length > 28 ? item.substring(0, 28) + "…" : item,
+                    data: activeWeekOrder.map((wk) => {
+                      const v = itemInstock[item]?.[wk];
+                      return v != null && v > 0 ? toPercent(v) : null;
+                    }),
+                    borderColor: ITEM_COLORS[origIdx % ITEM_COLORS.length],
+                    backgroundColor: "transparent",
+                    borderWidth: 2,
+                    pointRadius: instockPeriod <= 8 ? 4 : 2,
+                    fill: false,
+                    tension: 0.3,
+                    spanGaps: true,
+                    yAxisID: "y",
+                    order: 1,
+                  };
                 }),
-                borderColor: ITEM_COLORS[idx % ITEM_COLORS.length],
-                backgroundColor: "transparent",
-                borderWidth: 2,
-                pointRadius: 2,
-                fill: false,
-                tension: 0.3,
-                spanGaps: true,
-                yAxisID: "y",
-                order: 1,
-              })),
             ]}
             options={{
               scales: {
-                y: {
-                  min: 0,
-                  max: 100,
-                  ticks: { callback: (v) => v + "%" },
-                },
-                x: {
-                  ticks: { maxRotation: 45, autoSkip: true, maxTicksLimit: 26 },
-                },
+                y: { min: 0, max: 100, ticks: { callback: (v) => v + "%" } },
+                x: { ticks: { maxRotation: 45, autoSkip: true, maxTicksLimit: instockPeriod <= 13 ? instockPeriod : 26 } },
               },
             }}
           />
