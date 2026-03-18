@@ -854,12 +854,31 @@ function ToggleBtn({ label, active, onClick, color = "#2ECFAA" }) {
 // ═════════════════════════════════════════════════════════════════════════════
 // MAIN PAGE — SINGLE VIEW, NO SUB-TABS
 // ═════════════════════════════════════════════════════════════════════════════
-export function WalmartStoreAnalytics() {
+export function WalmartStoreAnalytics({ filters = {} }) {
   const [showCities, setShowCities] = useState(false);
   const [showRegions, setShowRegions] = useState(false);
   const [selectedMetric, setSelectedMetric] = useState("pos");
   const [selectedState, setSelectedState] = useState(null);
   const [selectedCity, setSelectedCity] = useState(null);
+
+  // Store Inventory Detail state
+  const [storeInvData, setStoreInvData] = useState(null);
+  const [storeInvLoading, setStoreInvLoading] = useState(true);
+  const [hiddenStoreInvItems, setHiddenStoreInvItems] = useState(new Set());
+
+  useEffect(() => {
+    (async () => {
+      try {
+        setStoreInvLoading(true);
+        const d = await api.walmartStoreInventoryDetail(filters);
+        setStoreInvData(d);
+      } catch (e) {
+        setStoreInvData({ stores: [], items: [], latestWeek: null });
+      } finally {
+        setStoreInvLoading(false);
+      }
+    })();
+  }, [filters.division, filters.customer]);
 
   const totalUnits = Object.values(WM_DATA).reduce((a, s) => a + s.qty, 0);
   const totalReturns = Object.values(WM_DATA).reduce((a, s) => a + (s.returns || 0), 0);
@@ -1191,6 +1210,134 @@ export function WalmartStoreAnalytics() {
           </Card>
         );
       })()}
+      {/* ── 2026 Store Inventory Detail ── */}
+      <Card>
+        <CardHdr>2026 Store Inventory Detail</CardHdr>
+        <div style={{ ...SG(9), color: "var(--txt3)", marginBottom: 10 }}>
+          Per-store OH, on-order, and rolling sales from walmart_store_weekly ·
+          {storeInvData?.latestWeek ? ` latest week ${storeInvData.latestWeek}` : ""}
+          {storeInvData?.weeksAvailable ? ` · ${storeInvData.weeksAvailable} weeks available` : ""}
+        </div>
+
+        {/* Item toggle pills (informational — store data is aggregate) */}
+        {storeInvData && storeInvData.items.length > 0 && (
+          <div style={{ display: "flex", flexWrap: "wrap", gap: 5, marginBottom: 12 }}>
+            <span style={{ ...SG(9, 600), color: "var(--txt3)", alignSelf: "center", marginRight: 4 }}>Items:</span>
+            {storeInvData.items.map((item, idx) => {
+              const color = ["#2ecf99","#f97316","#3b82f6","#a78bfa","#ef4444","#f59e0b","#ec4899","#14b8a6"][idx % 8];
+              const isHidden = hiddenStoreInvItems.has(item);
+              return (
+                <button
+                  key={item}
+                  onClick={() => setHiddenStoreInvItems(prev => {
+                    const n = new Set(prev);
+                    if (n.has(item)) n.delete(item); else n.add(item);
+                    return n;
+                  })}
+                  title="Store data is aggregate across all items"
+                  style={{
+                    padding: "3px 9px", borderRadius: 12, cursor: "pointer",
+                    ...SG(9, 500),
+                    background: isHidden ? "transparent" : `${color}22`,
+                    color: isHidden ? "var(--txt3)" : color,
+                    border: `1px solid ${isHidden ? "var(--brd)" : color}`,
+                    transition: "all .15s",
+                  }}
+                >
+                  {item.length > 28 ? item.substring(0, 28) + "…" : item}
+                </button>
+              );
+            })}
+          </div>
+        )}
+
+        {storeInvLoading && <div style={{ ...SG(12), color: "var(--txt3)", padding: "12px 0" }}>Loading store data…</div>}
+
+        {!storeInvLoading && storeInvData && (
+          storeInvData.stores.length === 0 ? (
+            <div style={{ ...SG(11), color: "var(--txt3)", padding: "16px 0" }}>
+              No store inventory data available for 2026. Upload a Walmart weekly store report to populate this table.
+            </div>
+          ) : (
+            <div style={{ overflowX: "auto" }}>
+              <table style={{ borderCollapse: "collapse", width: "100%", minWidth: 720 }}>
+                <thead>
+                  <tr style={{ background: "var(--bg2)" }}>
+                    <th style={{
+                      ...SG(9, 600), padding: "6px 10px", textAlign: "left",
+                      color: "var(--txt2)", borderBottom: "1px solid var(--brd)",
+                      position: "sticky", left: 0, background: "var(--bg2)", zIndex: 2,
+                      minWidth: 200, whiteSpace: "nowrap",
+                    }}>Store</th>
+                    {[
+                      { label: "OH Units",     title: "On-hand units latest week" },
+                      { label: "On Order",     title: "In-transit + in-warehouse units latest week" },
+                      { label: "Instock %",    title: "In-stock percentage latest week" },
+                      { label: "Sales LW",     title: "Sales units last week" },
+                      { label: "L4 Wks",       title: "Sales units last 4 weeks" },
+                      { label: "L8 Wks",       title: "Sales units last 8 weeks" },
+                      { label: "L13 Wks",      title: "Sales units last 13 weeks" },
+                    ].map(col => (
+                      <th key={col.label} title={col.title} style={{
+                        ...SG(9, 600), padding: "6px 8px", textAlign: "right",
+                        color: "var(--txt2)", borderBottom: "1px solid var(--brd)", whiteSpace: "nowrap",
+                      }}>{col.label}</th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody>
+                  {storeInvData.stores.map((s, idx) => {
+                    const rowBg = idx % 2 === 0 ? "var(--bg2)" : "var(--card)";
+                    const instockNum = s.instockPct > 1 ? s.instockPct : s.instockPct * 100;
+                    const instockColor = instockNum >= 90 ? "#2ecf99" : instockNum >= 70 ? "#f59e0b" : instockNum > 0 ? "#ef4444" : "var(--txt3)";
+                    return (
+                      <tr key={s.storeNumber} style={{ borderBottom: "1px solid var(--brd)", background: rowBg }}>
+                        <td style={{
+                          padding: "5px 10px", position: "sticky", left: 0,
+                          background: rowBg, zIndex: 1, borderRight: "1px solid var(--brd)",
+                        }}>
+                          <div style={{ ...SG(10, 600), color: "var(--txt1)", whiteSpace: "nowrap" }}>
+                            {s.storeName.length > 34 ? s.storeName.substring(0, 34) + "…" : s.storeName}
+                          </div>
+                          <div style={{ ...SG(8), color: "var(--txt3)", marginTop: 1 }}>
+                            Store #{s.storeNumber}
+                          </div>
+                        </td>
+                        <td style={{ ...SG(10), padding: "5px 8px", textAlign: "right", color: s.ohUnits > 0 ? "var(--txt1)" : "var(--txt3)" }}>
+                          {s.ohUnits > 0 ? fN(s.ohUnits) : "—"}
+                        </td>
+                        <td style={{ ...SG(10), padding: "5px 8px", textAlign: "right", color: s.onOrderUnits > 0 ? "#f59e0b" : "var(--txt3)" }}>
+                          {s.onOrderUnits > 0 ? fN(s.onOrderUnits) : "—"}
+                        </td>
+                        <td style={{ ...SG(10), padding: "5px 8px", textAlign: "right", color: instockColor }}>
+                          {s.instockPct > 0 ? instockNum.toFixed(1) + "%" : "—"}
+                        </td>
+                        <td style={{ ...SG(10), padding: "5px 8px", textAlign: "right", color: s.salesLW > 0 ? "var(--txt1)" : "var(--txt3)" }}>
+                          {s.salesLW > 0 ? fN(s.salesLW) : "—"}
+                        </td>
+                        <td style={{ ...SG(10), padding: "5px 8px", textAlign: "right", color: s.salesL4W > 0 ? "var(--txt1)" : "var(--txt3)" }}>
+                          {s.salesL4W > 0 ? fN(s.salesL4W) : "—"}
+                        </td>
+                        <td style={{ ...SG(10), padding: "5px 8px", textAlign: "right", color: s.salesL8W > 0 ? "var(--txt1)" : "var(--txt3)" }}>
+                          {s.salesL8W > 0 ? fN(s.salesL8W) : "—"}
+                        </td>
+                        <td style={{ ...SG(10), padding: "5px 8px", textAlign: "right", color: s.salesL13W > 0 ? "var(--txt1)" : "var(--txt3)" }}>
+                          {s.salesL13W > 0 ? fN(s.salesL13W) : "—"}
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+              <div style={{ ...SG(8), color: "var(--txt3)", marginTop: 8 }}>
+                {storeInvData.stores.length} stores · data from walmart_store_weekly ·
+                L4/L8/L13 = cumulative sales units across available weeks
+              </div>
+            </div>
+          )
+        )}
+      </Card>
+
     </div>
   );
 }

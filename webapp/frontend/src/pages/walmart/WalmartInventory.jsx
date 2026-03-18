@@ -121,6 +121,9 @@ export function WalmartInventory({ filters }) {
   // Store detail state
   const [hiddenStoreItems, setHiddenStoreItems] = useState(new Set());
   const [expandedStoreItems, setExpandedStoreItems] = useState(new Set());
+  const [zeroOHData, setZeroOHData] = useState(null);       // { stores, latestWeek, totalStores }
+  const [zeroOHLoading, setZeroOHLoading] = useState(false);
+  const [zeroOHLoaded, setZeroOHLoaded] = useState(false);
 
   useEffect(() => {
     (async () => {
@@ -150,6 +153,18 @@ export function WalmartInventory({ filters }) {
       if (next.has(item)) next.delete(item); else next.add(item);
       return next;
     });
+
+  // Lazy-load zero-OH store list on first expand
+  const handleExpandStoreRow = (itemName) => {
+    toggleSetItem(setExpandedStoreItems)(itemName);
+    if (!zeroOHLoaded && !zeroOHLoading) {
+      setZeroOHLoading(true);
+      api.walmartStoresZeroOH(filters, 1)
+        .then((d) => { setZeroOHData(d); setZeroOHLoaded(true); })
+        .catch(() => setZeroOHData({ stores: [], latestWeek: null, totalStores: 0 }))
+        .finally(() => setZeroOHLoading(false));
+    }
+  };
 
   if (loading)
     return (
@@ -459,7 +474,7 @@ export function WalmartInventory({ filters }) {
                         <div style={{ display: "flex", alignItems: "flex-start", gap: 6 }}>
                           {/* Expand toggle button (only shown if zeroCount > 0) */}
                           <button
-                            onClick={() => toggleSetItem(setExpandedStoreItems)(it.itemName)}
+                            onClick={() => handleExpandStoreRow(it.itemName)}
                             title={zeroCount > 0 ? `Show/hide ${zeroCount} stores with 0 OH` : "No zero-OH stores"}
                             style={{
                               ...SG(9, 600),
@@ -521,36 +536,65 @@ export function WalmartInventory({ filters }) {
                             {zeroCount > 0
                               ? `${zeroCount} Traited Store${zeroCount !== 1 ? "s" : ""} with 0 On-Hand — ${it.itemName}`
                               : "No traited stores with 0 on-hand"}
-                          </div>
-
-                          {/* Explanation / placeholder */}
-                          <div style={{
-                            ...SG(9), color: "var(--txt3)",
-                            background: "var(--card2)", borderRadius: 6,
-                            padding: "10px 14px",
-                            border: "1px solid var(--brd)",
-                            maxWidth: 560,
-                          }}>
-                            <div style={{ ...SG(9, 600), color: "var(--txt2)", marginBottom: 4 }}>
-                              Individual store numbers not yet available
-                            </div>
-                            Store-level item breakdown requires uploading the Walmart
-                            Item × Store weekly detail report (not yet ingested). Once
-                            available, this panel will list each store number, store city,
-                            OH units, and on-order for <em>{it.itemName}</em>.
-                            <div style={{ marginTop: 8, color: "var(--txt3)" }}>
-                              <strong>What we know:</strong>&nbsp;
-                              {it.traitedStores} traited stores total ·{" "}
-                              {it.storesWithInv} estimated with inventory ·{" "}
-                              <span style={{ color: COLORS.red }}>{zeroCount} with 0 OH</span>
-                            </div>
-                            {it.onOrderUnits > 0 && (
-                              <div style={{ marginTop: 4, color: "#f59e0b" }}>
-                                {fN(it.onOrderUnits)} total units on order for this item
-                                (store-level allocation not available)
-                              </div>
+                            {zeroOHData && (
+                              <span style={{ ...SG(9), color: "var(--txt3)", fontWeight: 400, marginLeft: 12 }}>
+                                (store totals · week {zeroOHData.latestWeek})
+                              </span>
                             )}
                           </div>
+
+                          {/* Store table */}
+                          {zeroOHLoading && (
+                            <div style={{ ...SG(9), color: "var(--txt3)", padding: "6px 0" }}>Loading stores…</div>
+                          )}
+                          {!zeroOHLoading && zeroOHLoaded && (
+                            zeroOHData && zeroOHData.stores.length > 0 ? (
+                              <div style={{ overflowX: "auto", maxHeight: 260, overflowY: "auto" }}>
+                                <table style={{ borderCollapse: "collapse", width: "100%", minWidth: 520 }}>
+                                  <thead>
+                                    <tr style={{ background: "var(--bg2)", position: "sticky", top: 0, zIndex: 1 }}>
+                                      {["Store #", "Store Name", "OH Units", "In Transit", "In Whse", "Instock %", "Sales LW"].map(h => (
+                                        <th key={h} style={{
+                                          ...SG(9, 600), padding: "4px 8px", textAlign: h === "Store Name" ? "left" : "right",
+                                          color: "var(--txt2)", borderBottom: "1px solid var(--brd)", whiteSpace: "nowrap",
+                                        }}>{h}</th>
+                                      ))}
+                                    </tr>
+                                  </thead>
+                                  <tbody>
+                                    {zeroOHData.stores.map((s, si) => (
+                                      <tr key={s.storeNumber} style={{
+                                        background: si % 2 === 0 ? "var(--card)" : "var(--bg2)",
+                                        borderBottom: "1px solid var(--brd)",
+                                      }}>
+                                        <td style={{ ...SG(9), padding: "3px 8px", textAlign: "right", color: "var(--txt3)", whiteSpace: "nowrap" }}>{s.storeNumber}</td>
+                                        <td style={{ ...SG(9), padding: "3px 8px", color: "var(--txt1)", whiteSpace: "nowrap", maxWidth: 200, overflow: "hidden", textOverflow: "ellipsis" }}>{s.storeName}</td>
+                                        <td style={{ ...SG(9), padding: "3px 8px", textAlign: "right", color: s.ohUnits === 0 ? COLORS.red : "var(--txt1)" }}>{fN(s.ohUnits)}</td>
+                                        <td style={{ ...SG(9), padding: "3px 8px", textAlign: "right", color: s.inTransit > 0 ? "#f59e0b" : "var(--txt3)" }}>{s.inTransit > 0 ? fN(s.inTransit) : "—"}</td>
+                                        <td style={{ ...SG(9), padding: "3px 8px", textAlign: "right", color: s.inWarehouse > 0 ? "#f59e0b" : "var(--txt3)" }}>{s.inWarehouse > 0 ? fN(s.inWarehouse) : "—"}</td>
+                                        <td style={{ ...SG(9), padding: "3px 8px", textAlign: "right", color: "var(--txt3)" }}>{s.instockPct > 0 ? (s.instockPct > 1 ? s.instockPct.toFixed(1) : (s.instockPct * 100).toFixed(1)) + "%" : "—"}</td>
+                                        <td style={{ ...SG(9), padding: "3px 8px", textAlign: "right", color: s.salesLW > 0 ? COLORS.teal : "var(--txt3)" }}>{s.salesLW > 0 ? fN(s.salesLW) : "—"}</td>
+                                      </tr>
+                                    ))}
+                                  </tbody>
+                                </table>
+                                <div style={{ ...SG(8), color: "var(--txt3)", marginTop: 6 }}>
+                                  {zeroOHData.totalStores} store{zeroOHData.totalStores !== 1 ? "s" : ""} with ≤1 unit OH across all items ·
+                                  Note: store data is totals across all items, not per-item
+                                </div>
+                              </div>
+                            ) : (
+                              <div style={{ ...SG(9), color: "var(--txt3)", padding: "6px 0" }}>
+                                No stores with 0–1 unit OH found for week {zeroOHData?.latestWeek || "—"}
+                              </div>
+                            )
+                          )}
+                          {!zeroOHLoading && !zeroOHLoaded && (
+                            <div style={{ ...SG(9), color: "var(--txt3)" }}>
+                              {it.traitedStores} traited · {it.storesWithInv} with inv ·{" "}
+                              <span style={{ color: COLORS.red }}>{zeroCount} with 0 OH</span>
+                            </div>
+                          )}
                         </td>
                       </tr>
                     ),

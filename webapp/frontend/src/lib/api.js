@@ -356,6 +356,11 @@ export const api = {
   walmartForecast: (h = {}) => fetchJSON('/api/walmart/forecast' + (_hq(h) ? '?' + _hq(h).slice(1) : '')),
   walmartWeeklyTrend: (h = {}) => fetchJSON('/api/walmart/weekly-trend' + (_hq(h) ? '?' + _hq(h).slice(1) : '')),
   walmartItemStoreDetail: (h = {}) => fetchJSON('/api/walmart/item-store-detail' + (_hq(h) ? '?' + _hq(h).slice(1) : '')),
+  walmartStoresZeroOH: (h = {}, maxOh = 1) => {
+    const base = _hq(h) ? '?' + _hq(h).slice(1) + `&max_oh=${maxOh}` : `?max_oh=${maxOh}`;
+    return fetchJSON('/api/walmart/stores-zero-oh' + base);
+  },
+  walmartStoreInventoryDetail: (h = {}) => fetchJSON('/api/walmart/store-inventory-detail' + (_hq(h) ? '?' + _hq(h).slice(1) : '')),
   walmartStoreAnalytics: (h = {}, opts = {}) => {
     const { week, sortBy, sortDir, limit, offset } = opts;
     let q = _hq(h) ? '?' + _hq(h).slice(1) : '?';

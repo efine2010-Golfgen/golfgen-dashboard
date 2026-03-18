@@ -937,40 +937,51 @@ def get_item_store_detail(division: str = None, customer: str = None):
     try:
         hw, hp = hierarchy_filter(division=division, customer=customer or "walmart_stores")
 
-        # Step 1: Get the most-recent walmart_week per item × period_type
-        #   then fetch the matching row's metrics.
-        #   hp is used twice (once in inner subquery, once in outer WHERE).
+        # Single conditional-MAX aggregate — one row per item, all periods covered.
+        # Inclusive WHERE: accepts both numeric 2026 weeks AND period-label rows.
+        # No JOIN required so ALL items appear regardless of walmart_week format.
         rows = con.execute(f"""
             SELECT
-              w.prime_item_number,
-              w.prime_item_desc,
-              UPPER(w.period_type)          AS period_type,
-              COALESCE(w.pos_qty_ty, 0)     AS pos_qty,
-              COALESCE(w.pos_store_count_ty, 0) AS pos_store_count,
-              COALESCE(w.on_hand_qty_ty, 0) AS oh_units,
-              COALESCE(w.on_order_qty_ty, 0) AS on_order_units,
-              COALESCE(w.traited_store_count_ty, 0) AS traited_stores,
-              COALESCE(w.valid_store_count_ty, 0)   AS valid_stores,
-              w.instock_pct_ty
-            FROM walmart_item_weekly w
-            INNER JOIN (
-              SELECT prime_item_number, period_type, MAX(walmart_week) AS max_wk
-              FROM walmart_item_weekly
-              WHERE prime_item_desc IS NOT NULL
-                AND CAST(walmart_week AS VARCHAR) >= '202601'
-                {hw}
-              GROUP BY prime_item_number, period_type
-            ) latest
-              ON w.prime_item_number = latest.prime_item_number
-             AND w.period_type      = latest.period_type
-             AND w.walmart_week     = latest.max_wk
-            WHERE w.prime_item_desc IS NOT NULL
-              AND CAST(w.walmart_week AS VARCHAR) >= '202601'
+              prime_item_number,
+              prime_item_desc,
+              COALESCE(MAX(CASE WHEN UPPER(period_type) IN ('L1W','LW','WEEKLY')
+                              THEN on_hand_qty_ty END), 0)          AS oh_l1w,
+              COALESCE(MAX(CASE WHEN UPPER(period_type) IN ('L1W','LW','WEEKLY')
+                              THEN on_order_qty_ty END), 0)         AS on_order_l1w,
+              COALESCE(MAX(CASE WHEN UPPER(period_type) IN ('L1W','LW','WEEKLY')
+                              THEN traited_store_count_ty END), 0)  AS traited_l1w,
+              COALESCE(MAX(CASE WHEN UPPER(period_type) IN ('L1W','LW','WEEKLY')
+                              THEN valid_store_count_ty END), 0)    AS valid_l1w,
+              MAX(CASE WHEN UPPER(period_type) IN ('L1W','LW','WEEKLY')
+                       THEN instock_pct_ty END)                     AS instock_l1w,
+              COALESCE(MAX(CASE WHEN UPPER(period_type) IN ('L1W','LW','WEEKLY')
+                              THEN pos_store_count_ty END), 0)      AS pos_sc_l1w,
+              COALESCE(MAX(CASE WHEN UPPER(period_type) IN ('L1W','LW','WEEKLY')
+                              THEN pos_qty_ty END), 0)              AS sales_lw,
+              COALESCE(MAX(on_hand_qty_ty), 0)                      AS oh_any,
+              COALESCE(MAX(on_order_qty_ty), 0)                     AS on_order_any,
+              COALESCE(MAX(traited_store_count_ty), 0)              AS traited_any,
+              COALESCE(MAX(valid_store_count_ty), 0)                AS valid_any,
+              MAX(CASE WHEN instock_pct_ty > 0 THEN instock_pct_ty END) AS instock_any,
+              COALESCE(MAX(pos_store_count_ty), 0)                  AS pos_sc_any,
+              COALESCE(MAX(CASE WHEN UPPER(period_type) = 'L4W'
+                              THEN pos_qty_ty END), 0)              AS sales_l4w,
+              COALESCE(MAX(CASE WHEN UPPER(period_type) = 'L8W'
+                              THEN pos_qty_ty END), 0)              AS sales_l8w,
+              COALESCE(MAX(CASE WHEN UPPER(period_type) = 'L13W'
+                              THEN pos_qty_ty END), 0)              AS sales_l13w
+            FROM walmart_item_weekly
+            WHERE prime_item_desc IS NOT NULL
+              AND (
+                CAST(walmart_week AS VARCHAR) >= '202601'
+                OR UPPER(period_type) IN ('L1W','LW','WEEKLY','L4W','L8W','L13W','L26W','L52W')
+              )
               {hw}
-            ORDER BY w.prime_item_desc, w.period_type
-        """, hp + hp).fetchall()
+            GROUP BY prime_item_number, prime_item_desc
+            ORDER BY prime_item_desc
+        """, hp).fetchall()
 
-        # Step 2: Pull GolfGen vendor# → Walmart item# mapping from NIF items
+        # Pull GolfGen vendor# → Walmart item# mapping from NIF items
         try:
             nif_rows = con.execute("""
                 SELECT DISTINCT vendor_stock_number, wmt_item_number
@@ -981,94 +992,205 @@ def get_item_store_detail(division: str = None, customer: str = None):
         except Exception:
             nif_map = {}
 
-        # Step 3: Pivot by period_type — build one dict entry per item
-        # L1W/LW/WEEKLY = most-recent inventory snapshot (preferred for OH/traited)
-        # L4W/L8W/L13W  = rolling sales windows (sales units only)
-        # Fallback: if no L1W row exists, use inventory values from next-best period
-        L1W_TYPES = {"L1W", "LW", "WEEKLY"}
-        # Inventory fallback priority: shorter windows are more current
-        INV_FALLBACK_ORDER = ["L4W", "L8W", "L13W", "L26W", "L52W"]
+        # Each row is one item with all periods pre-aggregated — build output directly
+        items = []
+        for r in rows:
+            item_num   = r[0] or ""
+            item_desc  = r[1] or "Unknown"
 
-        items_dict: dict = {}   # prime_item_number → output dict
-        inv_cache: dict  = {}   # prime_item_number → {period: (oh, on_order, traited, valid_st, instock_raw, pos_sc)}
+            oh_l1w,    on_order_l1w, traited_l1w, valid_l1w = (
+                _n(r[2]), _n(r[3]), _safe_int(r[4]), _safe_int(r[5])
+            )
+            instock_l1w, pos_sc_l1w, sales_lw = r[6], _safe_int(r[7]), _n(r[8])
+            oh_any,    on_order_any, traited_any, valid_any = (
+                _n(r[9]), _n(r[10]), _safe_int(r[11]), _safe_int(r[12])
+            )
+            instock_any, pos_sc_any = r[13], _safe_int(r[14])
+            sales_l4w  = _n(r[15])
+            sales_l8w  = _n(r[16])
+            sales_l13w = _n(r[17])
 
-        def _fill_inv(d, oh, on_order, traited, valid_st, instock_raw, pos_sc):
-            """Populate inventory-snapshot fields from one period's row."""
-            d["ohUnits"]       = oh
-            d["onOrderUnits"]  = on_order
-            d["traitedStores"] = traited
-            d["storesWithSales"] = pos_sc
+            # Prefer L1W values; fall back to any-period max for items with no L1W row
+            has_l1w = (oh_l1w > 0 or on_order_l1w > 0 or traited_l1w > 0 or sales_lw > 0)
+            oh          = oh_l1w       if has_l1w else oh_any
+            on_order    = on_order_l1w if has_l1w else on_order_any
+            traited     = traited_l1w  if has_l1w else traited_any
+            valid_st    = valid_l1w    if has_l1w else valid_any
+            instock_raw = instock_l1w  if has_l1w else instock_any
+            pos_sc      = pos_sc_l1w   if has_l1w else pos_sc_any
+
+            # Calculate storesWithInv from traited × instock%
             if instock_raw is not None and traited > 0:
-                instock = (float(instock_raw) / 100.0) if float(instock_raw) > 1 else float(instock_raw)
+                instock = float(instock_raw) / 100.0 if float(instock_raw) > 1 else float(instock_raw)
                 stores_with_inv = round(traited * instock)
             else:
                 stores_with_inv = valid_st
-            d["storesWithInv"]  = stores_with_inv
-            # traitedZeroInv = traited stores with 0 OH (traited-only, not all stores)
-            d["traitedZeroInv"] = max(0, traited - stores_with_inv)
 
-        for r in rows:
-            item_num    = r[0] or ""
-            item_desc   = r[1] or "Unknown"
-            period      = r[2] or ""
-            pos_qty     = _n(r[3])
-            pos_sc      = _safe_int(r[4])
-            oh          = _n(r[5])
-            on_order    = _n(r[6])
-            traited     = _safe_int(r[7])
-            valid_st    = _safe_int(r[8])
-            instock_raw = r[9]
+            items.append({
+                "itemName":         item_desc,
+                "vendorItemNumber": item_num,
+                "wmtItemNumber":    nif_map.get(item_num, ""),
+                "ohUnits":          oh,
+                "onOrderUnits":     on_order,
+                "traitedStores":    traited,
+                "storesWithInv":    stores_with_inv,
+                "traitedZeroInv":   max(0, traited - stores_with_inv),
+                "storesOneUnit":    0,
+                "storesWithSales":  pos_sc,
+                "onOrderZeroOH":    None,
+                "salesLW":          sales_lw,
+                "salesL4W":         sales_l4w,
+                "salesL8W":         sales_l8w,
+                "salesL13W":        sales_l13w,
+            })
 
-            if item_num not in items_dict:
-                items_dict[item_num] = {
-                    "itemName":         item_desc,
-                    "vendorItemNumber": item_num,
-                    "wmtItemNumber":    nif_map.get(item_num, ""),
-                    "ohUnits":          0,
-                    "onOrderUnits":     0,
-                    "traitedStores":    0,
-                    "storesWithInv":    0,
-                    "traitedZeroInv":   0,   # traited stores with 0 OH only
-                    "storesOneUnit":    0,   # not available at weekly granularity
-                    "storesWithSales":  0,
-                    "onOrderZeroOH":    None,  # requires store-item level data
-                    "salesLW":          0,
-                    "salesL4W":         0,
-                    "salesL8W":         0,
-                    "salesL13W":        0,
-                    "_has_inv":         False,
-                }
-                inv_cache[item_num] = {}
-
-            d = items_dict[item_num]
-
-            # Always cache this period's inventory values for fallback
-            inv_cache[item_num][period] = (oh, on_order, traited, valid_st, instock_raw, pos_sc)
-
-            if period in L1W_TYPES:
-                # Primary: use this row for all inventory-snapshot fields
-                _fill_inv(d, oh, on_order, traited, valid_st, instock_raw, pos_sc)
-                d["salesLW"]   = pos_qty
-                d["_has_inv"]  = True
-            elif period == "L4W":
-                d["salesL4W"]  = pos_qty
-            elif period == "L8W":
-                d["salesL8W"]  = pos_qty
-            elif period == "L13W":
-                d["salesL13W"] = pos_qty
-
-        # Fallback: items that had NO L1W/weekly row get inventory from next-best period
-        for item_num, d in items_dict.items():
-            if not d["_has_inv"]:
-                cache = inv_cache.get(item_num, {})
-                for fallback_pt in INV_FALLBACK_ORDER:
-                    if fallback_pt in cache:
-                        _fill_inv(d, *cache[fallback_pt])
-                        break
-            del d["_has_inv"]  # strip internal flag before returning
-
-        items = sorted(items_dict.values(), key=lambda x: x["itemName"])
         return {"items": items}
+    finally:
+        con.close()
+
+
+# ═════════════════════════════════════════════════════════════════════════════
+#  ENDPOINT 8c: Stores with 0 or 1 Unit OH — for item dropdown expansion
+# ═════════════════════════════════════════════════════════════════════════════
+
+
+@router.get("/api/walmart/stores-zero-oh")
+def get_stores_zero_oh(division: str = None, customer: str = None, max_oh: int = 1):
+    """
+    Returns stores from walmart_store_weekly where on_hand_qty_ty <= max_oh
+    for the most recent available week. Used to populate the expandable
+    store-detail panel in the 2026 Item Store Inventory Detail table.
+    Note: walmart_store_weekly is store-level totals (not per-item).
+    """
+    con = get_db()
+    try:
+        hw, hp = hierarchy_filter(division=division, customer=customer or "walmart_stores")
+
+        wk_row = con.execute(
+            f"SELECT MAX(walmart_week) FROM walmart_store_weekly WHERE 1=1 {hw}", hp
+        ).fetchone()
+        latest_week = str(wk_row[0]) if wk_row and wk_row[0] else None
+        if not latest_week:
+            return {"stores": [], "latestWeek": None, "totalStores": 0}
+
+        rows = con.execute(f"""
+            SELECT
+              store_number,
+              store_name,
+              COALESCE(on_hand_qty_ty, 0)       AS on_hand,
+              COALESCE(in_transit_qty_ty, 0)    AS in_transit,
+              COALESCE(in_warehouse_qty_ty, 0)  AS in_warehouse,
+              COALESCE(instock_pct_ty, 0)       AS instock_pct,
+              COALESCE(pos_qty_ty, 0)           AS sales_lw
+            FROM walmart_store_weekly
+            WHERE walmart_week = ?
+              AND COALESCE(on_hand_qty_ty, 0) <= ?
+              {hw}
+            ORDER BY store_name, store_number
+        """, [latest_week, max_oh] + hp).fetchall()
+
+        stores = [
+            {
+                "storeNumber": r[0] or "",
+                "storeName":   r[1] or f"Store {r[0]}",
+                "ohUnits":     _n(r[2]),
+                "inTransit":   _n(r[3]),
+                "inWarehouse": _n(r[4]),
+                "instockPct":  _n(r[5]),
+                "salesLW":     _n(r[6]),
+            }
+            for r in rows
+        ]
+        return {"stores": stores, "latestWeek": latest_week, "totalStores": len(stores)}
+    finally:
+        con.close()
+
+
+# ═════════════════════════════════════════════════════════════════════════════
+#  ENDPOINT 8d: Store Inventory Detail — Per-store metrics (Store Analytics page)
+# ═════════════════════════════════════════════════════════════════════════════
+
+
+@router.get("/api/walmart/store-inventory-detail")
+def get_store_inventory_detail(division: str = None, customer: str = None):
+    """
+    Returns per-store inventory + rolling sales metrics for 2026.
+    Used by the Store Analytics page "2026 Store Inventory Detail" table.
+    Also returns item list from walmart_item_weekly for toggle pills.
+    """
+    con = get_db()
+    try:
+        hw, hp = hierarchy_filter(division=division, customer=customer or "walmart_stores")
+
+        # Get the most recent 13 weekly walmart_week values (numeric, 2026+)
+        wk_rows = con.execute(f"""
+            SELECT DISTINCT walmart_week
+            FROM walmart_store_weekly
+            WHERE CAST(walmart_week AS VARCHAR) >= '202601' {hw}
+            ORDER BY walmart_week DESC
+            LIMIT 13
+        """, hp).fetchall()
+        if not wk_rows:
+            return {"stores": [], "items": [], "latestWeek": None}
+
+        weeks_all   = [str(r[0]) for r in wk_rows]
+        latest_week = weeks_all[0]
+        weeks_l4    = weeks_all[:4]
+        weeks_l8    = weeks_all[:8]
+        weeks_l13   = weeks_all[:13]
+
+        # Build IN-list placeholders
+        def _in(lst): return ", ".join(["?" for _ in lst])
+
+        store_rows = con.execute(f"""
+            SELECT
+              store_number,
+              store_name,
+              COALESCE(SUM(CASE WHEN walmart_week = ? THEN on_hand_qty_ty END), 0)       AS oh_lw,
+              COALESCE(SUM(CASE WHEN walmart_week = ?
+                THEN COALESCE(in_transit_qty_ty,0) + COALESCE(in_warehouse_qty_ty,0) END), 0) AS on_order_lw,
+              MAX(CASE WHEN walmart_week = ? THEN instock_pct_ty END)                    AS instock_lw,
+              COALESCE(SUM(CASE WHEN walmart_week IN ({_in(weeks_all[:1])}) THEN pos_qty_ty END), 0) AS sales_lw,
+              COALESCE(SUM(CASE WHEN walmart_week IN ({_in(weeks_l4)})  THEN pos_qty_ty END), 0) AS sales_l4w,
+              COALESCE(SUM(CASE WHEN walmart_week IN ({_in(weeks_l8)})  THEN pos_qty_ty END), 0) AS sales_l8w,
+              COALESCE(SUM(CASE WHEN walmart_week IN ({_in(weeks_l13)}) THEN pos_qty_ty END), 0) AS sales_l13w
+            FROM walmart_store_weekly
+            WHERE CAST(walmart_week AS VARCHAR) >= '202601' {hw}
+            GROUP BY store_number, store_name
+            ORDER BY store_name, store_number
+        """, [latest_week, latest_week, latest_week] + weeks_all[:1] + weeks_l4 + weeks_l8 + weeks_l13 + hp).fetchall()
+
+        stores = [
+            {
+                "storeName":   r[1] or f"Store {r[0]}",
+                "storeNumber": r[0] or "",
+                "ohUnits":     _n(r[2]),
+                "onOrderUnits":_n(r[3]),
+                "instockPct":  _n(r[4]),
+                "salesLW":     _n(r[5]),
+                "salesL4W":    _n(r[6]),
+                "salesL8W":    _n(r[7]),
+                "salesL13W":   _n(r[8]),
+            }
+            for r in store_rows
+        ]
+
+        # Item list for toggle pills
+        try:
+            item_rows = con.execute(f"""
+                SELECT DISTINCT prime_item_desc
+                FROM walmart_item_weekly
+                WHERE prime_item_desc IS NOT NULL
+                  AND (CAST(walmart_week AS VARCHAR) >= '202601'
+                       OR UPPER(period_type) IN ('L1W','LW','WEEKLY','L4W','L8W','L13W')) {hw}
+                ORDER BY prime_item_desc
+            """, hp).fetchall()
+            items = [r[0] for r in item_rows if r[0]]
+        except Exception:
+            items = []
+
+        return {"stores": stores, "items": items, "latestWeek": latest_week,
+                "weeksAvailable": len(weeks_all)}
     finally:
         con.close()
 
