@@ -636,6 +636,54 @@ export default function Sales({ filters = {} }) {
                 </span>
               );
             };
+
+            // ── TODAY: wider card with 6 columns (TY | LY Now | CHG | LY EOD | Forecast) ──
+            if (p === 'Today') {
+              const lyEod   = d.ly_eod_sales ?? d.ly_sales;
+              const lyEodU  = d.ly_eod_units ?? d.ly_units;
+              const lyNow   = d.ly_same_time_sales;
+              const lyNowU  = d.ly_same_time_units;
+              // rows: [label, TY, LY-now, delta, invert, LY-EOD, Forecast]
+              const todayRows = [
+                ['Sales $',     f$(d.sales),       f$(lyNow),  pct(d.sales, lyNow),   false, f$(lyEod),  f$(d.ty_forecast)],
+                ['Units',       fN(d.units),        fN(lyNowU), pct(d.units, lyNowU),  false, fN(lyEodU), fN(d.ty_units_forecast)],
+                ['AUR',         f$(d.aur),          '—',        null,                  false, f$(d.ly_aur),        '—'],
+                ['Amazon Fees', f$(d.amazon_fees),  '—',        null,                  true,  f$(d.ly_amazon_fees),'—'],
+                ['Returns',     d.returns_amount > 0 ? `${d.returns}·${f$(d.returns_amount)}` : fN(d.returns),
+                                '—', null, true,
+                                d.ly_returns_amount > 0 ? `${d.ly_returns}·${f$(d.ly_returns_amount)}` : fN(d.ly_returns), '—'],
+                ['Orders',      fN(d.orders),       '—',        null,                  false, fN(d.ly_orders),     '—'],
+                ['Sessions',    '—',                '—',        null,                  false, '—',                 '—'],
+                ['Conv %',      d.sessions > 0 ? fP(d.conversion) : '—', '—', null, false, fP(d.ly_conversion), '—'],
+              ];
+              return (
+                <div key={p} style={{flex:'1 1 340px',minWidth:340,background:'var(--card2)',border:'1px solid var(--acc1)',borderRadius:12,padding:'12px 14px',transition:'background .3s',boxShadow:'0 0 0 1px rgba(46,207,170,.15)'}}>
+                  <div style={{display:'flex',alignItems:'baseline',gap:8,paddingBottom:9,borderBottom:'1px solid var(--brd)',marginBottom:9}}>
+                    <span style={{fontSize:10,fontWeight:700,textTransform:'uppercase',letterSpacing:'.12em',color:B.b2}}>Today</span>
+                    <span style={{fontSize:9,color:'var(--txt3)'}}>so far · LY = same time last year</span>
+                  </div>
+                  <div style={{display:'grid',gridTemplateColumns:'auto 65px 65px 50px 65px 72px',columnGap:4,rowGap:6,alignItems:'center'}}>
+                    {/* header */}
+                    <span/>
+                    <span style={{fontSize:9,fontWeight:700,color:'var(--txt3)',textTransform:'uppercase',letterSpacing:'.05em'}}>TY</span>
+                    <span style={{fontSize:9,fontWeight:700,color:B.b3,textTransform:'uppercase',letterSpacing:'.05em'}}>LY NOW</span>
+                    <span style={{fontSize:9,fontWeight:700,color:'var(--txt3)',textTransform:'uppercase',letterSpacing:'.05em',textAlign:'right'}}>CHG</span>
+                    <span style={{fontSize:9,fontWeight:700,color:'var(--txt3)',textTransform:'uppercase',letterSpacing:'.05em'}}>LY EOD</span>
+                    <span style={{fontSize:9,fontWeight:700,color:B.t2,textTransform:'uppercase',letterSpacing:'.05em',textAlign:'right'}}>FCST</span>
+                    {todayRows.flatMap(([l, ty, lyNowV, delta, inv, lyEodV, fcst]) => [
+                      <span key={l+'-l'} style={{fontSize:10,color:'var(--txt3)',whiteSpace:'nowrap',paddingRight:4}}>{l}</span>,
+                      <span key={l+'-ty'} style={{fontSize:12,fontWeight:700,color:'var(--txt)'}}>{ty}</span>,
+                      <span key={l+'-ln'} style={{fontSize:10,color:B.b3}}>{lyNowV}</span>,
+                      pctEl(delta, inv, l+'-chg'),
+                      <span key={l+'-eod'} style={{fontSize:10,color:'var(--txt2)'}}>{lyEodV}</span>,
+                      <span key={l+'-fc'} style={{fontSize:11,fontWeight:700,color:B.t2,textAlign:'right'}}>{fcst}</span>,
+                    ])}
+                  </div>
+                </div>
+              );
+            }
+
+            // ── All other periods: standard 4-column layout ──
             const rows = [
               ['Sales $',      f$(d.sales),         f$(d.ly_sales),         pct(d.sales, d.ly_sales),         false],
               ['Units',        fN(d.units),          fN(d.ly_units),         pct(d.units, d.ly_units),          false],
@@ -651,14 +699,11 @@ export default function Sales({ filters = {} }) {
             return (
               <div key={p} style={{flex:'1 1 185px',minWidth:185,background:'var(--card2)',border:'1px solid var(--brd)',borderRadius:12,padding:'12px 14px',transition:'background .3s'}}>
                 <div style={{fontSize:10,fontWeight:700,textTransform:'uppercase',letterSpacing:'.12em',color:B.b2,paddingBottom:9,borderBottom:'1px solid var(--brd)',marginBottom:9}}>{p}</div>
-                {/* Single flat grid — all header + data cells share the same column tracks */}
                 <div style={{display:'grid',gridTemplateColumns:'auto 62px 54px 48px',columnGap:3,rowGap:6,alignItems:'center'}}>
-                  {/* header row */}
                   <span/>
                   <span style={{fontSize:9,fontWeight:700,color:'var(--txt3)',textTransform:'uppercase',letterSpacing:'.06em'}}>TY</span>
                   <span style={{fontSize:9,fontWeight:700,color:'var(--txt3)',textTransform:'uppercase',letterSpacing:'.06em'}}>LY</span>
                   <span style={{fontSize:9,fontWeight:700,color:'var(--txt3)',textTransform:'uppercase',letterSpacing:'.06em',textAlign:'right'}}>Chg</span>
-                  {/* data rows — flat children so all share same column sizing */}
                   {rows.flatMap(([l, ty, lyv, delta, inv]) => [
                     <span key={l+'-l'} style={{fontSize:10,color:'var(--txt3)',whiteSpace:'nowrap',paddingRight:14}}>{l}</span>,
                     <span key={l+'-ty'} style={{fontSize:12,fontWeight:700,color:'var(--txt)'}}>{ty}</span>,

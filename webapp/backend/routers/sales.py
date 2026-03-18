@@ -950,6 +950,43 @@ def sales_period_comparison(
             ty_ret_units, ty_ret_amt = _pc_refunds(sd, ed, fp)
             ly_ret_units, ly_ret_amt = _pc_refunds(ly_sd, ly_ed, fp)
 
+            # ── TODAY-ONLY: LY same-time-of-day snapshot + TY full-day forecast ──
+            # Uses orders table (timestamped) to slice LY at the same hour as now.
+            # ly_eod_* = existing ly_sales/units (S&T full-day actuals from daily_sales).
+            # ty_forecast = TY_so_far × (LY_full_day / LY_same_time) — pacing ratio.
+            ly_same_time_sales = 0.0
+            ly_same_time_units = 0
+            ty_forecast        = None
+            ty_units_forecast  = None
+            if period_key == 'today':
+                now_ct    = datetime.now(CENTRAL)
+                # ly_sd is already today − 364 days (weekday-aligned LY date)
+                ly_start  = datetime(ly_sd.year, ly_sd.month, ly_sd.day,
+                                     0, 0, 0, tzinfo=CENTRAL)
+                ly_cutoff = datetime(ly_sd.year, ly_sd.month, ly_sd.day,
+                                     now_ct.hour, now_ct.minute, now_ct.second,
+                                     tzinfo=CENTRAL)
+                try:
+                    st_row = con.execute(f"""
+                        SELECT COALESCE(SUM(CASE WHEN order_total > 0
+                                               THEN order_total ELSE 0 END), 0),
+                               COALESCE(SUM(number_of_items), 0)
+                        FROM orders
+                        WHERE purchase_date >= ? AND purchase_date <= ?
+                          AND (order_status IS NULL
+                               OR order_status NOT IN ('Cancelled','Canceled','Pending'))
+                          {hw}
+                    """, [ly_start.isoformat(), ly_cutoff.isoformat()] + hp).fetchone()
+                    ly_same_time_sales = round(float(st_row[0] or 0), 2)
+                    ly_same_time_units = int(st_row[1] or 0)
+                except Exception as _ex:
+                    logger.debug(f"ly_same_time query: {_ex}")
+                # Forecast = TY × (LY full-day / LY same-time)  [pacing ratio]
+                if ly_same_time_sales > 0 and ly_sales > 0:
+                    ty_forecast = round(sales * (ly_sales / ly_same_time_sales), 2)
+                if ly_same_time_units > 0 and ly_units > 0:
+                    ty_units_forecast = round(units * (float(ly_units) / ly_same_time_units))
+
             result[label] = {
                 "sales": round(sales, 2), "units": units, "aur": aur,
                 "orders": orders, "aov": aov,
@@ -963,6 +1000,13 @@ def sales_period_comparison(
                 "ly_conversion": ly_conv,
                 "ly_amazon_fees": ly_fees_val, "ly_returns": ly_ret_units,
                 "ly_returns_amount": ly_ret_amt,
+                # Today-only fields (0 / None for all other periods)
+                "ly_same_time_sales":  ly_same_time_sales,
+                "ly_same_time_units":  ly_same_time_units,
+                "ly_eod_sales":        round(ly_sales, 2),
+                "ly_eod_units":        ly_units,
+                "ty_forecast":         ty_forecast,
+                "ty_units_forecast":   ty_units_forecast,
             }
 
         con.close()
