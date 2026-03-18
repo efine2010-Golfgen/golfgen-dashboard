@@ -992,7 +992,41 @@ def get_item_store_detail(division: str = None, customer: str = None):
         except Exception:
             nif_map = {}
 
-        # Each row is one item with all periods pre-aggregated — build output directly
+        # Per-field fallback: prefer L1W value when > 0, else fall back to best-any value.
+        # This avoids the "global has_l1w" problem where one field is zero in L1W
+        # but valid in another period — each field independently chooses the best value.
+        def _best(l1w_val, any_val):
+            """Return L1W value when non-zero, else any-period max."""
+            return l1w_val if (l1w_val is not None and l1w_val > 0) else (any_val or 0)
+
+        # Also query walmart_store_weekly for store-level stats (same for all items)
+        store_stats = {"storesOneUnit": 0, "onOrderZeroOH": 0, "storesZeroOH": 0}
+        try:
+            wk_row = con.execute(
+                f"SELECT MAX(walmart_week) FROM walmart_store_weekly WHERE 1=1 {hw}", hp
+            ).fetchone()
+            latest_sw_week = str(wk_row[0]) if wk_row and wk_row[0] else None
+            if latest_sw_week:
+                ss = con.execute(f"""
+                    SELECT
+                      COUNT(CASE WHEN COALESCE(on_hand_qty_ty,0) = 0 THEN 1 END)   AS zero_oh,
+                      COUNT(CASE WHEN COALESCE(on_hand_qty_ty,0) = 1 THEN 1 END)   AS one_oh,
+                      COALESCE(SUM(
+                        CASE WHEN COALESCE(on_hand_qty_ty,0) = 0
+                             THEN COALESCE(in_transit_qty_ty,0)
+                                + COALESCE(in_warehouse_qty_ty,0)
+                        END
+                      ), 0) AS on_order_zero_oh
+                    FROM walmart_store_weekly
+                    WHERE walmart_week = ? {hw}
+                """, [latest_sw_week] + hp).fetchone()
+                if ss:
+                    store_stats["storesZeroOH"]   = _safe_int(ss[0])
+                    store_stats["storesOneUnit"]   = _safe_int(ss[1])
+                    store_stats["onOrderZeroOH"]   = _n(ss[2])
+        except Exception:
+            pass
+
         items = []
         for r in rows:
             item_num   = r[0] or ""
@@ -1010,17 +1044,16 @@ def get_item_store_detail(division: str = None, customer: str = None):
             sales_l8w  = _n(r[16])
             sales_l13w = _n(r[17])
 
-            # Prefer L1W values; fall back to any-period max for items with no L1W row
-            has_l1w = (oh_l1w > 0 or on_order_l1w > 0 or traited_l1w > 0 or sales_lw > 0)
-            oh          = oh_l1w       if has_l1w else oh_any
-            on_order    = on_order_l1w if has_l1w else on_order_any
-            traited     = traited_l1w  if has_l1w else traited_any
-            valid_st    = valid_l1w    if has_l1w else valid_any
-            instock_raw = instock_l1w  if has_l1w else instock_any
-            pos_sc      = pos_sc_l1w   if has_l1w else pos_sc_any
+            # Per-field fallback: each field independently picks L1W or best-any
+            oh          = _best(oh_l1w, oh_any)
+            on_order    = _best(on_order_l1w, on_order_any)
+            traited     = traited_l1w if traited_l1w > 0 else traited_any
+            valid_st    = valid_l1w   if valid_l1w   > 0 else valid_any
+            instock_raw = instock_l1w if (instock_l1w is not None and instock_l1w > 0) else instock_any
+            pos_sc      = pos_sc_l1w  if pos_sc_l1w  > 0 else pos_sc_any
 
             # Calculate storesWithInv from traited × instock%
-            if instock_raw is not None and traited > 0:
+            if instock_raw is not None and float(instock_raw) > 0 and traited > 0:
                 instock = float(instock_raw) / 100.0 if float(instock_raw) > 1 else float(instock_raw)
                 stores_with_inv = round(traited * instock)
             else:
@@ -1035,9 +1068,10 @@ def get_item_store_detail(division: str = None, customer: str = None):
                 "traitedStores":    traited,
                 "storesWithInv":    stores_with_inv,
                 "traitedZeroInv":   max(0, traited - stores_with_inv),
-                "storesOneUnit":    0,
+                # Store-level stats (same value for all items — aggregate across all stores)
+                "storesOneUnit":    store_stats["storesOneUnit"],
+                "onOrderZeroOH":    store_stats["onOrderZeroOH"],
                 "storesWithSales":  pos_sc,
-                "onOrderZeroOH":    None,
                 "salesLW":          sales_lw,
                 "salesL4W":         sales_l4w,
                 "salesL8W":         sales_l8w,
