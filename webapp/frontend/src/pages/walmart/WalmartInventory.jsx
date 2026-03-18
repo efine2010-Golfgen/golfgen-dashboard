@@ -57,6 +57,8 @@ export function WalmartInventory({ filters }) {
   const [weeklyData, setWeeklyData] = useState(null);
   const [instockPeriod, setInstockPeriod] = useState(52);
   const [hiddenItems, setHiddenItems] = useState(new Set());
+  const [tablePeriod, setTablePeriod] = useState(26);
+  const [hiddenTableItems, setHiddenTableItems] = useState(new Set());
 
   useEffect(() => {
     (async () => {
@@ -262,95 +264,121 @@ export function WalmartInventory({ filters }) {
         </Card>
       )}
 
-      {/* 26-Week Instock % Table by Item */}
+      {/* In Stock % Table by Item — period selector + item toggles */}
       {last26Weeks.length > 0 && itemsWithWeeklyInstock.length > 0 && (
         <Card>
-          <CardHdr title="In Stock % by Item — Last 26 Weeks" />
-          <div
-            style={{
-              overflowX: "auto",
-              fontSize: "11px",
-              lineHeight: "1.6",
-            }}
-          >
-            <table style={{ width: "100%", borderCollapse: "collapse" }}>
-              <thead>
-                <tr style={{ borderBottom: "1px solid var(--border)" }}>
-                  <th
-                    style={{
-                      textAlign: "left",
-                      padding: "8px",
-                      ...SG(10, 600),
-                      position: "sticky",
-                      left: 0,
-                      background: "var(--card)",
-                      zIndex: 2,
-                      minWidth: 160,
-                    }}
-                  >
-                    Item
-                  </th>
-                  {last26WeekOrder.map((wk) => (
-                    <th
-                      key={wk}
-                      style={{
-                        textAlign: "right",
-                        padding: "6px 4px",
-                        ...SG(8, 600),
-                        whiteSpace: "nowrap",
-                      }}
-                    >
-                      {fmtWeek(wk)}
-                    </th>
-                  ))}
-                </tr>
-              </thead>
-              <tbody>
-                {itemsWithWeeklyInstock.map((item, idx) => (
-                  <tr
-                    key={idx}
-                    style={{
-                      borderBottom: "1px solid var(--border)",
-                      backgroundColor:
-                        idx % 2 === 0 ? "var(--bg2)" : "transparent",
-                    }}
-                  >
-                    <td
-                      style={{
-                        padding: "6px 8px",
-                        ...SG(10),
-                        position: "sticky",
-                        left: 0,
-                        background: "var(--card)",
-                        zIndex: 1,
-                        whiteSpace: "nowrap",
-                      }}
-                    >
-                      {item.length > 30 ? item.substring(0, 30) + "…" : item}
-                    </td>
-                    {last26WeekOrder.map((wk) => {
-                      const val = itemInstock[item]?.[wk];
-                      const hasData = val != null && val > 0;
-                      return (
-                        <td
-                          key={wk}
-                          style={{
-                            padding: "6px 4px",
-                            textAlign: "right",
-                            ...SG(10),
-                            color: hasData ? instockColor(val) : "var(--txt3)",
-                            whiteSpace: "nowrap",
-                          }}
-                        >
-                          {hasData ? fInstock(val) : "—"}
-                        </td>
-                      );
-                    })}
-                  </tr>
-                ))}
-              </tbody>
-            </table>
+          <CardHdr title="In Stock % by Item" />
+
+          {/* Period selector */}
+          <div style={{ display: "flex", alignItems: "center", gap: 4, marginBottom: 10, flexWrap: "wrap" }}>
+            {[{ label: "L8W", weeks: 8 }, { label: "L13W", weeks: 13 }, { label: "L26W", weeks: 26 }].map((p) => (
+              <button
+                key={p.weeks}
+                onClick={() => setTablePeriod(p.weeks)}
+                style={{
+                  ...SG(9, tablePeriod === p.weeks ? 700 : 500),
+                  padding: "3px 10px", borderRadius: 6,
+                  border: `1px solid ${tablePeriod === p.weeks ? "transparent" : "var(--brd)"}`,
+                  background: tablePeriod === p.weeks ? "var(--card2)" : "transparent",
+                  color: tablePeriod === p.weeks ? "#fff" : "var(--txt3)",
+                  cursor: "pointer",
+                }}
+              >{p.label}</button>
+            ))}
           </div>
+
+          {/* Item show/hide toggles */}
+          <div style={{ display: "flex", flexWrap: "wrap", gap: 5, marginBottom: 12 }}>
+            {itemsWithWeeklyInstock.map((item, idx) => {
+              const hidden = hiddenTableItems.has(item);
+              const color = ITEM_COLORS[idx % ITEM_COLORS.length];
+              const label = item.length > 32 ? item.substring(0, 32) + "…" : item;
+              return (
+                <button
+                  key={item}
+                  onClick={() =>
+                    setHiddenTableItems((prev) => {
+                      const next = new Set(prev);
+                      if (next.has(item)) next.delete(item); else next.add(item);
+                      return next;
+                    })
+                  }
+                  style={{
+                    ...SG(9, 500),
+                    display: "flex", alignItems: "center", gap: 5,
+                    padding: "3px 9px", borderRadius: 12,
+                    border: `1px solid ${hidden ? "var(--brd)" : color}`,
+                    background: hidden ? "transparent" : `${color}1a`,
+                    color: hidden ? "var(--txt3)" : color,
+                    cursor: "pointer", opacity: hidden ? 0.45 : 1,
+                    transition: "all 0.15s",
+                  }}
+                >
+                  <span style={{
+                    width: 8, height: 8, borderRadius: "50%", flexShrink: 0,
+                    background: hidden ? "var(--txt3)" : color,
+                    display: "inline-block",
+                  }} />
+                  {label}
+                </button>
+              );
+            })}
+          </div>
+
+          {/* Table */}
+          {(() => {
+            const tblWeekOrder = weekOrder.slice(-tablePeriod);
+            const visibleItems = itemsWithWeeklyInstock.filter((item) => !hiddenTableItems.has(item));
+            return (
+              <div style={{ overflowX: "auto", fontSize: "11px", lineHeight: "1.6" }}>
+                <table style={{ width: "100%", borderCollapse: "collapse" }}>
+                  <thead>
+                    <tr style={{ borderBottom: "1px solid var(--brd)" }}>
+                      <th style={{
+                        textAlign: "left", padding: "8px", ...SG(10, 600),
+                        position: "sticky", left: 0, background: "var(--card)", zIndex: 2, minWidth: 160,
+                      }}>Item</th>
+                      {tblWeekOrder.map((wk) => (
+                        <th key={wk} style={{ textAlign: "right", padding: "6px 4px", ...SG(8, 600), whiteSpace: "nowrap" }}>
+                          {fmtWeek(wk)}
+                        </th>
+                      ))}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {visibleItems.map((item, idx) => (
+                      <tr key={item} style={{ borderBottom: "1px solid var(--brd)", backgroundColor: idx % 2 === 0 ? "var(--bg2)" : "transparent" }}>
+                        <td style={{
+                          padding: "6px 8px", ...SG(10),
+                          position: "sticky", left: 0, background: "var(--card)", zIndex: 1, whiteSpace: "nowrap",
+                          color: ITEM_COLORS[itemsWithWeeklyInstock.indexOf(item) % ITEM_COLORS.length],
+                          fontWeight: 600,
+                        }}>
+                          {item.length > 30 ? item.substring(0, 30) + "…" : item}
+                        </td>
+                        {tblWeekOrder.map((wk) => {
+                          const val = itemInstock[item]?.[wk];
+                          const hasData = val != null && val > 0;
+                          return (
+                            <td key={wk} style={{
+                              padding: "6px 4px", textAlign: "right", ...SG(10),
+                              color: hasData ? instockColor(val) : "var(--txt3)",
+                              whiteSpace: "nowrap",
+                            }}>
+                              {hasData ? fInstock(val) : "—"}
+                            </td>
+                          );
+                        })}
+                      </tr>
+                    ))}
+                    {visibleItems.length === 0 && (
+                      <tr><td colSpan={tblWeekOrder.length + 1} style={{ padding: 20, textAlign: "center", color: "var(--txt3)", ...SG(10) }}>All items hidden — toggle items above to show</td></tr>
+                    )}
+                  </tbody>
+                </table>
+              </div>
+            );
+          })()}
         </Card>
       )}
     </div>
