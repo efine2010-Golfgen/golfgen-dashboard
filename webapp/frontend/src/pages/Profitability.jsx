@@ -463,11 +463,11 @@ function ItemProfitability({ filters, days }) {
                     <td style={cellR}>{fmt$2(item.rev)}</td>
                     <td style={cellR}>${round(item.cogsPerUnit || 0, 2)}</td>
                     <td style={cellR}>{fmtPct(item.cogsPct)}</td>
-                    <td style={cellR}>{fmt$2(item.referralTotal)}</td>
-                    <td style={cellR}>{fmt$2(item.fbaTotal)}</td>
+                    <td style={cellR}>{fmt$2(item.referralFees)}</td>
+                    <td style={cellR}>{fmt$2(item.fbaFees)}</td>
                     <td style={cellR}>{fmt$2(item.storageFees || 0)}</td>
                     <td style={cellR}>{fmt$2(item.otherFees || 0)}</td>
-                    <td style={{ ...cellR, color: "#f87171", fontWeight: 700 }}>{fmt$2(item.totalFees || (item.referralTotal + item.fbaTotal + (item.storageFees || 0)))}</td>
+                    <td style={{ ...cellR, color: "#f87171", fontWeight: 700 }}>{fmt$2(item.amazonFees || (item.referralFees + item.fbaFees + (item.storageFees || 0)))}</td>
                     <td style={{ ...cellR, color: gmColor, fontWeight: 700 }}>{fmtPct(gm)}</td>
                     <td style={{ ...cellR, color: (item.margin || 0) >= 0 ? "#2ECFAA" : "#f87171" }}>{fmtPct(item.margin)}</td>
                     <td style={{ ...cellR, color: (item.netPerUnit || 0) >= 0 ? "#2ECFAA" : "#f87171" }}>${round(item.netPerUnit || 0, 2)}</td>
