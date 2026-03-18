@@ -50,22 +50,19 @@ const PERIOD_OPTIONS = [
   { label: "L52W", weeks: 52 },
 ];
 
-// Store detail view modes
-const STORE_VIEWS = [
-  { key: "stores", label: "Store Counts" },
-  { key: "units",  label: "Units"        },
-];
-
-// Metric definitions per view
-const STORE_METRICS = [
-  { key: "traitedStores",  label: "# Traited Stores"      },
-  { key: "storesWithInv",  label: "Stores w/ Inv >0"      },
-  { key: "traitedZeroInv", label: "Traited w/ 0 Inv"      },
-  { key: "storesOneUnit",  label: "Stores w/ 1 Unit"      },
-];
-const UNIT_METRICS = [
-  { key: "ohUnits",      label: "OH Units"       },
-  { key: "onOrderUnits", label: "On Order Units" },
+// Table column definitions for the 2026 Item Store Inventory Detail
+const STORE_DETAIL_COLS = [
+  { key: "traitedStores",  label: "# Traited Stores",  color: () => "var(--txt1)" },
+  { key: "storesWithInv",  label: "Stores w/ Inv",     color: () => COLORS.teal },
+  { key: "storesWithSales",label: "Stores w/ Sales",   color: (v) => v > 0 ? COLORS.teal : "var(--txt3)" },
+  { key: "ohUnits",        label: "OH Inv Units",       color: () => "var(--txt1)" },
+  { key: "onOrderUnits",   label: "On Order Units",    color: (v) => v > 0 ? "#f59e0b" : "var(--txt3)" },
+  { key: "traitedZeroInv", label: "Stores 0 Units OH", color: (v) => v > 0 ? COLORS.red : "var(--txt3)" },
+  { key: "storesOneUnit",  label: "Stores 1 Unit OH",  color: () => "var(--txt3)" },
+  { key: "salesLW",        label: "Sales Units LW",    color: (v) => v > 0 ? "var(--txt1)" : "var(--txt3)" },
+  { key: "salesL4W",       label: "L4 Wks",            color: (v) => v > 0 ? "var(--txt1)" : "var(--txt3)" },
+  { key: "salesL8W",       label: "L8 Wks",            color: (v) => v > 0 ? "var(--txt1)" : "var(--txt3)" },
+  { key: "salesL13W",      label: "L13 Wks",           color: (v) => v > 0 ? "var(--txt1)" : "var(--txt3)" },
 ];
 
 // Generic item-toggle pill component
@@ -119,8 +116,7 @@ export function WalmartInventory({ filters }) {
   const [tablePeriod, setTablePeriod] = useState(26);
   const [hiddenTableItems, setHiddenTableItems] = useState(new Set());
 
-  // Store detail chart state
-  const [storeDetailView, setStoreDetailView] = useState("stores");
+  // Store detail state
   const [hiddenStoreItems, setHiddenStoreItems] = useState(new Set());
 
   useEffect(() => {
@@ -196,29 +192,9 @@ export function WalmartInventory({ filters }) {
     return s.length >= 6 ? "Wk" + s.slice(4) : s;
   };
 
-  // ── Store detail chart data ──────────────────────────────────────────────
+  // ── Store detail table data ──────────────────────────────────────────────
   const storeItems = storeDetailData?.items || [];
   const storeItemNames = storeItems.map((it) => it.itemName);
-
-  const activeMetrics = storeDetailView === "stores" ? STORE_METRICS : UNIT_METRICS;
-  const metricLabels = activeMetrics.map((m) => m.label);
-
-  // One dataset per item (Chart.js grouped bar: X=metrics, each item is a series)
-  const storeChartDatasets = storeItems
-    .filter((it) => !hiddenStoreItems.has(it.itemName))
-    .map((it, arrIdx) => {
-      const origIdx = storeItemNames.indexOf(it.itemName);
-      const color = ITEM_COLORS[origIdx % ITEM_COLORS.length];
-      return {
-        label: it.itemName.length > 28 ? it.itemName.substring(0, 28) + "…" : it.itemName,
-        data: activeMetrics.map((m) => it[m.key] || 0),
-        backgroundColor: color + "bb",
-        borderColor: color,
-        borderWidth: 1,
-      };
-    });
-
-  const storeConfigKey = `store-detail-${storeDetailView}-${[...hiddenStoreItems].sort().join("|")}`;
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: "24px" }}>
@@ -407,128 +383,106 @@ export function WalmartInventory({ filters }) {
         </Card>
       )}
 
-      {/* ── 2026 Item Store Inventory Detail — grouped bar chart ─────────────── */}
+      {/* ── 2026 Item Store Inventory Detail ─────────────────────────────────── */}
       {storeItems.length > 0 && (
         <Card>
           <CardHdr title="2026 Item Store Inventory Detail" />
 
-          {/* View toggle + legend note */}
-          <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 10, flexWrap: "wrap" }}>
-            {STORE_VIEWS.map((v) => (
-              <button
-                key={v.key}
-                onClick={() => setStoreDetailView(v.key)}
-                style={{
-                  ...SG(9, storeDetailView === v.key ? 700 : 500),
-                  padding: "3px 10px", borderRadius: 6,
-                  border: `1px solid ${storeDetailView === v.key ? "transparent" : "var(--brd)"}`,
-                  background: storeDetailView === v.key ? "var(--card2)" : "transparent",
-                  color: storeDetailView === v.key ? "#fff" : "var(--txt3)",
-                  cursor: "pointer",
-                }}
-              >{v.label}</button>
-            ))}
-            <span style={{ ...SG(9), color: "var(--txt3)", marginLeft: 4 }}>
-              {storeDetailView === "stores"
-                ? "Stores w/ Inv estimated from Instock % × Traited Stores"
-                : "OH = on-hand units across all traited stores"}
-            </span>
-          </div>
-
-          {/* Item toggle pills */}
+          {/* Item toggle pills — show/hide rows */}
           <TogglePills
             items={storeItemNames}
             hidden={hiddenStoreItems}
             onToggle={toggleSetItem(setHiddenStoreItems)}
           />
 
-          {storeChartDatasets.length > 0 ? (
-            <ChartCanvas
-              type="bar"
-              height={300}
-              configKey={storeConfigKey}
-              labels={metricLabels}
-              datasets={storeChartDatasets}
-              options={{
-                plugins: {
-                  legend: { display: true, position: "bottom" },
-                  tooltip: {
-                    callbacks: {
-                      label: (ctx) => {
-                        const val = ctx.parsed.y;
-                        return `${ctx.dataset.label}: ${Number(val).toLocaleString()}`;
-                      },
-                    },
-                  },
-                },
-                scales: {
-                  x: { ticks: { ...SG(9) } },
-                  y: {
-                    beginAtZero: true,
-                    ticks: {
-                      callback: (v) => Number(v).toLocaleString(),
-                    },
-                  },
-                },
-              }}
-            />
-          ) : (
-            <p style={{ ...SG(11), color: "var(--txt3)", padding: "16px 0" }}>
-              All items hidden — toggle items above to show
-            </p>
-          )}
+          {/* Note */}
+          <p style={{ ...SG(9), color: "var(--txt3)", marginBottom: 10 }}>
+            Stores w/ Inv estimated from Instock % × Traited Stores. Sales units from most-recent period report.
+          </p>
 
-          {/* Summary table */}
-          <div style={{ overflowX: "auto", marginTop: 16 }}>
+          {/* Scrollable table */}
+          <div style={{ overflowX: "auto" }}>
             <table style={{ width: "100%", borderCollapse: "collapse", fontSize: "11px" }}>
               <thead>
-                <tr style={{ borderBottom: "1px solid var(--brd)" }}>
-                  <th style={{ textAlign: "left", padding: "6px 8px", ...SG(10, 600), minWidth: 160 }}>Item</th>
-                  <th style={{ textAlign: "right", padding: "6px 8px", ...SG(10, 600) }}>OH Units</th>
-                  <th style={{ textAlign: "right", padding: "6px 8px", ...SG(10, 600) }}>On Order</th>
-                  <th style={{ textAlign: "right", padding: "6px 8px", ...SG(10, 600) }}># Traited</th>
-                  <th style={{ textAlign: "right", padding: "6px 8px", ...SG(10, 600) }}>w/ Inv &gt;0</th>
-                  <th style={{ textAlign: "right", padding: "6px 8px", ...SG(10, 600) }}>Traited 0 Inv</th>
-                  <th style={{ textAlign: "right", padding: "6px 8px", ...SG(10, 600) }}>w/ 1 Unit</th>
+                <tr style={{ borderBottom: "2px solid var(--brd)" }}>
+                  {/* Sticky item description column */}
+                  <th style={{
+                    textAlign: "left", padding: "7px 10px", ...SG(10, 600),
+                    minWidth: 180, position: "sticky", left: 0,
+                    background: "var(--card)", zIndex: 3,
+                    borderRight: "1px solid var(--brd)",
+                  }}>
+                    Item Description
+                  </th>
+                  {STORE_DETAIL_COLS.map((col) => (
+                    <th key={col.key} style={{
+                      textAlign: "right", padding: "7px 8px", ...SG(10, 600),
+                      whiteSpace: "nowrap",
+                    }}>
+                      {col.label}
+                    </th>
+                  ))}
                 </tr>
               </thead>
               <tbody>
                 {storeItems.map((it, idx) => {
-                  const color = ITEM_COLORS[idx % ITEM_COLORS.length];
+                  const itemColor = ITEM_COLORS[idx % ITEM_COLORS.length];
                   const isHidden = hiddenStoreItems.has(it.itemName);
+                  const rowBg = idx % 2 === 0 ? "var(--bg2)" : "var(--card)";
                   return (
                     <tr
                       key={it.itemName}
                       style={{
                         borderBottom: "1px solid var(--brd)",
-                        backgroundColor: idx % 2 === 0 ? "var(--bg2)" : "transparent",
-                        opacity: isHidden ? 0.35 : 1,
+                        backgroundColor: rowBg,
+                        opacity: isHidden ? 0.3 : 1,
+                        transition: "opacity 0.15s",
                       }}
                     >
-                      <td style={{ padding: "5px 8px", ...SG(10), color, fontWeight: 600, whiteSpace: "nowrap" }}>
-                        {it.itemName.length > 34 ? it.itemName.substring(0, 34) + "…" : it.itemName}
+                      {/* Sticky item description cell */}
+                      <td style={{
+                        padding: "6px 10px", position: "sticky", left: 0,
+                        background: rowBg, zIndex: 1,
+                        borderRight: "1px solid var(--brd)",
+                      }}>
+                        <div style={{ ...SG(10, 600), color: itemColor, whiteSpace: "nowrap" }}>
+                          {it.itemName.length > 36 ? it.itemName.substring(0, 36) + "…" : it.itemName}
+                        </div>
+                        {(it.vendorItemNumber || it.wmtItemNumber) && (
+                          <div style={{ ...SG(8), color: "var(--txt3)", marginTop: 2, whiteSpace: "nowrap" }}>
+                            {it.vendorItemNumber ? `GG# ${it.vendorItemNumber}` : ""}
+                            {it.vendorItemNumber && it.wmtItemNumber ? "  ·  " : ""}
+                            {it.wmtItemNumber ? `WMT# ${it.wmtItemNumber}` : ""}
+                          </div>
+                        )}
                       </td>
-                      <td style={{ padding: "5px 8px", textAlign: "right", ...SG(10), color: "var(--txt1)" }}>
-                        {fN(it.ohUnits)}
-                      </td>
-                      <td style={{ padding: "5px 8px", textAlign: "right", ...SG(10), color: "var(--txt1)" }}>
-                        {fN(it.onOrderUnits)}
-                      </td>
-                      <td style={{ padding: "5px 8px", textAlign: "right", ...SG(10), color: "var(--txt1)" }}>
-                        {fN(it.traitedStores)}
-                      </td>
-                      <td style={{ padding: "5px 8px", textAlign: "right", ...SG(10), color: COLORS.teal }}>
-                        {fN(it.storesWithInv)}
-                      </td>
-                      <td style={{ padding: "5px 8px", textAlign: "right", ...SG(10), color: it.traitedZeroInv > 0 ? COLORS.red : "var(--txt3)" }}>
-                        {fN(it.traitedZeroInv)}
-                      </td>
-                      <td style={{ padding: "5px 8px", textAlign: "right", ...SG(10), color: "var(--txt3)" }}>
-                        {it.storesOneUnit > 0 ? fN(it.storesOneUnit) : "—"}
-                      </td>
+                      {/* Data columns via STORE_DETAIL_COLS */}
+                      {STORE_DETAIL_COLS.map((col) => {
+                        const val = it[col.key];
+                        const display = (val != null && val !== 0) ? fN(val) : "—";
+                        return (
+                          <td key={col.key} style={{
+                            padding: "6px 8px", textAlign: "right",
+                            ...SG(10), color: col.color(val || 0),
+                            whiteSpace: "nowrap",
+                          }}>
+                            {display}
+                          </td>
+                        );
+                      })}
                     </tr>
                   );
                 })}
+                {storeItems.length === 0 && (
+                  <tr>
+                    <td
+                      colSpan={STORE_DETAIL_COLS.length + 1}
+                      style={{ padding: 20, textAlign: "center", color: "var(--txt3)", ...SG(10) }}
+                    >
+                      No 2026 item data available
+                    </td>
+                  </tr>
+                )}
               </tbody>
             </table>
           </div>
