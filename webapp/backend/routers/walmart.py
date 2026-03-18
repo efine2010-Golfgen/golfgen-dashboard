@@ -964,6 +964,16 @@ def get_item_store_detail(division: str = None, customer: str = None):
               COALESCE(MAX(valid_store_count_ty), 0)                AS valid_any,
               MAX(CASE WHEN instock_pct_ty > 0 THEN instock_pct_ty END) AS instock_any,
               COALESCE(MAX(pos_store_count_ty), 0)                  AS pos_sc_any,
+              -- On-order fallback values by period (ordered: L4W is most current after L1W)
+              MAX(CASE WHEN UPPER(period_type) = 'L4W'  THEN on_order_qty_ty END) AS on_order_l4w,
+              MAX(CASE WHEN UPPER(period_type) = 'L8W'  THEN on_order_qty_ty END) AS on_order_l8w,
+              MAX(CASE WHEN UPPER(period_type) = 'L13W' THEN on_order_qty_ty END) AS on_order_l13w,
+              -- Traited/valid fallback values by period
+              MAX(CASE WHEN UPPER(period_type) = 'L4W'  THEN traited_store_count_ty END) AS traited_l4w,
+              MAX(CASE WHEN UPPER(period_type) = 'L4W'  THEN valid_store_count_ty END)   AS valid_l4w,
+              MAX(CASE WHEN UPPER(period_type) = 'L4W'  THEN instock_pct_ty END)         AS instock_l4w,
+              MAX(CASE WHEN UPPER(period_type) = 'L4W'  THEN pos_store_count_ty END)     AS pos_sc_l4w,
+              -- Rolling sales windows
               COALESCE(MAX(CASE WHEN UPPER(period_type) = 'L4W'
                               THEN pos_qty_ty END), 0)              AS sales_l4w,
               COALESCE(MAX(CASE WHEN UPPER(period_type) = 'L8W'
@@ -992,65 +1002,56 @@ def get_item_store_detail(division: str = None, customer: str = None):
         except Exception:
             nif_map = {}
 
-        # Per-field fallback: prefer L1W value when > 0, else fall back to best-any value.
-        # This avoids the "global has_l1w" problem where one field is zero in L1W
-        # but valid in another period — each field independently chooses the best value.
-        def _best(l1w_val, any_val):
-            """Return L1W value when non-zero, else any-period max."""
-            return l1w_val if (l1w_val is not None and l1w_val > 0) else (any_val or 0)
+        # Per-field ordered fallback: L1W → L4W → L8W → L13W (never MAX-across-all)
+        # This prevents accidentally picking a large cumulative value from a long window.
+        def _first(*vals):
+            """Return first non-None, non-zero value, else 0."""
+            for v in vals:
+                if v is not None and v > 0:
+                    return v
+            return 0
 
-        # Also query walmart_store_weekly for store-level stats (same for all items)
-        store_stats = {"storesOneUnit": 0, "onOrderZeroOH": 0, "storesZeroOH": 0}
-        try:
-            wk_row = con.execute(
-                f"SELECT MAX(walmart_week) FROM walmart_store_weekly WHERE 1=1 {hw}", hp
-            ).fetchone()
-            latest_sw_week = str(wk_row[0]) if wk_row and wk_row[0] else None
-            if latest_sw_week:
-                ss = con.execute(f"""
-                    SELECT
-                      COUNT(CASE WHEN COALESCE(on_hand_qty_ty,0) = 0 THEN 1 END)   AS zero_oh,
-                      COUNT(CASE WHEN COALESCE(on_hand_qty_ty,0) = 1 THEN 1 END)   AS one_oh,
-                      COALESCE(SUM(
-                        CASE WHEN COALESCE(on_hand_qty_ty,0) = 0
-                             THEN COALESCE(in_transit_qty_ty,0)
-                                + COALESCE(in_warehouse_qty_ty,0)
-                        END
-                      ), 0) AS on_order_zero_oh
-                    FROM walmart_store_weekly
-                    WHERE walmart_week = ? {hw}
-                """, [latest_sw_week] + hp).fetchone()
-                if ss:
-                    store_stats["storesZeroOH"]   = _safe_int(ss[0])
-                    store_stats["storesOneUnit"]   = _safe_int(ss[1])
-                    store_stats["onOrderZeroOH"]   = _n(ss[2])
-        except Exception:
-            pass
+        def _first_raw(*vals):
+            """Return first non-None, non-zero value, else None (for instock %)."""
+            for v in vals:
+                if v is not None and float(v) > 0:
+                    return v
+            return None
 
         items = []
         for r in rows:
             item_num   = r[0] or ""
             item_desc  = r[1] or "Unknown"
 
-            oh_l1w,    on_order_l1w, traited_l1w, valid_l1w = (
+            # L1W columns
+            oh_l1w, on_order_l1w, traited_l1w, valid_l1w = (
                 _n(r[2]), _n(r[3]), _safe_int(r[4]), _safe_int(r[5])
             )
             instock_l1w, pos_sc_l1w, sales_lw = r[6], _safe_int(r[7]), _n(r[8])
-            oh_any,    on_order_any, traited_any, valid_any = (
+            # Any-period max (fallback for OH only — never for on_order to avoid large sums)
+            oh_any,  on_order_any_unused, traited_any, valid_any = (
                 _n(r[9]), _n(r[10]), _safe_int(r[11]), _safe_int(r[12])
             )
             instock_any, pos_sc_any = r[13], _safe_int(r[14])
-            sales_l4w  = _n(r[15])
-            sales_l8w  = _n(r[16])
-            sales_l13w = _n(r[17])
+            # Ordered per-period fallbacks for on_order / traited
+            on_order_l4w = _n(r[15])
+            on_order_l8w = _n(r[16])
+            on_order_l13w = _n(r[17])
+            traited_l4w  = _safe_int(r[18])
+            valid_l4w    = _safe_int(r[19])
+            instock_l4w  = r[20]
+            pos_sc_l4w   = _safe_int(r[21])
+            sales_l4w    = _n(r[22])
+            sales_l8w    = _n(r[23])
+            sales_l13w   = _n(r[24])
 
-            # Per-field fallback: each field independently picks L1W or best-any
-            oh          = _best(oh_l1w, oh_any)
-            on_order    = _best(on_order_l1w, on_order_any)
-            traited     = traited_l1w if traited_l1w > 0 else traited_any
-            valid_st    = valid_l1w   if valid_l1w   > 0 else valid_any
-            instock_raw = instock_l1w if (instock_l1w is not None and instock_l1w > 0) else instock_any
-            pos_sc      = pos_sc_l1w  if pos_sc_l1w  > 0 else pos_sc_any
+            # Per-field ordered fallback
+            oh          = _first(oh_l1w, oh_any)
+            on_order    = _first(on_order_l1w, on_order_l4w, on_order_l8w, on_order_l13w)
+            traited     = _first(traited_l1w, traited_l4w, traited_any)
+            valid_st    = _first(valid_l1w, valid_l4w, valid_any)
+            instock_raw = _first_raw(instock_l1w, instock_l4w, instock_any)
+            pos_sc      = _first(pos_sc_l1w, pos_sc_l4w, pos_sc_any)
 
             # Calculate storesWithInv from traited × instock%
             if instock_raw is not None and float(instock_raw) > 0 and traited > 0:
@@ -1068,9 +1069,10 @@ def get_item_store_detail(division: str = None, customer: str = None):
                 "traitedStores":    traited,
                 "storesWithInv":    stores_with_inv,
                 "traitedZeroInv":   max(0, traited - stores_with_inv),
-                # Store-level stats (same value for all items — aggregate across all stores)
-                "storesOneUnit":    store_stats["storesOneUnit"],
-                "onOrderZeroOH":    store_stats["onOrderZeroOH"],
+                # storesOneUnit and onOrderZeroOH require item×store level data
+                # (walmart_store_weekly is store totals only — no item dimension)
+                "storesOneUnit":    None,
+                "onOrderZeroOH":    None,
                 "storesWithSales":  pos_sc,
                 "salesLW":          sales_lw,
                 "salesL4W":         sales_l4w,

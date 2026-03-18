@@ -864,7 +864,6 @@ export function WalmartStoreAnalytics({ filters = {} }) {
   // Store Inventory Detail state
   const [storeInvData, setStoreInvData] = useState(null);
   const [storeInvLoading, setStoreInvLoading] = useState(true);
-  const [hiddenStoreInvItems, setHiddenStoreInvItems] = useState(new Set());
 
   useEffect(() => {
     (async () => {
@@ -1219,35 +1218,30 @@ export function WalmartStoreAnalytics({ filters = {} }) {
           {storeInvData?.weeksAvailable ? ` · ${storeInvData.weeksAvailable} weeks available` : ""}
         </div>
 
-        {/* Item toggle pills (informational — store data is aggregate) */}
+        {/* Item context row — store data is aggregate, no item filtering possible */}
         {storeInvData && storeInvData.items.length > 0 && (
-          <div style={{ display: "flex", flexWrap: "wrap", gap: 5, marginBottom: 12 }}>
-            <span style={{ ...SG(9, 600), color: "var(--txt3)", alignSelf: "center", marginRight: 4 }}>Items:</span>
-            {storeInvData.items.map((item, idx) => {
-              const color = ["#2ecf99","#f97316","#3b82f6","#a78bfa","#ef4444","#f59e0b","#ec4899","#14b8a6"][idx % 8];
-              const isHidden = hiddenStoreInvItems.has(item);
-              return (
-                <button
-                  key={item}
-                  onClick={() => setHiddenStoreInvItems(prev => {
-                    const n = new Set(prev);
-                    if (n.has(item)) n.delete(item); else n.add(item);
-                    return n;
-                  })}
-                  title="Store data is aggregate across all items"
-                  style={{
-                    padding: "3px 9px", borderRadius: 12, cursor: "pointer",
-                    ...SG(9, 500),
-                    background: isHidden ? "transparent" : `${color}22`,
-                    color: isHidden ? "var(--txt3)" : color,
-                    border: `1px solid ${isHidden ? "var(--brd)" : color}`,
-                    transition: "all .15s",
-                  }}
-                >
-                  {item.length > 28 ? item.substring(0, 28) + "…" : item}
-                </button>
-              );
-            })}
+          <div style={{
+            display: "flex", alignItems: "center", gap: 10, marginBottom: 12,
+            padding: "7px 12px", background: "var(--bg2)", borderRadius: 6,
+            border: "1px solid var(--brd)",
+          }}>
+            <span style={{ ...SG(9, 600), color: "var(--txt2)" }}>
+              {storeInvData.items.length} tracked item{storeInvData.items.length !== 1 ? "s" : ""}:
+            </span>
+            <span style={{ ...SG(9), color: "var(--txt3)" }}>
+              {storeInvData.items.map((it, i) => (
+                <span key={it}>
+                  {i > 0 && <span style={{ color: "var(--brd)", margin: "0 4px" }}>·</span>}
+                  {it.length > 30 ? it.substring(0, 30) + "…" : it}
+                </span>
+              ))}
+            </span>
+            <span style={{
+              ...SG(8), color: "var(--txt3)", marginLeft: "auto", whiteSpace: "nowrap",
+              background: "var(--card2)", padding: "2px 6px", borderRadius: 4,
+            }}>
+              Store data is aggregate · item-level filtering not available
+            </span>
           </div>
         )}
 
