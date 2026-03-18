@@ -964,6 +964,11 @@ def get_item_store_detail(division: str = None, customer: str = None):
               COALESCE(MAX(valid_store_count_ty), 0)                AS valid_any,
               MAX(CASE WHEN instock_pct_ty > 0 THEN instock_pct_ty END) AS instock_any,
               COALESCE(MAX(pos_store_count_ty), 0)                  AS pos_sc_any,
+              -- In-transit / in-warehouse as alternative source for on_order (L1W only)
+              COALESCE(MAX(CASE WHEN UPPER(period_type) IN ('L1W','LW','WEEKLY')
+                              THEN in_transit_qty_ty END), 0)       AS in_transit_l1w,
+              COALESCE(MAX(CASE WHEN UPPER(period_type) IN ('L1W','LW','WEEKLY')
+                              THEN in_warehouse_qty_ty END), 0)     AS in_warehouse_l1w,
               -- On-order fallback values by period (ordered: L4W is most current after L1W)
               MAX(CASE WHEN UPPER(period_type) = 'L4W'  THEN on_order_qty_ty END) AS on_order_l4w,
               MAX(CASE WHEN UPPER(period_type) = 'L8W'  THEN on_order_qty_ty END) AS on_order_l8w,
@@ -1033,32 +1038,40 @@ def get_item_store_detail(division: str = None, customer: str = None):
                 _n(r[9]), _n(r[10]), _safe_int(r[11]), _safe_int(r[12])
             )
             instock_any, pos_sc_any = r[13], _safe_int(r[14])
-            # Ordered per-period fallbacks for on_order / traited
-            on_order_l4w = _n(r[15])
-            on_order_l8w = _n(r[16])
-            on_order_l13w = _n(r[17])
-            traited_l4w  = _safe_int(r[18])
-            valid_l4w    = _safe_int(r[19])
-            instock_l4w  = r[20]
-            pos_sc_l4w   = _safe_int(r[21])
-            sales_l4w    = _n(r[22])
-            sales_l8w    = _n(r[23])
-            sales_l13w   = _n(r[24])
+            # In-transit + in-warehouse: alternative source for on_order (L1W only)
+            in_transit_l1w   = _n(r[15])
+            in_warehouse_l1w = _n(r[16])
+            # Ordered per-period fallbacks for traited (on_order does NOT fall back)
+            on_order_l4w = _n(r[17])
+            on_order_l8w = _n(r[18])
+            on_order_l13w = _n(r[19])
+            traited_l4w  = _safe_int(r[20])
+            valid_l4w    = _safe_int(r[21])
+            instock_l4w  = r[22]
+            pos_sc_l4w   = _safe_int(r[23])
+            sales_l4w    = _n(r[24])
+            sales_l8w    = _n(r[25])
+            sales_l13w   = _n(r[26])
 
             # Per-field ordered fallback
             oh          = _first(oh_l1w, oh_any)
-            on_order    = _first(on_order_l1w, on_order_l4w, on_order_l8w, on_order_l13w)
+            # On Order = current week ONLY (no fallback to L4W/L8W rolling totals)
+            # Try on_order_qty first; if 0, use in_transit + in_warehouse as proxy
+            on_order    = on_order_l1w if on_order_l1w > 0 else (in_transit_l1w + in_warehouse_l1w)
             traited     = _first(traited_l1w, traited_l4w, traited_any)
             valid_st    = _first(valid_l1w, valid_l4w, valid_any)
             instock_raw = _first_raw(instock_l1w, instock_l4w, instock_any)
             pos_sc      = _first(pos_sc_l1w, pos_sc_l4w, pos_sc_any)
 
             # Calculate storesWithInv from traited × instock%
-            if instock_raw is not None and float(instock_raw) > 0 and traited > 0:
+            # When traited_store_count_ty = 0 (column absent from upload), fall back to
+            # valid_store_count_ty as proxy so traitedZeroInv is not always 0.
+            effective_traited = traited if traited > 0 else valid_st
+            if instock_raw is not None and float(instock_raw) > 0 and effective_traited > 0:
                 instock = float(instock_raw) / 100.0 if float(instock_raw) > 1 else float(instock_raw)
-                stores_with_inv = round(traited * instock)
+                stores_with_inv = round(effective_traited * instock)
             else:
-                stores_with_inv = valid_st
+                stores_with_inv = effective_traited  # assume all stocked → 0 zero-OH stores
 
             items.append({
                 "itemName":         item_desc,
@@ -1066,9 +1079,9 @@ def get_item_store_detail(division: str = None, customer: str = None):
                 "wmtItemNumber":    nif_map.get(item_num, ""),
                 "ohUnits":          oh,
                 "onOrderUnits":     on_order,
-                "traitedStores":    traited,
+                "traitedStores":    effective_traited,
                 "storesWithInv":    stores_with_inv,
-                "traitedZeroInv":   max(0, traited - stores_with_inv),
+                "traitedZeroInv":   max(0, effective_traited - stores_with_inv),
                 # storesOneUnit and onOrderZeroOH require item×store level data
                 # (walmart_store_weekly is store totals only — no item dimension)
                 "storesOneUnit":    None,
