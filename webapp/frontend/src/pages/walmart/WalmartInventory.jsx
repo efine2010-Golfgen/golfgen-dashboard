@@ -51,18 +51,20 @@ const PERIOD_OPTIONS = [
 ];
 
 // Table column definitions for the 2026 Item Store Inventory Detail
+// traitedZeroInv = traited stores with 0 OH ONLY (not all stores)
 const STORE_DETAIL_COLS = [
-  { key: "traitedStores",  label: "# Traited Stores",  color: () => "var(--txt1)" },
-  { key: "storesWithInv",  label: "Stores w/ Inv",     color: () => COLORS.teal },
-  { key: "storesWithSales",label: "Stores w/ Sales",   color: (v) => v > 0 ? COLORS.teal : "var(--txt3)" },
-  { key: "ohUnits",        label: "OH Inv Units",       color: () => "var(--txt1)" },
-  { key: "onOrderUnits",   label: "On Order Units",    color: (v) => v > 0 ? "#f59e0b" : "var(--txt3)" },
-  { key: "traitedZeroInv", label: "Stores 0 Units OH", color: (v) => v > 0 ? COLORS.red : "var(--txt3)" },
-  { key: "storesOneUnit",  label: "Stores 1 Unit OH",  color: () => "var(--txt3)" },
-  { key: "salesLW",        label: "Sales Units LW",    color: (v) => v > 0 ? "var(--txt1)" : "var(--txt3)" },
-  { key: "salesL4W",       label: "L4 Wks",            color: (v) => v > 0 ? "var(--txt1)" : "var(--txt3)" },
-  { key: "salesL8W",       label: "L8 Wks",            color: (v) => v > 0 ? "var(--txt1)" : "var(--txt3)" },
-  { key: "salesL13W",      label: "L13 Wks",           color: (v) => v > 0 ? "var(--txt1)" : "var(--txt3)" },
+  { key: "traitedStores",  label: "# Traited Stores",           color: () => "var(--txt1)",                                        title: "Stores authorized to carry this item" },
+  { key: "storesWithInv",  label: "Stores w/ Inv",              color: () => COLORS.teal,                                          title: "Traited stores with inventory > 0 (estimated from Instock %)" },
+  { key: "storesWithSales",label: "Stores w/ Sales",            color: (v) => v > 0 ? COLORS.teal : "var(--txt3)",                 title: "Stores that recorded a sale last week" },
+  { key: "ohUnits",        label: "OH Inv Units",               color: () => "var(--txt1)",                                        title: "Total on-hand units across all traited stores" },
+  { key: "onOrderUnits",   label: "On Order Units",             color: (v) => v > 0 ? "#f59e0b" : "var(--txt3)",                  title: "Units on order (in-transit + DC stock)" },
+  { key: "traitedZeroInv", label: "Traited Stores 0 OH",        color: (v) => v > 0 ? COLORS.red : "var(--txt3)",                  title: "# of TRAITED stores with 0 on-hand units (click ▼ to expand)" },
+  { key: "onOrderZeroOH",  label: "On Order → 0-OH Strs",       color: () => "var(--txt3)",                                        title: "On-order units allocated to zero-OH stores (requires store-item data)" },
+  { key: "storesOneUnit",  label: "Stores 1 Unit OH",           color: () => "var(--txt3)",                                        title: "Stores with exactly 1 unit on hand (requires store-item data)" },
+  { key: "salesLW",        label: "Sales Units LW",             color: (v) => v > 0 ? "var(--txt1)" : "var(--txt3)",              title: "Sales units last week" },
+  { key: "salesL4W",       label: "L4 Wks",                    color: (v) => v > 0 ? "var(--txt1)" : "var(--txt3)",              title: "Sales units last 4 weeks" },
+  { key: "salesL8W",       label: "L8 Wks",                    color: (v) => v > 0 ? "var(--txt1)" : "var(--txt3)",              title: "Sales units last 8 weeks" },
+  { key: "salesL13W",      label: "L13 Wks",                   color: (v) => v > 0 ? "var(--txt1)" : "var(--txt3)",              title: "Sales units last 13 weeks" },
 ];
 
 // Generic item-toggle pill component
@@ -118,6 +120,7 @@ export function WalmartInventory({ filters }) {
 
   // Store detail state
   const [hiddenStoreItems, setHiddenStoreItems] = useState(new Set());
+  const [expandedStoreItems, setExpandedStoreItems] = useState(new Set());
 
   useEffect(() => {
     (async () => {
@@ -408,17 +411,21 @@ export function WalmartInventory({ filters }) {
                   {/* Sticky item description column */}
                   <th style={{
                     textAlign: "left", padding: "7px 10px", ...SG(10, 600),
-                    minWidth: 180, position: "sticky", left: 0,
+                    minWidth: 200, position: "sticky", left: 0,
                     background: "var(--card)", zIndex: 3,
                     borderRight: "1px solid var(--brd)",
                   }}>
                     Item Description
                   </th>
                   {STORE_DETAIL_COLS.map((col) => (
-                    <th key={col.key} style={{
-                      textAlign: "right", padding: "7px 8px", ...SG(10, 600),
-                      whiteSpace: "nowrap",
-                    }}>
+                    <th
+                      key={col.key}
+                      title={col.title}
+                      style={{
+                        textAlign: "right", padding: "7px 8px", ...SG(10, 600),
+                        whiteSpace: "nowrap", cursor: "help",
+                      }}
+                    >
                       {col.label}
                     </th>
                   ))}
@@ -426,42 +433,66 @@ export function WalmartInventory({ filters }) {
               </thead>
               <tbody>
                 {storeItems.map((it, idx) => {
-                  const itemColor = ITEM_COLORS[idx % ITEM_COLORS.length];
-                  const isHidden = hiddenStoreItems.has(it.itemName);
-                  const rowBg = idx % 2 === 0 ? "var(--bg2)" : "var(--card)";
-                  return (
+                  const itemColor   = ITEM_COLORS[idx % ITEM_COLORS.length];
+                  const isHidden    = hiddenStoreItems.has(it.itemName);
+                  const isExpanded  = expandedStoreItems.has(it.itemName);
+                  const rowBg       = idx % 2 === 0 ? "var(--bg2)" : "var(--card)";
+                  const zeroCount   = it.traitedZeroInv || 0;
+
+                  return [
+                    /* ── Main data row ── */
                     <tr
                       key={it.itemName}
                       style={{
-                        borderBottom: "1px solid var(--brd)",
+                        borderBottom: isExpanded ? "none" : "1px solid var(--brd)",
                         backgroundColor: rowBg,
                         opacity: isHidden ? 0.3 : 1,
                         transition: "opacity 0.15s",
                       }}
                     >
-                      {/* Sticky item description cell */}
+                      {/* Sticky item description cell with expand toggle */}
                       <td style={{
                         padding: "6px 10px", position: "sticky", left: 0,
                         background: rowBg, zIndex: 1,
                         borderRight: "1px solid var(--brd)",
                       }}>
-                        <div style={{ ...SG(10, 600), color: itemColor, whiteSpace: "nowrap" }}>
-                          {it.itemName.length > 36 ? it.itemName.substring(0, 36) + "…" : it.itemName}
-                        </div>
-                        {(it.vendorItemNumber || it.wmtItemNumber) && (
-                          <div style={{ ...SG(8), color: "var(--txt3)", marginTop: 2, whiteSpace: "nowrap" }}>
-                            {it.vendorItemNumber ? `GG# ${it.vendorItemNumber}` : ""}
-                            {it.vendorItemNumber && it.wmtItemNumber ? "  ·  " : ""}
-                            {it.wmtItemNumber ? `WMT# ${it.wmtItemNumber}` : ""}
+                        <div style={{ display: "flex", alignItems: "flex-start", gap: 6 }}>
+                          {/* Expand toggle button (only shown if zeroCount > 0) */}
+                          <button
+                            onClick={() => toggleSetItem(setExpandedStoreItems)(it.itemName)}
+                            title={zeroCount > 0 ? `Show/hide ${zeroCount} stores with 0 OH` : "No zero-OH stores"}
+                            style={{
+                              ...SG(9, 600),
+                              background: "transparent", border: "none",
+                              cursor: zeroCount > 0 ? "pointer" : "default",
+                              color: zeroCount > 0 ? COLORS.red : "var(--txt3)",
+                              padding: "1px 2px", marginTop: 1, flexShrink: 0,
+                              opacity: zeroCount > 0 ? 1 : 0.3,
+                            }}
+                          >
+                            {isExpanded ? "▼" : "▶"}
+                          </button>
+                          <div>
+                            <div style={{ ...SG(10, 600), color: itemColor, whiteSpace: "nowrap" }}>
+                              {it.itemName.length > 34 ? it.itemName.substring(0, 34) + "…" : it.itemName}
+                            </div>
+                            {(it.vendorItemNumber || it.wmtItemNumber) && (
+                              <div style={{ ...SG(8), color: "var(--txt3)", marginTop: 2, whiteSpace: "nowrap" }}>
+                                {it.vendorItemNumber ? `GG# ${it.vendorItemNumber}` : ""}
+                                {it.vendorItemNumber && it.wmtItemNumber ? "  ·  " : ""}
+                                {it.wmtItemNumber ? `WMT# ${it.wmtItemNumber}` : ""}
+                              </div>
+                            )}
                           </div>
-                        )}
+                        </div>
                       </td>
-                      {/* Data columns via STORE_DETAIL_COLS */}
+                      {/* Data columns */}
                       {STORE_DETAIL_COLS.map((col) => {
                         const val = it[col.key];
+                        // null means data not available (show —); 0 also shows —
                         const display = (val != null && val !== 0) ? fN(val) : "—";
                         return (
-                          <td key={col.key} style={{
+                          <td key={col.key} title={col.title} style={{
                             padding: "6px 8px", textAlign: "right",
                             ...SG(10), color: col.color(val || 0),
                             whiteSpace: "nowrap",
@@ -470,8 +501,60 @@ export function WalmartInventory({ filters }) {
                           </td>
                         );
                       })}
-                    </tr>
-                  );
+                    </tr>,
+
+                    /* ── Expanded detail row (stores with 0 OH) ── */
+                    isExpanded && (
+                      <tr
+                        key={`${it.itemName}--expand`}
+                        style={{
+                          borderBottom: "1px solid var(--brd)",
+                          backgroundColor: rowBg,
+                        }}
+                      >
+                        <td
+                          colSpan={STORE_DETAIL_COLS.length + 1}
+                          style={{ padding: "10px 16px 14px 40px" }}
+                        >
+                          {/* Header */}
+                          <div style={{ ...SG(10, 600), color: COLORS.red, marginBottom: 8 }}>
+                            {zeroCount > 0
+                              ? `${zeroCount} Traited Store${zeroCount !== 1 ? "s" : ""} with 0 On-Hand — ${it.itemName}`
+                              : "No traited stores with 0 on-hand"}
+                          </div>
+
+                          {/* Explanation / placeholder */}
+                          <div style={{
+                            ...SG(9), color: "var(--txt3)",
+                            background: "var(--card2)", borderRadius: 6,
+                            padding: "10px 14px",
+                            border: "1px solid var(--brd)",
+                            maxWidth: 560,
+                          }}>
+                            <div style={{ ...SG(9, 600), color: "var(--txt2)", marginBottom: 4 }}>
+                              Individual store numbers not yet available
+                            </div>
+                            Store-level item breakdown requires uploading the Walmart
+                            Item × Store weekly detail report (not yet ingested). Once
+                            available, this panel will list each store number, store city,
+                            OH units, and on-order for <em>{it.itemName}</em>.
+                            <div style={{ marginTop: 8, color: "var(--txt3)" }}>
+                              <strong>What we know:</strong>&nbsp;
+                              {it.traitedStores} traited stores total ·{" "}
+                              {it.storesWithInv} estimated with inventory ·{" "}
+                              <span style={{ color: COLORS.red }}>{zeroCount} with 0 OH</span>
+                            </div>
+                            {it.onOrderUnits > 0 && (
+                              <div style={{ marginTop: 4, color: "#f59e0b" }}>
+                                {fN(it.onOrderUnits)} total units on order for this item
+                                (store-level allocation not available)
+                              </div>
+                            )}
+                          </div>
+                        </td>
+                      </tr>
+                    ),
+                  ];
                 })}
                 {storeItems.length === 0 && (
                   <tr>

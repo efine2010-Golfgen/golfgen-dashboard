@@ -982,64 +982,90 @@ def get_item_store_detail(division: str = None, customer: str = None):
             nif_map = {}
 
         # Step 3: Pivot by period_type — build one dict entry per item
+        # L1W/LW/WEEKLY = most-recent inventory snapshot (preferred for OH/traited)
+        # L4W/L8W/L13W  = rolling sales windows (sales units only)
+        # Fallback: if no L1W row exists, use inventory values from next-best period
         L1W_TYPES = {"L1W", "LW", "WEEKLY"}
-        items_dict: dict = {}  # prime_item_number → dict
+        # Inventory fallback priority: shorter windows are more current
+        INV_FALLBACK_ORDER = ["L4W", "L8W", "L13W", "L26W", "L52W"]
+
+        items_dict: dict = {}   # prime_item_number → output dict
+        inv_cache: dict  = {}   # prime_item_number → {period: (oh, on_order, traited, valid_st, instock_raw, pos_sc)}
+
+        def _fill_inv(d, oh, on_order, traited, valid_st, instock_raw, pos_sc):
+            """Populate inventory-snapshot fields from one period's row."""
+            d["ohUnits"]       = oh
+            d["onOrderUnits"]  = on_order
+            d["traitedStores"] = traited
+            d["storesWithSales"] = pos_sc
+            if instock_raw is not None and traited > 0:
+                instock = (float(instock_raw) / 100.0) if float(instock_raw) > 1 else float(instock_raw)
+                stores_with_inv = round(traited * instock)
+            else:
+                stores_with_inv = valid_st
+            d["storesWithInv"]  = stores_with_inv
+            # traitedZeroInv = traited stores with 0 OH (traited-only, not all stores)
+            d["traitedZeroInv"] = max(0, traited - stores_with_inv)
 
         for r in rows:
-            item_num  = r[0] or ""
-            item_desc = r[1] or "Unknown"
-            period    = r[2] or ""
-            pos_qty   = _n(r[3])
-            pos_sc    = _safe_int(r[4])
-            oh        = _n(r[5])
-            on_order  = _n(r[6])
-            traited   = _safe_int(r[7])
-            valid_st  = _safe_int(r[8])
+            item_num    = r[0] or ""
+            item_desc   = r[1] or "Unknown"
+            period      = r[2] or ""
+            pos_qty     = _n(r[3])
+            pos_sc      = _safe_int(r[4])
+            oh          = _n(r[5])
+            on_order    = _n(r[6])
+            traited     = _safe_int(r[7])
+            valid_st    = _safe_int(r[8])
             instock_raw = r[9]
 
             if item_num not in items_dict:
                 items_dict[item_num] = {
-                    "itemName":        item_desc,
+                    "itemName":         item_desc,
                     "vendorItemNumber": item_num,
-                    "wmtItemNumber":   nif_map.get(item_num, ""),
-                    "ohUnits":         0,
-                    "onOrderUnits":    0,
-                    "traitedStores":   0,
-                    "storesWithInv":   0,
-                    "traitedZeroInv":  0,
-                    "storesOneUnit":   0,   # not available at weekly granularity
-                    "storesWithSales": 0,
-                    "salesLW":         0,
-                    "salesL4W":        0,
-                    "salesL8W":        0,
-                    "salesL13W":       0,
+                    "wmtItemNumber":    nif_map.get(item_num, ""),
+                    "ohUnits":          0,
+                    "onOrderUnits":     0,
+                    "traitedStores":    0,
+                    "storesWithInv":    0,
+                    "traitedZeroInv":   0,   # traited stores with 0 OH only
+                    "storesOneUnit":    0,   # not available at weekly granularity
+                    "storesWithSales":  0,
+                    "onOrderZeroOH":    None,  # requires store-item level data
+                    "salesLW":          0,
+                    "salesL4W":         0,
+                    "salesL8W":         0,
+                    "salesL13W":        0,
+                    "_has_inv":         False,
                 }
+                inv_cache[item_num] = {}
 
             d = items_dict[item_num]
 
+            # Always cache this period's inventory values for fallback
+            inv_cache[item_num][period] = (oh, on_order, traited, valid_st, instock_raw, pos_sc)
+
             if period in L1W_TYPES:
-                # Inventory snapshot from most-recent L1W/weekly row
-                d["ohUnits"]      = oh
-                d["onOrderUnits"] = on_order
-                d["traitedStores"] = traited
-                d["storesWithSales"] = pos_sc
-                d["salesLW"] = pos_qty
-
-                # Estimate storesWithInv from instock_pct × traited
-                if instock_raw is not None and traited > 0:
-                    instock = (instock_raw / 100.0) if instock_raw > 1 else float(instock_raw)
-                    stores_with_inv = round(traited * instock)
-                else:
-                    stores_with_inv = valid_st
-                d["storesWithInv"]  = stores_with_inv
-                d["traitedZeroInv"] = max(0, traited - stores_with_inv)
-
+                # Primary: use this row for all inventory-snapshot fields
+                _fill_inv(d, oh, on_order, traited, valid_st, instock_raw, pos_sc)
+                d["salesLW"]   = pos_qty
+                d["_has_inv"]  = True
             elif period == "L4W":
-                d["salesL4W"] = pos_qty
+                d["salesL4W"]  = pos_qty
             elif period == "L8W":
-                d["salesL8W"] = pos_qty
+                d["salesL8W"]  = pos_qty
             elif period == "L13W":
                 d["salesL13W"] = pos_qty
+
+        # Fallback: items that had NO L1W/weekly row get inventory from next-best period
+        for item_num, d in items_dict.items():
+            if not d["_has_inv"]:
+                cache = inv_cache.get(item_num, {})
+                for fallback_pt in INV_FALLBACK_ORDER:
+                    if fallback_pt in cache:
+                        _fill_inv(d, *cache[fallback_pt])
+                        break
+            del d["_has_inv"]  # strip internal flag before returning
 
         items = sorted(items_dict.values(), key=lambda x: x["itemName"])
         return {"items": items}
