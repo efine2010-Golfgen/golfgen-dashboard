@@ -3,7 +3,8 @@ import { api } from "../../lib/api";
 import { SG, DM, Card, fN, f$ } from "./WalmartHelpers";
 
 /* ── Inline Editable Cell ──────────────────────────────────── */
-function EditCell({ value, onSave, type = "text", style = {} }) {
+// format: optional (value) => string for display mode only
+function EditCell({ value, onSave, type = "text", style = {}, format }) {
   const [editing, setEditing] = useState(false);
   const [val, setVal] = useState(value ?? "");
   const ref = useRef(null);
@@ -14,8 +15,9 @@ function EditCell({ value, onSave, type = "text", style = {} }) {
     const v = type === "number" ? (val === "" ? 0 : Number(val)) : val;
     if (v !== value) onSave(v);
   };
+  const displayVal = format ? format(value) : (value ?? "—");
   if (!editing) return (
-    <span onClick={() => setEditing(true)} style={{ cursor: "pointer", minWidth: 24, display: "inline-block", ...style }}>{value ?? "—"}</span>
+    <span onClick={() => setEditing(true)} style={{ cursor: "pointer", minWidth: 24, display: "inline-block", ...style }}>{displayVal}</span>
   );
   return (
     <input ref={ref} type={type} value={val} onChange={e => setVal(e.target.value)}
@@ -24,6 +26,10 @@ function EditCell({ value, onSave, type = "text", style = {} }) {
     />
   );
 }
+
+// Format helpers
+const fPrice = (v) => (v != null && v !== "" && Number(v) > 0) ? `$${Number(v).toFixed(2)}` : "—";
+const fDim   = (v) => (v != null && v !== "" && Number(v) > 0) ? Number(v).toFixed(1) : "—";
 
 /* ── Add Item Modal ────────────────────────────────────────── */
 function AddNifModal({ open, onClose, onAdd, year }) {
@@ -406,6 +412,13 @@ export function WalmartItemMaster({ filters = {} }) {
                 <div style={{ overflowX: "auto" }}>
                   <table style={{ width: "100%", borderCollapse: "collapse", ...SG(9) }}>
                     <thead>
+                      {/* Group header row for carton dimensions */}
+                      <tr style={{ borderBottom: "1px solid var(--brd)" }}>
+                        <th colSpan={9} style={{ ...thStyle, borderBottom: "none" }} />
+                        <th colSpan={3} style={{ ...thStyle, textAlign: "center", borderBottom: "none", color: "var(--teal)", fontSize: 9 }}>Store Count</th>
+                        <th colSpan={5} style={{ ...thStyle, textAlign: "center", borderBottom: "none", color: "var(--teal)", fontSize: 9 }}>Carton Dimensions (cm)</th>
+                        <th colSpan={4} style={{ ...thStyle, borderBottom: "none" }} />
+                      </tr>
                       <tr style={{ borderBottom: "2px solid var(--brd)" }}>
                         <th style={thStyle}>Description</th>
                         <th style={thStyle}>Brand</th>
@@ -416,8 +429,8 @@ export function WalmartItemMaster({ filters = {} }) {
                         <th style={{ ...thStyle, textAlign: "right" }}>Wholesale</th>
                         <th style={{ ...thStyle, textAlign: "right" }}>Retail</th>
                         <th style={{ ...thStyle, textAlign: "center" }}>Casepack</th>
-                        <th style={{ ...thStyle, textAlign: "right" }}>Old Stores</th>
-                        <th style={{ ...thStyle, textAlign: "right" }}>New Stores</th>
+                        <th style={{ ...thStyle, textAlign: "right" }}>Old</th>
+                        <th style={{ ...thStyle, textAlign: "right" }}>New</th>
                         <th style={{ ...thStyle, textAlign: "right" }}>Diff</th>
                         <th style={{ ...thStyle, textAlign: "right" }}>L</th>
                         <th style={{ ...thStyle, textAlign: "right" }}>W</th>
@@ -431,7 +444,10 @@ export function WalmartItemMaster({ filters = {} }) {
                       </tr>
                     </thead>
                     <tbody>
-                      {sectionItems.map((item) => (
+                      {sectionItems.map((item) => {
+                        // Compute store count diff locally so it updates immediately when either field is edited
+                        const computedDiff = (item.newStoreCount || 0) - (item.oldStoreCount || 0);
+                        return (
                         <tr
                           key={item.id}
                           style={{ borderBottom: "1px solid var(--brd)" }}
@@ -442,29 +458,48 @@ export function WalmartItemMaster({ filters = {} }) {
                           <td style={tdStyle}><EditCell value={item.upc} onSave={v => handleCellSave(item.id, "upc", v)} /></td>
                           <td style={{ ...tdStyle, color: "#2ecf99" }}><EditCell value={item.vendorStockNumber} onSave={v => handleCellSave(item.id, "vendor_stock_number", v)} /></td>
                           <td style={tdStyle}><EditCell value={item.brandId} onSave={v => handleCellSave(item.id, "brand_id", v)} /></td>
-                          <td style={{ ...tdStyle, textAlign: "right" }}><EditCell value={item.wholesaleCost} onSave={v => handleCellSave(item.id, "wholesale_cost", v)} type="number" style={{ width: 60 }} /></td>
-                          <td style={{ ...tdStyle, textAlign: "right" }}><EditCell value={item.walmartRetail} onSave={v => handleCellSave(item.id, "walmart_retail", v)} type="number" style={{ width: 60 }} /></td>
+                          {/* Wholesale / Retail — always show 2 decimal places */}
+                          <td style={{ ...tdStyle, textAlign: "right" }}>
+                            <EditCell value={item.wholesaleCost} onSave={v => handleCellSave(item.id, "wholesale_cost", v)} type="number" style={{ width: 60 }} format={fPrice} />
+                          </td>
+                          <td style={{ ...tdStyle, textAlign: "right" }}>
+                            <EditCell value={item.walmartRetail} onSave={v => handleCellSave(item.id, "walmart_retail", v)} type="number" style={{ width: 60 }} format={fPrice} />
+                          </td>
                           <td style={{ ...tdStyle, textAlign: "center" }}><EditCell value={item.vendorPack} onSave={v => handleCellSave(item.id, "vendor_pack", v)} type="number" style={{ width: 40 }} /></td>
                           <td style={{ ...tdStyle, textAlign: "right" }}><EditCell value={item.oldStoreCount} onSave={v => handleCellSave(item.id, "old_store_count", v)} type="number" style={{ width: 50 }} /></td>
                           <td style={{ ...tdStyle, textAlign: "right" }}><EditCell value={item.newStoreCount} onSave={v => handleCellSave(item.id, "new_store_count", v)} type="number" style={{ width: 50 }} /></td>
+                          {/* Diff computed locally — updates instantly when old/new changes */}
                           <td style={{
                             ...tdStyle,
                             textAlign: "right",
-                            color: item.storeCountDiff > 0 ? "#2ecfaa" : item.storeCountDiff < 0 ? "#f87171" : "var(--txt3)",
+                            fontWeight: 600,
+                            color: computedDiff > 0 ? "#2ecfaa" : computedDiff < 0 ? "#f87171" : "var(--txt3)",
                           }}>
-                            {item.storeCountDiff > 0 ? "+" : ""}{fN(item.storeCountDiff)}
+                            {computedDiff > 0 ? "+" : ""}{computedDiff !== 0 ? computedDiff : "—"}
                           </td>
-                          <td style={{ ...tdStyle, textAlign: "right" }}><EditCell value={item.cartonLength} onSave={v => handleCellSave(item.id, "carton_length", v)} type="number" style={{ width: 40 }} /></td>
-                          <td style={{ ...tdStyle, textAlign: "right" }}><EditCell value={item.cartonWidth} onSave={v => handleCellSave(item.id, "carton_width", v)} type="number" style={{ width: 40 }} /></td>
-                          <td style={{ ...tdStyle, textAlign: "right" }}><EditCell value={item.cartonHeight} onSave={v => handleCellSave(item.id, "carton_height", v)} type="number" style={{ width: 40 }} /></td>
-                          <td style={{ ...tdStyle, textAlign: "right" }}><EditCell value={item.cbm} onSave={v => handleCellSave(item.id, "cbm", v)} type="number" style={{ width: 40 }} /></td>
-                          <td style={{ ...tdStyle, textAlign: "right" }}><EditCell value={item.cbf} onSave={v => handleCellSave(item.id, "cbf", v)} type="number" style={{ width: 40 }} /></td>
+                          {/* Carton dimensions — 1 decimal place in display */}
+                          <td style={{ ...tdStyle, textAlign: "right" }}>
+                            <EditCell value={item.cartonLength} onSave={v => handleCellSave(item.id, "carton_length", v)} type="number" style={{ width: 40 }} format={fDim} />
+                          </td>
+                          <td style={{ ...tdStyle, textAlign: "right" }}>
+                            <EditCell value={item.cartonWidth} onSave={v => handleCellSave(item.id, "carton_width", v)} type="number" style={{ width: 40 }} format={fDim} />
+                          </td>
+                          <td style={{ ...tdStyle, textAlign: "right" }}>
+                            <EditCell value={item.cartonHeight} onSave={v => handleCellSave(item.id, "carton_height", v)} type="number" style={{ width: 40 }} format={fDim} />
+                          </td>
+                          <td style={{ ...tdStyle, textAlign: "right" }}>
+                            <EditCell value={item.cbm} onSave={v => handleCellSave(item.id, "cbm", v)} type="number" style={{ width: 40 }} format={fDim} />
+                          </td>
+                          <td style={{ ...tdStyle, textAlign: "right" }}>
+                            <EditCell value={item.cbf} onSave={v => handleCellSave(item.id, "cbf", v)} type="number" style={{ width: 40 }} format={fDim} />
+                          </td>
                           <td style={tdStyle}><EditCell value={item.color} onSave={v => handleCellSave(item.id, "color", v)} /></td>
                           <td style={tdStyle}><EditCell value={item.dexterity} onSave={v => handleCellSave(item.id, "dexterity", v)} /></td>
                           <td style={tdStyle}><EditCell value={item.category} onSave={v => handleCellSave(item.id, "category", v)} /></td>
                           <td style={tdStyle}><button onClick={() => setDeleteTarget(item)} style={{ background: "none", border: "none", color: "#f87171", cursor: "pointer", fontSize: 14, padding: "2px 4px" }}>✕</button></td>
                         </tr>
-                      ))}
+                        );
+                      })}
                     </tbody>
                   </table>
                 </div>
