@@ -905,6 +905,95 @@ def get_weekly_trend(division: str = None, customer: str = None):
 
 
 # ═════════════════════════════════════════════════════════════════════════════
+#  ENDPOINT 8b: Item Store Detail — Per-item store inventory metrics (2026)
+# ═════════════════════════════════════════════════════════════════════════════
+
+
+@router.get("/api/walmart/item-store-detail")
+def get_item_store_detail(division: str = None, customer: str = None):
+    """
+    Returns per-item store inventory metrics for current 2026 items.
+
+    Metrics per item:
+      ohUnits          — Walmart OH Units (on_hand_qty_ty)
+      onOrderUnits     — Walmart On Order Units (on_order_qty_ty)
+      traitedStores    — # Traited Stores (traited_store_count_ty)
+      storesWithInv    — # Stores with Inventory > 0 (traited * instock_pct)
+      traitedZeroInv   — # Traited Stores with 0 Inventory (traited - storesWithInv)
+      storesOneUnit    — # Stores with 1 Unit OH (not available at weekly granularity → 0)
+
+    Filters to walmart_week >= 202601 (2026 data only).
+    Uses the most recent period (L1W / LW / weekly); falls back to all periods
+    if none of those are present.
+    """
+    con = get_db()
+    try:
+        hw, hp = hierarchy_filter(division=division, customer=customer or "walmart_stores")
+
+        def _run_query(extra_where=""):
+            return con.execute(f"""
+                SELECT
+                  prime_item_desc,
+                  SUM(COALESCE(on_hand_qty_ty, 0))      AS oh_units,
+                  SUM(COALESCE(on_order_qty_ty, 0))     AS on_order_units,
+                  MAX(COALESCE(traited_store_count_ty, 0)) AS traited_stores,
+                  MAX(COALESCE(valid_store_count_ty, 0))   AS valid_stores,
+                  AVG(
+                    CASE WHEN COALESCE(instock_pct_ty, 0) > 0
+                    THEN CASE WHEN instock_pct_ty > 1
+                              THEN instock_pct_ty / 100.0
+                              ELSE instock_pct_ty
+                         END
+                    END
+                  ) AS instock_pct_norm
+                FROM walmart_item_weekly
+                WHERE prime_item_desc IS NOT NULL
+                  AND CAST(walmart_week AS VARCHAR) >= '202601'
+                  {extra_where}
+                  {hw}
+                GROUP BY prime_item_desc
+                ORDER BY prime_item_desc
+            """, hp).fetchall()
+
+        # Try most-recent-period rows first
+        rows = _run_query("AND period_type IN ('L1W', 'LW', 'weekly')")
+        if not rows:
+            # Fall back: any period with 2026 week data
+            rows = _run_query()
+
+        items = []
+        for r in rows:
+            item_name = r[0] or "Unknown"
+            oh_units = _n(r[1])
+            on_order_units = _n(r[2])
+            traited_stores = _safe_int(r[3])
+            valid_stores = _safe_int(r[4])
+            instock_pct = _n(r[5]) if r[5] is not None else 0.0
+
+            # Estimate stores with inventory from instock % × traited stores
+            if traited_stores > 0 and instock_pct > 0:
+                stores_with_inv = round(traited_stores * instock_pct)
+            else:
+                stores_with_inv = valid_stores  # fallback
+
+            traited_zero_inv = max(0, traited_stores - stores_with_inv)
+
+            items.append({
+                "itemName": item_name,
+                "ohUnits": oh_units,
+                "onOrderUnits": on_order_units,
+                "traitedStores": traited_stores,
+                "storesWithInv": stores_with_inv,
+                "traitedZeroInv": traited_zero_inv,
+                "storesOneUnit": 0,  # per-store-item granularity not in schema
+            })
+
+        return {"items": items}
+    finally:
+        con.close()
+
+
+# ═════════════════════════════════════════════════════════════════════════════
 #  ENDPOINT 9: Store Geography — All stores for latest week (geography page)
 # ═════════════════════════════════════════════════════════════════════════════
 
