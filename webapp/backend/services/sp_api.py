@@ -9,7 +9,7 @@ import logging
 import threading
 import time as _time_mod
 from core.database import get_db, get_db_rw
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, date
 from zoneinfo import ZoneInfo
 from pathlib import Path
 from typing import Optional
@@ -602,7 +602,29 @@ def _run_sp_api_sync_inner():
         from sp_api.api import Finances as FinancesAPI
         logger.info("  Pulling financial events (fees, refunds)...")
 
-        fin_start = (datetime.utcnow() - timedelta(days=90)).strftime("%Y-%m-%dT%H:%M:%SZ")
+        # Smart sync window: if we have < 90 days of history, do a deep 400-day
+        # backfill so LY comparisons work. Otherwise only re-pull the last 35 days
+        # (enough to catch late-posted events) and keep the historical rows intact.
+        _con_check = get_db()
+        _fin_count_row = _con_check.execute(
+            "SELECT COUNT(*), MIN(date) FROM financial_events"
+        ).fetchone()
+        _con_check.close()
+        _fin_count = int(_fin_count_row[0] or 0) if _fin_count_row else 0
+        _oldest_date = _fin_count_row[1] if _fin_count_row and _fin_count_row[1] else None
+        _oldest_days = (datetime.utcnow().date() - date.fromisoformat(str(_oldest_date)[:10])).days \
+            if _oldest_date else 0
+
+        if _oldest_days < 380:  # don't have 12+ months — do backfill
+            fin_days = 400  # covers LY for full YTD comparison
+            logger.info(f"  Financial events: backfill mode (oldest={_oldest_date}, "
+                        f"count={_fin_count}) — pulling {fin_days} days")
+        else:
+            fin_days = 35   # regular refresh: catch late-posted events
+            logger.info(f"  Financial events: regular mode (oldest={_oldest_date}) "
+                        f"— pulling {fin_days} days")
+
+        fin_start = (datetime.utcnow() - timedelta(days=fin_days)).strftime("%Y-%m-%dT%H:%M:%SZ")
         finances = FinancesAPI(credentials=credentials, marketplace=Marketplaces.US)
 
         # Manual NextToken pagination (more reliable than @load_all_pages)
@@ -611,7 +633,7 @@ def _run_sp_api_sync_inner():
         page = 0
         next_token = None
 
-        while page < 100:  # 100 pages × 100/page = 10,000 max events (covers ~6 months)
+        while page < 200:  # 200 pages × 100/page = 20,000 max events (covers 18 months)
             page += 1
             kwargs = {"PostedAfter": fin_start, "MaxResultsPerPage": 100}
             if next_token:
@@ -774,13 +796,17 @@ def _run_sp_api_sync_inner():
             # sp_api model object — try attribute access
             return getattr(obj, key, default)
 
-        # Only clear old financial events if we actually got new data to replace them.
-        # This prevents data loss when the API returns empty results.
+        # Only clear events in the re-sync window if we got new data.
+        # IMPORTANT: only delete the window we actually fetched (fin_days) so that
+        # historical data outside that window (e.g. LY events from 300+ days ago)
+        # is preserved for YOY comparisons. Uses ON CONFLICT DO NOTHING on INSERT
+        # to avoid duplicates if we accidentally overlap.
         if all_shipment_events or all_refund_events:
             try:
-                cutoff_date = (datetime.utcnow() - timedelta(days=90)).strftime("%Y-%m-%d")
+                cutoff_date = (datetime.utcnow() - timedelta(days=fin_days)).strftime("%Y-%m-%d")
                 con.execute("DELETE FROM financial_events WHERE date >= ?", [cutoff_date])
-                logger.info(f"  Cleared financial_events from {cutoff_date} for re-sync ({len(all_shipment_events)} shipments + {len(all_refund_events)} refunds to insert)")
+                logger.info(f"  Cleared financial_events from {cutoff_date} for re-sync "
+                            f"({len(all_shipment_events)} shipments + {len(all_refund_events)} refunds to insert)")
             except Exception as e:
                 logger.warning(f"  Could not clear old financial_events: {e}")
         else:
@@ -1730,21 +1756,196 @@ def get_ly_same_time_sales(ly_date, cutoff_dt) -> tuple:
         metrics = response.payload or []
 
         if not metrics:
-            result = (0.0, 0)
+            result = (0.0, 0, 0)
         else:
             m = metrics[0]
             ts = m.get('totalSales') or {}
             amount = float(ts.get('amount', 0) or 0) if isinstance(ts, dict) else float(ts or 0)
             units  = int(m.get('unitCount', 0) or 0)
-            result = (round(amount, 2), units)
+            ords   = int(m.get('orderCount', 0) or 0)
+            result = (round(amount, 2), units, ords)
 
         _ly_same_time_cache[cache_key] = (result, now_ts)
-        logger.info(f"get_ly_same_time_sales: {ly_date} through {cutoff_dt.hour}:{cutoff_dt.minute:02d} CT → ${result[0]:,.2f} / {result[1]} units")
+        logger.info(f"get_ly_same_time_sales: {ly_date} through {cutoff_dt.hour}:{cutoff_dt.minute:02d} CT → ${result[0]:,.2f} / {result[1]} units / {result[2]} orders")
         return result
 
     except Exception as e:
         logger.warning(f"get_ly_same_time_sales error: {e}")
-        return (0.0, 0)
+        return (0.0, 0, 0)
+
+
+# ── Hourly Sales — SP-API Sales.getOrderMetrics with HOUR granularity ────────
+_hourly_sales_cache: dict = {}
+_HOURLY_CACHE_TTL_TODAY = 300   # 5 min for today (data still flowing in)
+_HOURLY_CACHE_TTL_PAST  = 86400 # 24 hr for past dates (data is final)
+
+
+def get_hourly_sales(target_date) -> list:
+    """Fetch hourly sales breakdown for a given date via SP-API getOrderMetrics.
+
+    Returns a list of 24 dicts {hour, sales, units, orders}, indexed 0–23 in
+    Central Time.  Hours with no sales have sales=0/units=0/orders=0.
+    Falls back to [] on any error.
+
+    Cached per date: 5 min for today, 24 hr for past dates.
+    """
+    import time as _t
+    global _hourly_sales_cache
+
+    date_str   = str(target_date)
+    CENTRAL    = ZoneInfo("America/Chicago")
+    today_ct   = datetime.now(CENTRAL).date()
+    is_today   = (target_date == today_ct)
+
+    now_ts = _t.time()
+    if date_str in _hourly_sales_cache:
+        cached_val, cached_at = _hourly_sales_cache[date_str]
+        ttl = _HOURLY_CACHE_TTL_TODAY if is_today else _HOURLY_CACHE_TTL_PAST
+        if now_ts - cached_at < ttl:
+            return cached_val
+
+    try:
+        from sp_api.api import Sales as SalesAPI
+        from sp_api.base import Marketplaces
+        from sp_api.base.sales_enum import Granularity
+    except ImportError:
+        logger.warning("get_hourly_sales: sp_api library not installed")
+        return []
+
+    credentials = _load_sp_api_credentials()
+    if not credentials:
+        logger.warning("get_hourly_sales: no credentials")
+        return []
+
+    try:
+        day_start = datetime(target_date.year, target_date.month, target_date.day,
+                             0, 0, 0, tzinfo=CENTRAL)
+        if is_today:
+            now_ct    = datetime.now(CENTRAL)
+            day_end   = datetime(target_date.year, target_date.month, target_date.day,
+                                 now_ct.hour, max(now_ct.minute, 1), 0, tzinfo=CENTRAL)
+        else:
+            day_end   = datetime(target_date.year, target_date.month, target_date.day,
+                                 23, 59, 0, tzinfo=CENTRAL)
+
+        @retry_with_backoff(max_retries=2, base_delay=1.0, max_delay=10.0)
+        def _call():
+            api = SalesAPI(credentials=credentials, marketplace=Marketplaces.US)
+            return api.get_order_metrics(
+                interval=(day_start, day_end),
+                granularity=Granularity.HOUR,
+            )
+
+        response = _call()
+        metrics  = response.payload or []
+
+        # Build hour→data map; default all 24 hours to zero
+        hour_map = {h: {'hour': h, 'sales': 0.0, 'units': 0, 'orders': 0}
+                    for h in range(24)}
+
+        for m in metrics:
+            interval  = m.get('interval') or {}
+            start_str = interval.get('startTime', '') if isinstance(interval, dict) else ''
+            if start_str:
+                try:
+                    start_dt = datetime.fromisoformat(start_str.replace('Z', '+00:00'))
+                    h_ct     = start_dt.astimezone(CENTRAL).hour
+                except Exception:
+                    h_ct = -1
+            else:
+                h_ct = -1
+
+            if h_ct < 0 or h_ct > 23:
+                continue
+
+            ts     = m.get('totalSales') or {}
+            sales_ = float(ts.get('amount', 0) or 0) if isinstance(ts, dict) else float(ts or 0)
+            units_ = int(m.get('unitCount', 0) or 0)
+            ords_  = int(m.get('orderCount', 0) or 0)
+            hour_map[h_ct] = {'hour': h_ct, 'sales': round(sales_, 2),
+                              'units': units_, 'orders': ords_}
+
+        result = [hour_map[h] for h in range(24)]
+        _hourly_sales_cache[date_str] = (result, now_ts)
+        total = sum(r['sales'] for r in result)
+        logger.info(f"get_hourly_sales({target_date}): {len(metrics)} hourly points, total=${total:,.2f}")
+        return result
+
+    except Exception as e:
+        logger.warning(f"get_hourly_sales({target_date}) error: {e}")
+        return []
+
+
+_ly_full_day_cache: dict = {}
+_LY_FULL_DAY_CACHE_TTL = 86400  # 24 hours (LY date is always a past date)
+
+
+def get_ly_full_day_sales(ly_date) -> tuple:
+    """Fetch LY full-day sales/units/orders for a date via SP-API getOrderMetrics (TOTAL).
+
+    Used as a fallback when daily_sales table has no entry for the LY date.
+    Returns (total_sales: float, unit_count: int, order_count: int).
+    Cached for 24 hours.
+    """
+    import time as _t
+    global _ly_full_day_cache
+
+    date_str = str(ly_date)
+    now_ts = _t.time()
+    if date_str in _ly_full_day_cache:
+        cached_val, cached_at = _ly_full_day_cache[date_str]
+        if now_ts - cached_at < _LY_FULL_DAY_CACHE_TTL:
+            logger.debug(f"get_ly_full_day_sales: cache hit {date_str}")
+            return cached_val
+
+    try:
+        from sp_api.api import Sales as SalesAPI
+        from sp_api.base import Marketplaces
+        from sp_api.base.sales_enum import Granularity
+    except ImportError:
+        logger.warning("get_ly_full_day_sales: sp_api library not installed")
+        return (0.0, 0, 0)
+
+    credentials = _load_sp_api_credentials()
+    if not credentials:
+        logger.warning("get_ly_full_day_sales: no credentials")
+        return (0.0, 0, 0)
+
+    try:
+        CENTRAL = ZoneInfo("America/Chicago")
+        day_start = datetime(ly_date.year, ly_date.month, ly_date.day,
+                             0, 0, 0, tzinfo=CENTRAL)
+        day_end   = datetime(ly_date.year, ly_date.month, ly_date.day,
+                             23, 59, 0, tzinfo=CENTRAL)
+
+        @retry_with_backoff(max_retries=2, base_delay=1.0, max_delay=10.0)
+        def _call():
+            api = SalesAPI(credentials=credentials, marketplace=Marketplaces.US)
+            return api.get_order_metrics(
+                interval=(day_start, day_end),
+                granularity=Granularity.TOTAL,
+            )
+
+        response = _call()
+        metrics  = response.payload or []
+
+        if not metrics:
+            result = (0.0, 0, 0)
+        else:
+            m      = metrics[0]
+            ts     = m.get('totalSales') or {}
+            sales_ = float(ts.get('amount', 0) or 0) if isinstance(ts, dict) else float(ts or 0)
+            units_ = int(m.get('unitCount', 0) or 0)
+            ords_  = int(m.get('orderCount', 0) or 0)
+            result = (round(sales_, 2), units_, ords_)
+
+        _ly_full_day_cache[date_str] = (result, now_ts)
+        logger.info(f"get_ly_full_day_sales({ly_date}): ${result[0]:,.2f} / {result[1]} units / {result[2]} orders")
+        return result
+
+    except Exception as e:
+        logger.warning(f"get_ly_full_day_sales error: {e}")
+        return (0.0, 0, 0)
 
 
 def _sync_fc_inventory():
