@@ -113,20 +113,20 @@ function stackedBarSVG(data, W=1100, H=130) {
   return s + '</svg>';
 }
 
-function yoyBarSVG(data, forecast={}, yearVis={y2024:true,y2025:true,y2026:true}, W=1100, H=195) {
+function yoyBarSVG(data, forecast={}, yearVis={y2024:true,y2025:true,y2026:true}, W=1100, H=195, currentMonth=null) {
   if (!data || data.length === 0) return '<div style="color:#374f66;padding:20px;text-align:center;font-size:12px">No YOY data</div>';
   const CC = {y2024:B.dim, y2025:B.b2, y2026:B.o2, forecast:'#f59e0b'};
   // Build active bar definitions (only visible years + forecast when y2026 visible)
   const barDefs = [
-    yearVis.y2024 && {key:'y2024',   color:CC.y2024,    lc:'#8899aa', lbl:'2024'},
-    yearVis.y2025 && {key:'y2025',   color:CC.y2025,    lc:B.b3,      lbl:'2025'},
-    yearVis.y2026 && {key:'y2026',   color:CC.y2026,    lc:B.o3,      lbl:'2026 Actual'},
-    yearVis.y2026 && {key:'forecast',color:CC.forecast,  lc:'#fbbf24', lbl:'2026 Forecast'},
+    yearVis.y2024 && {key:'y2024',   color:CC.y2024,  lc:'#8899aa', lbl:"'24 Act"},
+    yearVis.y2025 && {key:'y2025',   color:CC.y2025,  lc:B.b3,      lbl:"'25 Act"},
+    yearVis.y2026 && {key:'y2026',   color:CC.y2026,  lc:B.o3,      lbl:"'26 Act"},
+    yearVis.y2026 && {key:'forecast',color:CC.forecast,lc:'#fbbf24', lbl:"'26 Proj"},
   ].filter(Boolean);
   const nBars = Math.max(barDefs.length, 1);
   const hasForecast = Object.keys(forecast).length > 0;
 
-  const pad = {t:28,r:16,b:26,l:58};
+  const pad = {t:30,r:16,b:26,l:58};
   // Compute max value across all visible bars including forecast
   const allVals = data.flatMap(d => barDefs.map(b =>
     b.key === 'forecast' ? (forecast[d.month_num]||0) : (d[b.key]||0)
@@ -140,33 +140,95 @@ function yoyBarSVG(data, forecast={}, yearVis={y2024:true,y2025:true,y2026:true}
   const groupX = mi => pad.l + mi*slotW + (slotW-groupW)/2;
   const barX   = (mi,bi) => groupX(mi) + bi*(bw+innerGap);
   const barH   = v => Math.max(((v||0)/maxV)*ih, (v||0) > 0 ? 3 : 0);
+  const fmtTip = v => v>=1e6?`$${(v/1e6).toFixed(2)}M`:v>=1000?`$${(v/1000).toFixed(1)}k`:`$${Math.round(v)}`;
+  const fmtLbl = v => v>=1e6?`$${(v/1e6).toFixed(1)}M`:v>=1000?`$${Math.round(v/1000)}k`:`$${Math.round(v)}`;
+
+  // ── Summary totals for top-right panel ──
+  const fy24Total = data.reduce((s,d)=>s+(d.y2024||0),0);
+  const fy25Total = data.reduce((s,d)=>s+(d.y2025||0),0);
+  const ytd26     = data.reduce((s,d)=>s+(d.y2026||0),0);
+  const proj26    = ytd26 + Object.values(forecast).reduce((s,v)=>s+v,0);
+
+  // y2026 barDef index (for placeholder positioning)
+  const bi26 = barDefs.findIndex(b=>b.key==='y2026');
 
   let s = `<svg width="100%" viewBox="0 0 ${W} ${H}" style="overflow:visible;display:block">`;
+
+  // ── Summary mini-panel (top-right, above grid) ──
+  const sumItems = [];
+  if (yearVis.y2024) sumItems.push({lbl:'FY 24', val:fy24Total, col:CC.y2024});
+  if (yearVis.y2025) sumItems.push({lbl:'FY 25', val:fy25Total, col:CC.y2025});
+  if (yearVis.y2026) sumItems.push({lbl:"'26 YTD", val:ytd26, col:CC.y2026});
+  if (yearVis.y2026 && hasForecast) sumItems.push({lbl:"'26 Proj", val:proj26, col:CC.forecast});
+  const sBoxW=62, sBoxH=24, sGap=5;
+  const sTotW = sumItems.length*(sBoxW+sGap)-sGap;
+  const sStartX = W - pad.r - sTotW;
+  sumItems.forEach((item,i)=>{
+    const sx = sStartX + i*(sBoxW+sGap);
+    s+=`<rect x="${sx}" y="2" width="${sBoxW}" height="${sBoxH}" rx="4" fill="#0b1829" stroke="${item.col}44" stroke-width="0.8"/>`;
+    s+=`<text x="${(sx+sBoxW/2).toFixed(1)}" y="11" text-anchor="middle" font-size="7" fill="${B.sub}">${item.lbl}</text>`;
+    s+=`<text x="${(sx+sBoxW/2).toFixed(1)}" y="22" text-anchor="middle" font-size="10.5" font-weight="700" fill="${item.col}">${fmtLbl(item.val)}</text>`;
+  });
+
   // Grid lines
   for (let i=0;i<=3;i++) {
     const v=maxV*(i/3);
     s+=`<line x1="${pad.l}" y1="${(pad.t+ih*(1-i/3)).toFixed(1)}" x2="${W-pad.r}" y2="${(pad.t+ih*(1-i/3)).toFixed(1)}" stroke="#1a2f4a" stroke-width="0.5"/>`;
-    s+=`<text x="${pad.l-5}" y="${(pad.t+ih*(1-i/3)+4).toFixed(1)}" text-anchor="end" font-size="9" fill="#374f66">${f$(v)}</text>`;
+    s+=`<text x="${pad.l-5}" y="${(pad.t+ih*(1-i/3)+4).toFixed(1)}" text-anchor="end" font-size="9" fill="#374f66">${fmtLbl(v)}</text>`;
   }
-  // Bars
+
+  // Bars + dotted placeholders
   data.forEach((d,mi) => {
+    const mn = d.month_num;
+    const isCurrent = currentMonth!=null && mn===currentMonth;
     barDefs.forEach((bar,bi) => {
-      const v = bar.key==='forecast' ? (forecast[d.month_num]||null) : d[bar.key];
+      const v = bar.key==='forecast' ? (forecast[mn]||null) : d[bar.key];
+      const isFcst = bar.key==='forecast';
+
+      // Dotted placeholder: y2026 slot is empty but we have a forecast → draw dashed outline
+      if (bar.key==='y2026' && (v==null||v<=0) && forecast[mn]>0) {
+        const fh = barH(forecast[mn]);
+        const bx = barX(mi, bi);
+        s+=`<rect x="${bx.toFixed(1)}" y="${(pad.t+ih-fh).toFixed(1)}" width="${bw.toFixed(1)}" height="${fh.toFixed(1)}" rx="2" fill="none" stroke="${CC.y2026}" stroke-width="1.2" stroke-dasharray="3,2" opacity="0.45"/>`;
+        return;
+      }
+
       if (v==null||v<=0) return;
       const hh = barH(v);
       const bx = barX(mi,bi);
-      const isFcst = bar.key==='forecast';
-      s += `<rect x="${bx.toFixed(1)}" y="${(pad.t+ih-hh).toFixed(1)}" width="${bw.toFixed(1)}" height="${hh.toFixed(1)}" fill="${bar.color}" rx="2" opacity="${isFcst?0.7:bar.key==='y2026'?1:0.82}"${isFcst?' stroke-dasharray="3,2" stroke="#f59e0b" stroke-width="0.8"':''}/>`;
-      if (v>0) {
-        const lbl = v>=1e6?`$${(v/1e6).toFixed(1)}M`:v>=1000?`$${Math.round(v/1000)}k`:`$${Math.round(v)}`;
-        s += `<text x="${(bx+bw/2).toFixed(1)}" y="${(pad.t+ih-hh-3).toFixed(1)}" text-anchor="middle" font-size="7" font-weight="600" fill="${bar.lc}">${lbl}</text>`;
-      }
+
+      // Hover tooltip text
+      let ttip='';
+      const fv=fmtTip(v);
+      if (bar.key==='y2024')    ttip=`${d.month} '24 Act: ${fv}`;
+      else if (bar.key==='y2025') ttip=`${d.month} '25 Act: ${fv}`;
+      else if (bar.key==='y2026') ttip=isCurrent?`${d.month} '26 MTD: ${fv}`:`${d.month} '26 Act: ${fv}`;
+      else                        ttip=`${d.month} '26 Proj: ${fv}`;
+
+      s+=`<rect x="${bx.toFixed(1)}" y="${(pad.t+ih-hh).toFixed(1)}" width="${bw.toFixed(1)}" height="${hh.toFixed(1)}" fill="${bar.color}" rx="2" opacity="${isFcst?0.7:bar.key==='y2026'?1:0.82}"${isFcst?' stroke-dasharray="3,2" stroke="#f59e0b" stroke-width="0.8"':''}><title>${ttip}</title></rect>`;
+      if (v>0) s+=`<text x="${(bx+bw/2).toFixed(1)}" y="${(pad.t+ih-hh-3).toFixed(1)}" text-anchor="middle" font-size="7" font-weight="600" fill="${bar.lc}">${fmtLbl(v)}</text>`;
     });
-    s += `<text x="${(groupX(mi)+groupW/2).toFixed(1)}" y="${H-6}" text-anchor="middle" font-size="9" fill="#374f66">${d.month}</text>`;
+    s+=`<text x="${(groupX(mi)+groupW/2).toFixed(1)}" y="${H-6}" text-anchor="middle" font-size="9" fill="#374f66">${d.month}</text>`;
   });
-  // Legend (skip forecast entry if no forecast data)
-  barDefs.filter(b=>b.key!=='forecast'||hasForecast).forEach((b,i)=>
-    s+=`<g transform="translate(${pad.l+i*105},${pad.t-16})"><rect width="8" height="8" y="-1" rx="2" fill="${b.color}"/><text x="11" y="7" font-size="9" fill="${B.sub}">${b.lbl}</text></g>`);
+
+  // Legend (skip forecast if no data; add dashed-outline entry for future months placeholder)
+  const legItems = barDefs.filter(b=>b.key!=='forecast'||hasForecast);
+  legItems.forEach((b,i)=>{
+    const lx=pad.l+i*100;
+    const rectFill = b.color;
+    const isFC = b.key==='forecast';
+    s+=`<g transform="translate(${lx},${pad.t-18})">`;
+    s+=`<rect width="8" height="8" y="-1" rx="2" fill="${isFC?'none':rectFill}" opacity="${isFC?1:0.85}"${isFC?` stroke="${b.color}" stroke-width="0.8" stroke-dasharray="2,1.5"`:''}/>`;
+    s+=`<text x="11" y="7" font-size="9" fill="${B.sub}">${b.lbl}</text></g>`;
+  });
+  // Placeholder legend entry
+  if (yearVis.y2026 && hasForecast) {
+    const lx=pad.l+legItems.length*100;
+    s+=`<g transform="translate(${lx},${pad.t-18})">`;
+    s+=`<rect width="8" height="8" y="-1" rx="2" fill="none" stroke="${CC.y2026}" stroke-width="1.2" stroke-dasharray="3,2" opacity="0.55"/>`;
+    s+=`<text x="11" y="7" font-size="9" fill="${B.sub}">Future</text></g>`;
+  }
+
   return s+'</svg>';
 }
 
@@ -1104,7 +1166,7 @@ export default function Sales({ filters = {} }) {
           </div>
         </div>
         {errors.yoy && <div style={{padding:'12px 14px',color:'#fb923c',fontSize:11,background:'rgba(251,146,60,.08)',border:'1px solid rgba(251,146,60,.18)',borderRadius:8}}>⚠ {errors.yoy}</div>}
-        {loading.yoy ? <Spinner/> : svgChart(yoyBarSVG(yoyMonths, forecastMap, yearVis))}
+        {loading.yoy ? <Spinner/> : svgChart(yoyBarSVG(yoyMonths, forecastMap, yearVis, 1100, 195, yoyMeta?.current_month))}
       </div>
 
       {/* Sales $ Trend */}
