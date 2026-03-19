@@ -1066,7 +1066,7 @@ export default function Sales({ filters = {} }) {
         const tod = periodCols?.['Today'] || {};
         // TY NOW
         const tyS   = tod.sales  || 0;
-        const tyU   = tod.units  || 0;
+        const tyU   = Math.max(0, tod.units  || 0);
         const tyO   = tod.orders || 0;
         const tyAur = tyU > 0 ? tyS / tyU : 0;
         // LY NOW (same time last year)
@@ -1076,7 +1076,7 @@ export default function Sales({ filters = {} }) {
         const lyNowAur = lyNowU > 0 ? lyNowS / lyNowU : 0;
         // TY EOD Forecast
         const tyFcstS   = tod.ty_forecast        || 0;
-        const tyFcstU   = tod.ty_units_forecast  || 0;
+        const tyFcstU   = Math.max(0, tod.ty_units_forecast  || 0);
         const tyFcstAur = tyFcstU > 0 ? tyFcstS / tyFcstU : 0;
         // LY EOD Actual
         const lyEodS   = tod.ly_eod_sales  ?? tod.ly_sales  ?? 0;
@@ -1222,31 +1222,24 @@ export default function Sales({ filters = {} }) {
                   <Legend items={[['Sales TY','#2E6FBB'],['Sales LY','#5B9FD4',true],['AUR TY','#22c55e'],['AUR LY','#16a34a',true]]}/>
                 </>}
               </ChartCard>
-              <ChartCard title="Units Sold & Returns" badge={cpSales} error={errors.trend}>
+              <ChartCard title="Units Sold — TY vs LY" badge={cpSales} error={errors.trend}>
                 {loading.trend ? <Spinner/> : (() => {
                   const tArr = toArr(trend);
                   if (!tArr || tArr.length < 2) return <div style={{color:'var(--txt3)',padding:20,textAlign:'center',fontSize:12}}>No data</div>;
-                  const W=1100,H=165,pad={t:14,r:64,b:24,l:54};
+                  const W=1100,H=165,pad={t:14,r:20,b:24,l:54};
                   const iw=W-pad.l-pad.r, ih=H-pad.t-pad.b, n=tArr.length;
                   const xB=i=>pad.l+((i+0.5)/n)*iw;
                   const uvArr=tArr.flatMap(d=>[d.ty_units,d.ly_units]).filter(v=>v!=null&&v>=0);
                   const umx=Math.max(...uvArr,1);
                   const yU=v=>pad.t+ih-Math.min(1,Math.max(0,(v||0)/umx))*ih;
-                  const rvArr=tArr.flatMap(d=>[d.ty_returns_amount,d.ly_returns_amount]).filter(v=>v!=null&&v>0);
-                  const rmx=rvArr.length?Math.max(...rvArr)*1.4:1;
-                  const yR=v=>pad.t+ih-Math.min(1,Math.max(0,(v||0)/rmx))*ih;
                   const bw=Math.max(3,Math.floor((iw/n)*0.35));
                   let s=`<svg width="100%" viewBox="0 0 ${W} ${H}" style="overflow:visible;display:block">`;
                   for(let i=0;i<=4;i++){const uval=umx/4*i,ya=yU(uval);s+=`<line x1="${pad.l}" y1="${ya.toFixed(1)}" x2="${W-pad.r}" y2="${ya.toFixed(1)}" stroke="#1a2f4a" stroke-width="0.5"/><text x="${pad.l-5}" y="${(ya+4).toFixed(1)}" text-anchor="end" font-size="9" fill="#5b7fa0">${fN(uval)}</text>`;}
-                  for(let i=1;i<=4;i++){const rval=rmx/4*i,ya=yR(rval);s+=`<text x="${W-pad.r+5}" y="${(ya+4).toFixed(1)}" text-anchor="start" font-size="9" fill="#ef444488">${f$(rval)}</text>`;}
-                  s+=`<text x="${W-pad.r+5}" y="${pad.t-2}" text-anchor="start" font-size="8" fill="#ef4444" font-weight="600">Returns →</text>`;
                   const step=Math.max(1,Math.floor(n/7));
                   tArr.forEach((d,i)=>{if(i%step===0||i===n-1)s+=`<text x="${xB(i).toFixed(1)}" y="${H-4}" text-anchor="middle" font-size="8" fill="#374f66">${d.date?d.date.slice(5):''}</text>`;});
-                  tArr.forEach((d,i)=>{if((d.ly_units||0)>0){const bh=Math.max(2,(d.ly_units/umx)*ih);s+=`<rect x="${xB(i).toFixed(1)}" y="${yU(d.ly_units).toFixed(1)}" width="${bw.toFixed(1)}" height="${bh.toFixed(1)}" fill="rgba(91,159,212,.3)" rx="2"/>`;}});
+                  tArr.forEach((d,i)=>{if((d.ly_units||0)>0){const bh=Math.max(2,(d.ly_units/umx)*ih);s+=`<rect x="${xB(i).toFixed(1)}" y="${yU(d.ly_units).toFixed(1)}" width="${bw.toFixed(1)}" height="${bh.toFixed(1)}" fill="rgba(91,159,212,.35)" rx="2"/>`;}});
                   tArr.forEach((d,i)=>{if((d.ty_units||0)>0){const bh=Math.max(2,(d.ty_units/umx)*ih);s+=`<rect x="${(xB(i)-bw).toFixed(1)}" y="${yU(d.ty_units).toFixed(1)}" width="${bw.toFixed(1)}" height="${bh.toFixed(1)}" fill="${B.b1}" rx="2"/>`;}});
-                  const ptsR=tArr.map((d,i)=>(d.ty_returns_amount||0)>0?`${xB(i).toFixed(1)},${yR(d.ty_returns_amount).toFixed(1)}`:null).filter(Boolean).join(' ');
-                  if(ptsR)s+=`<polyline points="${ptsR}" fill="none" stroke="#ef4444" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>`;
-                  return <>{svgChart(s+'</svg>')}<Legend items={[['TY Units',B.b1],['LY Units','#5B9FD4'],['Returns','#ef4444']]}/></>;
+                  return <>{svgChart(s+'</svg>')}<Legend items={[['TY Units',B.b1],['LY Units','#5B9FD4',true]]}/></>;
                 })()}
               </ChartCard>
             </div>

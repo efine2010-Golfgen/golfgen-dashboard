@@ -756,7 +756,9 @@ def sales_trend(
             result.append({
                 "date": d_str,
                 "ty_sales": round(ty_s, 2),
+                "ty_units": ty_u,
                 "ly_sales": round(ly.get("sales", 0), 2) if ly else None,
+                "ly_units": ly.get("units") if ly else None,
                 "ty_sessions": ty_sess,
                 "ly_sessions": ly.get("sessions") if ly else None,
                 "ty_aur": ty_aur,
@@ -1052,7 +1054,7 @@ def sales_period_comparison(
                 if ly_same_time_sales > 0 and ly_sales > 0:
                     ty_forecast = round(sales * (ly_sales / ly_same_time_sales), 2)
                 if ly_same_time_units > 0 and ly_units > 0:
-                    ty_units_forecast = round(units * (float(ly_units) / ly_same_time_units))
+                    ty_units_forecast = max(0, round(max(0, units) * (float(ly_units) / ly_same_time_units)))
 
             result[label] = {
                 "sales": round(sales, 2), "units": units, "aur": aur,
