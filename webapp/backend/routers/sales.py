@@ -962,8 +962,32 @@ def sales_period_comparison(
             ly_same_time_units = 0
             ty_forecast        = None
             ty_units_forecast  = None
+            snapshot_time      = None
             if period_key == 'today':
                 now_ct = datetime.now(CENTRAL)
+                snapshot_time = now_ct.strftime("%-I:%M %p CT")
+
+                # TY confirmed-only: exclude Pending estimates so number matches
+                # Amazon Seller Central which shows only confirmed order revenue.
+                try:
+                    s_iso_conf = datetime(sd.year, sd.month, sd.day, 0, 0, 0, tzinfo=CENTRAL).isoformat()
+                    e_iso_conf = datetime(sd.year, sd.month, sd.day, 23, 59, 59, tzinfo=CENTRAL).isoformat()
+                    conf_row = con.execute(f"""
+                        SELECT COALESCE(SUM(order_total), 0),
+                               COALESCE(SUM(number_of_items), 0)
+                        FROM orders
+                        WHERE purchase_date >= ? AND purchase_date <= ?
+                          AND (order_status IS NULL
+                               OR order_status NOT IN ('Cancelled','Pending')) {hw}
+                    """, [s_iso_conf, e_iso_conf] + hp).fetchone()
+                    conf_sales = float(conf_row[0] or 0)
+                    conf_units = int(conf_row[1] or 0)
+                    if conf_sales > 0 or conf_units > 0:
+                        sales, units = conf_sales, conf_units
+                        aur = round(sales / units, 2) if units else aur
+                except Exception as _ex_conf:
+                    logger.warning(f"today confirmed-only query failed: {_ex_conf}")
+
                 # Use SP-API Sales.getOrderMetrics for LY same-time data.
                 # The orders table only has recent history and won't have LY rows.
                 try:
@@ -1000,6 +1024,7 @@ def sales_period_comparison(
                 "ly_eod_units":        ly_units,
                 "ty_forecast":         ty_forecast,
                 "ty_units_forecast":   ty_units_forecast,
+                "snapshot_time":       snapshot_time,
             }
 
         con.close()

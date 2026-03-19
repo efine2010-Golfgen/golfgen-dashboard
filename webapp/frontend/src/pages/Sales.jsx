@@ -698,12 +698,16 @@ export default function Sales({ filters = {} }) {
               const lyEodU  = d.ly_eod_units ?? d.ly_units;
               const lyNow   = d.ly_same_time_sales;
               const lyNowU  = d.ly_same_time_units;
+              // Compute AURs from raw sales/units — avoids 0-unit divide issues
+              const lyNowAur  = lyNowU  > 0 ? lyNow  / lyNowU  : null;
+              const lyEodAur  = lyEodU  > 0 ? lyEod  / lyEodU  : (d.ly_aur || null);
+              const tyProjAur = (d.ty_units_forecast > 0 && d.ty_forecast > 0) ? d.ty_forecast / d.ty_units_forecast : null;
               // rows: [label, TY, LY-now, delta, invert, LY-EOD, Forecast]
               const todayRows = [
-                ['Sales $',     f$(d.sales),       f$(lyNow),  pct(d.sales, lyNow),   false, f$(lyEod),  f$(d.ty_forecast)],
-                ['Units',       fN(d.units),        fN(lyNowU), pct(d.units, lyNowU),  false, fN(lyEodU), fN(d.ty_units_forecast)],
-                ['AUR',         f$(d.aur),          '—',        null,                  false, f$(d.ly_aur),        '—'],
-                ['Amazon Fees', f$(d.amazon_fees),  '—',        null,                  true,  f$(d.ly_amazon_fees),'—'],
+                ['Sales $',     f$(d.sales),       f$(lyNow),       pct(d.sales, lyNow),   false, f$(lyEod),       f$(d.ty_forecast)],
+                ['Units',       fN(d.units),        fN(lyNowU),      pct(d.units, lyNowU),  false, fN(lyEodU),      fN(d.ty_units_forecast)],
+                ['AUR',         f$(d.aur),          f$(lyNowAur),    pct(d.aur, lyNowAur),  false, f$(lyEodAur),    f$(tyProjAur)],
+                ['Amazon Fees', f$(d.amazon_fees),  '—',             null,                  true,  f$(d.ly_amazon_fees),'—'],
                 ['Returns',     d.returns_amount > 0 ? `${d.returns}·${f$(d.returns_amount)}` : fN(d.returns),
                                 '—', null, true,
                                 d.ly_returns_amount > 0 ? `${d.ly_returns}·${f$(d.ly_returns_amount)}` : fN(d.ly_returns), '—'],
@@ -715,7 +719,9 @@ export default function Sales({ filters = {} }) {
                 <div key={p} style={{flex:'1 1 445px',minWidth:445,background:'var(--card2)',border:'1px solid var(--acc1)',borderRadius:12,padding:'12px 14px',transition:'background .3s',boxShadow:'0 0 0 1px rgba(46,207,170,.15)'}}>
                   <div style={{display:'flex',alignItems:'baseline',gap:8,paddingBottom:9,borderBottom:'1px solid var(--brd)',marginBottom:9}}>
                     <span style={{fontSize:10,fontWeight:700,textTransform:'uppercase',letterSpacing:'.12em',color:B.b2}}>Today</span>
-                    <span style={{fontSize:9,color:'var(--txt3)'}}>so far · LY = same time last year</span>
+                    <span style={{fontSize:9,color:'var(--txt3)'}}>
+                      {d.snapshot_time ? `through ${d.snapshot_time}` : 'so far'}{' · LY = same time last year'}
+                    </span>
                   </div>
                   <div style={{display:'grid',gridTemplateColumns:'82px 62px 62px 50px 62px 70px',columnGap:4,rowGap:6,alignItems:'center'}}>
                     {/* header */}
