@@ -960,59 +960,80 @@ export default function Sales({ filters = {} }) {
                       {d.snapshot_time ? `through ${d.snapshot_time}` : 'so far'}{' · LY = same time last year'}
                     </span>
                   </div>
-                  {/* 8-col grid: Label | TY NOW | LY NOW | CHG | ‖ | TY FCST | LY EOD | CHG
-                      Column 5 is a 10px visual divider separating the two groups            */}
-                  <div style={{display:'grid',gridTemplateColumns:'76px 68px 64px 40px 10px 68px 64px 40px',columnGap:4,rowGap:0,alignItems:'start'}}>
-                    {/* group header labels */}
-                    <span/>
-                    <span style={{gridColumn:'2/5',fontSize:8,fontWeight:700,color:'var(--txt3)',textTransform:'uppercase',letterSpacing:'.06em',paddingBottom:2,borderBottom:'1px solid var(--brd)',marginBottom:3}}>NOW vs LY</span>
-                    {/* divider spacer for group header row */}
-                    <span style={{gridColumn:'5/6'}}/>
-                    <span style={{gridColumn:'6/9',fontSize:8,fontWeight:700,color:'var(--txt3)',textTransform:'uppercase',letterSpacing:'.06em',paddingBottom:2,borderBottom:'1px solid var(--brd)',marginBottom:3}}>FORECAST vs LY EOD</span>
-                    {/* column headers */}
-                    <span/>
-                    <span style={{fontSize:9,fontWeight:700,color:'var(--txt3)',textTransform:'uppercase',letterSpacing:'.04em',paddingBottom:6}}>TY NOW</span>
-                    <span style={{fontSize:9,fontWeight:700,color:B.b3,textTransform:'uppercase',letterSpacing:'.04em',paddingBottom:6}}>LY NOW</span>
-                    <span style={{fontSize:9,fontWeight:700,color:'var(--txt3)',textTransform:'uppercase',letterSpacing:'.04em',paddingBottom:6}}>CHG</span>
-                    {/* divider column header */}
-                    <span style={{borderLeft:'1px solid var(--brd)',alignSelf:'stretch',marginLeft:3}}/>
-                    <span style={{fontSize:9,fontWeight:700,color:B.t2,textTransform:'uppercase',letterSpacing:'.04em',paddingBottom:6}}>TY FCST</span>
-                    <span style={{fontSize:9,fontWeight:700,color:'var(--txt3)',textTransform:'uppercase',letterSpacing:'.04em',paddingBottom:6}}>LY EOD</span>
-                    <span style={{fontSize:9,fontWeight:700,color:'var(--txt3)',textTransform:'uppercase',letterSpacing:'.04em',paddingBottom:6}}>CHG</span>
-                    {todayRows.flatMap(([l, ty, lyNowV, delta, inv, fcst, lyEodV]) => {
+                  {/* Two side-by-side group boxes. Rows share the same minHeight so they
+                      stay visually aligned across the two boxes.                         */}
+                  {(() => {
+                    const hdr = {fontSize:9,fontWeight:700,textTransform:'uppercase',letterSpacing:'.04em',paddingBottom:5};
+                    const rowMinH = (isRet) => isRet ? 34 : 26;
+                    const rowH   = (isRet) => ({minHeight:rowMinH(isRet),display:'flex',alignItems:'center'});
+                    const retH   = (isRet) => ({minHeight:rowMinH(isRet),display:'flex',flexDirection:'column',justifyContent:'center',gap:1});
+                    const retCell = (l, val, baseStyle, amtStyle, unitsStyle) => {
                       const isRet = l === 'Returns';
-                      const rowH = {minHeight: isRet ? 34 : 26, display:'flex', alignItems:'center'};
-                      const retH = {minHeight: isRet ? 34 : 26, display:'flex', flexDirection:'column', justifyContent:'center', gap:1};
-                      // two-line Returns cell renderer
-                      const retCell = (val, baseStyle, amtStyle, unitsStyle) => isRet
-                        ? <div style={retH}>
+                      return isRet
+                        ? <div style={retH(true)}>
                             <span style={amtStyle}>{val.amt > 0 ? f$(val.amt) : '—'}</span>
                             {val.units > 0 && <span style={unitsStyle}>{val.units} units</span>}
                           </div>
-                        : <span style={{...rowH,...baseStyle}}>{fmt(l, val)}</span>;
-                      return [
-                        <span key={l+'-l'} style={{...rowH,fontSize:10,color:'var(--txt3)',overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>{l}</span>,
-                        retCell(ty,
-                          {fontSize:11,fontWeight:600,color:'var(--txt)'},
-                          {fontSize:11,fontWeight:600,color:'var(--txt)'},
-                          {fontSize:8,color:'var(--txt3)'}),
-                        isRet
-                          ? <span key={l+'-ln'} style={{...rowH,fontSize:10,color:B.b3}}>—</span>
-                          : <span key={l+'-ln'} style={{...rowH,fontSize:10,color:B.b3}}>{lyNowV != null ? fmt(l, lyNowV) : '—'}</span>,
-                        <span key={l+'-chg'} style={rowH}>{pctEl(delta, inv, l+'-chg-inner')}</span>,
-                        /* divider cell */
-                        <span key={l+'-div'} style={{...rowH,borderLeft:'1px solid var(--brd)',marginLeft:3}}/>,
-                        isRet
-                          ? <span key={l+'-fc'} style={{...rowH,fontSize:11,fontWeight:700,color:B.t2}}>—</span>
-                          : <span key={l+'-fc'} style={{...rowH,fontSize:11,fontWeight:700,color:B.t2}}>{fcst != null ? fmt(l, fcst) : '—'}</span>,
-                        retCell(lyEodV,
-                          {fontSize:10,color:'var(--txt2)'},
-                          {fontSize:10,color:'var(--txt2)'},
-                          {fontSize:8,color:'var(--txt3)'}),
-                        <span key={l+'-vs'} style={rowH}>{isRet ? pctEl(pct(ty.amt, lyEodV.amt), inv, l+'-vs-inner') : pctEl(pct(fcst, lyEodV), inv, l+'-vs-inner')}</span>,
-                      ];
-                    })}
-                  </div>
+                        : <span style={{...rowH(false),...baseStyle}}>{fmt(l, val)}</span>;
+                    };
+                    return (
+                      <div style={{display:'flex',gap:10,alignItems:'flex-start'}}>
+
+                        {/* ── GROUP 1: Label | TY NOW | LY NOW | CHG ── */}
+                        <div style={{flex:'0 0 auto',background:'rgba(46,207,170,.05)',border:'1px solid rgba(46,207,170,.18)',borderRadius:8,padding:'6px 8px'}}>
+                          <div style={{fontSize:8,fontWeight:700,color:'var(--acc1)',textTransform:'uppercase',letterSpacing:'.06em',textAlign:'center',marginBottom:5}}>NOW vs LY</div>
+                          <div style={{display:'grid',gridTemplateColumns:'76px 68px 62px 40px',columnGap:4,rowGap:0,alignItems:'start'}}>
+                            {/* headers */}
+                            <span/>
+                            <span style={{...hdr,color:'var(--txt3)'}}>TY NOW</span>
+                            <span style={{...hdr,color:B.b3}}>LY NOW</span>
+                            <span style={{...hdr,color:'var(--txt3)'}}>CHG</span>
+                            {/* data rows */}
+                            {todayRows.map(([l, ty, lyNowV, delta, inv]) => {
+                              const isRet = l === 'Returns';
+                              return [
+                                <span key={l+'-l'} style={{...rowH(isRet),fontSize:10,color:'var(--txt3)',overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>{l}</span>,
+                                retCell(l, ty,
+                                  {fontSize:11,fontWeight:600,color:'var(--txt)'},
+                                  {fontSize:11,fontWeight:600,color:'var(--txt)'},
+                                  {fontSize:8,color:'var(--txt3)'}),
+                                isRet
+                                  ? <span key={l+'-ln'} style={rowH(true)}>—</span>
+                                  : <span key={l+'-ln'} style={{...rowH(false),fontSize:10,color:B.b3}}>{lyNowV != null ? fmt(l, lyNowV) : '—'}</span>,
+                                <span key={l+'-chg'} style={rowH(isRet)}>{pctEl(delta, inv, l+'-chg-inner')}</span>,
+                              ];
+                            })}
+                          </div>
+                        </div>
+
+                        {/* ── GROUP 2: TY FCST | LY EOD | CHG ── */}
+                        <div style={{flex:'0 0 auto',background:'rgba(245,158,11,.05)',border:'1px solid rgba(245,158,11,.18)',borderRadius:8,padding:'6px 8px'}}>
+                          <div style={{fontSize:8,fontWeight:700,color:B.t2,textTransform:'uppercase',letterSpacing:'.06em',textAlign:'center',marginBottom:5}}>FORECAST vs EOD</div>
+                          <div style={{display:'grid',gridTemplateColumns:'68px 62px 40px',columnGap:4,rowGap:0,alignItems:'start'}}>
+                            {/* headers */}
+                            <span style={{...hdr,color:B.t2}}>TY FCST</span>
+                            <span style={{...hdr,color:'var(--txt3)'}}>LY EOD</span>
+                            <span style={{...hdr,color:'var(--txt3)'}}>CHG</span>
+                            {/* data rows */}
+                            {todayRows.map(([l, ty, , , inv, fcst, lyEodV]) => {
+                              const isRet = l === 'Returns';
+                              return [
+                                isRet
+                                  ? <span key={l+'-fc'} style={{...rowH(true),fontSize:11,fontWeight:700,color:B.t2}}>—</span>
+                                  : <span key={l+'-fc'} style={{...rowH(false),fontSize:11,fontWeight:700,color:B.t2}}>{fcst != null ? fmt(l, fcst) : '—'}</span>,
+                                retCell(l, lyEodV,
+                                  {fontSize:10,color:'var(--txt2)'},
+                                  {fontSize:10,color:'var(--txt2)'},
+                                  {fontSize:8,color:'var(--txt3)'}),
+                                <span key={l+'-vs'} style={rowH(isRet)}>{isRet ? pctEl(pct(ty.amt, lyEodV.amt), inv, l+'-vs-inner') : pctEl(pct(fcst, lyEodV), inv, l+'-vs-inner')}</span>,
+                              ];
+                            })}
+                          </div>
+                        </div>
+
+                      </div>
+                    );
+                  })()}
                 </div>
               );
             }

@@ -2781,12 +2781,36 @@ def hourly_heatmap(
             "orders": int(row[4] or 0),
         }
 
-    # ── Fire background fill for today only if we have no data yet ──
-    # (Non-blocking: returns immediately, scheduler fills history over time)
+    # ── Populate today's data synchronously if missing, recent gaps in background ──
     today_str = str(today_ct)
     if today_str not in db_map or not db_map[today_str]:
-        import threading
-        threading.Thread(target=save_hourly_to_db, args=(today_ct,), daemon=True).start()
+        # Fetch synchronously so the response includes real data on first load
+        try:
+            from services.sp_api import get_hourly_sales
+            live_rows = get_hourly_sales(today_ct)
+            if live_rows:
+                db_map[today_str] = {r['hour']: r for r in live_rows}
+                logger.info(f"hourly_heatmap: live-fetched today ({today_str}) — {len(live_rows)} hours")
+                # Persist to DB in background
+                import threading
+                threading.Thread(target=save_hourly_to_db, args=(today_ct,), daemon=True).start()
+            else:
+                logger.warning(f"hourly_heatmap: live fetch for today returned no rows")
+        except Exception as _hm_ex:
+            logger.warning(f"hourly_heatmap: live fetch failed: {_hm_ex}")
+
+    # Back-fill recent days that are missing (last 3 days, 1 per request max)
+    recent_cutoff = today_ct - timedelta(days=7)
+    for _past_d in sorted(dates, reverse=True):
+        if _past_d >= today_ct:
+            continue
+        if _past_d < recent_cutoff:
+            break
+        if str(_past_d) not in db_map or not db_map.get(str(_past_d)):
+            import threading
+            threading.Thread(target=save_hourly_to_db, args=(_past_d,), daemon=True).start()
+            logger.info(f"hourly_heatmap: kicked off background fill for {_past_d}")
+            break  # one background fill per request
 
     # ── Build response ──
     day_names = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]
