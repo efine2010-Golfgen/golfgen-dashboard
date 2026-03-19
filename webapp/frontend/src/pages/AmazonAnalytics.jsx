@@ -9,7 +9,7 @@ import ItemPlanning from "./ItemPlanning";
 import ItemMaster from "./ItemMaster";
 
 const TABS = [
-  { key: "exec-summary", label: "EXEC SUMMARY" },
+  { key: "exec-summary", label: "SALES SUMMARY" },
   { key: "item-performance", label: "ITEM PERFORMANCE" },
   { key: "profitability", label: "PROFITABILITY" },
   { key: "fba-inventory", label: "FBA INVENTORY" },

@@ -958,8 +958,8 @@ export default function Sales({ filters = {} }) {
                       {d.snapshot_time ? `through ${d.snapshot_time}` : 'so far'}{' · LY = same time last year'}
                     </span>
                   </div>
-                  {/* 7-col grid: Label | TY NOW | LY NOW | CHG | TY FCST | LY EOD | vs LY% */}
-                  <div style={{display:'grid',gridTemplateColumns:'80px 60px 58px 44px 62px 58px 44px',columnGap:4,rowGap:0,alignItems:'start'}}>
+                  {/* 7-col grid: Label | TY NOW | LY NOW | CHG | TY FCST | LY EOD | CHG */}
+                  <div style={{display:'grid',gridTemplateColumns:'80px 60px 58px 40px 62px 56px 38px',columnGap:3,rowGap:0,alignItems:'start'}}>
                     {/* header row */}
                     <span/>
                     <span style={{fontSize:9,fontWeight:700,color:'var(--txt3)',textTransform:'uppercase',letterSpacing:'.04em',paddingBottom:6}}>TY NOW</span>
@@ -967,7 +967,7 @@ export default function Sales({ filters = {} }) {
                     <span style={{fontSize:9,fontWeight:700,color:'var(--txt3)',textTransform:'uppercase',letterSpacing:'.04em',paddingBottom:6}}>CHG</span>
                     <span style={{fontSize:9,fontWeight:700,color:B.t2,textTransform:'uppercase',letterSpacing:'.04em',paddingBottom:6}}>TY FCST</span>
                     <span style={{fontSize:9,fontWeight:700,color:'var(--txt3)',textTransform:'uppercase',letterSpacing:'.04em',paddingBottom:6}}>LY EOD</span>
-                    <span style={{fontSize:9,fontWeight:700,color:'var(--txt3)',textTransform:'uppercase',letterSpacing:'.04em',paddingBottom:6}}>vs LY</span>
+                    <span style={{fontSize:9,fontWeight:700,color:'var(--txt3)',textTransform:'uppercase',letterSpacing:'.04em',paddingBottom:6}}>CHG</span>
                     {todayRows.flatMap(([l, ty, lyNowV, delta, inv, fcst, lyEodV]) => {
                       const isRet = l === 'Returns';
                       const rowH = {minHeight: isRet ? 34 : 26, display:'flex', alignItems:'center'};

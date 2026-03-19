@@ -2692,7 +2692,7 @@ def save_hourly_to_db(target_date=None):
         return 0
 
 
-@router.get("/sales/hourly-heatmap")
+@router.get("/api/sales/hourly-heatmap")
 def hourly_heatmap(
     days: int = Query(30, ge=1, le=90),
     division: str = Query(""),
