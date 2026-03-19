@@ -1050,11 +1050,23 @@ def sales_period_comparison(
                     ly_same_time_units  = round(float(ly_units) * day_frac) if ly_units else 0
                     ly_same_time_orders = round(float(ly_orders) * day_frac) if ly_orders else 0
                     logger.info(f"LY NOW time-fraction fallback: {day_frac:.1%} of day → ${ly_same_time_sales:,.2f} / {ly_same_time_units} units")
-                # Forecast = TY × (LY full-day / LY same-time)  [pacing ratio]
+                # ── Sales forecast: LY pacing ratio ──────────────────────────────
+                # TY_so_far × (LY_full_day / LY_same_time) captures intraday patterns
+                # (peak hours, promotions). S&T dollar data is reliable for this.
                 if ly_same_time_sales > 0 and ly_sales > 0:
                     ty_forecast = round(sales * (ly_sales / ly_same_time_sales), 2)
-                if ly_same_time_units > 0 and ly_units > 0:
-                    ty_units_forecast = max(0, round(max(0, units) * (float(ly_units) / ly_same_time_units)))
+
+                # ── Unit forecast: time-fraction extrapolation ────────────────────
+                # Do NOT use the LY pacing ratio for units — SP-API getOrderMetrics
+                # returns net unit counts that include cancellations/adjustments.
+                # ly_same_time_units can easily EXCEED ly_units (full day) if
+                # cancellations hit after the same-time snapshot, making ratio < 1
+                # and forecasting FEWER units than are already confirmed sold.
+                # Time-fraction is simpler, robust, and always self-consistent:
+                # "I've sold N units in X% of the day → pace to N/X by EOD"
+                _day_frac_u = (now_ct.hour * 60 + now_ct.minute) / (24 * 60)
+                if _day_frac_u >= 0.04 and units > 0:  # require >=~1hr elapsed
+                    ty_units_forecast = max(units, round(units / _day_frac_u))
 
             result[label] = {
                 "sales": round(sales, 2), "units": units, "aur": aur,
