@@ -1214,13 +1214,313 @@ export default function Sales({ filters = {} }) {
               )}
             </div>
 
-            {/* Sales & AUR Trend */}
-            <ChartCard title="Sales $ & AUR Trend" badge={cpSales} error={errors.trend}>
-              {loading.trend ? <Spinner/> : <>
-                {svgChart(salesAurSVG(toArr(trend)))}
-                <Legend items={[['Sales TY','#2E6FBB'],['Sales LY','#5B9FD4',true],['AUR TY','#22c55e'],['AUR LY','#16a34a',true]]}/>
-              </>}
-            </ChartCard>
+            {/* ── Section 4: Sales Trends — 2-col ── */}
+            <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:12,marginBottom:12}}>
+              <ChartCard title="Revenue & AUR Trend" badge={cpSales} error={errors.trend}>
+                {loading.trend ? <Spinner/> : <>
+                  {svgChart(salesAurSVG(toArr(trend)))}
+                  <Legend items={[['Sales TY','#2E6FBB'],['Sales LY','#5B9FD4',true],['AUR TY','#22c55e'],['AUR LY','#16a34a',true]]}/>
+                </>}
+              </ChartCard>
+              <ChartCard title="Units Sold & Returns" badge={cpSales} error={errors.trend}>
+                {loading.trend ? <Spinner/> : (() => {
+                  const tArr = toArr(trend);
+                  if (!tArr || tArr.length < 2) return <div style={{color:'var(--txt3)',padding:20,textAlign:'center',fontSize:12}}>No data</div>;
+                  const W=1100,H=165,pad={t:14,r:64,b:24,l:54};
+                  const iw=W-pad.l-pad.r, ih=H-pad.t-pad.b, n=tArr.length;
+                  const xB=i=>pad.l+((i+0.5)/n)*iw;
+                  const uvArr=tArr.flatMap(d=>[d.ty_units,d.ly_units]).filter(v=>v!=null&&v>=0);
+                  const umx=Math.max(...uvArr,1);
+                  const yU=v=>pad.t+ih-Math.min(1,Math.max(0,(v||0)/umx))*ih;
+                  const rvArr=tArr.flatMap(d=>[d.ty_returns_amount,d.ly_returns_amount]).filter(v=>v!=null&&v>0);
+                  const rmx=rvArr.length?Math.max(...rvArr)*1.4:1;
+                  const yR=v=>pad.t+ih-Math.min(1,Math.max(0,(v||0)/rmx))*ih;
+                  const bw=Math.max(3,Math.floor((iw/n)*0.35));
+                  let s=`<svg width="100%" viewBox="0 0 ${W} ${H}" style="overflow:visible;display:block">`;
+                  for(let i=0;i<=4;i++){const uval=umx/4*i,ya=yU(uval);s+=`<line x1="${pad.l}" y1="${ya.toFixed(1)}" x2="${W-pad.r}" y2="${ya.toFixed(1)}" stroke="#1a2f4a" stroke-width="0.5"/><text x="${pad.l-5}" y="${(ya+4).toFixed(1)}" text-anchor="end" font-size="9" fill="#5b7fa0">${fN(uval)}</text>`;}
+                  for(let i=1;i<=4;i++){const rval=rmx/4*i,ya=yR(rval);s+=`<text x="${W-pad.r+5}" y="${(ya+4).toFixed(1)}" text-anchor="start" font-size="9" fill="#ef444488">${f$(rval)}</text>`;}
+                  s+=`<text x="${W-pad.r+5}" y="${pad.t-2}" text-anchor="start" font-size="8" fill="#ef4444" font-weight="600">Returns →</text>`;
+                  const step=Math.max(1,Math.floor(n/7));
+                  tArr.forEach((d,i)=>{if(i%step===0||i===n-1)s+=`<text x="${xB(i).toFixed(1)}" y="${H-4}" text-anchor="middle" font-size="8" fill="#374f66">${d.date?d.date.slice(5):''}</text>`;});
+                  tArr.forEach((d,i)=>{if((d.ly_units||0)>0){const bh=Math.max(2,(d.ly_units/umx)*ih);s+=`<rect x="${xB(i).toFixed(1)}" y="${yU(d.ly_units).toFixed(1)}" width="${bw.toFixed(1)}" height="${bh.toFixed(1)}" fill="rgba(91,159,212,.3)" rx="2"/>`;}});
+                  tArr.forEach((d,i)=>{if((d.ty_units||0)>0){const bh=Math.max(2,(d.ty_units/umx)*ih);s+=`<rect x="${(xB(i)-bw).toFixed(1)}" y="${yU(d.ty_units).toFixed(1)}" width="${bw.toFixed(1)}" height="${bh.toFixed(1)}" fill="${B.b1}" rx="2"/>`;}});
+                  const ptsR=tArr.map((d,i)=>(d.ty_returns_amount||0)>0?`${xB(i).toFixed(1)},${yR(d.ty_returns_amount).toFixed(1)}`:null).filter(Boolean).join(' ');
+                  if(ptsR)s+=`<polyline points="${ptsR}" fill="none" stroke="#ef4444" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>`;
+                  return <>{svgChart(s+'</svg>')}<Legend items={[['TY Units',B.b1],['LY Units','#5B9FD4'],['Returns','#ef4444']]}/></>;
+                })()}
+              </ChartCard>
+            </div>
+
+            {/* ── Section 5: Traffic & Conversion Pipeline ── */}
+            <div style={{background:'var(--card)',border:'1px solid var(--brd)',borderRadius:12,padding:16,marginBottom:12}}>
+              <div style={{display:'flex',alignItems:'center',gap:10,marginBottom:12}}>
+                <div style={{flex:1,height:1,background:'var(--brd)'}}/>
+                <span style={{fontSize:10,fontWeight:700,textTransform:'uppercase',letterSpacing:'.1em',color:'var(--txt3)',whiteSpace:'nowrap'}}>Traffic &amp; Conversion Pipeline</span>
+                <div style={{flex:1,height:1,background:'var(--brd)'}}/>
+              </div>
+              {Array.isArray(funnel) && funnel.length > 0 && (() => {
+                const maxV=Math.max(...funnel.map(s2=>s2.ty||0),1);
+                const sColors=[B.b3,B.b2,B.o2,B.t2];
+                const rates=funnel.map((s2,i)=>i===0?null:funnel[i-1].ty>0?((s2.ty||0)/funnel[i-1].ty*100).toFixed(1)+'%':null);
+                return (
+                  <div style={{display:'grid',gridTemplateColumns:`repeat(${funnel.length},1fr)`,gap:0,border:'1px solid var(--brd)',borderRadius:8,overflow:'hidden',marginBottom:12}}>
+                    {funnel.map((s2,i)=>{
+                      const lyDelta=s2.ly>0?((s2.ty-s2.ly)/s2.ly*100):null;
+                      const col=sColors[i%sColors.length];
+                      return (
+                        <div key={s2.label} style={{padding:'10px 14px',borderRight:i<funnel.length-1?'1px solid var(--brd)':'none',position:'relative'}}>
+                          <div style={{fontSize:10,color:'var(--txt3)',fontWeight:600,marginBottom:4,whiteSpace:'nowrap',overflow:'hidden',textOverflow:'ellipsis'}}>{s2.label}</div>
+                          <div style={{fontSize:20,fontWeight:800,color:col}}>{(s2.ty||0).toLocaleString()}</div>
+                          <div style={{height:4,background:'var(--brd)',borderRadius:2,overflow:'hidden',margin:'6px 0 4px'}}>
+                            <div style={{height:'100%',width:`${Math.max(4,(s2.ty/maxV)*100)}%`,background:col,borderRadius:2}}/>
+                          </div>
+                          {rates[i] && <div style={{fontSize:9,color:'var(--txt3)'}}>{rates[i]} step-through</div>}
+                          {lyDelta!==null && <div style={{fontSize:10,fontWeight:700,color:lyDelta>=0?'#4ade80':'#fb923c'}}>{lyDelta>=0?'▲':'▼'}{Math.abs(lyDelta).toFixed(1)}% vs LY</div>}
+                          {i<funnel.length-1 && <div style={{position:'absolute',right:-9,top:'50%',transform:'translateY(-50%)',fontSize:14,color:'var(--brd2)',zIndex:1}}>›</div>}
+                        </div>
+                      );
+                    })}
+                  </div>
+                );
+              })()}
+              <div style={{display:'grid',gridTemplateColumns:'3fr 1fr',gap:12}}>
+                <ChartCard title="Sessions & Conversion Rate" badge={cpSales} error={errors.trendTraffic} noMargin>
+                  {loading.trendTraffic ? <Spinner/> : <>
+                    {svgChart(sessionsConvSVG(toArr(trendTraffic)))}
+                    <Legend items={[['Sessions TY',B.o2],['Sessions LY',B.sub,true],['Conv% TY',B.t2]]}/>
+                  </>}
+                </ChartCard>
+                <div style={{display:'flex',flexDirection:'column',gap:10}}>
+                  <div style={{background:'var(--card2)',border:'1px solid var(--brd)',borderRadius:10,padding:'12px 14px'}}>
+                    <div style={{fontSize:9,fontWeight:700,textTransform:'uppercase',letterSpacing:'.08em',color:'var(--txt3)',marginBottom:8}}>Traffic KPIs · MTD</div>
+                    {metricsTraffic && [
+                      ['Page Views', fN(metricsTraffic.glance_views||0), metricsTraffic.glance_views||0, metricsTraffic.ly_glance_views||0],
+                      ['Sessions',   fN(metricsTraffic.sessions||0),     metricsTraffic.sessions||0,     metricsTraffic.ly_sessions||0],
+                      ['Conv %',     fP(metricsTraffic.conversion||0),   metricsTraffic.conversion||0,   metricsTraffic.ly_conversion||0],
+                      ['Buy Box %',  fP(metricsTraffic.buy_box||0),      metricsTraffic.buy_box||0,      metricsTraffic.ly_buy_box||0],
+                    ].map(([lbl,val,ty,ly2])=>{
+                      const delta=ly2>0?((ty-ly2)/ly2*100):null;
+                      return (
+                        <div key={lbl} style={{display:'flex',justifyContent:'space-between',alignItems:'center',padding:'4px 0',borderBottom:'1px solid rgba(26,47,74,.4)'}}>
+                          <span style={{fontSize:11,color:'var(--txt3)'}}>{lbl}</span>
+                          <div style={{display:'flex',alignItems:'center',gap:5}}>
+                            <span style={{fontSize:13,fontWeight:700,color:'var(--txt)'}}>{val}</span>
+                            {delta!==null && <span style={{fontSize:9,fontWeight:700,padding:'1px 5px',borderRadius:4,background:delta>=0?'rgba(34,197,94,.12)':'rgba(239,68,68,.12)',color:delta>=0?'#4ade80':'#f87171'}}>{delta>=0?'▲':'▼'}{Math.abs(delta).toFixed(1)}%</span>}
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                  <div style={{background:'var(--card2)',border:'1px solid var(--brd)',borderRadius:10,padding:'12px 14px'}}>
+                    <div style={{fontSize:9,fontWeight:700,textTransform:'uppercase',letterSpacing:'.08em',color:'var(--txt3)',marginBottom:8}}>Advertising · MTD</div>
+                    {[
+                      ['Ad Spend', f$(m.ad_spend||0), m.ad_spend||0, m.ly_ad_spend||0, true],
+                      ['ROAS',     fX(m.roas||0),     m.roas||0,     m.ly_roas||0,     false],
+                      ['TACOS',    fP(m.tacos||0),    m.tacos||0,    m.ly_tacos||0,    true],
+                    ].map(([lbl,val,ty,ly2,inv])=>{
+                      const delta=ly2>0?((ty-ly2)/ly2*100):null;
+                      const pos=inv?(delta!==null&&delta<0):(delta!==null&&delta>0);
+                      return (
+                        <div key={lbl} style={{display:'flex',justifyContent:'space-between',alignItems:'center',padding:'4px 0',borderBottom:'1px solid rgba(26,47,74,.4)'}}>
+                          <span style={{fontSize:11,color:'var(--txt3)'}}>{lbl}</span>
+                          <div style={{display:'flex',alignItems:'center',gap:5}}>
+                            <span style={{fontSize:13,fontWeight:700,color:'var(--txt)'}}>{val}</span>
+                            {delta!==null && <span style={{fontSize:9,fontWeight:700,padding:'1px 5px',borderRadius:4,background:pos?'rgba(34,197,94,.12)':'rgba(239,68,68,.12)',color:pos?'#4ade80':'#f87171'}}>{delta>0?'▲':'▼'}{Math.abs(delta).toFixed(1)}%</span>}
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            {/* ── Section 6: Business Health + Actions ── */}
+            <div style={{display:'grid',gridTemplateColumns:'1fr 2fr',gap:12,marginBottom:12}}>
+              {(() => {
+                const tod2=periodCols?.['Today']||{};
+                const mtdH=periodCols?.['MTD']||{};
+                const paceScore=tod2.ty_forecast>0&&tod2.ly_eod_sales>0?Math.min(100,Math.round((tod2.ty_forecast/(tod2.ly_eod_sales||1))*50+50)):72;
+                const convScore=metricsTraffic?.conversion>0?Math.min(100,Math.round((metricsTraffic.conversion/0.14)*85)):70;
+                const roasScore=m.roas>0?Math.min(100,Math.round((m.roas/3.5)*100)):65;
+                const atcS=Array.isArray(funnel)&&funnel.length>2?(funnel[2]?.ty||0)/(funnel[0]?.ty||1):0;
+                const atcScore=Math.min(100,Math.round((atcS/0.22)*80));
+                const retRatioH=(mtdH.returns_amount||0)/(mtdH.sales||1);
+                const retScore=Math.min(100,Math.max(0,Math.round((1-retRatioH/0.05)*100)));
+                const dosScore=m.dos>0?Math.min(100,Math.round(Math.min(m.dos,90)/90*100)):60;
+                const overall=Math.round((paceScore+convScore+roasScore+atcScore+retScore+dosScore)/6);
+                const scoreColor=overall>=80?'#22c55e':overall>=65?B.t2:overall>=50?'#f59e0b':'#ef4444';
+                const scoreLabel=overall>=80?'Excellent':overall>=65?'Good':overall>=50?'Fair':'Needs Attention';
+                const circ=2*Math.PI*38;
+                return (
+                  <div style={{background:'var(--card)',border:'1px solid var(--brd)',borderRadius:12,padding:16,display:'flex',flexDirection:'column',alignItems:'center',gap:14}}>
+                    <div style={{fontSize:9,fontWeight:700,textTransform:'uppercase',letterSpacing:'.1em',color:'var(--txt3)',width:'100%',textAlign:'center'}}>Business Health Score</div>
+                    <div style={{display:'flex',alignItems:'center',gap:16,width:'100%'}}>
+                      <div style={{position:'relative',width:88,height:88,flexShrink:0}}>
+                        <svg viewBox="0 0 88 88" width="88" height="88" style={{transform:'rotate(-90deg)'}}>
+                          <circle cx="44" cy="44" r="38" fill="none" stroke="var(--brd)" strokeWidth="8"/>
+                          <circle cx="44" cy="44" r="38" fill="none" stroke={scoreColor} strokeWidth="8"
+                            strokeDasharray={`${(overall/100)*circ} ${circ}`} strokeLinecap="round"/>
+                        </svg>
+                        <div style={{position:'absolute',inset:0,display:'flex',flexDirection:'column',alignItems:'center',justifyContent:'center'}}>
+                          <div style={{fontSize:22,fontWeight:800,lineHeight:1,color:scoreColor}}>{overall}</div>
+                          <div style={{fontSize:8,fontWeight:700,textTransform:'uppercase',letterSpacing:'.06em',color:'var(--txt3)',marginTop:1}}>/ 100</div>
+                        </div>
+                      </div>
+                      <div style={{flex:1}}>
+                        <div style={{fontSize:14,fontWeight:700,color:scoreColor,marginBottom:3}}>{scoreLabel}</div>
+                        <div style={{fontSize:10,color:'var(--txt3)',lineHeight:1.5}}>Revenue pace, conversion, ROAS, funnel efficiency, returns &amp; inventory.</div>
+                      </div>
+                    </div>
+                    <div style={{width:'100%',display:'flex',flexDirection:'column',gap:5}}>
+                      {[['Revenue Pace',paceScore,'#22c55e'],['Conversion Rate',convScore,B.t2],['ROAS / Ad Eff.',roasScore,B.b3],['ATC / Funnel',atcScore,'#f59e0b'],['Return Rate',retScore,'#22c55e'],['Inventory DOS',dosScore,B.b3]].map(([lbl,sc,col])=>(
+                        <div key={lbl} style={{display:'flex',alignItems:'center',gap:8,fontSize:10}}>
+                          <span style={{width:96,color:'var(--txt3)',whiteSpace:'nowrap',overflow:'hidden',textOverflow:'ellipsis'}}>{lbl}</span>
+                          <div style={{flex:1,height:5,background:'var(--brd)',borderRadius:3,overflow:'hidden'}}>
+                            <div style={{width:`${sc}%`,height:'100%',background:col,borderRadius:3}}/>
+                          </div>
+                          <span style={{width:26,textAlign:'right',fontWeight:700,color:col}}>{sc}</span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                );
+              })()}
+              {(() => {
+                const mtdA=periodCols?.['MTD']||{};
+                const actions=[];
+                const atcIdx=Array.isArray(funnel)?funnel.findIndex(s2=>s2.label?.toLowerCase().includes('cart')):-1;
+                const sessIdx=Array.isArray(funnel)?funnel.findIndex(s2=>s2.label?.toLowerCase().includes('sess')):-1;
+                const atcRate=atcIdx>=0&&sessIdx>=0&&(funnel[sessIdx]?.ty||0)>0?(funnel[atcIdx].ty/funnel[sessIdx].ty):0;
+                if(atcRate>0&&atcRate<0.18) actions.push({type:'alert',title:`🛒 ATC Rate low at ${(atcRate*100).toFixed(1)}% — benchmark ~22%`,desc:'Add-to-cart rate is below the 90-day benchmark. Review top ASINs for pricing gaps, competitor undercutting, or missing A+ content.'});
+                if((m.tacos||0)>0.16) actions.push({type:'warn',title:`📣 TACOS at ${fP(m.tacos)} — approaching 16% threshold`,desc:'Ad spend as a % of revenue is elevated. Consider pausing underperforming campaigns or reducing bids on low-ROAS keywords.'});
+                if((m.dos||0)>0&&(m.dos||0)<30) actions.push({type:'alert',title:`📦 Days of Supply at ${m.dos}d — reorder approaching`,desc:`With ${m.dos} days of supply, FBA stock is running low. Create a shipment plan now to avoid stockouts and BSR drop.`});
+                const mtdChg=(mtdA.ly_sales||0)>0?((mtdA.sales||0)-(mtdA.ly_sales||0))/(mtdA.ly_sales||1):null;
+                if(mtdChg!==null&&mtdChg>=0.05) actions.push({type:'ok',title:`✅ MTD pacing ▲${(mtdChg*100).toFixed(1)}% vs LY`,desc:'Revenue is tracking above last year. Consider increasing ad budget to capture more share while TACOS is healthy.'});
+                else if(mtdChg!==null&&mtdChg<-0.02) actions.push({type:'warn',title:`📉 MTD revenue ▼${(Math.abs(mtdChg)*100).toFixed(1)}% vs LY`,desc:'Revenue is trailing last year MTD. Check for suppressed listings, lost Buy Box, or gaps in ad coverage.'});
+                const retR=(mtdA.returns_amount||0)/(mtdA.sales||1);
+                if(retR>0&&retR<0.04) actions.push({type:'ok',title:`✅ Return rate ${(retR*100).toFixed(1)}% — below 4% target`,desc:'Returns are well-controlled. Maintain current listing accuracy and A+ content that is driving this improvement.'});
+                else if(retR>0.07) actions.push({type:'alert',title:`⚠ Return rate ${(retR*100).toFixed(1)}% — above 7% threshold`,desc:'High returns may indicate listing inaccuracy, product issues, or sizing confusion. Review top return reasons in Seller Central.'});
+                if((m.roas||0)>0&&(m.roas||0)<2.5) actions.push({type:'warn',title:`📊 ROAS at ${fX(m.roas)} — below 2.5x floor`,desc:'Ad return on spend is low. Review campaign structure, negative keywords, and bid strategy. Consider pausing bottom-decile ASINs.'});
+                if(actions.length===0) actions.push({type:'info',title:'✅ All metrics within healthy ranges',desc:'No urgent actions detected. Review the detailed tabs for optimization opportunities in advertising, inventory, and pricing.'});
+                const tStyle={alert:{border:'rgba(239,68,68,.2)',bg:'rgba(239,68,68,.05)',dot:'#ef4444'},warn:{border:'rgba(245,158,11,.2)',bg:'rgba(245,158,11,.05)',dot:'#f59e0b'},ok:{border:'rgba(34,197,94,.2)',bg:'rgba(34,197,94,.05)',dot:'#22c55e'},info:{border:'rgba(91,159,212,.2)',bg:'rgba(91,159,212,.04)',dot:B.b3}};
+                return (
+                  <div style={{background:'var(--card)',border:'1px solid var(--brd)',borderRadius:12,padding:16}}>
+                    <div style={{fontSize:9,fontWeight:700,textTransform:'uppercase',letterSpacing:'.1em',color:'var(--txt3)',marginBottom:12}}>📋 Actions to Take Today</div>
+                    <div style={{display:'flex',flexDirection:'column',gap:8}}>
+                      {actions.slice(0,6).map((a,i)=>{
+                        const st=tStyle[a.type]||tStyle.info;
+                        return (
+                          <div key={i} style={{display:'flex',gap:10,alignItems:'flex-start',padding:'10px 12px',borderRadius:8,border:`1px solid ${st.border}`,background:st.bg}}>
+                            <div style={{width:8,height:8,borderRadius:'50%',background:st.dot,flexShrink:0,marginTop:4}}/>
+                            <div>
+                              <div style={{fontSize:12,fontWeight:600,color:'var(--txt)',marginBottom:2}}>{a.title}</div>
+                              <div style={{fontSize:10,color:'var(--txt3)',lineHeight:1.5}}>{a.desc}</div>
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+                );
+              })()}
+            </div>
+
+            {/* ── Section 7: Profitability Snapshot ── */}
+            <div style={{display:'grid',gridTemplateColumns:'1fr 1fr 1fr',gap:12,marginBottom:12}}>
+              {(() => {
+                const mtdP=periodCols?.['MTD']||{};
+                const rev=mtdP.sales||0;
+                const ret=mtdP.returns_amount||0;
+                const netRev=rev-ret;
+                const fees=Math.abs(mtdP.amazon_fees||0);
+                const adSpend=m.ad_spend||0;
+                const cogs=netRev*0.35;
+                const cm=netRev-fees-adSpend-cogs;
+                const cmPct=netRev>0?cm/netRev*100:0;
+                return (
+                  <div style={{background:'var(--card)',border:'1px solid var(--brd)',borderRadius:12,padding:16}}>
+                    <div style={{fontSize:9,fontWeight:700,textTransform:'uppercase',letterSpacing:'.08em',color:'var(--txt3)',marginBottom:10}}>P&amp;L Summary · MTD</div>
+                    {[['Gross Revenue',rev,B.t2,false],['− Returns &amp; Refunds',-ret,'#ef4444',true],['= Net Revenue',netRev,'var(--txt)',false],['− Amazon Fees',-fees,'#ef4444',true],['− Ad Spend',-adSpend,'#ef4444',true],['− COGS est. 35%',-cogs,'#ef4444',true]].map(([lbl,val,col,neg],idx)=>(
+                      <div key={idx} style={{display:'flex',justifyContent:'space-between',padding:'6px 0',borderBottom:lbl.startsWith('=')?'1px solid var(--brd)':'1px solid rgba(26,47,74,.4)',alignItems:'center'}}>
+                        <span style={{fontSize:11,color:neg?'var(--txt3)':'var(--txt2)'}}>{lbl}</span>
+                        <span style={{fontSize:12,fontWeight:700,color:col}}>{neg?'−':''}{f$(Math.abs(val))}</span>
+                      </div>
+                    ))}
+                    <div style={{display:'flex',justifyContent:'space-between',padding:'8px 0 2px',alignItems:'center'}}>
+                      <span style={{fontSize:12,fontWeight:700,color:'var(--txt)'}}>Contribution Margin</span>
+                      <span style={{fontSize:16,fontWeight:800,color:B.t2}}>{f$(cm)}</span>
+                    </div>
+                    <div style={{display:'flex',justifyContent:'space-between',alignItems:'center'}}>
+                      <span style={{fontSize:10,color:'var(--txt3)'}}>Margin %</span>
+                      <span style={{fontSize:12,fontWeight:700,color:B.t3}}>{cmPct.toFixed(1)}%</span>
+                    </div>
+                  </div>
+                );
+              })()}
+              <div style={{background:'var(--card)',border:'1px solid var(--brd)',borderRadius:12,padding:16}}>
+                <div style={{fontSize:9,fontWeight:700,textTransform:'uppercase',letterSpacing:'.08em',color:'var(--txt3)',marginBottom:10}}>Amazon Fee Breakdown · MTD</div>
+                {feeBreak && (feeBreak.items||Array.isArray(feeBreak)) ? (() => {
+                  const items=feeBreak.items||feeBreak;
+                  const total=items.reduce((s2,f2)=>s2+(f2.amount||0),0);
+                  const fColors=['#E87830',B.b2,B.t2,B.sub,'#f59e0b'];
+                  return <>
+                    {items.slice(0,5).map((f2,i)=>{
+                      const pct=total>0?((f2.amount||0)/total*100).toFixed(1):'0';
+                      return (
+                        <div key={f2.type} style={{display:'flex',justifyContent:'space-between',alignItems:'center',padding:'5px 0',borderBottom:'1px solid rgba(26,47,74,.4)'}}>
+                          <div style={{display:'flex',alignItems:'center',gap:6}}>
+                            <div style={{width:10,height:10,borderRadius:2,background:fColors[i%fColors.length],flexShrink:0}}/>
+                            <span style={{fontSize:11,color:'var(--txt3)'}}>{f2.type}</span>
+                          </div>
+                          <div style={{textAlign:'right'}}>
+                            <div style={{fontSize:12,fontWeight:700,color:fColors[i%fColors.length]}}>{f$(f2.amount||0)}</div>
+                            <div style={{fontSize:9,color:'var(--txt3)'}}>{pct}%</div>
+                          </div>
+                        </div>
+                      );
+                    })}
+                    <div style={{display:'flex',justifyContent:'space-between',padding:'6px 0 0',alignItems:'center',borderTop:'1px solid var(--brd)',marginTop:2}}>
+                      <span style={{fontSize:11,fontWeight:700,color:'var(--txt)'}}>Total Fees</span>
+                      <span style={{fontSize:14,fontWeight:800,color:'#ef4444'}}>{f$(total)}</span>
+                    </div>
+                  </>;
+                })() : <div style={{color:'var(--txt3)',fontSize:11,textAlign:'center',padding:'20px 0'}}>Fee data loading…</div>}
+              </div>
+              {(() => {
+                const mtdM=periodCols?.['MTD']||{};
+                const rev5=mtdM.sales||0, lyRev5=mtdM.ly_sales||0;
+                const fees5=Math.abs(mtdM.amazon_fees||0), lyFees5=Math.abs(mtdM.ly_amazon_fees||0);
+                const ret5=mtdM.returns_amount||0, lyRet5=mtdM.ly_returns_amount||0;
+                const adS5=m.ad_spend||0, lyAd5=m.ly_ad_spend||0;
+                const cm5=rev5-ret5-fees5-adS5-(rev5-ret5)*0.35;
+                const lyCm5=lyRev5-lyRet5-lyFees5-lyAd5-(lyRev5-lyRet5)*0.35;
+                const cmPct5=rev5>0?cm5/rev5*100:0, lyCmPct5=lyRev5>0?lyCm5/lyRev5*100:0;
+                const cmChg=lyCmPct5>0?cmPct5-lyCmPct5:null;
+                return (
+                  <div style={{background:'var(--card)',border:'1px solid var(--brd)',borderTop:`2px solid ${B.t2}`,borderRadius:12,padding:16}}>
+                    <div style={{fontSize:9,fontWeight:700,textTransform:'uppercase',letterSpacing:'.08em',color:'var(--txt3)',marginBottom:10}}>Margin &amp; AUR · MTD</div>
+                    <div style={{display:'flex',gap:14,alignItems:'flex-end',marginBottom:12,flexWrap:'wrap'}}>
+                      <div><div style={{fontSize:9,color:'var(--txt3)',marginBottom:2}}>TY CM%</div><div style={{fontSize:26,fontWeight:800,color:B.t2,lineHeight:1}}>{cmPct5.toFixed(1)}%</div></div>
+                      <div><div style={{fontSize:9,color:'var(--txt3)',marginBottom:2}}>LY CM%</div><div style={{fontSize:26,fontWeight:800,color:B.b3,lineHeight:1}}>{lyCmPct5.toFixed(1)}%</div></div>
+                      {cmChg!==null && <span style={{fontSize:11,fontWeight:700,padding:'3px 8px',borderRadius:6,background:cmChg>=0?'rgba(34,197,94,.12)':'rgba(239,68,68,.12)',color:cmChg>=0?'#4ade80':'#f87171',marginBottom:4}}>{cmChg>=0?'▲':'▼'}{Math.abs(cmChg).toFixed(1)}pt</span>}
+                    </div>
+                    <div style={{height:1,background:'var(--brd)',marginBottom:10}}/>
+                    {[
+                      ['ROAS',  fX(m.roas||0),  B.t2],
+                      ['TACOS', fP(m.tacos||0), (m.tacos||0)>0.16?'#f59e0b':B.t3],
+                      ['AUR TY',f$(mtdM.aur||(rev5/(mtdM.units||1))), 'var(--txt)'],
+                      ['AUR LY',f$(mtdM.ly_aur||(lyRev5/(mtdM.ly_units||1))), B.sub],
+                    ].map(([lbl,val,col])=>(
+                      <div key={lbl} style={{display:'flex',justifyContent:'space-between',padding:'5px 0',borderBottom:'1px solid rgba(26,47,74,.4)'}}>
+                        <span style={{fontSize:11,color:'var(--txt3)'}}>{lbl}</span>
+                        <span style={{fontSize:13,fontWeight:700,color:col}}>{val}</span>
+                      </div>
+                    ))}
+                  </div>
+                );
+              })()}
+            </div>
           </>
         );
       })()}
