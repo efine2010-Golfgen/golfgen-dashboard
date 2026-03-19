@@ -998,7 +998,7 @@ export default function Sales({ filters = {} }) {
 
       {/* PERIOD COMPARISON COLUMNS */}
       {viewTab !== 'Custom' && periodCols && (
-        <div style={{display:'flex',gap:8,overflowX:'auto',paddingBottom:6,marginBottom:24}}>
+        <div style={{display:'grid',gridTemplateColumns:'minmax(380px,2.1fr) repeat(4,minmax(185px,1fr))',gap:8,overflowX:'auto',paddingBottom:6,marginBottom:24}}>
           {periods.slice(0,5).map(p => {
             const d = periodCols[p] || {};
             const pct = (ty, lyv) => (!lyv || !ty) ? null : ((ty - lyv) / lyv * 100);
@@ -1046,20 +1046,21 @@ export default function Sales({ filters = {} }) {
                 return fN(v);
               };
               return (
-                <div key={p} style={{flex:'1 1 400px',minWidth:400,background:'var(--card2)',border:'1px solid var(--brd)',borderRadius:12,padding:'10px 12px',transition:'background .3s'}}>
-                  <div style={{display:'flex',alignItems:'baseline',gap:8,paddingBottom:9,borderBottom:'1px solid var(--brd)',marginBottom:9}}>
-                    <span style={{fontSize:10,fontWeight:700,textTransform:'uppercase',letterSpacing:'.12em',color:B.b2}}>Today</span>
-                    <span style={{fontSize:9,color:'var(--txt3)'}}>
-                      {d.snapshot_time ? `through ${d.snapshot_time}` : 'so far'}{' · LY = same time last year'}
+                <div key={p} style={{background:'var(--card2)',border:'1px solid var(--brd)',borderRadius:12,padding:'10px 12px',transition:'background .3s'}}>
+                  {/* Title row — fixed 30px to match regular cards */}
+                  <div style={{height:30,display:'flex',alignItems:'center',gap:8,borderBottom:'1px solid var(--brd)',marginBottom:8}}>
+                    <span style={{fontSize:10,fontWeight:700,textTransform:'uppercase',letterSpacing:'.12em',color:B.b2,whiteSpace:'nowrap'}}>Today</span>
+                    <span style={{fontSize:9,color:'var(--txt3)',whiteSpace:'nowrap',overflow:'hidden',textOverflow:'ellipsis'}}>
+                      {d.snapshot_time ? `thru ${d.snapshot_time}` : 'so far'}{' · LY = same time'}
                     </span>
                   </div>
-                  {/* Two side-by-side group boxes. Rows share the same minHeight so they
-                      stay visually aligned across the two boxes.                         */}
+                  {/* Two side-by-side group boxes. Fixed row heights align with sibling cards. */}
                   {(() => {
-                    const hdr = {fontSize:9,fontWeight:700,textTransform:'uppercase',letterSpacing:'.04em',paddingBottom:5};
-                    const rowMinH = (isRet) => isRet ? 34 : 26;
-                    const rowH   = (isRet) => ({minHeight:rowMinH(isRet),display:'flex',alignItems:'center'});
-                    const retH   = (isRet) => ({minHeight:rowMinH(isRet),display:'flex',flexDirection:'column',justifyContent:'center',gap:1});
+                    const ROW_H = 26, RET_H = 34;
+                    const HDR_H = 20;
+                    const hdr = {height:HDR_H,display:'flex',alignItems:'center',fontSize:9,fontWeight:700,textTransform:'uppercase',letterSpacing:'.04em'};
+                    const rowH   = (isRet) => ({height:isRet?RET_H:ROW_H,display:'flex',alignItems:'center',flexShrink:0});
+                    const retH   = (isRet) => ({height:isRet?RET_H:ROW_H,display:'flex',flexDirection:'column',justifyContent:'center',gap:1,flexShrink:0});
                     const retCell = (l, val, baseStyle, amtStyle, unitsStyle) => {
                       const isRet = l === 'Returns';
                       return isRet
@@ -1077,7 +1078,7 @@ export default function Sales({ filters = {} }) {
                           <div style={{fontSize:8,fontWeight:700,color:'var(--acc1)',textTransform:'uppercase',letterSpacing:'.06em',textAlign:'center',marginBottom:4}}>TODAY LIVE</div>
                           <div style={{display:'grid',gridTemplateColumns:'60px 54px 50px 34px',columnGap:3,rowGap:0,alignItems:'start'}}>
                             {/* headers */}
-                            <span/>
+                            <span style={{height:20}}/>
                             <span style={{...hdr,color:'var(--txt3)'}}>TY NOW</span>
                             <span style={{...hdr,color:B.b3}}>LY NOW</span>
                             <span style={{...hdr,color:'var(--txt3)'}}>CHG</span>
@@ -1154,17 +1155,20 @@ export default function Sales({ filters = {} }) {
               return fN(v);
             };
             return (
-              <div key={p} style={{flex:'1 1 220px',minWidth:220,background:'var(--card2)',border:'1px solid var(--brd)',borderRadius:12,padding:'12px 12px',transition:'background .3s'}}>
-                <div style={{fontSize:10,fontWeight:700,textTransform:'uppercase',letterSpacing:'.12em',color:B.b2,paddingBottom:9,borderBottom:'1px solid var(--brd)',marginBottom:9}}>{p}</div>
+              <div key={p} style={{background:'var(--card2)',border:'1px solid var(--brd)',borderRadius:12,padding:'10px 12px',transition:'background .3s'}}>
+                {/* Title row — fixed 30px to match Today card */}
+                <div style={{height:30,display:'flex',alignItems:'center',borderBottom:'1px solid var(--brd)',marginBottom:8}}>
+                  <span style={{fontSize:10,fontWeight:700,textTransform:'uppercase',letterSpacing:'.12em',color:B.b2}}>{p}</span>
+                </div>
                 <div style={{display:'grid',gridTemplateColumns:'68px 52px 48px 44px',columnGap:3,rowGap:0,alignItems:'start'}}>
-                  <span/>
-                  <span style={{fontSize:9,fontWeight:700,color:'var(--txt3)',textTransform:'uppercase',letterSpacing:'.06em',paddingBottom:6}}>TY</span>
-                  <span style={{fontSize:9,fontWeight:700,color:'var(--txt3)',textTransform:'uppercase',letterSpacing:'.06em',paddingBottom:6}}>LY</span>
-                  <span style={{fontSize:9,fontWeight:700,color:'var(--txt3)',textTransform:'uppercase',letterSpacing:'.06em',textAlign:'left',paddingBottom:6}}>Chg</span>
+                  <span style={{height:20}}/>
+                  <span style={{height:20,display:'flex',alignItems:'center',fontSize:9,fontWeight:700,color:'var(--txt3)',textTransform:'uppercase',letterSpacing:'.06em'}}>TY</span>
+                  <span style={{height:20,display:'flex',alignItems:'center',fontSize:9,fontWeight:700,color:'var(--txt3)',textTransform:'uppercase',letterSpacing:'.06em'}}>LY</span>
+                  <span style={{height:20,display:'flex',alignItems:'center',fontSize:9,fontWeight:700,color:'var(--txt3)',textTransform:'uppercase',letterSpacing:'.06em'}}>Chg</span>
                   {rows.flatMap(([l, ty, lyv, delta, inv]) => {
                     const isRet = l === 'Returns';
-                    const rowH = {minHeight: isRet ? 34 : 26, display:'flex', alignItems:'center'};
-                    const retH = {minHeight: isRet ? 34 : 26, display:'flex', flexDirection:'column', justifyContent:'center', gap:1};
+                    const rowH = {height: isRet ? 34 : 26, flexShrink:0, display:'flex', alignItems:'center'};
+                    const retH = {height: isRet ? 34 : 26, flexShrink:0, display:'flex', flexDirection:'column', justifyContent:'center', gap:1};
                     const retCell = (val, amtStyle, unitsStyle) => isRet
                       ? <div style={retH}>
                           <span style={amtStyle}>{val.amt > 0 ? f$(val.amt) : '—'}</span>
