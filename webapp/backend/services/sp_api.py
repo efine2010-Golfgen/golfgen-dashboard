@@ -1756,21 +1756,22 @@ def get_ly_same_time_sales(ly_date, cutoff_dt) -> tuple:
         metrics = response.payload or []
 
         if not metrics:
-            result = (0.0, 0)
+            result = (0.0, 0, 0)
         else:
             m = metrics[0]
             ts = m.get('totalSales') or {}
             amount = float(ts.get('amount', 0) or 0) if isinstance(ts, dict) else float(ts or 0)
             units  = int(m.get('unitCount', 0) or 0)
-            result = (round(amount, 2), units)
+            ords   = int(m.get('orderCount', 0) or 0)
+            result = (round(amount, 2), units, ords)
 
         _ly_same_time_cache[cache_key] = (result, now_ts)
-        logger.info(f"get_ly_same_time_sales: {ly_date} through {cutoff_dt.hour}:{cutoff_dt.minute:02d} CT → ${result[0]:,.2f} / {result[1]} units")
+        logger.info(f"get_ly_same_time_sales: {ly_date} through {cutoff_dt.hour}:{cutoff_dt.minute:02d} CT → ${result[0]:,.2f} / {result[1]} units / {result[2]} orders")
         return result
 
     except Exception as e:
         logger.warning(f"get_ly_same_time_sales error: {e}")
-        return (0.0, 0)
+        return (0.0, 0, 0)
 
 
 # ── Hourly Sales — SP-API Sales.getOrderMetrics with HOUR granularity ────────

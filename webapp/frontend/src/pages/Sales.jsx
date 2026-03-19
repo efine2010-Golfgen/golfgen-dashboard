@@ -765,6 +765,7 @@ export default function Sales({ filters = {} }) {
               const lyEodU  = d.ly_eod_units ?? d.ly_units;
               const lyNow   = d.ly_same_time_sales;
               const lyNowU  = d.ly_same_time_units;
+              const lyNowO  = d.ly_same_time_orders || null;
               const lyNowAur  = lyNowU  > 0 ? lyNow  / lyNowU  : null;
               const lyEodAur  = lyEodU  > 0 ? lyEod  / lyEodU  : (d.ly_aur || null);
               const tyProjAur = (d.ty_units_forecast > 0 && d.ty_forecast > 0) ? d.ty_forecast / d.ty_units_forecast : null;
@@ -779,7 +780,7 @@ export default function Sales({ filters = {} }) {
                                null, null, true,
                                null,
                                {amt:d.ly_returns_amount||0, units:d.ly_returns||0}],
-                ['Orders',     d.orders,            null,         null,                           false, null,                  d.ly_orders],
+                ['Orders',     d.orders,            lyNowO,       pct(d.orders, lyNowO),          false, null,                  d.ly_orders],
                 ['Sessions',   null,                null,         null,                           false, null,                  null],
                 ['Conv %',     d.sessions > 0 ? d.conversion : null, null, null, false, null, d.ly_conversion],
               ];

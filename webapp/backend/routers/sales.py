@@ -965,11 +965,12 @@ def sales_period_comparison(
             # Uses orders table (timestamped) to slice LY at the same hour as now.
             # ly_eod_* = existing ly_sales/units (S&T full-day actuals from daily_sales).
             # ty_forecast = TY_so_far × (LY_full_day / LY_same_time) — pacing ratio.
-            ly_same_time_sales = 0.0
-            ly_same_time_units = 0
-            ty_forecast        = None
-            ty_units_forecast  = None
-            snapshot_time      = None
+            ly_same_time_sales   = 0.0
+            ly_same_time_units   = 0
+            ly_same_time_orders  = 0
+            ty_forecast          = None
+            ty_units_forecast    = None
+            snapshot_time        = None
             if period_key == 'today':
                 now_ct = datetime.now(CENTRAL)
                 snapshot_time = now_ct.strftime("%-I:%M %p CT")
@@ -1005,12 +1006,13 @@ def sales_period_comparison(
                 # The orders table only has recent history and won't have LY rows.
                 try:
                     from services.sp_api import get_ly_same_time_sales
-                    ly_same_time_sales, ly_same_time_units = get_ly_same_time_sales(
-                        ly_sd, now_ct
-                    )
+                    _ly_st = get_ly_same_time_sales(ly_sd, now_ct)
+                    ly_same_time_sales  = _ly_st[0]
+                    ly_same_time_units  = _ly_st[1]
+                    ly_same_time_orders = _ly_st[2] if len(_ly_st) > 2 else 0
                 except Exception as _ex:
                     logger.warning(f"get_ly_same_time_sales failed: {_ex}")
-                    ly_same_time_sales, ly_same_time_units = 0.0, 0
+                    ly_same_time_sales, ly_same_time_units, ly_same_time_orders = 0.0, 0, 0
                 # Forecast = TY × (LY full-day / LY same-time)  [pacing ratio]
                 if ly_same_time_sales > 0 and ly_sales > 0:
                     ty_forecast = round(sales * (ly_sales / ly_same_time_sales), 2)
@@ -1031,8 +1033,9 @@ def sales_period_comparison(
                 "ly_amazon_fees": ly_fees_val, "ly_returns": ly_ret_units,
                 "ly_returns_amount": ly_ret_amt,
                 # Today-only fields (0 / None for all other periods)
-                "ly_same_time_sales":  ly_same_time_sales,
-                "ly_same_time_units":  ly_same_time_units,
+                "ly_same_time_sales":   ly_same_time_sales,
+                "ly_same_time_units":   ly_same_time_units,
+                "ly_same_time_orders":  ly_same_time_orders,
                 "ly_eod_sales":        round(ly_sales, 2),
                 "ly_eod_units":        ly_units,
                 "ty_forecast":         ty_forecast,
