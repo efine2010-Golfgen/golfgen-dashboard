@@ -953,20 +953,29 @@ export default function Sales({ filters = {} }) {
                 return fN(v);
               };
               return (
-                <div key={p} style={{flex:'1 1 490px',minWidth:490,background:'var(--card2)',border:'1px solid var(--acc1)',borderRadius:12,padding:'12px 14px',transition:'background .3s',boxShadow:'0 0 0 1px rgba(46,207,170,.15)'}}>
+                <div key={p} style={{flex:'1 1 520px',minWidth:520,background:'var(--card2)',border:'1px solid var(--acc1)',borderRadius:12,padding:'12px 16px',transition:'background .3s',boxShadow:'0 0 0 1px rgba(46,207,170,.15)'}}>
                   <div style={{display:'flex',alignItems:'baseline',gap:8,paddingBottom:9,borderBottom:'1px solid var(--brd)',marginBottom:9}}>
                     <span style={{fontSize:10,fontWeight:700,textTransform:'uppercase',letterSpacing:'.12em',color:B.b2}}>Today</span>
                     <span style={{fontSize:9,color:'var(--txt3)'}}>
                       {d.snapshot_time ? `through ${d.snapshot_time}` : 'so far'}{' · LY = same time last year'}
                     </span>
                   </div>
-                  {/* 7-col grid: Label | TY NOW | LY NOW | CHG | TY FCST | LY EOD | CHG */}
-                  <div style={{display:'grid',gridTemplateColumns:'80px 60px 58px 40px 62px 56px 38px',columnGap:3,rowGap:0,alignItems:'start'}}>
-                    {/* header row */}
+                  {/* 8-col grid: Label | TY NOW | LY NOW | CHG | ‖ | TY FCST | LY EOD | CHG
+                      Column 5 is a 10px visual divider separating the two groups            */}
+                  <div style={{display:'grid',gridTemplateColumns:'76px 68px 64px 40px 10px 68px 64px 40px',columnGap:4,rowGap:0,alignItems:'start'}}>
+                    {/* group header labels */}
+                    <span/>
+                    <span style={{gridColumn:'2/5',fontSize:8,fontWeight:700,color:'var(--txt3)',textTransform:'uppercase',letterSpacing:'.06em',paddingBottom:2,borderBottom:'1px solid var(--brd)',marginBottom:3}}>NOW vs LY</span>
+                    {/* divider spacer for group header row */}
+                    <span style={{gridColumn:'5/6'}}/>
+                    <span style={{gridColumn:'6/9',fontSize:8,fontWeight:700,color:'var(--txt3)',textTransform:'uppercase',letterSpacing:'.06em',paddingBottom:2,borderBottom:'1px solid var(--brd)',marginBottom:3}}>FORECAST vs LY EOD</span>
+                    {/* column headers */}
                     <span/>
                     <span style={{fontSize:9,fontWeight:700,color:'var(--txt3)',textTransform:'uppercase',letterSpacing:'.04em',paddingBottom:6}}>TY NOW</span>
                     <span style={{fontSize:9,fontWeight:700,color:B.b3,textTransform:'uppercase',letterSpacing:'.04em',paddingBottom:6}}>LY NOW</span>
                     <span style={{fontSize:9,fontWeight:700,color:'var(--txt3)',textTransform:'uppercase',letterSpacing:'.04em',paddingBottom:6}}>CHG</span>
+                    {/* divider column header */}
+                    <span style={{borderLeft:'1px solid var(--brd)',alignSelf:'stretch',marginLeft:3}}/>
                     <span style={{fontSize:9,fontWeight:700,color:B.t2,textTransform:'uppercase',letterSpacing:'.04em',paddingBottom:6}}>TY FCST</span>
                     <span style={{fontSize:9,fontWeight:700,color:'var(--txt3)',textTransform:'uppercase',letterSpacing:'.04em',paddingBottom:6}}>LY EOD</span>
                     <span style={{fontSize:9,fontWeight:700,color:'var(--txt3)',textTransform:'uppercase',letterSpacing:'.04em',paddingBottom:6}}>CHG</span>
@@ -984,13 +993,15 @@ export default function Sales({ filters = {} }) {
                       return [
                         <span key={l+'-l'} style={{...rowH,fontSize:10,color:'var(--txt3)',overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>{l}</span>,
                         retCell(ty,
-                          {fontSize:11,fontWeight:400,color:'var(--txt)'},
-                          {fontSize:11,fontWeight:400,color:'var(--txt)'},
+                          {fontSize:11,fontWeight:600,color:'var(--txt)'},
+                          {fontSize:11,fontWeight:600,color:'var(--txt)'},
                           {fontSize:8,color:'var(--txt3)'}),
                         isRet
                           ? <span key={l+'-ln'} style={{...rowH,fontSize:10,color:B.b3}}>—</span>
                           : <span key={l+'-ln'} style={{...rowH,fontSize:10,color:B.b3}}>{lyNowV != null ? fmt(l, lyNowV) : '—'}</span>,
                         <span key={l+'-chg'} style={rowH}>{pctEl(delta, inv, l+'-chg-inner')}</span>,
+                        /* divider cell */
+                        <span key={l+'-div'} style={{...rowH,borderLeft:'1px solid var(--brd)',marginLeft:3}}/>,
                         isRet
                           ? <span key={l+'-fc'} style={{...rowH,fontSize:11,fontWeight:700,color:B.t2}}>—</span>
                           : <span key={l+'-fc'} style={{...rowH,fontSize:11,fontWeight:700,color:B.t2}}>{fcst != null ? fmt(l, fcst) : '—'}</span>,
