@@ -30,8 +30,9 @@ const PERIOD_API_MAP = {
 };
 const GOLF_CUSTOMERS    = ['All Channels','Amazon','Walmart','Shopify','First Tee'];
 const HW_CUSTOMERS      = ['All Channels','Belk',"Albertson's",'Family Dollar','Hobby Lobby'];
-const CHART_PERIODS     = ['7D','30D','60D','90D','180D'];
-const CHART_PERIOD_API  = {'7D':'last_7d','30D':'last_30d','60D':'last_60d','90D':'last_90d','180D':'last_180d'};
+const CHART_PERIODS     = ['7D','30D','60D','90D','120D','180D','1Y'];
+const CHART_PERIOD_API  = {'7D':'last_7d','30D':'last_30d','60D':'last_60d','90D':'last_90d','120D':'last_120d','180D':'last_180d','1Y':'last_1y'};
+const HM_WEEKS_MAP      = {'13W':13,'26W':26,'52W':52};
 const VIEW_TABS         = ['Sales Summary','Daily','Weekly','Monthly','Yearly','Custom'];
 const MONTHS = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
 
@@ -166,7 +167,7 @@ function yoyBarSVG(data, forecast={}, yearVis={y2024:true,y2025:true,y2026:true}
         const fh = barH(forecast[mn]);
         const bx = barX(mi, bi);
         const tip = `${d.month} '26 Act: (not yet actualized)`;
-        s+=`<g><title>${tip}</title><rect x="${bx.toFixed(1)}" y="${(pad.t+ih-fh).toFixed(1)}" width="${bw.toFixed(1)}" height="${fh.toFixed(1)}" rx="2" fill="none" stroke="${CC.y2026}" stroke-width="1.2" stroke-dasharray="3,2" opacity="0.45"/></g>`;
+        s+=`<g data-tip="${tip}"><rect x="${bx.toFixed(1)}" y="${(pad.t+ih-fh).toFixed(1)}" width="${bw.toFixed(1)}" height="${fh.toFixed(1)}" rx="2" fill="none" stroke="${CC.y2026}" stroke-width="1.2" stroke-dasharray="3,2" opacity="0.45"/></g>`;
         return;
       }
 
@@ -174,7 +175,7 @@ function yoyBarSVG(data, forecast={}, yearVis={y2024:true,y2025:true,y2026:true}
       const hh = barH(v);
       const bx = barX(mi,bi);
 
-      // Build tooltip label
+      // Build tooltip label — uses data-tip on <g> (SVG <title> unreliable in Chrome via innerHTML)
       const fv = fmtTip(v);
       let ttip='';
       if (bar.key==='y2024')      ttip=`${d.month} '24 Act: ${fv}`;
@@ -182,8 +183,7 @@ function yoyBarSVG(data, forecast={}, yearVis={y2024:true,y2025:true,y2026:true}
       else if (bar.key==='y2026') ttip=isCurrent?`${d.month} '26 MTD: ${fv}`:`${d.month} '26 Act: ${fv}`;
       else                        ttip=`${d.month} '26 Proj: ${fv}`;
 
-      // Wrap in <g> so <title> is the first child — most reliable SVG tooltip pattern
-      s+=`<g><title>${ttip}</title>`;
+      s+=`<g data-tip="${ttip}">`;
       s+=`<rect x="${bx.toFixed(1)}" y="${(pad.t+ih-hh).toFixed(1)}" width="${bw.toFixed(1)}" height="${hh.toFixed(1)}" fill="${bar.color}" rx="2" opacity="${isFcst?0.7:bar.key==='y2026'?1:0.82}"${isFcst?' stroke-dasharray="3,2" stroke="#f59e0b" stroke-width="0.8"':''}/>`;
       s+=`</g>`;
       if (v>0) s+=`<text x="${(bx+bw/2).toFixed(1)}" y="${(pad.t+ih-hh-3).toFixed(1)}" text-anchor="middle" font-size="7" font-weight="600" fill="${bar.lc}">${fmtLbl(v)}</text>`;
@@ -212,17 +212,17 @@ function yoyBarSVG(data, forecast={}, yearVis={y2024:true,y2025:true,y2026:true}
   return s+'</svg>';
 }
 
-function heatmapSVG(data, W=1100) {
+function heatmapSVG(data, W=1100, weeks=26, metricKey='units') {
   if (!data || data.length === 0) return '<div style="color:#374f66;padding:20px;text-align:center;font-size:12px">No heatmap data</div>';
   const DAYS = ['Mon','Tue','Wed','Thu','Fri','Sat','Sun'];
-  const WEEKS = 26;
-  const mx = Math.max(...data.map(d => d.units||0));
+  const WEEKS = weeks;
+  const mx = Math.max(...data.map(d => d[metricKey]||0), 1);
   const padL=36,padT=18,padR=8,padB=8,cellH=26;
-  const cellW = Math.floor((W-padL-padR)/WEEKS);
+  const cellW = Math.max(12, Math.floor((W-padL-padR)/WEEKS));
   const svgW = padL+WEEKS*cellW+padR, svgH = padT+7*cellH+padB;
-  // Build lookup for fast access: "week,day" -> units
+  // Build lookup: "week,day" → metricKey value
   const lookup = {};
-  data.forEach(({week,day,units}) => { lookup[`${week},${day}`] = units||0; });
+  data.forEach(d => { lookup[`${d.week},${d.day}`] = d[metricKey]||0; });
   let s = `<svg width="100%" viewBox="0 0 ${svgW} ${svgH}" style="overflow:visible;display:block">`;
   Array.from({length:WEEKS},(_,w) => { if(w%4===0||w===WEEKS-1) s+=`<text x="${padL+(w+.5)*cellW}" y="${padT-5}" text-anchor="middle" font-size="8" fill="${B.sub}">W${WEEKS-w}</text>`; });
   DAYS.forEach((d,i) => s+=`<text x="${padL-3}" y="${padT+(i+.5)*cellH+4}" text-anchor="end" font-size="9" fill="${B.sub}">${d}</text>`);
@@ -248,17 +248,19 @@ function heatmapSVG(data, W=1100) {
   };
   // Power scaling (sqrt) — spreads values more than log, clear peaks vs valleys
   const sqrtMax = Math.sqrt(mx || 1);
+  const isSales = metricKey === 'sales';
   for (let w=0; w<WEEKS; w++) {
     for (let d=0; d<7; d++) {
-      const units = lookup[`${WEEKS-1-w},${d}`] || 0;
-      const pct = units > 0 ? Math.sqrt(units) / sqrtMax : 0;
-      const fill = units > 0 ? heatColor(pct) : 'rgb(21,37,62)';
-      const opacity = units > 0 ? (0.55 + pct * 0.45).toFixed(2) : '0.18';
-      s += `<rect x="${(padL+w*cellW+2).toFixed(1)}" y="${(padT+d*cellH+2).toFixed(1)}" width="${(cellW-4).toFixed(1)}" height="${(cellH-4).toFixed(1)}" rx="3" fill="${fill}" opacity="${opacity}"/>`;
-      if (units > 0) {
-        const fs = units >= 100 ? 6 : 7;
+      const val = lookup[`${WEEKS-1-w},${d}`] || 0;
+      const pct = val > 0 ? Math.sqrt(val) / sqrtMax : 0;
+      const fill = val > 0 ? heatColor(pct) : 'rgb(21,37,62)';
+      const opacity = val > 0 ? (0.55 + pct * 0.45).toFixed(2) : '0.18';
+      s += `<rect x="${(padL+w*cellW+2).toFixed(1)}" y="${(padT+d*cellH+2).toFixed(1)}" width="${Math.max(4,cellW-4).toFixed(1)}" height="${(cellH-4).toFixed(1)}" rx="3" fill="${fill}" opacity="${opacity}"/>`;
+      if (val > 0 && cellW > 14) {
+        const dispVal = isSales ? (val>=1000?`$${(val/1000).toFixed(0)}k`:`$${Math.round(val)}`) : val;
+        const fs = String(dispVal).length > 4 ? 5 : 7;
         const txtFill = pct > 0.5 ? '#fff' : '#c8d6e5';
-        s += `<text x="${(padL+(w+.5)*cellW).toFixed(1)}" y="${(padT+(d+.5)*cellH+3.5).toFixed(1)}" text-anchor="middle" font-size="${fs}" font-weight="600" fill="${txtFill}">${units}</text>`;
+        s += `<text x="${(padL+(w+.5)*cellW).toFixed(1)}" y="${(padT+(d+.5)*cellH+3.5).toFixed(1)}" text-anchor="middle" font-size="${fs}" font-weight="600" fill="${txtFill}">${dispVal}</text>`;
       }
     }
   }
@@ -499,6 +501,113 @@ function hourlySVG(tyData, lyData, currentHour, W=1100, H=160) {
   return s + '</svg>';
 }
 
+// ── Conversion Rate Arc Gauge ──────────────────────────────────────────────
+// Semi-circular gauge: left=0%, right=max. TY arc colored by delta vs LY.
+// LY position marked by a dot on the arc track.
+function convGaugeSVG(tyRate, lyRate, W=300, H=155) {
+  const maxRate = 0.10; // 10% scale covers typical Amazon range (1-5%)
+  const cx = W/2, cy = H - 18, r = Math.min(cx - 12, H - 30);
+  const f  = tyRate != null ? Math.min(Math.max(tyRate / maxRate, 0), 1) : null;
+  const fLy = lyRate != null ? Math.min(Math.max(lyRate / maxRate, 0), 1) : null;
+  // Point on arc at fraction t (0=left, 1=right, arches upward through top)
+  const arcPt = t => {
+    const angle = Math.PI * (1 - t); // π→0 as t→0→1
+    return [cx + r * Math.cos(angle), cy - r * Math.sin(angle)];
+  };
+  // SVG arc path from left (t=0) to fraction t
+  const arcPath = t => {
+    if (t <= 0) return '';
+    const [ex, ey] = arcPt(t);
+    const largeArc = t > 0.5 ? 1 : 0;
+    return `M${(cx-r).toFixed(1)},${cy.toFixed(1)} A${r},${r} 0 ${largeArc} 1 ${ex.toFixed(1)},${ey.toFixed(1)}`;
+  };
+  const delta = (tyRate != null && lyRate != null && lyRate > 0)
+    ? (tyRate - lyRate) / lyRate * 100 : null;
+  const fillColor = delta == null ? '#2E6FBB' : delta >= 0 ? '#1AA392' : '#E8821E';
+  let s = `<svg width="100%" viewBox="0 0 ${W} ${H}" style="overflow:visible;display:block">`;
+  // Background track
+  s += `<path d="${arcPath(1)}" fill="none" stroke="#1a2f4a" stroke-width="16" stroke-linecap="round"/>`;
+  // Zone tints: red 0-2%, yellow 2-4%, green 4%+
+  [['#c0392b',0,0.20],['#d68910',0.20,0.40],['#1AA392',0.40,1.00]].forEach(([col,t0,t1])=>{
+    const p0 = arcPath(t0===0?0.001:t0), p1 = arcPath(t1);
+    if (p0 && p1) {
+      // Draw zone as a short arc segment using stroke on a clipped path (approximate with opacity fill)
+      const [x0,y0]=arcPt(t0===0?0.001:t0),[x1,y1]=arcPt(t1);
+      const la = (t1-t0) > 0.5 ? 1 : 0;
+      s += `<path d="M${x0.toFixed(1)},${y0.toFixed(1)} A${r},${r} 0 ${la} 1 ${x1.toFixed(1)},${y1.toFixed(1)}" fill="none" stroke="${col}" stroke-width="16" stroke-linecap="butt" opacity=".18"/>`;
+    }
+  });
+  // TY fill arc
+  if (f != null && f > 0) {
+    s += `<path d="${arcPath(f)}" fill="none" stroke="${fillColor}" stroke-width="16" stroke-linecap="round" opacity=".95"/>`;
+  }
+  // LY dot marker
+  if (fLy != null) {
+    const [ldx,ldy] = arcPt(fLy);
+    s += `<circle cx="${ldx.toFixed(1)}" cy="${ldy.toFixed(1)}" r="7" fill="#5b7fa0" stroke="#0c1a2e" stroke-width="2.5"/>`;
+    s += `<text x="${ldx.toFixed(1)}" y="${(ldy+3.5).toFixed(1)}" text-anchor="middle" font-size="6" font-weight="700" fill="#fff">LY</text>`;
+  }
+  // Scale tick labels: 0, 2, 4, 6, 8, 10%
+  [0,0.02,0.04,0.06,0.08,0.10].forEach(v => {
+    const tf = v/maxRate;
+    const angle = Math.PI*(1-tf);
+    const tx = cx + (r+14)*Math.cos(angle), ty2 = cy - (r+14)*Math.sin(angle);
+    s += `<text x="${tx.toFixed(1)}" y="${ty2.toFixed(1)}" text-anchor="middle" dominant-baseline="middle" font-size="7" fill="#374f66">${(v*100).toFixed(0)}%</text>`;
+  });
+  // Big TY number
+  if (tyRate != null) {
+    s += `<text x="${cx}" y="${cy-22}" text-anchor="middle" font-size="26" font-weight="800" fill="${fillColor}" letter-spacing="-1">${(tyRate*100).toFixed(2)}%</text>`;
+    s += `<text x="${cx}" y="${cy-4}" text-anchor="middle" font-size="8" font-weight="700" fill="#5b7fa0" letter-spacing=".08em">CONVERSION TY</text>`;
+  } else {
+    s += `<text x="${cx}" y="${cy-12}" text-anchor="middle" font-size="12" fill="#374f66">—</text>`;
+  }
+  // Delta badge
+  if (delta != null) {
+    const dColor = delta >= 0 ? '#4ade80' : '#fb923c';
+    s += `<text x="${cx}" y="${cy+14}" text-anchor="middle" font-size="10" font-weight="700" fill="${dColor}">${delta>=0?'▲':'▼'} ${Math.abs(delta).toFixed(1)}% vs LY</text>`;
+  }
+  return s + '</svg>';
+}
+
+// ── SVGTip: wraps dangerouslySetInnerHTML SVG and shows floating tooltip ──
+// Uses data-tip attributes on <g> elements — reliable in all browsers unlike SVG <title>
+function SVGTip({ html }) {
+  const [tip, setTip] = useState(null);
+  const [pos, setPos] = useState({ x: 0, y: 0 });
+  const onMove = e => {
+    const el = e.target && e.target.closest ? e.target.closest('[data-tip]') : null;
+    if (el) {
+      setTip(el.getAttribute('data-tip'));
+      setPos({ x: e.clientX, y: e.clientY });
+    } else {
+      setTip(null);
+    }
+  };
+  return (
+    <div onMouseMove={onMove} onMouseLeave={() => setTip(null)}>
+      <div dangerouslySetInnerHTML={{ __html: html }} />
+      {tip && (
+        <div style={{
+          position: 'fixed',
+          left: pos.x + 14,
+          top: pos.y - 38,
+          background: '#0d1f35',
+          border: '1px solid #2a4a6a',
+          borderRadius: 6,
+          padding: '5px 11px',
+          fontSize: 11,
+          color: '#ddeeff',
+          fontWeight: 600,
+          pointerEvents: 'none',
+          zIndex: 9999,
+          whiteSpace: 'nowrap',
+          boxShadow: '0 3px 10px rgba(0,0,0,.5)',
+        }}>{tip}</div>
+      )}
+    </div>
+  );
+}
+
 // ── SUB-COMPONENTS ─────────────────────────────────────────────────
 function Spinner() {
   return (
@@ -615,9 +724,11 @@ export default function Sales({ filters = {} }) {
   const [cpTraffic,   setCpTraffic]   = useState('30D');
   const [customStart, setCustomStart] = useState('');
   const [customEnd,   setCustomEnd]   = useState('');
-  const [hmMetric,    setHmMetric]    = useState('$');        // '$' | 'units'
+  const [hmMetric,    setHmMetric]    = useState('$');        // '$' | 'units' (hourly heatmap)
   const [hideNight,   setHideNight]   = useState(false);      // hide hours 0-5
   const [hideLate,    setHideLate]    = useState(false);      // hide hours 18-23
+  const [hmWeeks,     setHmWeeks]     = useState('26W');       // '13W'|'26W'|'52W' (weekly heatmap)
+  const [hmMetric2,   setHmMetric2]   = useState('units');     // 'units'|'sales'|'returns' (weekly heatmap)
 
   // Data state
   const [metrics,     setMetrics]     = useState(null);
@@ -627,7 +738,8 @@ export default function Sales({ filters = {} }) {
   const [channel,     setChannel]     = useState(null);
   const [rolling,     setRolling]     = useState(null);
   const [heatmap,     setHeatmap]     = useState(null);
-  const [trendTraffic, setTrendTraffic] = useState(null);
+  const [trendTraffic,   setTrendTraffic]   = useState(null);
+  const [metricsTraffic, setMetricsTraffic] = useState(null); // period-aware traffic KPIs
   const [funnel,      setFunnel]      = useState(null);
   const [adEff,       setAdEff]       = useState(null);
   const [feeBreak,    setFeeBreak]    = useState(null);
@@ -680,14 +792,19 @@ export default function Sales({ filters = {} }) {
     const params = {...baseParams, period: chartSalesApi};
     load('trend',   setTrend,   'trend',     params);
     load('rolling', setRolling, 'rolling',   params);
-    load('heatmap', setHeatmap, 'heatmap',   baseParams);
     load('yoy',     setYoy,     'monthly-yoy',baseParams);
   }, [divRaw, custRaw, cpSales]);
 
-  // Fetch traffic chart data when cpTraffic changes
+  // Fetch weekly heatmap — reloads when weeks selection or filters change
+  useEffect(() => {
+    load('heatmap', setHeatmap, 'heatmap', {...baseParams, weeks: HM_WEEKS_MAP[hmWeeks]});
+  }, [divRaw, custRaw, hmWeeks]);
+
+  // Fetch traffic chart data + period-aware traffic KPIs when cpTraffic changes
   useEffect(() => {
     const params = {...baseParams, period: chartTrafficApi};
-    load('trendTraffic', setTrendTraffic, 'trend', params);
+    load('trendTraffic',   setTrendTraffic,   'trend',   params);
+    load('metricsTraffic', setMetricsTraffic, 'summary', params);
   }, [divRaw, custRaw, cpTraffic]);
 
   // Fetch 30-day hourly heatmap data — reload on filter changes only
@@ -843,8 +960,8 @@ export default function Sales({ filters = {} }) {
                       {d.snapshot_time ? `through ${d.snapshot_time}` : 'so far'}{' · LY = same time last year'}
                     </span>
                   </div>
-                  {/* 7-col grid: Label | TY NOW | LY NOW | CHG | TY FCST | LY EOD | vs LY% */}
-                  <div style={{display:'grid',gridTemplateColumns:'80px 60px 58px 44px 62px 58px 44px',columnGap:4,rowGap:0,alignItems:'start'}}>
+                  {/* 7-col grid: Label | TY NOW | LY NOW | CHG | TY FCST | LY EOD | CHG */}
+                  <div style={{display:'grid',gridTemplateColumns:'80px 60px 58px 40px 62px 56px 38px',columnGap:3,rowGap:0,alignItems:'start'}}>
                     {/* header row */}
                     <span/>
                     <span style={{fontSize:9,fontWeight:700,color:'var(--txt3)',textTransform:'uppercase',letterSpacing:'.04em',paddingBottom:6}}>TY NOW</span>
@@ -852,7 +969,7 @@ export default function Sales({ filters = {} }) {
                     <span style={{fontSize:9,fontWeight:700,color:'var(--txt3)',textTransform:'uppercase',letterSpacing:'.04em',paddingBottom:6}}>CHG</span>
                     <span style={{fontSize:9,fontWeight:700,color:B.t2,textTransform:'uppercase',letterSpacing:'.04em',paddingBottom:6}}>TY FCST</span>
                     <span style={{fontSize:9,fontWeight:700,color:'var(--txt3)',textTransform:'uppercase',letterSpacing:'.04em',paddingBottom:6}}>LY EOD</span>
-                    <span style={{fontSize:9,fontWeight:700,color:'var(--txt3)',textTransform:'uppercase',letterSpacing:'.04em',paddingBottom:6}}>vs LY</span>
+                    <span style={{fontSize:9,fontWeight:700,color:'var(--txt3)',textTransform:'uppercase',letterSpacing:'.04em',paddingBottom:6}}>CHG</span>
                     {todayRows.flatMap(([l, ty, lyNowV, delta, inv, fcst, lyEodV]) => {
                       const isRet = l === 'Returns';
                       const rowH = {minHeight: isRet ? 34 : 26, display:'flex', alignItems:'center'};
@@ -1171,13 +1288,13 @@ export default function Sales({ filters = {} }) {
           </div>
         </div>
         {errors.yoy && <div style={{padding:'12px 14px',color:'#fb923c',fontSize:11,background:'rgba(251,146,60,.08)',border:'1px solid rgba(251,146,60,.18)',borderRadius:8}}>⚠ {errors.yoy}</div>}
-        {loading.yoy ? <Spinner/> : svgChart(yoyBarSVG(yoyMonths, forecastMap, yearVis, 1100, 195, yoyMeta?.current_month))}
+        {loading.yoy ? <Spinner/> : <SVGTip html={yoyBarSVG(yoyMonths, forecastMap, yearVis, 1100, 195, yoyMeta?.current_month)}/>}
       </div>
 
       {/* Sales Charts period bar — controls trend/rolling charts only, NOT the monthly revenue chart above */}
-      <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',flexWrap:'wrap',gap:8,margin:'6px 0 10px'}}>
-        <div style={{fontSize:10,color:'var(--txt3)',fontWeight:600,textTransform:'uppercase',letterSpacing:'.08em'}}>Trend Charts</div>
+      <div style={{display:'flex',alignItems:'center',gap:10,flexWrap:'wrap',margin:'6px 0 10px'}}>
         <PeriodBar value={cpSales} onChange={setCpSales}/>
+        <div style={{fontSize:10,color:'var(--txt3)',fontWeight:600,textTransform:'uppercase',letterSpacing:'.08em'}}>Trend Charts</div>
       </div>
 
       {/* Sales $ Trend */}
@@ -1204,30 +1321,92 @@ export default function Sales({ filters = {} }) {
         </>}
       </ChartCard>
 
-      {/* Units Heatmap */}
-      <ChartCard title="Units Sold — 26 Weeks × Day of Week" noMargin error={errors.heatmap}>
-        {loading.heatmap ? <Spinner/> : svgChart(heatmapSVG(toArr(heatmap)))}
-      </ChartCard>
+      {/* Weekly Sales Heatmap — with week-count + metric toggles */}
+      {(() => {
+        const pillBtn2 = (label, active, onClick) => (
+          <button key={label} onClick={onClick} style={{
+            padding:'3px 10px',borderRadius:6,fontSize:10,fontWeight:600,cursor:'pointer',transition:'all .15s',
+            border:`1px solid ${active ? B.b2 : 'var(--brd)'}`,
+            background: active ? `${B.b1}33` : 'transparent',
+            color: active ? B.b3 : 'var(--txt3)',
+          }}>{label}</button>
+        );
+        const hmWeeksNum = HM_WEEKS_MAP[hmWeeks];
+        const metricLabel = hmMetric2==='units' ? 'Sales Units' : hmMetric2==='sales' ? 'Sales $' : 'Return Units';
+        return (
+          <div style={{background:'var(--surf)',border:'1px solid var(--brd)',borderRadius:14,padding:16,marginBottom:12,transition:'background .3s'}}>
+            <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:12,flexWrap:'wrap',gap:8}}>
+              <span style={{fontSize:13,fontWeight:700,color:'var(--txt)'}}>
+                {metricLabel} — {hmWeeks} × Day of Week
+              </span>
+              <div style={{display:'flex',gap:4,alignItems:'center',flexWrap:'wrap'}}>
+                {['13W','26W','52W'].map(w => pillBtn2(w, hmWeeks===w, ()=>setHmWeeks(w)))}
+                <div style={{width:1,height:16,background:'var(--brd)',margin:'0 4px'}}/>
+                {[['Sales Units','units'],['Sales $','sales'],['Return Units','returns']].map(([lbl,key]) =>
+                  pillBtn2(lbl, hmMetric2===key, ()=>setHmMetric2(key))
+                )}
+              </div>
+            </div>
+            {errors.heatmap && <div style={{padding:'10px 14px',color:'#fb923c',fontSize:11,background:'rgba(251,146,60,.08)',border:'1px solid rgba(251,146,60,.18)',borderRadius:8,marginBottom:8}}>⚠ {errors.heatmap}</div>}
+            {loading.heatmap ? <Spinner/> : svgChart(heatmapSVG(toArr(heatmap), 1100, hmWeeksNum, hmMetric2))}
+          </div>
+        );
+      })()}
 
       {/* ══ TRAFFIC & CONVERSION ════════════════════════════════════ */}
       <SectionDivider label="Traffic & Conversion"/>
       <div style={{display:'flex',gap:8,marginBottom:14,overflowX:'auto',paddingBottom:2}}>
-        {loading.metrics ? <Spinner/> : <>
-          <MetricCard label="Sessions"     value={fN(m.sessions)}    ly={fN(ly('sessions'))}    delta={dp(m.sessions,ly('sessions'))}/>
-          <MetricCard label="Glance Views" value={fN(m.glance_views)} ly={fN(ly('glance_views'))} delta={dp(m.glance_views,ly('glance_views'))}/>
-          <MetricCard label="Click Through" value={fP(m.ctr)}         ly={fP(ly('ctr'))}         delta={dp(m.ctr,ly('ctr'))}/>
-          <MetricCard label="Conversion"   value={fP(m.conversion)}  ly={fP(ly('conversion'))}  delta={dp(m.conversion,ly('conversion'))}/>
-        </>}
+        {loading.metricsTraffic ? <Spinner/> : (() => {
+          const mt = metricsTraffic || {};
+          const mlt = k => mt[`ly_${k}`]; // same pattern as main ly() helper
+          return <>
+            <MetricCard label="Sessions"     value={fN(mt.sessions)}    ly={fN(mlt('sessions'))}    delta={dp(mt.sessions,mlt('sessions'))}/>
+            <MetricCard label="Glance Views" value={fN(mt.glance_views)} ly={fN(mlt('glance_views'))} delta={dp(mt.glance_views,mlt('glance_views'))}/>
+            <MetricCard label="Click Through" value={fP(mt.ctr)}         ly={fP(mlt('ctr'))}         delta={dp(mt.ctr,mlt('ctr'))}/>
+            <MetricCard label="Conversion"   value={fP(mt.conversion)}  ly={fP(mlt('conversion'))}  delta={dp(mt.conversion,mlt('conversion'))}/>
+          </>;
+        })()}
       </div>
-      <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',flexWrap:'wrap',gap:8,margin:'6px 0 10px'}}>
-        <div style={{fontSize:10,color:'var(--txt3)',fontWeight:600,textTransform:'uppercase',letterSpacing:'.08em'}}>Charts</div>
+      <div style={{display:'flex',alignItems:'center',gap:10,flexWrap:'wrap',margin:'6px 0 10px'}}>
         <PeriodBar value={cpTraffic} onChange={setCpTraffic}/>
+        <div style={{fontSize:10,color:'var(--txt3)',fontWeight:600,textTransform:'uppercase',letterSpacing:'.08em'}}>Traffic Charts</div>
       </div>
-      <ChartCard title="Traffic & Conversion" badge={cpTraffic} error={errors.trendTraffic}>
-        {loading.trendTraffic ? <Spinner/> : <>
-          {svgChart(dualLineSVG(toArr(trendTraffic),'ty_sessions','ly_sessions',B.o2,B.sub,fN))}
-          <Legend items={[['Sessions TY',B.o2],['Sessions LY',B.sub,true]]}/>
-        </>}
+      {/* Sessions trend + Conversion gauge side-by-side */}
+      <ChartCard title="Sessions Trend & Conversion Rate" badge={cpTraffic} error={errors.trendTraffic}>
+        {loading.trendTraffic ? <Spinner/> : (
+          <div style={{display:'grid',gridTemplateColumns:'1fr 280px',gap:16,alignItems:'center'}}>
+            {/* Left: sessions line chart */}
+            <div>
+              {svgChart(dualLineSVG(toArr(trendTraffic),'ty_sessions','ly_sessions',B.o2,B.sub,fN))}
+              <Legend items={[['Sessions TY',B.o2],['Sessions LY',B.sub,true]]}/>
+            </div>
+            {/* Right: conversion arc gauge — computed from trendTraffic (period-aware) */}
+            <div style={{display:'flex',flexDirection:'column',alignItems:'center'}}>
+              {(() => {
+                const rows = toArr(trendTraffic);
+                const tySessTotal = rows.reduce((s,d) => s + (d.ty_sessions||0), 0);
+                const tyUnitsEst  = rows.reduce((s,d) => s + ((d.ty_conv||0)*(d.ty_sessions||0)), 0);
+                const lySessTotal = rows.reduce((s,d) => s + (d.ly_sessions||0), 0);
+                const lyUnitsEst  = rows.reduce((s,d) => s + ((d.ly_conv||0)*(d.ly_sessions||0)), 0);
+                const tyConv = tySessTotal > 0 ? tyUnitsEst / tySessTotal : null;
+                const lyConv = lySessTotal > 0 ? lyUnitsEst / lySessTotal : null;
+                return svgChart(convGaugeSVG(tyConv, lyConv));
+              })()}
+              <div style={{display:'flex',alignItems:'center',gap:5,fontSize:8,color:B.sub,marginTop:2}}>
+                <div style={{width:8,height:8,borderRadius:'50%',background:'#5b7fa0',border:'2px solid #0c1a2e',flexShrink:0}}/>
+                <span>Last year position on arc</span>
+              </div>
+              <div style={{display:'flex',gap:8,marginTop:6}}>
+                {[['< 2%','#c0392b'],['2–4%','#d68910'],['> 4%','#1AA392']].map(([l,c])=>(
+                  <div key={l} style={{display:'flex',alignItems:'center',gap:3,fontSize:8,color:B.sub}}>
+                    <div style={{width:7,height:7,borderRadius:1,background:c,opacity:.7}}/>
+                    <span>{l}</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          </div>
+        )}
       </ChartCard>
       <ChartCard title="Conversion Funnel vs LY" noMargin error={errors.funnel}>
         {loading.funnel ? <Spinner/> : svgChart(funnelSVG(toArr(funnel)))}
