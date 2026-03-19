@@ -959,28 +959,17 @@ def sales_period_comparison(
             ty_forecast        = None
             ty_units_forecast  = None
             if period_key == 'today':
-                now_ct    = datetime.now(CENTRAL)
-                # ly_sd is already today − 364 days (weekday-aligned LY date)
-                ly_start  = datetime(ly_sd.year, ly_sd.month, ly_sd.day,
-                                     0, 0, 0, tzinfo=CENTRAL)
-                ly_cutoff = datetime(ly_sd.year, ly_sd.month, ly_sd.day,
-                                     now_ct.hour, now_ct.minute, now_ct.second,
-                                     tzinfo=CENTRAL)
+                now_ct = datetime.now(CENTRAL)
+                # Use SP-API Sales.getOrderMetrics for LY same-time data.
+                # The orders table only has recent history and won't have LY rows.
                 try:
-                    st_row = con.execute(f"""
-                        SELECT COALESCE(SUM(CASE WHEN order_total > 0
-                                               THEN order_total ELSE 0 END), 0),
-                               COALESCE(SUM(number_of_items), 0)
-                        FROM orders
-                        WHERE purchase_date >= ? AND purchase_date <= ?
-                          AND (order_status IS NULL
-                               OR order_status NOT IN ('Cancelled','Canceled','Pending'))
-                          {hw}
-                    """, [ly_start.isoformat(), ly_cutoff.isoformat()] + hp).fetchone()
-                    ly_same_time_sales = round(float(st_row[0] or 0), 2)
-                    ly_same_time_units = int(st_row[1] or 0)
+                    from services.sp_api import get_ly_same_time_sales
+                    ly_same_time_sales, ly_same_time_units = get_ly_same_time_sales(
+                        ly_sd, now_ct
+                    )
                 except Exception as _ex:
-                    logger.debug(f"ly_same_time query: {_ex}")
+                    logger.warning(f"get_ly_same_time_sales failed: {_ex}")
+                    ly_same_time_sales, ly_same_time_units = 0.0, 0
                 # Forecast = TY × (LY full-day / LY same-time)  [pacing ratio]
                 if ly_same_time_sales > 0 and ly_sales > 0:
                     ty_forecast = round(sales * (ly_sales / ly_same_time_sales), 2)

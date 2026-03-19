@@ -1665,6 +1665,85 @@ def _sync_reimbursements_report():
         logger.error(f"  Reimbursements sync error: {e}")
 
 
+# ── LY Same-Time Sales — SP-API Sales.getOrderMetrics ─────────────────────────
+_ly_same_time_cache: dict = {}
+_LY_CACHE_TTL = 300  # seconds (5 minutes)
+
+
+def get_ly_same_time_sales(ly_date, cutoff_dt) -> tuple:
+    """Fetch LY sales through the same time-of-day as now via SP-API getOrderMetrics.
+
+    Args:
+        ly_date  : datetime.date — the LY equivalent date (364 days ago)
+        cutoff_dt: datetime (tz-aware, Central) — current wall-clock time
+
+    Returns:
+        (total_sales: float, unit_count: int)
+        Falls back to (0.0, 0) on any error.
+
+    Cached per (ly_date, hour) for 5 minutes to avoid hammering the API.
+    """
+    import time as _t
+    global _ly_same_time_cache
+
+    cache_key = (str(ly_date), cutoff_dt.hour)
+    now_ts = _t.time()
+    if cache_key in _ly_same_time_cache:
+        cached_val, cached_at = _ly_same_time_cache[cache_key]
+        if now_ts - cached_at < _LY_CACHE_TTL:
+            logger.debug(f"get_ly_same_time_sales: cache hit {cache_key}")
+            return cached_val
+
+    try:
+        from sp_api.api import Sales as SalesAPI
+        from sp_api.base import Marketplaces
+    except ImportError:
+        logger.warning("get_ly_same_time_sales: sp_api library not installed")
+        return (0.0, 0)
+
+    credentials = _load_sp_api_credentials()
+    if not credentials:
+        logger.warning("get_ly_same_time_sales: no credentials")
+        return (0.0, 0)
+
+    try:
+        CENTRAL = ZoneInfo("America/Chicago")
+        ly_start = datetime(ly_date.year, ly_date.month, ly_date.day,
+                            0, 0, 0, tzinfo=CENTRAL)
+        # Ensure at least 1-minute interval so API doesn't reject zero-duration
+        safe_cutoff = datetime(ly_date.year, ly_date.month, ly_date.day,
+                               cutoff_dt.hour, max(cutoff_dt.minute, 1), 0,
+                               tzinfo=CENTRAL)
+
+        # SP-API interval format: start--end (double hyphen)
+        interval = f"{ly_start.isoformat()}--{safe_cutoff.isoformat()}"
+
+        @retry_with_backoff(max_retries=2, base_delay=1.0, max_delay=10.0)
+        def _call_api():
+            api = SalesAPI(credentials=credentials, marketplace=Marketplaces.US)
+            return api.get_order_metrics(interval=interval, granularity='Total')
+
+        response = _call_api()
+        metrics = response.payload or []
+
+        if not metrics:
+            result = (0.0, 0)
+        else:
+            m = metrics[0]
+            ts = m.get('totalSales') or {}
+            amount = float(ts.get('amount', 0) or 0) if isinstance(ts, dict) else float(ts or 0)
+            units  = int(m.get('unitCount', 0) or 0)
+            result = (round(amount, 2), units)
+
+        _ly_same_time_cache[cache_key] = (result, now_ts)
+        logger.info(f"get_ly_same_time_sales: {ly_date} through {cutoff_dt.hour}:{cutoff_dt.minute:02d} CT → ${result[0]:,.2f} / {result[1]} units")
+        return result
+
+    except Exception as e:
+        logger.warning(f"get_ly_same_time_sales error: {e}")
+        return (0.0, 0)
+
+
 def _sync_fc_inventory():
     """Pull FC-level inventory using Inventories API with granularityType=FulfillmentCenter."""
     try:

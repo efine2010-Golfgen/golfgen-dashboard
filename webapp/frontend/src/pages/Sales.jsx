@@ -657,12 +657,12 @@ export default function Sales({ filters = {} }) {
                 ['Conv %',      d.sessions > 0 ? fP(d.conversion) : '—', '—', null, false, fP(d.ly_conversion), '—'],
               ];
               return (
-                <div key={p} style={{flex:'1 1 340px',minWidth:340,background:'var(--card2)',border:'1px solid var(--acc1)',borderRadius:12,padding:'12px 14px',transition:'background .3s',boxShadow:'0 0 0 1px rgba(46,207,170,.15)'}}>
+                <div key={p} style={{flex:'1 1 430px',minWidth:430,background:'var(--card2)',border:'1px solid var(--acc1)',borderRadius:12,padding:'12px 14px',transition:'background .3s',boxShadow:'0 0 0 1px rgba(46,207,170,.15)'}}>
                   <div style={{display:'flex',alignItems:'baseline',gap:8,paddingBottom:9,borderBottom:'1px solid var(--brd)',marginBottom:9}}>
                     <span style={{fontSize:10,fontWeight:700,textTransform:'uppercase',letterSpacing:'.12em',color:B.b2}}>Today</span>
                     <span style={{fontSize:9,color:'var(--txt3)'}}>so far · LY = same time last year</span>
                   </div>
-                  <div style={{display:'grid',gridTemplateColumns:'auto 65px 65px 50px 65px 72px',columnGap:4,rowGap:6,alignItems:'center'}}>
+                  <div style={{display:'grid',gridTemplateColumns:'82px 62px 62px 50px 62px 70px',columnGap:4,rowGap:6,alignItems:'center'}}>
                     {/* header */}
                     <span/>
                     <span style={{fontSize:9,fontWeight:700,color:'var(--txt3)',textTransform:'uppercase',letterSpacing:'.05em'}}>TY</span>
