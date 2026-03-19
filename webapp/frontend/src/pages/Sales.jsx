@@ -404,6 +404,59 @@ function adQuadrantSVG(data) {
   return s + '</svg>';
 }
 
+function hourlySVG(tyData, lyData, currentHour, W=1100, H=160) {
+  if (!tyData || tyData.length === 0) return '<div style="color:#374f66;padding:20px;text-align:center;font-size:12px">No hourly data</div>';
+  const pad = {t:16, r:16, b:28, l:54};
+  const iw = W - pad.l - pad.r, ih = H - pad.t - pad.b;
+  const nHours = 24;
+  const barW = Math.max(10, (iw / nHours) * 0.62);
+  const tyMap = {}, lyMap = {};
+  tyData.forEach(d => { tyMap[d.hour] = d.sales || 0; });
+  lyData.forEach(d => { lyMap[d.hour] = d.sales || 0; });
+  const allVals = [...tyData.map(d => d.sales||0), ...lyData.map(d => d.sales||0)];
+  const maxV = Math.max(...allVals, 1);
+  const xH = h => pad.l + ((h + 0.5) / nHours) * iw;
+  const yV = v => pad.t + ih - (v / maxV) * ih;
+  const fmtHr = h => h === 0 ? '12a' : h < 12 ? `${h}a` : h === 12 ? '12p' : `${h-12}p`;
+  const uid = `hr${Math.random().toString(36).slice(2,6)}`;
+  let s = `<svg width="100%" viewBox="0 0 ${W} ${H}" style="overflow:visible;display:block">`;
+  s += `<defs><linearGradient id="${uid}" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stop-color="#2E6FBB" stop-opacity=".9"/><stop offset="100%" stop-color="#2E6FBB" stop-opacity=".4"/></linearGradient></defs>`;
+  // Grid lines
+  for (let i = 0; i <= 4; i++) {
+    const v = maxV * (i/4);
+    s += `<line x1="${pad.l}" y1="${yV(v).toFixed(1)}" x2="${W-pad.r}" y2="${yV(v).toFixed(1)}" stroke="#1a2f4a" stroke-width="0.5"/>`;
+    s += `<text x="${pad.l-5}" y="${(yV(v)+4).toFixed(1)}" text-anchor="end" font-size="9" fill="#374f66">${f$(v)}</text>`;
+  }
+  // TY bars
+  for (let h = 0; h < 24; h++) {
+    const v = tyMap[h] || 0;
+    const bh = maxV > 0 ? (v / maxV) * ih : 0;
+    const bx = xH(h) - barW/2;
+    const isFuture = currentHour != null && h > currentHour;
+    if (bh > 0) {
+      s += `<rect x="${bx.toFixed(1)}" y="${yV(v).toFixed(1)}" width="${barW.toFixed(1)}" height="${bh.toFixed(1)}" fill="url(#${uid})" rx="2" opacity="${isFuture ? 0.18 : 0.9}"/>`;
+    }
+  }
+  // LY dashed line
+  const lyPts = Array.from({length:24}, (_,h) => `${xH(h).toFixed(1)},${yV(lyMap[h]||0).toFixed(1)}`).join(' ');
+  s += `<polyline points="${lyPts}" fill="none" stroke="#f59e0b" stroke-width="1.8" stroke-dasharray="5 3" stroke-linejoin="round" opacity=".85"/>`;
+  // LY dots at each hour with data
+  for (let h = 0; h < 24; h++) {
+    if ((lyMap[h]||0) > 0) s += `<circle cx="${xH(h).toFixed(1)}" cy="${yV(lyMap[h]).toFixed(1)}" r="2.5" fill="#f59e0b" opacity=".7"/>`;
+  }
+  // Current hour vertical marker
+  if (currentHour != null && currentHour >= 0 && currentHour <= 23) {
+    const mx = xH(currentHour).toFixed(1);
+    s += `<line x1="${mx}" y1="${pad.t}" x2="${mx}" y2="${pad.t+ih}" stroke="#4DC5B8" stroke-width="1.2" stroke-dasharray="4 3" opacity=".9"/>`;
+    s += `<text x="${parseFloat(mx)+3}" y="${pad.t+10}" font-size="8" fill="#4DC5B8" font-weight="700">now</text>`;
+  }
+  // Hour labels
+  [0,3,6,9,12,15,18,21,23].forEach(h => {
+    s += `<text x="${xH(h).toFixed(1)}" y="${H-6}" text-anchor="middle" font-size="8" fill="#374f66">${fmtHr(h)}</text>`;
+  });
+  return s + '</svg>';
+}
+
 // ── SUB-COMPONENTS ─────────────────────────────────────────────────
 function Spinner() {
   return (
@@ -520,6 +573,7 @@ export default function Sales({ filters = {} }) {
   const [cpTraffic,   setCpTraffic]   = useState('30D');
   const [customStart, setCustomStart] = useState('');
   const [customEnd,   setCustomEnd]   = useState('');
+  const [hourlyDate,  setHourlyDate]  = useState('today');    // 'today' | 'yesterday' | YYYY-MM-DD
 
   // Data state
   const [metrics,     setMetrics]     = useState(null);
@@ -534,6 +588,7 @@ export default function Sales({ filters = {} }) {
   const [adEff,       setAdEff]       = useState(null);
   const [feeBreak,    setFeeBreak]    = useState(null);
   const [adBreak,     setAdBreak]     = useState(null);
+  const [hourly,      setHourly]      = useState(null);
   const [loading,     setLoading]     = useState({});
   const [errors,      setErrors]      = useState({});
 
@@ -590,6 +645,18 @@ export default function Sales({ filters = {} }) {
     const params = {...baseParams, period: chartTrafficApi};
     load('trendTraffic', setTrendTraffic, 'trend', params);
   }, [divRaw, custRaw, cpTraffic]);
+
+  // Fetch hourly sales — reload when date selector changes or filters change
+  useEffect(() => {
+    const today = new Date();
+    const todayStr = today.toISOString().split('T')[0];
+    const yest = new Date(today); yest.setDate(yest.getDate() - 1);
+    const yestStr = yest.toISOString().split('T')[0];
+    const dateParam = hourlyDate === 'today' ? todayStr
+                    : hourlyDate === 'yesterday' ? yestStr
+                    : hourlyDate;
+    load('hourly', setHourly, 'hourly', {...baseParams, date: dateParam});
+  }, [divRaw, custRaw, hourlyDate]);
 
   const handleViewTab = v => { setViewTab(v); setActivePeriod(PERIODS[v]?.[0] || ''); };
 
@@ -829,6 +896,80 @@ export default function Sales({ filters = {} }) {
               </div>
             );
           })}
+        </div>
+      )}
+
+      {/* HOURLY SALES CHART */}
+      {(viewTab === 'Sales Summary' || viewTab === 'Daily') && (
+        <div style={{background:'var(--surf)',border:'1px solid var(--brd)',borderRadius:14,padding:16,marginBottom:12,transition:'background .3s'}}>
+          <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:14,flexWrap:'wrap',gap:8}}>
+            <span style={{fontSize:13,fontWeight:700,color:'var(--txt)'}}>Hourly Sales</span>
+            <div style={{display:'flex',gap:6,alignItems:'center',flexWrap:'wrap'}}>
+              {['today','yesterday'].map(d => (
+                <button key={d} onClick={() => setHourlyDate(d)}
+                  style={{padding:'4px 11px',borderRadius:7,fontSize:11,fontWeight:600,border:`1px solid ${hourlyDate===d?B.b2:'var(--brd)'}`,
+                    background:hourlyDate===d?`${B.b1}33`:'transparent',color:hourlyDate===d?B.b3:'var(--txt3)',cursor:'pointer',transition:'all .15s',textTransform:'capitalize'}}>
+                  {d === 'today' ? 'Today' : 'Yesterday'}
+                </button>
+              ))}
+              <input type="date"
+                value={['today','yesterday'].includes(hourlyDate) ? '' : hourlyDate}
+                onChange={e => e.target.value && setHourlyDate(e.target.value)}
+                style={{padding:'3px 8px',borderRadius:7,border:`1px solid ${!['today','yesterday'].includes(hourlyDate)?B.b2:'var(--brd)'}`,background:'var(--card)',color:'var(--txt)',fontSize:11,outline:'none',colorScheme:'dark'}}/>
+            </div>
+          </div>
+          {errors.hourly && <div style={{padding:'12px 14px',color:'#fb923c',fontSize:11,background:'rgba(251,146,60,.08)',border:'1px solid rgba(251,146,60,.18)',borderRadius:8}}>⚠ {errors.hourly}</div>}
+          {loading.hourly ? <Spinner/> : (() => {
+            const hTy = hourly?.ty || [];
+            const hLy = hourly?.ly || [];
+            const isToday = hourlyDate === 'today';
+            const curHour = isToday ? (() => { try { return new Date(new Date().toLocaleString('en-US',{timeZone:'America/Chicago'})).getHours(); } catch(e) { return null; } })() : null;
+            const tyTotal = hourly?.ty_total;
+            const lyTotal = hourly?.ly_total;
+            const vsLy = (tyTotal != null && lyTotal != null && lyTotal > 0) ? ((tyTotal/lyTotal - 1) * 100) : null;
+            return (
+              <>
+                <div style={{display:'flex',gap:24,marginBottom:12,flexWrap:'wrap'}}>
+                  <div>
+                    <div style={{fontSize:9,textTransform:'uppercase',letterSpacing:'.08em',color:B.sub}}>TY Total</div>
+                    <div style={{fontSize:18,fontWeight:700,color:B.b3,marginTop:2}}>{tyTotal != null ? f$(tyTotal) : '—'}</div>
+                  </div>
+                  <div>
+                    <div style={{fontSize:9,textTransform:'uppercase',letterSpacing:'.08em',color:B.sub}}>LY Same Day</div>
+                    <div style={{fontSize:18,fontWeight:700,color:B.sub,marginTop:2}}>{lyTotal != null ? f$(lyTotal) : '—'}</div>
+                  </div>
+                  {vsLy != null && (
+                    <div>
+                      <div style={{fontSize:9,textTransform:'uppercase',letterSpacing:'.08em',color:B.sub}}>vs LY</div>
+                      <div style={{fontSize:18,fontWeight:700,color:vsLy>=0?'#4ade80':'#fb923c',marginTop:2}}>
+                        {vsLy>=0?'▲':'▼'} {Math.abs(vsLy).toFixed(1)}%
+                      </div>
+                    </div>
+                  )}
+                  <div style={{marginLeft:'auto',alignSelf:'flex-end',paddingBottom:2}}>
+                    <span style={{fontSize:9,color:B.sub}}>{hourly?.ty_source === 'orders_table' ? 'Source: orders' : 'Source: SP-API'}</span>
+                  </div>
+                </div>
+                {svgChart(hourlySVG(hTy, hLy, curHour))}
+                <div style={{display:'flex',gap:14,flexWrap:'wrap',marginTop:8}}>
+                  <div style={{display:'flex',alignItems:'center',gap:5,fontSize:10,color:'var(--txt3)'}}>
+                    <div style={{width:9,height:9,borderRadius:2,background:B.b2}}/>
+                    <span>This Year</span>
+                  </div>
+                  <div style={{display:'flex',alignItems:'center',gap:5,fontSize:10,color:'var(--txt3)'}}>
+                    <div style={{width:16,height:0,border:'1.5px dashed #f59e0b',borderRadius:1}}/>
+                    <span>Last Year</span>
+                  </div>
+                  {curHour != null && (
+                    <div style={{display:'flex',alignItems:'center',gap:5,fontSize:10,color:'var(--txt3)'}}>
+                      <div style={{width:1.5,height:10,background:B.t2}}/>
+                      <span>Current time</span>
+                    </div>
+                  )}
+                </div>
+              </>
+            );
+          })()}
         </div>
       )}
 
