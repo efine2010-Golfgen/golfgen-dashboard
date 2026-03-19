@@ -143,32 +143,7 @@ function yoyBarSVG(data, forecast={}, yearVis={y2024:true,y2025:true,y2026:true}
   const fmtTip = v => v>=1e6?`$${(v/1e6).toFixed(2)}M`:v>=1000?`$${(v/1000).toFixed(1)}k`:`$${Math.round(v)}`;
   const fmtLbl = v => v>=1e6?`$${(v/1e6).toFixed(1)}M`:v>=1000?`$${Math.round(v/1000)}k`:`$${Math.round(v)}`;
 
-  // ── Summary totals for top-right panel ──
-  const fy24Total = data.reduce((s,d)=>s+(d.y2024||0),0);
-  const fy25Total = data.reduce((s,d)=>s+(d.y2025||0),0);
-  const ytd26     = data.reduce((s,d)=>s+(d.y2026||0),0);
-  const proj26    = ytd26 + Object.values(forecast).reduce((s,v)=>s+v,0);
-
-  // y2026 barDef index (for placeholder positioning)
-  const bi26 = barDefs.findIndex(b=>b.key==='y2026');
-
   let s = `<svg width="100%" viewBox="0 0 ${W} ${H}" style="overflow:visible;display:block">`;
-
-  // ── Summary mini-panel (top-right, above grid) ──
-  const sumItems = [];
-  if (yearVis.y2024) sumItems.push({lbl:'FY 24', val:fy24Total, col:CC.y2024});
-  if (yearVis.y2025) sumItems.push({lbl:'FY 25', val:fy25Total, col:CC.y2025});
-  if (yearVis.y2026) sumItems.push({lbl:"'26 YTD", val:ytd26, col:CC.y2026});
-  if (yearVis.y2026 && hasForecast) sumItems.push({lbl:"'26 Proj", val:proj26, col:CC.forecast});
-  const sBoxW=62, sBoxH=24, sGap=5;
-  const sTotW = sumItems.length*(sBoxW+sGap)-sGap;
-  const sStartX = W - pad.r - sTotW;
-  sumItems.forEach((item,i)=>{
-    const sx = sStartX + i*(sBoxW+sGap);
-    s+=`<rect x="${sx}" y="2" width="${sBoxW}" height="${sBoxH}" rx="4" fill="#0b1829" stroke="${item.col}44" stroke-width="0.8"/>`;
-    s+=`<text x="${(sx+sBoxW/2).toFixed(1)}" y="11" text-anchor="middle" font-size="7" fill="${B.sub}">${item.lbl}</text>`;
-    s+=`<text x="${(sx+sBoxW/2).toFixed(1)}" y="22" text-anchor="middle" font-size="10.5" font-weight="700" fill="${item.col}">${fmtLbl(item.val)}</text>`;
-  });
 
   // Grid lines
   for (let i=0;i<=3;i++) {
@@ -178,6 +153,7 @@ function yoyBarSVG(data, forecast={}, yearVis={y2024:true,y2025:true,y2026:true}
   }
 
   // Bars + dotted placeholders
+  // Tooltip pattern: <g><title>text</title><rect.../></g> — most reliable SVG hover across browsers
   data.forEach((d,mi) => {
     const mn = d.month_num;
     const isCurrent = currentMonth!=null && mn===currentMonth;
@@ -185,11 +161,12 @@ function yoyBarSVG(data, forecast={}, yearVis={y2024:true,y2025:true,y2026:true}
       const v = bar.key==='forecast' ? (forecast[mn]||null) : d[bar.key];
       const isFcst = bar.key==='forecast';
 
-      // Dotted placeholder: y2026 slot is empty but we have a forecast → draw dashed outline
+      // Dotted placeholder: y2026 slot is empty but forecast exists → dashed outline rect
       if (bar.key==='y2026' && (v==null||v<=0) && forecast[mn]>0) {
         const fh = barH(forecast[mn]);
         const bx = barX(mi, bi);
-        s+=`<rect x="${bx.toFixed(1)}" y="${(pad.t+ih-fh).toFixed(1)}" width="${bw.toFixed(1)}" height="${fh.toFixed(1)}" rx="2" fill="none" stroke="${CC.y2026}" stroke-width="1.2" stroke-dasharray="3,2" opacity="0.45"/>`;
+        const tip = `${d.month} '26 Act: (not yet actualized)`;
+        s+=`<g><title>${tip}</title><rect x="${bx.toFixed(1)}" y="${(pad.t+ih-fh).toFixed(1)}" width="${bw.toFixed(1)}" height="${fh.toFixed(1)}" rx="2" fill="none" stroke="${CC.y2026}" stroke-width="1.2" stroke-dasharray="3,2" opacity="0.45"/></g>`;
         return;
       }
 
@@ -197,15 +174,18 @@ function yoyBarSVG(data, forecast={}, yearVis={y2024:true,y2025:true,y2026:true}
       const hh = barH(v);
       const bx = barX(mi,bi);
 
-      // Hover tooltip text
+      // Build tooltip label
+      const fv = fmtTip(v);
       let ttip='';
-      const fv=fmtTip(v);
-      if (bar.key==='y2024')    ttip=`${d.month} '24 Act: ${fv}`;
+      if (bar.key==='y2024')      ttip=`${d.month} '24 Act: ${fv}`;
       else if (bar.key==='y2025') ttip=`${d.month} '25 Act: ${fv}`;
       else if (bar.key==='y2026') ttip=isCurrent?`${d.month} '26 MTD: ${fv}`:`${d.month} '26 Act: ${fv}`;
       else                        ttip=`${d.month} '26 Proj: ${fv}`;
 
-      s+=`<rect x="${bx.toFixed(1)}" y="${(pad.t+ih-hh).toFixed(1)}" width="${bw.toFixed(1)}" height="${hh.toFixed(1)}" fill="${bar.color}" rx="2" opacity="${isFcst?0.7:bar.key==='y2026'?1:0.82}"${isFcst?' stroke-dasharray="3,2" stroke="#f59e0b" stroke-width="0.8"':''}><title>${ttip}</title></rect>`;
+      // Wrap in <g> so <title> is the first child — most reliable SVG tooltip pattern
+      s+=`<g><title>${ttip}</title>`;
+      s+=`<rect x="${bx.toFixed(1)}" y="${(pad.t+ih-hh).toFixed(1)}" width="${bw.toFixed(1)}" height="${hh.toFixed(1)}" fill="${bar.color}" rx="2" opacity="${isFcst?0.7:bar.key==='y2026'?1:0.82}"${isFcst?' stroke-dasharray="3,2" stroke="#f59e0b" stroke-width="0.8"':''}/>`;
+      s+=`</g>`;
       if (v>0) s+=`<text x="${(bx+bw/2).toFixed(1)}" y="${(pad.t+ih-hh-3).toFixed(1)}" text-anchor="middle" font-size="7" font-weight="600" fill="${bar.lc}">${fmtLbl(v)}</text>`;
     });
     s+=`<text x="${(groupX(mi)+groupW/2).toFixed(1)}" y="${H-6}" text-anchor="middle" font-size="9" fill="#374f66">${d.month}</text>`;
@@ -754,6 +734,12 @@ export default function Sales({ filters = {} }) {
     }
   }
 
+  // ── FY summary totals for Monthly Revenue card header ──
+  const fy24Total = yoyMonths.reduce((s,m2)=>s+(m2.y2024||0),0);
+  const fy25Total = yoyMonths.reduce((s,m2)=>s+(m2.y2025||0),0);
+  const ytd26     = yoyMonths.reduce((s,m2)=>s+(m2.y2026||0),0);
+  const proj26    = ytd26 + Object.values(forecastMap).reduce((s,v)=>s+v,0);
+
   return (
     <div style={{fontFamily:"'Sora',-apple-system,BlinkMacSystemFont,sans-serif",color:'var(--txt)'}}>
 
@@ -1140,17 +1126,13 @@ export default function Sales({ filters = {} }) {
         </>}
       </div>
 
-      {/* Sales Charts period bar */}
-      <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',flexWrap:'wrap',gap:8,margin:'6px 0 10px'}}>
-        <div style={{fontSize:10,color:'var(--txt3)',fontWeight:600,textTransform:'uppercase',letterSpacing:'.08em'}}>Charts</div>
-        <PeriodBar value={cpSales} onChange={setCpSales}/>
-      </div>
-
-      {/* Monthly YOY */}
-      {/* Monthly Revenue — custom header with year toggles on left */}
+      {/* Monthly Revenue YOY — independent chart, NOT controlled by the Charts period bar below */}
       <div style={{background:'var(--surf)',border:'1px solid var(--brd)',borderRadius:14,padding:16,marginBottom:12,transition:'background .3s'}}>
-        <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:14}}>
-          <div style={{display:'flex',gap:5,alignItems:'center'}}>
+        <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:12,flexWrap:'wrap',gap:8}}>
+          {/* Left: title + year toggles */}
+          <div style={{display:'flex',gap:6,alignItems:'center',flexWrap:'wrap'}}>
+            <span style={{fontSize:12,fontWeight:700,color:'var(--txt)',marginRight:4}}>Monthly Revenue</span>
+            <div style={{width:1,height:14,background:'var(--brd)',margin:'0 2px'}}/>
             {[['2024','y2024',B.dim],['2025','y2025',B.b2],['2026','y2026',B.o2]].map(([lbl,key,col])=>(
               <button key={key} onClick={()=>setYearVis(v=>({...v,[key]:!v[key]}))} style={{
                 fontSize:10,fontWeight:600,padding:'3px 10px',borderRadius:6,cursor:'pointer',
@@ -1160,13 +1142,42 @@ export default function Sales({ filters = {} }) {
               }}>{lbl}</button>
             ))}
           </div>
-          <div style={{display:'flex',alignItems:'center',gap:8}}>
-            <span style={{fontSize:12,fontWeight:700,color:'var(--txt)'}}>Monthly Revenue</span>
-            <span style={{fontSize:10,padding:'2px 9px',borderRadius:99,background:'rgba(46,111,187,.15)',color:B.b3,border:'1px solid rgba(46,111,187,.2)'}}>Year over Year</span>
+          {/* Right: FY summary boxes — same row as year toggles */}
+          <div style={{display:'flex',gap:5,alignItems:'center',flexWrap:'wrap'}}>
+            {yearVis.y2024 && fy24Total>0 && (
+              <div style={{background:'#0b1829',border:`1px solid ${B.dim}55`,borderRadius:7,padding:'3px 11px',textAlign:'center',minWidth:58}}>
+                <div style={{fontSize:7,color:B.sub,lineHeight:'1.4',letterSpacing:'.05em'}}>FY 24</div>
+                <div style={{fontSize:12,fontWeight:700,color:B.dim,lineHeight:'1.3'}}>{f$(fy24Total)}</div>
+              </div>
+            )}
+            {yearVis.y2025 && fy25Total>0 && (
+              <div style={{background:'#0b1829',border:`1px solid ${B.b2}55`,borderRadius:7,padding:'3px 11px',textAlign:'center',minWidth:58}}>
+                <div style={{fontSize:7,color:B.sub,lineHeight:'1.4',letterSpacing:'.05em'}}>FY 25</div>
+                <div style={{fontSize:12,fontWeight:700,color:B.b2,lineHeight:'1.3'}}>{f$(fy25Total)}</div>
+              </div>
+            )}
+            {yearVis.y2026 && ytd26>0 && (
+              <div style={{background:'#0b1829',border:`1px solid ${B.o2}55`,borderRadius:7,padding:'3px 11px',textAlign:'center',minWidth:58}}>
+                <div style={{fontSize:7,color:B.sub,lineHeight:'1.4',letterSpacing:'.05em'}}>&apos;26 YTD</div>
+                <div style={{fontSize:12,fontWeight:700,color:B.o2,lineHeight:'1.3'}}>{f$(ytd26)}</div>
+              </div>
+            )}
+            {yearVis.y2026 && proj26>ytd26 && (
+              <div style={{background:'#0b1829',border:'1px solid #f59e0b55',borderRadius:7,padding:'3px 11px',textAlign:'center',minWidth:58}}>
+                <div style={{fontSize:7,color:B.sub,lineHeight:'1.4',letterSpacing:'.05em'}}>&apos;26 Proj</div>
+                <div style={{fontSize:12,fontWeight:700,color:'#f59e0b',lineHeight:'1.3'}}>{f$(proj26)}</div>
+              </div>
+            )}
           </div>
         </div>
         {errors.yoy && <div style={{padding:'12px 14px',color:'#fb923c',fontSize:11,background:'rgba(251,146,60,.08)',border:'1px solid rgba(251,146,60,.18)',borderRadius:8}}>⚠ {errors.yoy}</div>}
         {loading.yoy ? <Spinner/> : svgChart(yoyBarSVG(yoyMonths, forecastMap, yearVis, 1100, 195, yoyMeta?.current_month))}
+      </div>
+
+      {/* Sales Charts period bar — controls trend/rolling charts only, NOT the monthly revenue chart above */}
+      <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',flexWrap:'wrap',gap:8,margin:'6px 0 10px'}}>
+        <div style={{fontSize:10,color:'var(--txt3)',fontWeight:600,textTransform:'uppercase',letterSpacing:'.08em'}}>Trend Charts</div>
+        <PeriodBar value={cpSales} onChange={setCpSales}/>
       </div>
 
       {/* Sales $ Trend */}
