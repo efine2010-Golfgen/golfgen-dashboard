@@ -1373,24 +1373,28 @@ def sales_rolling(
         return {"error": str(e)}
 
 
-# ── ENDPOINT 7: Units heatmap data ────────────────────────
+# ── ENDPOINT 7: Units/Sales/Returns heatmap data ──────────
 @router.get("/api/sales/heatmap")
 def sales_heatmap(
     division: str | None = Query(None),
     customer: str | None = Query(None),
     marketplace: str | None = Query(None),
+    weeks: int = Query(26, ge=13, le=52),
 ):
-    """26 weeks x 7 days heatmap of units sold."""
+    """N weeks x 7 days heatmap of units sold, sales $, and return units.
+    weeks param controls history depth (13, 26, or 52).
+    Returns rows with: week, day, day_name, units, sales, returns
+    """
     try:
         con = get_db()
         hw, hp = _hier_where(division, customer, marketplace=marketplace)
         today = _today_central()
-        start_date = today - timedelta(weeks=26)
+        start_date = today - timedelta(weeks=weeks)
         expected_days = (today - start_date).days + 1
 
         # Try asin='ALL' first (has full historical coverage from S&T report backfill)
         rows = con.execute(f"""
-            SELECT date, COALESCE(units_ordered, 0)
+            SELECT date, COALESCE(units_ordered, 0), COALESCE(ordered_product_sales, 0)
             FROM daily_sales
             WHERE asin = 'ALL' AND date >= ? AND date <= ? {hw}
             ORDER BY date
@@ -1399,7 +1403,7 @@ def sales_heatmap(
         # Fallback: if ALL rows are sparse, aggregate from per-ASIN rows
         if len(rows) < (expected_days * 0.3):
             agg_rows = con.execute(f"""
-                SELECT date, COALESCE(SUM(units_ordered), 0)
+                SELECT date, COALESCE(SUM(units_ordered), 0), COALESCE(SUM(ordered_product_sales), 0)
                 FROM daily_sales
                 WHERE asin != 'ALL' AND date >= ? AND date <= ? {hw}
                 GROUP BY date ORDER BY date
@@ -1427,16 +1431,32 @@ def sales_heatmap(
                 s_iso = datetime(today.year, today.month, today.day, 0, 0, 0, tzinfo=CENTRAL).isoformat()
                 e_iso = datetime(today.year, today.month, today.day, 23, 59, 59, tzinfo=CENTRAL).isoformat()
                 o_row = con.execute(f"""
-                    SELECT COALESCE(SUM(number_of_items), 0)
+                    SELECT COALESCE(SUM(number_of_items), 0), COALESCE(SUM(order_total), 0)
                     FROM orders
                     WHERE purchase_date >= ? AND purchase_date <= ?
                       AND (order_status IS NULL OR order_status NOT IN ('Cancelled')) {hw}
                 """, [s_iso, e_iso] + hp).fetchone()
                 today_units = int(o_row[0]) if o_row and o_row[0] else 0
+                today_sales = float(o_row[1]) if o_row and o_row[1] else 0.0
                 if today_units > 0:
-                    rows = list(rows) + [(today_str, today_units)]
+                    rows = list(rows) + [(today_str, today_units, today_sales)]
             except Exception:
                 pass
+
+        # Build returns map: date → return_units from financial_events
+        returns_map: dict = {}
+        try:
+            ret_rows = con.execute(f"""
+                SELECT date, COUNT(*)
+                FROM financial_events
+                WHERE date >= ? AND date <= ?
+                  AND (event_type ILIKE '%refund%' OR event_type ILIKE '%return%') {hw}
+                GROUP BY date
+            """, [str(start_date), str(today)] + hp).fetchall()
+            for rr in ret_rows:
+                returns_map[fmt_date(rr[0])] = int(rr[1])
+        except Exception:
+            pass
 
         con.close()
 
@@ -1445,6 +1465,8 @@ def sales_heatmap(
         for r in rows:
             d_str = fmt_date(r[0])
             units = int(r[1])
+            sales = float(r[2]) if len(r) > 2 and r[2] else 0.0
+            returns_ct = returns_map.get(d_str, 0)
             try:
                 dt = datetime.strptime(d_str, "%Y-%m-%d").date()
             except Exception:
@@ -1452,10 +1474,13 @@ def sales_heatmap(
             days_ago = (today - dt).days
             week = days_ago // 7
             day = dt.weekday()  # 0=Mon, 6=Sun
-            if week < 26:
+            if week < weeks:
                 result.append({
                     "week": week, "day": day,
-                    "day_name": day_names[day], "units": units,
+                    "day_name": day_names[day],
+                    "units": units,
+                    "sales": round(sales, 2),
+                    "returns": returns_ct,
                 })
         return result
     except Exception as e:
