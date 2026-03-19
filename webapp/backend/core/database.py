@@ -1628,6 +1628,33 @@ def _init_retail_tables():
     con.close()
 
 
+def _init_hourly_sales_table():
+    """Create hourly_sales table for storing per-hour SP-API sales data.
+
+    Used by the 30-day × 24-hour heatmap on the Sales page.
+    Populated hourly by the scheduler from SP-API getOrderMetrics (HOUR granularity).
+    Each row = one hour of one day for one division+customer combination.
+    UNIQUE constraint prevents duplicates on upsert.
+    """
+    con = get_db_rw()
+    con.execute("""
+        CREATE TABLE IF NOT EXISTS hourly_sales (
+            id          SERIAL PRIMARY KEY,
+            sale_date   DATE NOT NULL,
+            hour        INT  NOT NULL,
+            sales       DOUBLE PRECISION DEFAULT 0,
+            units       INT DEFAULT 0,
+            orders      INT DEFAULT 0,
+            division    VARCHAR DEFAULT 'all',
+            customer    VARCHAR DEFAULT 'amazon',
+            platform    VARCHAR DEFAULT 'sp_api',
+            synced_at   TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            UNIQUE (sale_date, hour, division, customer, platform)
+        )
+    """)
+    con.close()
+
+
 def _init_app_settings_table():
     """Create app_settings key-value table for storing API credentials, tokens, etc."""
     con = get_db_rw()
@@ -1766,6 +1793,12 @@ def init_all_tables():
         logger.info("App settings table initialized")
     except Exception as e:
         logger.error(f"App settings table init error: {e}")
+
+    try:
+        _init_hourly_sales_table()
+        logger.info("Hourly sales table initialized")
+    except Exception as e:
+        logger.error(f"Hourly sales table init error: {e}")
 
     # ── Fix PostgreSQL sequences after migration ──
     try:

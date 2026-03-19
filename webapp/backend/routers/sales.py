@@ -607,14 +607,19 @@ def sales_summary(
         ly_gm_pct = round(ly_gm / ly_sales, 4) if ly_sales else 0
 
         # Returns/refunds from financial_events
+        # Amazon's PostedDate is the settlement date — typically 1-2 days AFTER
+        # the refund is processed. Add a +2 day buffer on end date so returns
+        # are not missed just because they settled one day into the next period.
         def _sum_refunds(s, e, extra_params):
             try:
+                e_buf = e + timedelta(days=2)
                 r = con.execute(f"""
                     SELECT COALESCE(COUNT(*), 0),
                            COALESCE(SUM(ABS(product_charges)), 0)
                     FROM financial_events
-                    WHERE date >= ? AND date <= ? AND event_type ILIKE '%%refund%%' {fw}
-                """, [str(s), str(e)] + extra_params).fetchone()
+                    WHERE date >= ? AND date <= ?
+                      AND (event_type ILIKE '%%refund%%' OR event_type ILIKE '%%return%%') {fw}
+                """, [str(s), str(e_buf)] + extra_params).fetchone()
                 return int(r[0]) if r else 0, round(float(r[1]), 2) if r else 0
             except Exception:
                 return 0, 0
@@ -945,15 +950,19 @@ def sales_period_comparison(
                 ly_fees_val = round(ly_sales * 0.27, 2)
 
             # Returns / refunds
+            # Amazon's PostedDate is the settlement date — typically 1-2 days AFTER
+            # the refund is processed. Add a +2 day buffer on end date so TY returns
+            # are not missed just because they settled one day into the next period.
             def _pc_refunds(s, e, extra_params):
                 try:
+                    e_buf = e + timedelta(days=2)
                     r = con.execute(f"""
                         SELECT COALESCE(COUNT(*), 0),
                                COALESCE(SUM(ABS(product_charges)), 0)
                         FROM financial_events
                         WHERE date >= ? AND date <= ?
                           AND (event_type ILIKE '%%refund%%' OR event_type ILIKE '%%return%%') {fw}
-                    """, [str(s), str(e)] + extra_params).fetchone()
+                    """, [str(s), str(e_buf)] + extra_params).fetchone()
                     return int(r[0]) if r else 0, round(float(r[1]), 2) if r else 0
                 except Exception:
                     return 0, 0
@@ -2610,3 +2619,188 @@ def color_mix(
         result.append({"color": color, "revenue": round(rev, 2), "pct": pct})
 
     return {"colors": result, "total": round(total_rev, 2)}
+
+
+# ──────────────────────────────────────────────────────────────────────────────
+# HOURLY SALES HEATMAP — 30-day × 24-hour grid
+# ──────────────────────────────────────────────────────────────────────────────
+
+def save_hourly_to_db(target_date=None):
+    """Fetch hourly SP-API data for target_date and upsert into hourly_sales table.
+
+    Called by the scheduler every hour to accumulate historical hourly data.
+    Also called on-demand when the heatmap endpoint finds missing days.
+    """
+    try:
+        from services.sp_api import get_hourly_sales
+        from core.database import get_db_rw
+
+        if target_date is None:
+            target_date = _today_central()
+
+        rows = get_hourly_sales(target_date)
+        if not rows:
+            logger.debug(f"save_hourly_to_db({target_date}): no data from SP-API")
+            return 0
+
+        con = get_db_rw()
+        saved = 0
+        now_ts = datetime.now(CENTRAL).isoformat()
+        for r in rows:
+            h = r.get("hour", 0)
+            s = float(r.get("sales", 0) or 0)
+            u = int(r.get("units", 0) or 0)
+            o = int(r.get("orders", 0) or 0)
+            con.execute("""
+                INSERT INTO hourly_sales (sale_date, hour, sales, units, orders, division, customer, platform, synced_at)
+                VALUES (?, ?, ?, ?, ?, 'all', 'amazon', 'sp_api', ?)
+                ON CONFLICT (sale_date, hour, division, customer, platform)
+                DO UPDATE SET sales=EXCLUDED.sales, units=EXCLUDED.units, orders=EXCLUDED.orders, synced_at=EXCLUDED.synced_at
+            """, [str(target_date), h, s, u, o, now_ts])
+            saved += 1
+        con.close()
+        total_sales = sum(float(r.get("sales", 0) or 0) for r in rows)
+        logger.info(f"save_hourly_to_db({target_date}): saved {saved} hours, total=${total_sales:,.2f}")
+        return saved
+    except Exception as ex:
+        logger.warning(f"save_hourly_to_db({target_date}) error: {ex}")
+        return 0
+
+
+@router.get("/sales/hourly-heatmap")
+def hourly_heatmap(
+    days: int = Query(30, ge=1, le=90),
+    division: str = Query(""),
+    customer: str = Query(""),
+):
+    """30-day × 24-hour sales heatmap for the Sales page.
+
+    Returns `days` calendar days (newest = last element) with 24 hourly buckets each.
+    Pulls from hourly_sales table. If a day has no DB rows (gap), fetches from SP-API
+    on-demand for dates in the past 7 days (avoids hammering API for old dates).
+
+    Response shape:
+    {
+      "days": [
+        {
+          "date": "2026-03-01",
+          "label": "Mar 1",
+          "dayOfWeek": "Sun",
+          "isToday": false,
+          "hours": [ {hour, sales, units, orders}, ... ×24 ]
+        }, ...
+      ],
+      "maxSales": 1234.56,
+      "maxUnits": 45,
+      "lastUpdated": "2026-03-18T12:05:00"
+    }
+    """
+    today_ct = _today_central()
+    con = get_db()
+    hw, hp = _hier_where(division, customer)
+
+    # Build date range: today back `days` days
+    dates = [today_ct - timedelta(days=i) for i in range(days - 1, -1, -1)]  # oldest→newest
+
+    # ── Pull all stored rows for the date range ──
+    range_start = str(dates[0])
+    range_end   = str(dates[-1])
+    try:
+        stored_rows = con.execute("""
+            SELECT sale_date, hour, sales, units, orders
+            FROM hourly_sales
+            WHERE sale_date >= ? AND sale_date <= ?
+              AND division = 'all' AND customer = 'amazon' AND platform = 'sp_api'
+        """, [range_start, range_end]).fetchall()
+    except Exception:
+        stored_rows = []
+    con.close()
+
+    # Index stored data: {date_str: {hour: {sales, units, orders}}}
+    db_map: dict = {}
+    for row in stored_rows:
+        ds = str(row[0])
+        h  = int(row[1])
+        if ds not in db_map:
+            db_map[ds] = {}
+        db_map[ds][h] = {
+            "hour":   h,
+            "sales":  float(row[2] or 0),
+            "units":  int(row[3] or 0),
+            "orders": int(row[4] or 0),
+        }
+
+    # ── Fill gaps from SP-API for recent dates ──
+    recent_cutoff = today_ct - timedelta(days=7)
+    for d in dates:
+        ds = str(d)
+        # Only try to fill if we have no data at all for this date
+        if ds not in db_map or not db_map[ds]:
+            if d >= recent_cutoff:
+                saved = save_hourly_to_db(d)
+                if saved > 0:
+                    # Re-query for this date
+                    con2 = get_db()
+                    fresh = con2.execute("""
+                        SELECT hour, sales, units, orders
+                        FROM hourly_sales
+                        WHERE sale_date = ? AND division='all' AND customer='amazon' AND platform='sp_api'
+                    """, [ds]).fetchall()
+                    con2.close()
+                    if fresh:
+                        db_map[ds] = {}
+                        for fr in fresh:
+                            h = int(fr[0])
+                            db_map[ds][h] = {
+                                "hour": h,
+                                "sales": float(fr[1] or 0),
+                                "units": int(fr[2] or 0),
+                                "orders": int(fr[3] or 0),
+                            }
+
+    # ── Build response ──
+    day_names = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]
+    month_names = ["Jan", "Feb", "Mar", "Apr", "May", "Jun",
+                   "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"]
+    now_ct = datetime.now(CENTRAL)
+    current_hour = now_ct.hour
+
+    result_days = []
+    max_sales = 0.0
+    max_units = 0
+
+    for d in dates:
+        ds = str(d)
+        hours_data = db_map.get(ds, {})
+        is_today = (d == today_ct)
+
+        hours_list = []
+        for h in range(24):
+            cell = hours_data.get(h, {"hour": h, "sales": 0.0, "units": 0, "orders": 0})
+            # For today: future hours are null (no data yet)
+            if is_today and h > current_hour:
+                cell = {"hour": h, "sales": None, "units": None, "orders": None}
+            else:
+                s = float(cell.get("sales") or 0)
+                u = int(cell.get("units") or 0)
+                if s > max_sales:
+                    max_sales = s
+                if u > max_units:
+                    max_units = u
+                cell = {"hour": h, "sales": round(s, 2), "units": u, "orders": int(cell.get("orders") or 0)}
+            hours_list.append(cell)
+
+        result_days.append({
+            "date":      ds,
+            "label":     f"{month_names[d.month - 1]} {d.day}",
+            "dayOfWeek": day_names[d.weekday()],
+            "isToday":   is_today,
+            "hours":     hours_list,
+        })
+
+    return {
+        "days":        result_days,
+        "maxSales":    round(max_sales, 2),
+        "maxUnits":    max_units,
+        "lastUpdated": now_ct.strftime("%Y-%m-%dT%H:%M:%S"),
+    }

@@ -573,7 +573,9 @@ export default function Sales({ filters = {} }) {
   const [cpTraffic,   setCpTraffic]   = useState('30D');
   const [customStart, setCustomStart] = useState('');
   const [customEnd,   setCustomEnd]   = useState('');
-  const [hourlyDate,  setHourlyDate]  = useState('today');    // 'today' | 'yesterday' | YYYY-MM-DD
+  const [hmMetric,    setHmMetric]    = useState('$');        // '$' | 'units'
+  const [hideNight,   setHideNight]   = useState(false);      // hide hours 0-5
+  const [hideLate,    setHideLate]    = useState(false);      // hide hours 18-23
 
   // Data state
   const [metrics,     setMetrics]     = useState(null);
@@ -588,7 +590,7 @@ export default function Sales({ filters = {} }) {
   const [adEff,       setAdEff]       = useState(null);
   const [feeBreak,    setFeeBreak]    = useState(null);
   const [adBreak,     setAdBreak]     = useState(null);
-  const [hourly,      setHourly]      = useState(null);
+  const [hmData,      setHmData]      = useState(null);       // 30-day hourly heatmap
   const [loading,     setLoading]     = useState({});
   const [errors,      setErrors]      = useState({});
 
@@ -646,17 +648,10 @@ export default function Sales({ filters = {} }) {
     load('trendTraffic', setTrendTraffic, 'trend', params);
   }, [divRaw, custRaw, cpTraffic]);
 
-  // Fetch hourly sales — reload when date selector changes or filters change
+  // Fetch 30-day hourly heatmap data — reload on filter changes only
   useEffect(() => {
-    const today = new Date();
-    const todayStr = today.toISOString().split('T')[0];
-    const yest = new Date(today); yest.setDate(yest.getDate() - 1);
-    const yestStr = yest.toISOString().split('T')[0];
-    const dateParam = hourlyDate === 'today' ? todayStr
-                    : hourlyDate === 'yesterday' ? yestStr
-                    : hourlyDate;
-    load('hourly', setHourly, 'hourly', {...baseParams, date: dateParam});
-  }, [divRaw, custRaw, hourlyDate]);
+    load('hmData', setHmData, 'hourly-heatmap', {...baseParams, days: 30});
+  }, [divRaw, custRaw]);
 
   const handleViewTab = v => { setViewTab(v); setActivePeriod(PERIODS[v]?.[0] || ''); };
 
@@ -900,79 +895,161 @@ export default function Sales({ filters = {} }) {
         </div>
       )}
 
-      {/* HOURLY SALES CHART */}
-      {(viewTab === 'Sales Summary' || viewTab === 'Daily') && (
-        <div style={{background:'var(--surf)',border:'1px solid var(--brd)',borderRadius:14,padding:16,marginBottom:12,transition:'background .3s'}}>
-          <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:14,flexWrap:'wrap',gap:8}}>
-            <span style={{fontSize:13,fontWeight:700,color:'var(--txt)'}}>Hourly Sales</span>
-            <div style={{display:'flex',gap:6,alignItems:'center',flexWrap:'wrap'}}>
-              {['today','yesterday'].map(d => (
-                <button key={d} onClick={() => setHourlyDate(d)}
-                  style={{padding:'4px 11px',borderRadius:7,fontSize:11,fontWeight:600,border:`1px solid ${hourlyDate===d?B.b2:'var(--brd)'}`,
-                    background:hourlyDate===d?`${B.b1}33`:'transparent',color:hourlyDate===d?B.b3:'var(--txt3)',cursor:'pointer',transition:'all .15s',textTransform:'capitalize'}}>
-                  {d === 'today' ? 'Today' : 'Yesterday'}
-                </button>
-              ))}
-              <input type="date"
-                value={['today','yesterday'].includes(hourlyDate) ? '' : hourlyDate}
-                onChange={e => e.target.value && setHourlyDate(e.target.value)}
-                style={{padding:'3px 8px',borderRadius:7,border:`1px solid ${!['today','yesterday'].includes(hourlyDate)?B.b2:'var(--brd)'}`,background:'var(--card)',color:'var(--txt)',fontSize:11,outline:'none',colorScheme:'dark'}}/>
+      {/* HOURLY SALES HEATMAP — 30 days × 24 hours */}
+      {(viewTab === 'Sales Summary' || viewTab === 'Daily') && (() => {
+        // ── Color scale (same as 26-week heatmap) ──
+        const hmStops = [
+          [21,37,62],[15,82,115],[13,115,119],[34,139,34],
+          [218,165,32],[230,101,30],[214,40,57],
+        ];
+        const hmColor = (t) => {
+          if (t <= 0) return 'rgb(21,37,62)';
+          if (t >= 1) return 'rgb(214,40,57)';
+          const seg = t * (hmStops.length - 1);
+          const i = Math.floor(seg), f = seg - i;
+          const a = hmStops[i], b2 = hmStops[Math.min(i+1,hmStops.length-1)];
+          return `rgb(${Math.round(a[0]+(b2[0]-a[0])*f)},${Math.round(a[1]+(b2[1]-a[1])*f)},${Math.round(a[2]+(b2[2]-a[2])*f)})`;
+        };
+
+        const HOUR_LABELS = [
+          '12am','1am','2am','3am','4am','5am',
+          '6am','7am','8am','9am','10am','11am',
+          '12pm','1pm','2pm','3pm','4pm','5pm',
+          '6pm','7pm','8pm','9pm','10pm','11pm',
+        ];
+        const CELL_W = 33; // px per day column
+        const CELL_H = 21; // px per hour row
+        const LABEL_W = 38; // px for hour label column
+
+        const hmDays = hmData?.days || [];
+        const maxVal  = hmMetric === '$' ? (hmData?.maxSales || 0) : (hmData?.maxUnits || 0);
+        const sqrtMax = Math.sqrt(maxVal || 1);
+
+        const visHours = Array.from({length:24},(_,i)=>i)
+          .filter(h => !(hideNight && h < 6))
+          .filter(h => !(hideLate  && h >= 18));
+
+        const fCell = (v) => {
+          if (v == null || v === 0) return '';
+          if (hmMetric === '$') {
+            if (v >= 1000) return `$${(v/1000).toFixed(1)}k`;
+            if (v >= 100) return `$${Math.round(v)}`;
+            return `$${Math.round(v)}`;
+          }
+          if (v >= 1000) return `${(v/1000).toFixed(1)}k`;
+          return String(v);
+        };
+
+        const pillBtn = (label, active, onClick) => (
+          <button key={label} onClick={onClick} style={{
+            padding:'3px 10px',borderRadius:6,fontSize:10,fontWeight:600,cursor:'pointer',transition:'all .15s',
+            border:`1px solid ${active ? B.b2 : 'var(--brd)'}`,
+            background: active ? `${B.b1}33` : 'transparent',
+            color: active ? B.b3 : 'var(--txt3)',
+          }}>{label}</button>
+        );
+
+        return (
+          <div style={{background:'var(--surf)',border:'1px solid var(--brd)',borderRadius:14,padding:'14px 16px',marginBottom:12}}>
+            {/* Header */}
+            <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:10,flexWrap:'wrap',gap:8}}>
+              <span style={{fontSize:13,fontWeight:700,color:'var(--txt)'}}>Hourly Sales — 30 Day View</span>
+              <div style={{display:'flex',gap:5,alignItems:'center',flexWrap:'wrap'}}>
+                {pillBtn('$', hmMetric==='$', ()=>setHmMetric('$'))}
+                {pillBtn('Units', hmMetric==='units', ()=>setHmMetric('units'))}
+                <div style={{width:1,height:16,background:'var(--brd)',margin:'0 2px'}}/>
+                {pillBtn(hideNight?'Show 12–5am':'Hide 12–5am', hideNight, ()=>setHideNight(v=>!v))}
+                {pillBtn(hideLate ?'Show 6–11pm':'Hide 6–11pm',  hideLate,  ()=>setHideLate(v=>!v))}
+              </div>
             </div>
-          </div>
-          {errors.hourly && <div style={{padding:'12px 14px',color:'#fb923c',fontSize:11,background:'rgba(251,146,60,.08)',border:'1px solid rgba(251,146,60,.18)',borderRadius:8}}>⚠ {errors.hourly}</div>}
-          {loading.hourly ? <Spinner/> : (() => {
-            const hTy = hourly?.ty || [];
-            const hLy = hourly?.ly || [];
-            const isToday = hourlyDate === 'today';
-            const curHour = isToday ? (() => { try { return new Date(new Date().toLocaleString('en-US',{timeZone:'America/Chicago'})).getHours(); } catch(e) { return null; } })() : null;
-            const tyTotal = hourly?.ty_total;
-            const lyTotal = hourly?.ly_total;
-            const vsLy = (tyTotal != null && lyTotal != null && lyTotal > 0) ? ((tyTotal/lyTotal - 1) * 100) : null;
-            return (
-              <>
-                <div style={{display:'flex',gap:24,marginBottom:12,flexWrap:'wrap'}}>
-                  <div>
-                    <div style={{fontSize:9,textTransform:'uppercase',letterSpacing:'.08em',color:B.sub}}>TY Total</div>
-                    <div style={{fontSize:18,fontWeight:700,color:B.b3,marginTop:2}}>{tyTotal != null ? f$(tyTotal) : '—'}</div>
-                  </div>
-                  <div>
-                    <div style={{fontSize:9,textTransform:'uppercase',letterSpacing:'.08em',color:B.sub}}>LY Same Day</div>
-                    <div style={{fontSize:18,fontWeight:700,color:B.sub,marginTop:2}}>{lyTotal != null ? f$(lyTotal) : '—'}</div>
-                  </div>
-                  {vsLy != null && (
-                    <div>
-                      <div style={{fontSize:9,textTransform:'uppercase',letterSpacing:'.08em',color:B.sub}}>vs LY</div>
-                      <div style={{fontSize:18,fontWeight:700,color:vsLy>=0?'#4ade80':'#fb923c',marginTop:2}}>
-                        {vsLy>=0?'▲':'▼'} {Math.abs(vsLy).toFixed(1)}%
+
+            {errors.hmData && <div style={{padding:'10px 14px',color:'#fb923c',fontSize:11,background:'rgba(251,146,60,.08)',border:'1px solid rgba(251,146,60,.18)',borderRadius:8,marginBottom:8}}>⚠ {errors.hmData}</div>}
+
+            {loading.hmData ? <Spinner/> : hmDays.length === 0 ? (
+              <div style={{padding:'24px',textAlign:'center',color:B.sub,fontSize:12}}>No hourly data yet — data accumulates over time</div>
+            ) : (
+              <div style={{overflowX:'auto',overflowY:'visible'}}>
+                {/* Day header: month labels */}
+                <div style={{display:'flex',marginLeft:LABEL_W,marginBottom:1}}>
+                  {hmDays.map(d => (
+                    <div key={d.date} style={{width:CELL_W,flexShrink:0,textAlign:'center',overflow:'hidden'}}>
+                      <div style={{fontSize:7,color:d.isToday?B.b3:B.sub,fontWeight:d.isToday?700:400,lineHeight:'1.3',whiteSpace:'nowrap',overflow:'hidden'}}>
+                        {d.label.replace(/\s+/,'<br>')}
                       </div>
                     </div>
-                  )}
-                  <div style={{marginLeft:'auto',alignSelf:'flex-end',paddingBottom:2}}>
-                    <span style={{fontSize:9,color:B.sub}}>{hourly?.ty_source === 'orders_table' ? 'Source: orders' : 'Source: SP-API'}</span>
-                  </div>
+                  ))}
                 </div>
-                {svgChart(hourlySVG(hTy, hLy, curHour))}
-                <div style={{display:'flex',gap:14,flexWrap:'wrap',marginTop:8}}>
-                  <div style={{display:'flex',alignItems:'center',gap:5,fontSize:10,color:'var(--txt3)'}}>
-                    <div style={{width:9,height:9,borderRadius:2,background:B.b2}}/>
-                    <span>This Year</span>
-                  </div>
-                  <div style={{display:'flex',alignItems:'center',gap:5,fontSize:10,color:'var(--txt3)'}}>
-                    <div style={{width:16,height:0,border:'1.5px dashed #f59e0b',borderRadius:1}}/>
-                    <span>Last Year</span>
-                  </div>
-                  {curHour != null && (
-                    <div style={{display:'flex',alignItems:'center',gap:5,fontSize:10,color:'var(--txt3)'}}>
-                      <div style={{width:1.5,height:10,background:B.t2}}/>
-                      <span>Current time</span>
+                {/* Day header: day-of-week labels */}
+                <div style={{display:'flex',marginLeft:LABEL_W,marginBottom:3}}>
+                  {hmDays.map(d => (
+                    <div key={`dow-${d.date}`} style={{width:CELL_W,flexShrink:0,textAlign:'center'}}>
+                      <div style={{fontSize:7,color:d.isToday?B.b3:(d.dayOfWeek==='Sat'||d.dayOfWeek==='Sun'?'#5a7a9a':B.sub),
+                        fontWeight:d.isToday?700:400,lineHeight:'1.3'}}>
+                        {d.dayOfWeek}
+                      </div>
                     </div>
-                  )}
+                  ))}
                 </div>
-              </>
-            );
-          })()}
-        </div>
-      )}
+
+                {/* Hour rows */}
+                {visHours.map(h => (
+                  <div key={h} style={{display:'flex',alignItems:'center',marginBottom:1}}>
+                    {/* Hour label */}
+                    <div style={{width:LABEL_W,flexShrink:0,textAlign:'right',paddingRight:5,fontSize:8,color:B.sub,fontVariantNumeric:'tabular-nums'}}>
+                      {HOUR_LABELS[h]}
+                    </div>
+                    {/* Day cells */}
+                    {hmDays.map(d => {
+                      const cell = d.hours[h] || {};
+                      const val = hmMetric === '$' ? cell.sales : cell.units;
+                      const isFuture = (val === null || val === undefined);
+                      const numVal = isFuture ? 0 : (Number(val) || 0);
+                      const pct = (numVal > 0) ? Math.sqrt(numVal) / sqrtMax : 0;
+                      const bgColor = isFuture ? 'rgb(21,37,62)' : (numVal > 0 ? hmColor(pct) : 'rgb(21,37,62)');
+                      const opacity = isFuture ? 0.08 : (numVal > 0 ? 0.55 + pct*0.45 : 0.18);
+                      const txtColor = pct > 0.5 ? '#ffffff' : '#7a9bbf';
+                      const tipLabel = `${d.label} ${HOUR_LABELS[h]}`;
+                      const tipVal = hmMetric === '$' ? f$(numVal) : `${numVal} units`;
+                      return (
+                        <div key={d.date} title={isFuture ? `${tipLabel}: future` : `${tipLabel}: ${tipVal}`}
+                          style={{
+                            width: CELL_W-2, height: CELL_H, marginRight:2,
+                            background: bgColor, opacity,
+                            borderRadius:3, flexShrink:0,
+                            display:'flex',alignItems:'center',justifyContent:'center',
+                            fontSize:7, color:txtColor, fontWeight:600,
+                            overflow:'hidden', cursor:'default',
+                            border: d.isToday ? `1px solid ${B.b2}33` : 'none',
+                          }}>
+                          {!isFuture && numVal > 0 && fCell(numVal)}
+                        </div>
+                      );
+                    })}
+                  </div>
+                ))}
+
+                {/* Footer */}
+                <div style={{display:'flex',justifyContent:'space-between',marginTop:6,marginLeft:LABEL_W}}>
+                  <div style={{display:'flex',gap:10,alignItems:'center'}}>
+                    {/* Color scale legend */}
+                    <div style={{display:'flex',alignItems:'center',gap:3}}>
+                      <span style={{fontSize:8,color:B.sub}}>Low</span>
+                      {[0,.17,.33,.5,.67,.83,1].map(t => (
+                        <div key={t} style={{width:10,height:10,borderRadius:2,background:t===0?'rgb(21,37,62)':hmColor(t),opacity:0.55+t*0.45}}/>
+                      ))}
+                      <span style={{fontSize:8,color:B.sub}}>High</span>
+                    </div>
+                    <span style={{fontSize:8,color:B.sub}}>· Today outlined in blue</span>
+                  </div>
+                  <span style={{fontSize:8,color:B.sub,alignSelf:'flex-end'}}>
+                    Updated: {hmData?.lastUpdated ? hmData.lastUpdated.replace('T',' ') : '—'}
+                  </span>
+                </div>
+              </div>
+            )}
+          </div>
+        );
+      })()}
 
       {/* PERIOD PILLS — directly above Sales Overview KPIs */}
       {viewTab !== 'Custom' && (

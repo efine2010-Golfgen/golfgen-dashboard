@@ -36,6 +36,7 @@ _scheduler_locks = {
     "backup": threading.Lock(),
     "docs": threading.Lock(),
     "inventory_snapshot": threading.Lock(),
+    "hourly_sales": threading.Lock(),
 }
 
 
@@ -244,6 +245,30 @@ def _run_scheduled_inventory_snapshot():
         _scheduler_locks["inventory_snapshot"].release()
 
 
+def _run_scheduled_hourly_sales_save():
+    """Hourly job: save today's + yesterday's hourly SP-API sales to hourly_sales table.
+
+    Runs every hour at :05 past the hour so data has settled since the prior hour.
+    Accumulates 30+ days of hourly data for the Sales heatmap chart.
+    """
+    if not _scheduler_locks["hourly_sales"].acquire(blocking=False):
+        logger.warning("Skipping hourly sales save — previous run still active")
+        return
+    try:
+        from routers.sales import save_hourly_to_db
+        from datetime import date, timedelta
+        from zoneinfo import ZoneInfo
+        today_ct = datetime.now(ZoneInfo("America/Chicago")).date()
+        yesterday = today_ct - timedelta(days=1)
+        saved_today = save_hourly_to_db(today_ct)
+        saved_yday  = save_hourly_to_db(yesterday)
+        logger.info(f"Hourly sales save: today={saved_today} hours, yesterday={saved_yday} hours")
+    except Exception as e:
+        logger.error(f"Hourly sales save failed: {e}")
+    finally:
+        _scheduler_locks["hourly_sales"].release()
+
+
 def _run_scheduled_backup_verification():
     """Weekly backup verification — downloads latest backup and compares to live DB."""
     if not _scheduler_locks["backup"].acquire(blocking=False):
@@ -444,6 +469,9 @@ async def _sync_loop():
 
         # Schedule incremental gap-fill every 2 hours at :45 (avoids :00 full syncs)
         scheduler.add_job(_run_scheduled_gap_fill, CronTrigger(hour='*/2', minute=45, second=0, timezone=_tz), id="gap_fill_2hourly")
+
+        # Schedule hourly sales save at :05 past every hour (accumulates heatmap data)
+        scheduler.add_job(_run_scheduled_hourly_sales_save, CronTrigger(minute=5, second=0, timezone=_tz), id="hourly_sales_save", misfire_grace_time=1800)
 
         # Schedule daily FBA inventory snapshot at 11pm Central (after all syncs, before backup)
         scheduler.add_job(_run_scheduled_inventory_snapshot, CronTrigger(hour=23, minute=0, timezone=_tz), id="fba_inventory_snapshot_11pm", misfire_grace_time=3600)
