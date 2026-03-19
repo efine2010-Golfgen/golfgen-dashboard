@@ -28,13 +28,14 @@ def _today_central() -> date:
     return datetime.now(CENTRAL).date()
 
 
-def _orders_supplement(con, sd: date, ed: date, hw: str, hp: list):
+def _orders_supplement(con, sd: date, ed: date, hw: str, hp: list, include_pending: bool = True):
     """Pull sales/units from orders table using exact Central-time day boundaries.
 
     Handles the S&T report lag for recent periods (today, yesterday, last few days).
-    Includes both confirmed (Shipped) revenue AND estimated revenue for Pending orders
-    (Amazon Seller Central includes Pending in their daily totals; we estimate using
-    ASIN average price from the last 14 days of confirmed orders).
+    When include_pending=True (default): includes both confirmed revenue AND estimated
+    revenue for Pending orders (Amazon Seller Central includes Pending in their totals).
+    When include_pending=False: returns confirmed/shipped orders only — use this for the
+    TY Now figure so it matches Amazon Seller Central's confirmed-order view.
     Returns (sales_float, units_int, order_count_int). Returns (0, 0, 0) on any failure.
     """
     try:
@@ -54,6 +55,11 @@ def _orders_supplement(con, sd: date, ed: date, hw: str, hp: list):
         shipped_sales = float(r[0] or 0) if r else 0.0
         shipped_units = int(r[1] or 0) if r else 0
         total_cnt     = int(r[2] or 0) if r else 0
+
+        # When confirmed-only mode: return here, skip pending estimation
+        if not include_pending:
+            logger.debug(f"_orders_supplement {sd}→{ed} (confirmed-only): ${shipped_sales:.2f}, {shipped_units} units")
+            return shipped_sales, shipped_units, total_cnt
 
         # Step 2: Pending orders — SP-API returns OrderTotal={} for these.
         # Estimate revenue using the ASIN's average price from last 14 days.
@@ -969,24 +975,14 @@ def sales_period_comparison(
 
                 # TY confirmed-only: exclude Pending estimates so number matches
                 # Amazon Seller Central which shows only confirmed order revenue.
-                try:
-                    s_iso_conf = datetime(sd.year, sd.month, sd.day, 0, 0, 0, tzinfo=CENTRAL).isoformat()
-                    e_iso_conf = datetime(sd.year, sd.month, sd.day, 23, 59, 59, tzinfo=CENTRAL).isoformat()
-                    conf_row = con.execute(f"""
-                        SELECT COALESCE(SUM(order_total), 0),
-                               COALESCE(SUM(number_of_items), 0)
-                        FROM orders
-                        WHERE purchase_date >= ? AND purchase_date <= ?
-                          AND (order_status IS NULL
-                               OR order_status NOT IN ('Cancelled','Pending')) {hw}
-                    """, [s_iso_conf, e_iso_conf] + hp).fetchone()
-                    conf_sales = float(conf_row[0] or 0)
-                    conf_units = int(conf_row[1] or 0)
-                    if conf_sales > 0 or conf_units > 0:
-                        sales, units = conf_sales, conf_units
-                        aur = round(sales / units, 2) if units else aur
-                except Exception as _ex_conf:
-                    logger.warning(f"today confirmed-only query failed: {_ex_conf}")
+                # Uses _orders_supplement(include_pending=False) so we reuse the
+                # same proven query logic (Step 1 only — no pending estimation).
+                conf_sales, conf_units, conf_cnt = _orders_supplement(
+                    con, sd, ed, hw, hp, include_pending=False
+                )
+                if conf_sales > 0 or conf_cnt > 0:
+                    sales, units = conf_sales, conf_units
+                    aur = round(sales / units, 2) if units else aur
 
                 # Use SP-API Sales.getOrderMetrics for LY same-time data.
                 # The orders table only has recent history and won't have LY rows.

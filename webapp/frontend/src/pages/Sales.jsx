@@ -683,10 +683,10 @@ export default function Sales({ filters = {} }) {
             const d = periodCols[p] || {};
             const pct = (ty, lyv) => (!lyv || !ty) ? null : ((ty - lyv) / lyv * 100);
             const pctEl = (delta, inv, key) => {
-              if (delta == null) return <span key={key} style={{fontSize:9,color:'var(--txt3)',textAlign:'right'}}>—</span>;
+              if (delta == null) return <span key={key} style={{fontSize:9,color:'var(--txt3)',textAlign:'left'}}>—</span>;
               const pos = inv ? delta < 0 : delta > 0;
               return (
-                <span key={key} style={{fontSize:9,fontWeight:700,color:pos?'#4ade80':'#fb923c',whiteSpace:'nowrap',textAlign:'right'}}>
+                <span key={key} style={{fontSize:9,fontWeight:700,color:pos?'#4ade80':'#fb923c',whiteSpace:'nowrap',textAlign:'left'}}>
                   {delta>0?'▲':'▼'} {Math.abs(delta).toFixed(1)}%
                 </span>
               );
@@ -723,21 +723,21 @@ export default function Sales({ filters = {} }) {
                       {d.snapshot_time ? `through ${d.snapshot_time}` : 'so far'}{' · LY = same time last year'}
                     </span>
                   </div>
-                  <div style={{display:'grid',gridTemplateColumns:'82px 62px 62px 50px 62px 70px',columnGap:4,rowGap:6,alignItems:'center'}}>
+                  <div style={{display:'grid',gridTemplateColumns:'80px 60px 58px 46px 58px 62px',columnGap:4,rowGap:6,alignItems:'center'}}>
                     {/* header */}
                     <span/>
-                    <span style={{fontSize:9,fontWeight:700,color:'var(--txt3)',textTransform:'uppercase',letterSpacing:'.05em'}}>TY</span>
+                    <span style={{fontSize:9,fontWeight:700,color:'var(--txt3)',textTransform:'uppercase',letterSpacing:'.05em'}}>TY NOW</span>
                     <span style={{fontSize:9,fontWeight:700,color:B.b3,textTransform:'uppercase',letterSpacing:'.05em'}}>LY NOW</span>
-                    <span style={{fontSize:9,fontWeight:700,color:'var(--txt3)',textTransform:'uppercase',letterSpacing:'.05em',textAlign:'right'}}>CHG</span>
+                    <span style={{fontSize:9,fontWeight:700,color:'var(--txt3)',textTransform:'uppercase',letterSpacing:'.05em',textAlign:'left'}}>CHG</span>
                     <span style={{fontSize:9,fontWeight:700,color:'var(--txt3)',textTransform:'uppercase',letterSpacing:'.05em'}}>LY EOD</span>
-                    <span style={{fontSize:9,fontWeight:700,color:B.t2,textTransform:'uppercase',letterSpacing:'.05em',textAlign:'right'}}>FCST</span>
+                    <span style={{fontSize:9,fontWeight:700,color:B.t2,textTransform:'uppercase',letterSpacing:'.05em'}}>FCST</span>
                     {todayRows.flatMap(([l, ty, lyNowV, delta, inv, lyEodV, fcst]) => [
                       <span key={l+'-l'} style={{fontSize:10,color:'var(--txt3)',overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>{l}</span>,
                       <span key={l+'-ty'} style={{fontSize:11,fontWeight:400,color:'var(--txt)'}}>{ty}</span>,
                       <span key={l+'-ln'} style={{fontSize:10,color:B.b3}}>{lyNowV}</span>,
                       pctEl(delta, inv, l+'-chg'),
                       <span key={l+'-eod'} style={{fontSize:10,color:'var(--txt2)'}}>{lyEodV}</span>,
-                      <span key={l+'-fc'} style={{fontSize:11,fontWeight:700,color:B.t2,textAlign:'right'}}>{fcst}</span>,
+                      <span key={l+'-fc'} style={{fontSize:11,fontWeight:700,color:B.t2}}>{fcst}</span>,
                     ])}
                   </div>
                 </div>
@@ -764,7 +764,7 @@ export default function Sales({ filters = {} }) {
                   <span/>
                   <span style={{fontSize:9,fontWeight:700,color:'var(--txt3)',textTransform:'uppercase',letterSpacing:'.06em'}}>TY</span>
                   <span style={{fontSize:9,fontWeight:700,color:'var(--txt3)',textTransform:'uppercase',letterSpacing:'.06em'}}>LY</span>
-                  <span style={{fontSize:9,fontWeight:700,color:'var(--txt3)',textTransform:'uppercase',letterSpacing:'.06em',textAlign:'right'}}>Chg</span>
+                  <span style={{fontSize:9,fontWeight:700,color:'var(--txt3)',textTransform:'uppercase',letterSpacing:'.06em',textAlign:'left'}}>Chg</span>
                   {rows.flatMap(([l, ty, lyv, delta, inv]) => [
                     <span key={l+'-l'} style={{fontSize:10,color:'var(--txt3)',overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>{l}</span>,
                     <span key={l+'-ty'} style={{fontSize:11,fontWeight:400,color:'var(--txt)'}}>{ty}</span>,
