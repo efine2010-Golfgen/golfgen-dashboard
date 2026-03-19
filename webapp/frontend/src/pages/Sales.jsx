@@ -113,20 +113,20 @@ function stackedBarSVG(data, W=1100, H=130) {
   return s + '</svg>';
 }
 
-function yoyBarSVG(data, forecast={}, yearVis={y2024:true,y2025:true,y2026:true}, W=1100, H=195) {
+function yoyBarSVG(data, forecast={}, yearVis={y2024:true,y2025:true,y2026:true}, W=1100, H=195, currentMonth=null) {
   if (!data || data.length === 0) return '<div style="color:#374f66;padding:20px;text-align:center;font-size:12px">No YOY data</div>';
   const CC = {y2024:B.dim, y2025:B.b2, y2026:B.o2, forecast:'#f59e0b'};
   // Build active bar definitions (only visible years + forecast when y2026 visible)
   const barDefs = [
-    yearVis.y2024 && {key:'y2024',   color:CC.y2024,    lc:'#8899aa', lbl:'2024'},
-    yearVis.y2025 && {key:'y2025',   color:CC.y2025,    lc:B.b3,      lbl:'2025'},
-    yearVis.y2026 && {key:'y2026',   color:CC.y2026,    lc:B.o3,      lbl:'2026 Actual'},
-    yearVis.y2026 && {key:'forecast',color:CC.forecast,  lc:'#fbbf24', lbl:'2026 Forecast'},
+    yearVis.y2024 && {key:'y2024',   color:CC.y2024,  lc:'#8899aa', lbl:"'24 Act"},
+    yearVis.y2025 && {key:'y2025',   color:CC.y2025,  lc:B.b3,      lbl:"'25 Act"},
+    yearVis.y2026 && {key:'y2026',   color:CC.y2026,  lc:B.o3,      lbl:"'26 Act"},
+    yearVis.y2026 && {key:'forecast',color:CC.forecast,lc:'#fbbf24', lbl:"'26 Proj"},
   ].filter(Boolean);
   const nBars = Math.max(barDefs.length, 1);
   const hasForecast = Object.keys(forecast).length > 0;
 
-  const pad = {t:28,r:16,b:26,l:58};
+  const pad = {t:30,r:16,b:26,l:58};
   // Compute max value across all visible bars including forecast
   const allVals = data.flatMap(d => barDefs.map(b =>
     b.key === 'forecast' ? (forecast[d.month_num]||0) : (d[b.key]||0)
@@ -140,33 +140,74 @@ function yoyBarSVG(data, forecast={}, yearVis={y2024:true,y2025:true,y2026:true}
   const groupX = mi => pad.l + mi*slotW + (slotW-groupW)/2;
   const barX   = (mi,bi) => groupX(mi) + bi*(bw+innerGap);
   const barH   = v => Math.max(((v||0)/maxV)*ih, (v||0) > 0 ? 3 : 0);
+  const fmtTip = v => v>=1e6?`$${(v/1e6).toFixed(2)}M`:v>=1000?`$${(v/1000).toFixed(1)}k`:`$${Math.round(v)}`;
+  const fmtLbl = v => v>=1e6?`$${(v/1e6).toFixed(1)}M`:v>=1000?`$${Math.round(v/1000)}k`:`$${Math.round(v)}`;
 
   let s = `<svg width="100%" viewBox="0 0 ${W} ${H}" style="overflow:visible;display:block">`;
+
   // Grid lines
   for (let i=0;i<=3;i++) {
     const v=maxV*(i/3);
     s+=`<line x1="${pad.l}" y1="${(pad.t+ih*(1-i/3)).toFixed(1)}" x2="${W-pad.r}" y2="${(pad.t+ih*(1-i/3)).toFixed(1)}" stroke="#1a2f4a" stroke-width="0.5"/>`;
-    s+=`<text x="${pad.l-5}" y="${(pad.t+ih*(1-i/3)+4).toFixed(1)}" text-anchor="end" font-size="9" fill="#374f66">${f$(v)}</text>`;
+    s+=`<text x="${pad.l-5}" y="${(pad.t+ih*(1-i/3)+4).toFixed(1)}" text-anchor="end" font-size="9" fill="#374f66">${fmtLbl(v)}</text>`;
   }
-  // Bars
+
+  // Bars + dotted placeholders
+  // Tooltip pattern: <g><title>text</title><rect.../></g> — most reliable SVG hover across browsers
   data.forEach((d,mi) => {
+    const mn = d.month_num;
+    const isCurrent = currentMonth!=null && mn===currentMonth;
     barDefs.forEach((bar,bi) => {
-      const v = bar.key==='forecast' ? (forecast[d.month_num]||null) : d[bar.key];
+      const v = bar.key==='forecast' ? (forecast[mn]||null) : d[bar.key];
+      const isFcst = bar.key==='forecast';
+
+      // Dotted placeholder: y2026 slot is empty but forecast exists → dashed outline rect
+      if (bar.key==='y2026' && (v==null||v<=0) && forecast[mn]>0) {
+        const fh = barH(forecast[mn]);
+        const bx = barX(mi, bi);
+        const tip = `${d.month} '26 Act: (not yet actualized)`;
+        s+=`<g data-tip="${tip}"><rect x="${bx.toFixed(1)}" y="${(pad.t+ih-fh).toFixed(1)}" width="${bw.toFixed(1)}" height="${fh.toFixed(1)}" rx="2" fill="none" stroke="${CC.y2026}" stroke-width="1.2" stroke-dasharray="3,2" opacity="0.45"/></g>`;
+        return;
+      }
+
       if (v==null||v<=0) return;
       const hh = barH(v);
       const bx = barX(mi,bi);
-      const isFcst = bar.key==='forecast';
-      s += `<rect x="${bx.toFixed(1)}" y="${(pad.t+ih-hh).toFixed(1)}" width="${bw.toFixed(1)}" height="${hh.toFixed(1)}" fill="${bar.color}" rx="2" opacity="${isFcst?0.7:bar.key==='y2026'?1:0.82}"${isFcst?' stroke-dasharray="3,2" stroke="#f59e0b" stroke-width="0.8"':''}/>`;
-      if (v>0) {
-        const lbl = v>=1e6?`$${(v/1e6).toFixed(1)}M`:v>=1000?`$${Math.round(v/1000)}k`:`$${Math.round(v)}`;
-        s += `<text x="${(bx+bw/2).toFixed(1)}" y="${(pad.t+ih-hh-3).toFixed(1)}" text-anchor="middle" font-size="7" font-weight="600" fill="${bar.lc}">${lbl}</text>`;
-      }
+
+      // Build tooltip label — uses data-tip on <g> (SVG <title> unreliable in Chrome via innerHTML)
+      const fv = fmtTip(v);
+      let ttip='';
+      if (bar.key==='y2024')      ttip=`${d.month} '24 Act: ${fv}`;
+      else if (bar.key==='y2025') ttip=`${d.month} '25 Act: ${fv}`;
+      else if (bar.key==='y2026') ttip=isCurrent?`${d.month} '26 MTD: ${fv}`:`${d.month} '26 Act: ${fv}`;
+      else                        ttip=`${d.month} '26 Proj: ${fv}`;
+
+      s+=`<g data-tip="${ttip}">`;
+      s+=`<rect x="${bx.toFixed(1)}" y="${(pad.t+ih-hh).toFixed(1)}" width="${bw.toFixed(1)}" height="${hh.toFixed(1)}" fill="${bar.color}" rx="2" opacity="${isFcst?0.7:bar.key==='y2026'?1:0.82}"${isFcst?' stroke-dasharray="3,2" stroke="#f59e0b" stroke-width="0.8"':''}/>`;
+      s+=`</g>`;
+      if (v>0) s+=`<text x="${(bx+bw/2).toFixed(1)}" y="${(pad.t+ih-hh-3).toFixed(1)}" text-anchor="middle" font-size="7" font-weight="600" fill="${bar.lc}">${fmtLbl(v)}</text>`;
     });
-    s += `<text x="${(groupX(mi)+groupW/2).toFixed(1)}" y="${H-6}" text-anchor="middle" font-size="9" fill="#374f66">${d.month}</text>`;
+    s+=`<text x="${(groupX(mi)+groupW/2).toFixed(1)}" y="${H-6}" text-anchor="middle" font-size="9" fill="#374f66">${d.month}</text>`;
   });
-  // Legend (skip forecast entry if no forecast data)
-  barDefs.filter(b=>b.key!=='forecast'||hasForecast).forEach((b,i)=>
-    s+=`<g transform="translate(${pad.l+i*105},${pad.t-16})"><rect width="8" height="8" y="-1" rx="2" fill="${b.color}"/><text x="11" y="7" font-size="9" fill="${B.sub}">${b.lbl}</text></g>`);
+
+  // Legend (skip forecast if no data; add dashed-outline entry for future months placeholder)
+  const legItems = barDefs.filter(b=>b.key!=='forecast'||hasForecast);
+  legItems.forEach((b,i)=>{
+    const lx=pad.l+i*100;
+    const rectFill = b.color;
+    const isFC = b.key==='forecast';
+    s+=`<g transform="translate(${lx},${pad.t-18})">`;
+    s+=`<rect width="8" height="8" y="-1" rx="2" fill="${isFC?'none':rectFill}" opacity="${isFC?1:0.85}"${isFC?` stroke="${b.color}" stroke-width="0.8" stroke-dasharray="2,1.5"`:''}/>`;
+    s+=`<text x="11" y="7" font-size="9" fill="${B.sub}">${b.lbl}</text></g>`;
+  });
+  // Placeholder legend entry
+  if (yearVis.y2026 && hasForecast) {
+    const lx=pad.l+legItems.length*100;
+    s+=`<g transform="translate(${lx},${pad.t-18})">`;
+    s+=`<rect width="8" height="8" y="-1" rx="2" fill="none" stroke="${CC.y2026}" stroke-width="1.2" stroke-dasharray="3,2" opacity="0.55"/>`;
+    s+=`<text x="11" y="7" font-size="9" fill="${B.sub}">Future</text></g>`;
+  }
+
   return s+'</svg>';
 }
 
@@ -404,6 +445,98 @@ function adQuadrantSVG(data) {
   return s + '</svg>';
 }
 
+function hourlySVG(tyData, lyData, currentHour, W=1100, H=160) {
+  if (!tyData || tyData.length === 0) return '<div style="color:#374f66;padding:20px;text-align:center;font-size:12px">No hourly data</div>';
+  const pad = {t:16, r:16, b:28, l:54};
+  const iw = W - pad.l - pad.r, ih = H - pad.t - pad.b;
+  const nHours = 24;
+  const barW = Math.max(10, (iw / nHours) * 0.62);
+  const tyMap = {}, lyMap = {};
+  tyData.forEach(d => { tyMap[d.hour] = d.sales || 0; });
+  lyData.forEach(d => { lyMap[d.hour] = d.sales || 0; });
+  const allVals = [...tyData.map(d => d.sales||0), ...lyData.map(d => d.sales||0)];
+  const maxV = Math.max(...allVals, 1);
+  const xH = h => pad.l + ((h + 0.5) / nHours) * iw;
+  const yV = v => pad.t + ih - (v / maxV) * ih;
+  const fmtHr = h => h === 0 ? '12a' : h < 12 ? `${h}a` : h === 12 ? '12p' : `${h-12}p`;
+  const uid = `hr${Math.random().toString(36).slice(2,6)}`;
+  let s = `<svg width="100%" viewBox="0 0 ${W} ${H}" style="overflow:visible;display:block">`;
+  s += `<defs><linearGradient id="${uid}" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stop-color="#2E6FBB" stop-opacity=".9"/><stop offset="100%" stop-color="#2E6FBB" stop-opacity=".4"/></linearGradient></defs>`;
+  // Grid lines
+  for (let i = 0; i <= 4; i++) {
+    const v = maxV * (i/4);
+    s += `<line x1="${pad.l}" y1="${yV(v).toFixed(1)}" x2="${W-pad.r}" y2="${yV(v).toFixed(1)}" stroke="#1a2f4a" stroke-width="0.5"/>`;
+    s += `<text x="${pad.l-5}" y="${(yV(v)+4).toFixed(1)}" text-anchor="end" font-size="9" fill="#374f66">${f$(v)}</text>`;
+  }
+  // TY bars
+  for (let h = 0; h < 24; h++) {
+    const v = tyMap[h] || 0;
+    const bh = maxV > 0 ? (v / maxV) * ih : 0;
+    const bx = xH(h) - barW/2;
+    const isFuture = currentHour != null && h > currentHour;
+    if (bh > 0) {
+      s += `<rect x="${bx.toFixed(1)}" y="${yV(v).toFixed(1)}" width="${barW.toFixed(1)}" height="${bh.toFixed(1)}" fill="url(#${uid})" rx="2" opacity="${isFuture ? 0.18 : 0.9}"/>`;
+    }
+  }
+  // LY dashed line
+  const lyPts = Array.from({length:24}, (_,h) => `${xH(h).toFixed(1)},${yV(lyMap[h]||0).toFixed(1)}`).join(' ');
+  s += `<polyline points="${lyPts}" fill="none" stroke="#f59e0b" stroke-width="1.8" stroke-dasharray="5 3" stroke-linejoin="round" opacity=".85"/>`;
+  // LY dots at each hour with data
+  for (let h = 0; h < 24; h++) {
+    if ((lyMap[h]||0) > 0) s += `<circle cx="${xH(h).toFixed(1)}" cy="${yV(lyMap[h]).toFixed(1)}" r="2.5" fill="#f59e0b" opacity=".7"/>`;
+  }
+  // Current hour vertical marker
+  if (currentHour != null && currentHour >= 0 && currentHour <= 23) {
+    const mx = xH(currentHour).toFixed(1);
+    s += `<line x1="${mx}" y1="${pad.t}" x2="${mx}" y2="${pad.t+ih}" stroke="#4DC5B8" stroke-width="1.2" stroke-dasharray="4 3" opacity=".9"/>`;
+    s += `<text x="${parseFloat(mx)+3}" y="${pad.t+10}" font-size="8" fill="#4DC5B8" font-weight="700">now</text>`;
+  }
+  // Hour labels
+  [0,3,6,9,12,15,18,21,23].forEach(h => {
+    s += `<text x="${xH(h).toFixed(1)}" y="${H-6}" text-anchor="middle" font-size="8" fill="#374f66">${fmtHr(h)}</text>`;
+  });
+  return s + '</svg>';
+}
+
+// ── SVGTip: wraps dangerouslySetInnerHTML SVG and shows floating tooltip ──
+// Uses data-tip attributes on <g> elements — reliable in all browsers unlike SVG <title>
+function SVGTip({ html }) {
+  const [tip, setTip] = useState(null);
+  const [pos, setPos] = useState({ x: 0, y: 0 });
+  const onMove = e => {
+    const el = e.target && e.target.closest ? e.target.closest('[data-tip]') : null;
+    if (el) {
+      setTip(el.getAttribute('data-tip'));
+      setPos({ x: e.clientX, y: e.clientY });
+    } else {
+      setTip(null);
+    }
+  };
+  return (
+    <div onMouseMove={onMove} onMouseLeave={() => setTip(null)}>
+      <div dangerouslySetInnerHTML={{ __html: html }} />
+      {tip && (
+        <div style={{
+          position: 'fixed',
+          left: pos.x + 14,
+          top: pos.y - 38,
+          background: '#0d1f35',
+          border: '1px solid #2a4a6a',
+          borderRadius: 6,
+          padding: '5px 11px',
+          fontSize: 11,
+          color: '#ddeeff',
+          fontWeight: 600,
+          pointerEvents: 'none',
+          zIndex: 9999,
+          whiteSpace: 'nowrap',
+          boxShadow: '0 3px 10px rgba(0,0,0,.5)',
+        }}>{tip}</div>
+      )}
+    </div>
+  );
+}
+
 // ── SUB-COMPONENTS ─────────────────────────────────────────────────
 function Spinner() {
   return (
@@ -520,6 +653,9 @@ export default function Sales({ filters = {} }) {
   const [cpTraffic,   setCpTraffic]   = useState('30D');
   const [customStart, setCustomStart] = useState('');
   const [customEnd,   setCustomEnd]   = useState('');
+  const [hmMetric,    setHmMetric]    = useState('$');        // '$' | 'units'
+  const [hideNight,   setHideNight]   = useState(false);      // hide hours 0-5
+  const [hideLate,    setHideLate]    = useState(false);      // hide hours 18-23
 
   // Data state
   const [metrics,     setMetrics]     = useState(null);
@@ -534,6 +670,7 @@ export default function Sales({ filters = {} }) {
   const [adEff,       setAdEff]       = useState(null);
   const [feeBreak,    setFeeBreak]    = useState(null);
   const [adBreak,     setAdBreak]     = useState(null);
+  const [hmData,      setHmData]      = useState(null);       // 30-day hourly heatmap
   const [loading,     setLoading]     = useState({});
   const [errors,      setErrors]      = useState({});
 
@@ -591,6 +728,11 @@ export default function Sales({ filters = {} }) {
     load('trendTraffic', setTrendTraffic, 'trend', params);
   }, [divRaw, custRaw, cpTraffic]);
 
+  // Fetch 30-day hourly heatmap data — reload on filter changes only
+  useEffect(() => {
+    load('hmData', setHmData, 'hourly-heatmap', {...baseParams, days: 30});
+  }, [divRaw, custRaw]);
+
   const handleViewTab = v => { setViewTab(v); setActivePeriod(PERIODS[v]?.[0] || ''); };
 
   const m = metrics || {};
@@ -629,6 +771,12 @@ export default function Sales({ filters = {} }) {
       });
     }
   }
+
+  // ── FY summary totals for Monthly Revenue card header ──
+  const fy24Total = yoyMonths.reduce((s,m2)=>s+(m2.y2024||0),0);
+  const fy25Total = yoyMonths.reduce((s,m2)=>s+(m2.y2025||0),0);
+  const ytd26     = yoyMonths.reduce((s,m2)=>s+(m2.y2026||0),0);
+  const proj26    = ytd26 + Object.values(forecastMap).reduce((s,v)=>s+v,0);
 
   return (
     <div style={{fontFamily:"'Sora',-apple-system,BlinkMacSystemFont,sans-serif",color:'var(--txt)'}}>
@@ -692,91 +840,302 @@ export default function Sales({ filters = {} }) {
               );
             };
 
-            // ── TODAY: wider card with 6 columns (TY | LY Now | CHG | LY EOD | Forecast) ──
+            // ── TODAY: wider card — TY NOW | LY NOW | CHG | TY FCST | LY EOD | vs LY% ──
             if (p === 'Today') {
               const lyEod   = d.ly_eod_sales ?? d.ly_sales;
               const lyEodU  = d.ly_eod_units ?? d.ly_units;
               const lyNow   = d.ly_same_time_sales;
               const lyNowU  = d.ly_same_time_units;
-              // Compute AURs from raw sales/units — avoids 0-unit divide issues
+              const lyNowO  = d.ly_same_time_orders || null;
               const lyNowAur  = lyNowU  > 0 ? lyNow  / lyNowU  : null;
               const lyEodAur  = lyEodU  > 0 ? lyEod  / lyEodU  : (d.ly_aur || null);
               const tyProjAur = (d.ty_units_forecast > 0 && d.ty_forecast > 0) ? d.ty_forecast / d.ty_units_forecast : null;
-              // rows: [label, TY, LY-now, delta, invert, LY-EOD, Forecast]
+              // rows: [label, TY, LY-now, delta, invert, TY-FCST, LY-EOD]
+              // Returns row uses objects {amt, units} for TY and LY-EOD so flatMap can render two-line
               const todayRows = [
-                ['Sales $',     f$(d.sales),       f$(lyNow),       pct(d.sales, lyNow),   false, f$(lyEod),       f$(d.ty_forecast)],
-                ['Units',       fN(d.units),        fN(lyNowU),      pct(d.units, lyNowU),  false, fN(lyEodU),      fN(d.ty_units_forecast)],
-                ['AUR',         f$(d.aur),          f$(lyNowAur),    pct(d.aur, lyNowAur),  false, f$(lyEodAur),    f$(tyProjAur)],
-                ['Amazon Fees', f$(d.amazon_fees),  '—',             null,                  true,  f$(d.ly_amazon_fees),'—'],
-                ['Returns',     d.returns_amount > 0 ? `${d.returns}·${f$(d.returns_amount)}` : fN(d.returns),
-                                '—', null, true,
-                                d.ly_returns_amount > 0 ? `${d.ly_returns}·${f$(d.ly_returns_amount)}` : fN(d.ly_returns), '—'],
-                ['Orders',      fN(d.orders),       '—',        null,                  false, fN(d.ly_orders),     '—'],
-                ['Sessions',    '—',                '—',        null,                  false, '—',                 '—'],
-                ['Conv %',      d.sessions > 0 ? fP(d.conversion) : '—', '—', null, false, fP(d.ly_conversion), '—'],
+                ['Sales $',    d.sales,            lyNow,        pct(d.sales, lyNow),           false, d.ty_forecast,         lyEod],
+                ['Units',      d.units,             lyNowU,       pct(d.units, lyNowU),           false, d.ty_units_forecast,   lyEodU],
+                ['AUR',        d.aur,               lyNowAur,     pct(d.aur, lyNowAur),           false, tyProjAur,             lyEodAur],
+                ['Amzn Fees',  d.amazon_fees,       null,         null,                           true,  null,                  d.ly_amazon_fees],
+                ['Returns',    {amt:d.returns_amount||0, units:d.returns||0},
+                               null, null, true,
+                               null,
+                               {amt:d.ly_returns_amount||0, units:d.ly_returns||0}],
+                ['Orders',     d.orders,            lyNowO,       pct(d.orders, lyNowO),          false, null,                  d.ly_orders],
+                ['Sessions',   null,                null,         null,                           false, null,                  null],
+                ['Conv %',     d.sessions > 0 ? d.conversion : null, null, null, false, null, d.ly_conversion],
               ];
+              // Format helpers
+              const fmt = (l, v) => {
+                if (v == null || v === 0 && l === 'Sessions') return '—';
+                if (l === 'Sales $' || l === 'Amzn Fees') return f$(v);
+                if (l === 'AUR') return f$(v);
+                if (l === 'Conv %') return fP(v);
+                return fN(v);
+              };
               return (
-                <div key={p} style={{flex:'1 1 445px',minWidth:445,background:'var(--card2)',border:'1px solid var(--acc1)',borderRadius:12,padding:'12px 14px',transition:'background .3s',boxShadow:'0 0 0 1px rgba(46,207,170,.15)'}}>
+                <div key={p} style={{flex:'1 1 490px',minWidth:490,background:'var(--card2)',border:'1px solid var(--acc1)',borderRadius:12,padding:'12px 14px',transition:'background .3s',boxShadow:'0 0 0 1px rgba(46,207,170,.15)'}}>
                   <div style={{display:'flex',alignItems:'baseline',gap:8,paddingBottom:9,borderBottom:'1px solid var(--brd)',marginBottom:9}}>
                     <span style={{fontSize:10,fontWeight:700,textTransform:'uppercase',letterSpacing:'.12em',color:B.b2}}>Today</span>
                     <span style={{fontSize:9,color:'var(--txt3)'}}>
                       {d.snapshot_time ? `through ${d.snapshot_time}` : 'so far'}{' · LY = same time last year'}
                     </span>
                   </div>
-                  <div style={{display:'grid',gridTemplateColumns:'80px 60px 58px 46px 58px 62px',columnGap:4,rowGap:6,alignItems:'center'}}>
-                    {/* header */}
+                  {/* 7-col grid: Label | TY NOW | LY NOW | CHG | TY FCST | LY EOD | vs LY% */}
+                  <div style={{display:'grid',gridTemplateColumns:'80px 60px 58px 44px 62px 58px 44px',columnGap:4,rowGap:0,alignItems:'start'}}>
+                    {/* header row */}
                     <span/>
-                    <span style={{fontSize:9,fontWeight:700,color:'var(--txt3)',textTransform:'uppercase',letterSpacing:'.05em'}}>TY NOW</span>
-                    <span style={{fontSize:9,fontWeight:700,color:B.b3,textTransform:'uppercase',letterSpacing:'.05em'}}>LY NOW</span>
-                    <span style={{fontSize:9,fontWeight:700,color:'var(--txt3)',textTransform:'uppercase',letterSpacing:'.05em',textAlign:'left'}}>CHG</span>
-                    <span style={{fontSize:9,fontWeight:700,color:'var(--txt3)',textTransform:'uppercase',letterSpacing:'.05em'}}>LY EOD</span>
-                    <span style={{fontSize:9,fontWeight:700,color:B.t2,textTransform:'uppercase',letterSpacing:'.05em'}}>FCST</span>
-                    {todayRows.flatMap(([l, ty, lyNowV, delta, inv, lyEodV, fcst]) => [
-                      <span key={l+'-l'} style={{fontSize:10,color:'var(--txt3)',overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>{l}</span>,
-                      <span key={l+'-ty'} style={{fontSize:11,fontWeight:400,color:'var(--txt)'}}>{ty}</span>,
-                      <span key={l+'-ln'} style={{fontSize:10,color:B.b3}}>{lyNowV}</span>,
-                      pctEl(delta, inv, l+'-chg'),
-                      <span key={l+'-eod'} style={{fontSize:10,color:'var(--txt2)'}}>{lyEodV}</span>,
-                      <span key={l+'-fc'} style={{fontSize:11,fontWeight:700,color:B.t2}}>{fcst}</span>,
-                    ])}
+                    <span style={{fontSize:9,fontWeight:700,color:'var(--txt3)',textTransform:'uppercase',letterSpacing:'.04em',paddingBottom:6}}>TY NOW</span>
+                    <span style={{fontSize:9,fontWeight:700,color:B.b3,textTransform:'uppercase',letterSpacing:'.04em',paddingBottom:6}}>LY NOW</span>
+                    <span style={{fontSize:9,fontWeight:700,color:'var(--txt3)',textTransform:'uppercase',letterSpacing:'.04em',paddingBottom:6}}>CHG</span>
+                    <span style={{fontSize:9,fontWeight:700,color:B.t2,textTransform:'uppercase',letterSpacing:'.04em',paddingBottom:6}}>TY FCST</span>
+                    <span style={{fontSize:9,fontWeight:700,color:'var(--txt3)',textTransform:'uppercase',letterSpacing:'.04em',paddingBottom:6}}>LY EOD</span>
+                    <span style={{fontSize:9,fontWeight:700,color:'var(--txt3)',textTransform:'uppercase',letterSpacing:'.04em',paddingBottom:6}}>vs LY</span>
+                    {todayRows.flatMap(([l, ty, lyNowV, delta, inv, fcst, lyEodV]) => {
+                      const isRet = l === 'Returns';
+                      const rowH = {minHeight: isRet ? 34 : 26, display:'flex', alignItems:'center'};
+                      const retH = {minHeight: isRet ? 34 : 26, display:'flex', flexDirection:'column', justifyContent:'center', gap:1};
+                      // two-line Returns cell renderer
+                      const retCell = (val, baseStyle, amtStyle, unitsStyle) => isRet
+                        ? <div style={retH}>
+                            <span style={amtStyle}>{val.amt > 0 ? f$(val.amt) : '—'}</span>
+                            {val.units > 0 && <span style={unitsStyle}>{val.units} units</span>}
+                          </div>
+                        : <span style={{...rowH,...baseStyle}}>{fmt(l, val)}</span>;
+                      return [
+                        <span key={l+'-l'} style={{...rowH,fontSize:10,color:'var(--txt3)',overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>{l}</span>,
+                        retCell(ty,
+                          {fontSize:11,fontWeight:400,color:'var(--txt)'},
+                          {fontSize:11,fontWeight:400,color:'var(--txt)'},
+                          {fontSize:8,color:'var(--txt3)'}),
+                        isRet
+                          ? <span key={l+'-ln'} style={{...rowH,fontSize:10,color:B.b3}}>—</span>
+                          : <span key={l+'-ln'} style={{...rowH,fontSize:10,color:B.b3}}>{lyNowV != null ? fmt(l, lyNowV) : '—'}</span>,
+                        <span key={l+'-chg'} style={rowH}>{pctEl(delta, inv, l+'-chg-inner')}</span>,
+                        isRet
+                          ? <span key={l+'-fc'} style={{...rowH,fontSize:11,fontWeight:700,color:B.t2}}>—</span>
+                          : <span key={l+'-fc'} style={{...rowH,fontSize:11,fontWeight:700,color:B.t2}}>{fcst != null ? fmt(l, fcst) : '—'}</span>,
+                        retCell(lyEodV,
+                          {fontSize:10,color:'var(--txt2)'},
+                          {fontSize:10,color:'var(--txt2)'},
+                          {fontSize:8,color:'var(--txt3)'}),
+                        <span key={l+'-vs'} style={rowH}>{isRet ? pctEl(pct(ty.amt, lyEodV.amt), inv, l+'-vs-inner') : pctEl(pct(fcst, lyEodV), inv, l+'-vs-inner')}</span>,
+                      ];
+                    })}
                   </div>
                 </div>
               );
             }
 
             // ── All other periods: standard 4-column layout ──
+            // Returns row: {amt, units} object so flatMap can render two-line cell
             const rows = [
-              ['Sales $',      f$(d.sales),         f$(d.ly_sales),         pct(d.sales, d.ly_sales),         false],
-              ['Units',        fN(d.units),          fN(d.ly_units),         pct(d.units, d.ly_units),          false],
-              ['AUR',          f$(d.aur),            f$(d.ly_aur),           pct(d.aur, d.ly_aur),              false],
-              ['Amazon Fees',  f$(d.amazon_fees),    f$(d.ly_amazon_fees),   pct(d.amazon_fees, d.ly_amazon_fees), true],
-              ['Returns',      d.returns_amount > 0 ? `${d.returns} · ${f$(d.returns_amount)}` : fN(d.returns),
-                               d.ly_returns_amount > 0 ? `${d.ly_returns} · ${f$(d.ly_returns_amount)}` : fN(d.ly_returns),
-                               pct(d.returns_amount || d.returns, d.ly_returns_amount || d.ly_returns), true],
-              ['Orders',       fN(d.orders),         fN(d.ly_orders),        pct(d.orders, d.ly_orders),        false],
-              ['Sessions',     fN(d.sessions),       fN(d.ly_sessions),      pct(d.sessions, d.ly_sessions),    false],
-              ['Conv %',       fP(d.conversion),     fP(d.ly_conversion),    pct(d.conversion, d.ly_conversion), false],
+              ['Sales $',    d.sales,         d.ly_sales,         pct(d.sales, d.ly_sales),         false],
+              ['Units',      d.units,          d.ly_units,         pct(d.units, d.ly_units),          false],
+              ['AUR',        d.aur,            d.ly_aur,           pct(d.aur, d.ly_aur),              false],
+              ['Amzn Fees',  d.amazon_fees,    d.ly_amazon_fees,   pct(d.amazon_fees, d.ly_amazon_fees), true],
+              ['Returns',    {amt:d.returns_amount||0, units:d.returns||0},
+                             {amt:d.ly_returns_amount||0, units:d.ly_returns||0},
+                             pct(d.returns_amount||0, d.ly_returns_amount||0), true],
+              ['Orders',     d.orders,         d.ly_orders,        pct(d.orders, d.ly_orders),        false],
+              ['Sessions',   d.sessions,       d.ly_sessions,      pct(d.sessions, d.ly_sessions),    false],
+              ['Conv %',     d.conversion,     d.ly_conversion,    pct(d.conversion, d.ly_conversion), false],
             ];
+            const fmtP = (l, v) => {
+              if (v == null) return '—';
+              if (l === 'Sales $' || l === 'Amzn Fees') return f$(v);
+              if (l === 'AUR') return f$(v);
+              if (l === 'Conv %') return fP(v);
+              if (l === 'Sessions' && v === 0) return '—';
+              return fN(v);
+            };
             return (
               <div key={p} style={{flex:'1 1 240px',minWidth:240,background:'var(--card2)',border:'1px solid var(--brd)',borderRadius:12,padding:'12px 14px',transition:'background .3s'}}>
                 <div style={{fontSize:10,fontWeight:700,textTransform:'uppercase',letterSpacing:'.12em',color:B.b2,paddingBottom:9,borderBottom:'1px solid var(--brd)',marginBottom:9}}>{p}</div>
-                <div style={{display:'grid',gridTemplateColumns:'68px 52px 48px 44px',columnGap:3,rowGap:6,alignItems:'center'}}>
+                <div style={{display:'grid',gridTemplateColumns:'68px 52px 48px 44px',columnGap:3,rowGap:0,alignItems:'start'}}>
                   <span/>
-                  <span style={{fontSize:9,fontWeight:700,color:'var(--txt3)',textTransform:'uppercase',letterSpacing:'.06em'}}>TY</span>
-                  <span style={{fontSize:9,fontWeight:700,color:'var(--txt3)',textTransform:'uppercase',letterSpacing:'.06em'}}>LY</span>
-                  <span style={{fontSize:9,fontWeight:700,color:'var(--txt3)',textTransform:'uppercase',letterSpacing:'.06em',textAlign:'left'}}>Chg</span>
-                  {rows.flatMap(([l, ty, lyv, delta, inv]) => [
-                    <span key={l+'-l'} style={{fontSize:10,color:'var(--txt3)',overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>{l}</span>,
-                    <span key={l+'-ty'} style={{fontSize:11,fontWeight:400,color:'var(--txt)'}}>{ty}</span>,
-                    <span key={l+'-ly'} style={{fontSize:10,color:'var(--txt2)'}}>{lyv}</span>,
-                    pctEl(delta, inv, l+'-chg'),
-                  ])}
+                  <span style={{fontSize:9,fontWeight:700,color:'var(--txt3)',textTransform:'uppercase',letterSpacing:'.06em',paddingBottom:6}}>TY</span>
+                  <span style={{fontSize:9,fontWeight:700,color:'var(--txt3)',textTransform:'uppercase',letterSpacing:'.06em',paddingBottom:6}}>LY</span>
+                  <span style={{fontSize:9,fontWeight:700,color:'var(--txt3)',textTransform:'uppercase',letterSpacing:'.06em',textAlign:'left',paddingBottom:6}}>Chg</span>
+                  {rows.flatMap(([l, ty, lyv, delta, inv]) => {
+                    const isRet = l === 'Returns';
+                    const rowH = {minHeight: isRet ? 34 : 26, display:'flex', alignItems:'center'};
+                    const retH = {minHeight: isRet ? 34 : 26, display:'flex', flexDirection:'column', justifyContent:'center', gap:1};
+                    const retCell = (val, amtStyle, unitsStyle) => isRet
+                      ? <div style={retH}>
+                          <span style={amtStyle}>{val.amt > 0 ? f$(val.amt) : '—'}</span>
+                          {val.units > 0 && <span style={unitsStyle}>{val.units} units</span>}
+                        </div>
+                      : <span style={{...rowH,...amtStyle}}>{fmtP(l, val)}</span>;
+                    return [
+                      <span key={l+'-l'} style={{...rowH,fontSize:10,color:'var(--txt3)',overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>{l}</span>,
+                      retCell(ty, {fontSize:11,fontWeight:400,color:'var(--txt)'}, {fontSize:8,color:'var(--txt3)'}),
+                      retCell(lyv, {fontSize:10,color:'var(--txt2)'}, {fontSize:8,color:'var(--txt3)'}),
+                      <span key={l+'-chg'} style={rowH}>{pctEl(delta, inv, l+'-chg-inner')}</span>,
+                    ];
+                  })}
                 </div>
               </div>
             );
           })}
         </div>
       )}
+
+      {/* HOURLY SALES HEATMAP — 30 days × 24 hours */}
+      {(viewTab === 'Sales Summary' || viewTab === 'Daily') && (() => {
+        // ── Color scale (same as 26-week heatmap) ──
+        const hmStops = [
+          [21,37,62],[15,82,115],[13,115,119],[34,139,34],
+          [218,165,32],[230,101,30],[214,40,57],
+        ];
+        const hmColor = (t) => {
+          if (t <= 0) return 'rgb(21,37,62)';
+          if (t >= 1) return 'rgb(214,40,57)';
+          const seg = t * (hmStops.length - 1);
+          const i = Math.floor(seg), f = seg - i;
+          const a = hmStops[i], b2 = hmStops[Math.min(i+1,hmStops.length-1)];
+          return `rgb(${Math.round(a[0]+(b2[0]-a[0])*f)},${Math.round(a[1]+(b2[1]-a[1])*f)},${Math.round(a[2]+(b2[2]-a[2])*f)})`;
+        };
+
+        const HOUR_LABELS = [
+          '12am','1am','2am','3am','4am','5am',
+          '6am','7am','8am','9am','10am','11am',
+          '12pm','1pm','2pm','3pm','4pm','5pm',
+          '6pm','7pm','8pm','9pm','10pm','11pm',
+        ];
+        const CELL_W = 33; // px per day column
+        const CELL_H = 21; // px per hour row
+        const LABEL_W = 38; // px for hour label column
+
+        const hmDays = hmData?.days || [];
+        const maxVal  = hmMetric === '$' ? (hmData?.maxSales || 0) : (hmData?.maxUnits || 0);
+        const sqrtMax = Math.sqrt(maxVal || 1);
+
+        const visHours = Array.from({length:24},(_,i)=>i)
+          .filter(h => !(hideNight && h < 6))
+          .filter(h => !(hideLate  && h >= 18));
+
+        const fCell = (v) => {
+          if (v == null || v === 0) return '';
+          if (hmMetric === '$') {
+            if (v >= 1000) return `$${(v/1000).toFixed(1)}k`;
+            if (v >= 100) return `$${Math.round(v)}`;
+            return `$${Math.round(v)}`;
+          }
+          if (v >= 1000) return `${(v/1000).toFixed(1)}k`;
+          return String(v);
+        };
+
+        const pillBtn = (label, active, onClick) => (
+          <button key={label} onClick={onClick} style={{
+            padding:'3px 10px',borderRadius:6,fontSize:10,fontWeight:600,cursor:'pointer',transition:'all .15s',
+            border:`1px solid ${active ? B.b2 : 'var(--brd)'}`,
+            background: active ? `${B.b1}33` : 'transparent',
+            color: active ? B.b3 : 'var(--txt3)',
+          }}>{label}</button>
+        );
+
+        return (
+          <div style={{background:'var(--surf)',border:'1px solid var(--brd)',borderRadius:14,padding:'14px 16px',marginBottom:12}}>
+            {/* Header */}
+            <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:10,flexWrap:'wrap',gap:8}}>
+              <span style={{fontSize:13,fontWeight:700,color:'var(--txt)'}}>Hourly Sales — 30 Day View</span>
+              <div style={{display:'flex',gap:5,alignItems:'center',flexWrap:'wrap'}}>
+                {pillBtn('$', hmMetric==='$', ()=>setHmMetric('$'))}
+                {pillBtn('Units', hmMetric==='units', ()=>setHmMetric('units'))}
+                <div style={{width:1,height:16,background:'var(--brd)',margin:'0 2px'}}/>
+                {pillBtn(hideNight?'Show 12–5am':'Hide 12–5am', hideNight, ()=>setHideNight(v=>!v))}
+                {pillBtn(hideLate ?'Show 6–11pm':'Hide 6–11pm',  hideLate,  ()=>setHideLate(v=>!v))}
+              </div>
+            </div>
+
+            {errors.hmData && <div style={{padding:'10px 14px',color:'#fb923c',fontSize:11,background:'rgba(251,146,60,.08)',border:'1px solid rgba(251,146,60,.18)',borderRadius:8,marginBottom:8}}>⚠ {errors.hmData}</div>}
+
+            {loading.hmData ? <Spinner/> : hmDays.length === 0 ? (
+              <div style={{padding:'24px',textAlign:'center',color:B.sub,fontSize:12}}>No hourly data yet — data accumulates over time</div>
+            ) : (
+              <div style={{overflowX:'auto',overflowY:'visible'}}>
+                {/* Day header: month labels */}
+                <div style={{display:'flex',marginLeft:LABEL_W,marginBottom:1}}>
+                  {hmDays.map(d => (
+                    <div key={d.date} style={{width:CELL_W,flexShrink:0,textAlign:'center',overflow:'hidden'}}>
+                      <div style={{fontSize:7,color:d.isToday?B.b3:B.sub,fontWeight:d.isToday?700:400,lineHeight:'1.3',whiteSpace:'nowrap',overflow:'hidden'}}>
+                        {d.label.replace(/\s+/,'<br>')}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+                {/* Day header: day-of-week labels */}
+                <div style={{display:'flex',marginLeft:LABEL_W,marginBottom:3}}>
+                  {hmDays.map(d => (
+                    <div key={`dow-${d.date}`} style={{width:CELL_W,flexShrink:0,textAlign:'center'}}>
+                      <div style={{fontSize:7,color:d.isToday?B.b3:(d.dayOfWeek==='Sat'||d.dayOfWeek==='Sun'?'#5a7a9a':B.sub),
+                        fontWeight:d.isToday?700:400,lineHeight:'1.3'}}>
+                        {d.dayOfWeek}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+
+                {/* Hour rows */}
+                {visHours.map(h => (
+                  <div key={h} style={{display:'flex',alignItems:'center',marginBottom:1}}>
+                    {/* Hour label */}
+                    <div style={{width:LABEL_W,flexShrink:0,textAlign:'right',paddingRight:5,fontSize:8,color:B.sub,fontVariantNumeric:'tabular-nums'}}>
+                      {HOUR_LABELS[h]}
+                    </div>
+                    {/* Day cells */}
+                    {hmDays.map(d => {
+                      const cell = d.hours[h] || {};
+                      const val = hmMetric === '$' ? cell.sales : cell.units;
+                      const isFuture = (val === null || val === undefined);
+                      const numVal = isFuture ? 0 : (Number(val) || 0);
+                      const pct = (numVal > 0) ? Math.sqrt(numVal) / sqrtMax : 0;
+                      const bgColor = isFuture ? 'rgb(21,37,62)' : (numVal > 0 ? hmColor(pct) : 'rgb(21,37,62)');
+                      const opacity = isFuture ? 0.08 : (numVal > 0 ? 0.55 + pct*0.45 : 0.18);
+                      const txtColor = pct > 0.5 ? '#ffffff' : '#7a9bbf';
+                      const tipLabel = `${d.label} ${HOUR_LABELS[h]}`;
+                      const tipVal = hmMetric === '$' ? f$(numVal) : `${numVal} units`;
+                      return (
+                        <div key={d.date} title={isFuture ? `${tipLabel}: future` : `${tipLabel}: ${tipVal}`}
+                          style={{
+                            width: CELL_W-2, height: CELL_H, marginRight:2,
+                            background: bgColor, opacity,
+                            borderRadius:3, flexShrink:0,
+                            display:'flex',alignItems:'center',justifyContent:'center',
+                            fontSize:7, color:txtColor, fontWeight:600,
+                            overflow:'hidden', cursor:'default',
+                            border: d.isToday ? `1px solid ${B.b2}33` : 'none',
+                          }}>
+                          {!isFuture && numVal > 0 && fCell(numVal)}
+                        </div>
+                      );
+                    })}
+                  </div>
+                ))}
+
+                {/* Footer */}
+                <div style={{display:'flex',justifyContent:'space-between',marginTop:6,marginLeft:LABEL_W}}>
+                  <div style={{display:'flex',gap:10,alignItems:'center'}}>
+                    {/* Color scale legend */}
+                    <div style={{display:'flex',alignItems:'center',gap:3}}>
+                      <span style={{fontSize:8,color:B.sub}}>Low</span>
+                      {[0,.17,.33,.5,.67,.83,1].map(t => (
+                        <div key={t} style={{width:10,height:10,borderRadius:2,background:t===0?'rgb(21,37,62)':hmColor(t),opacity:0.55+t*0.45}}/>
+                      ))}
+                      <span style={{fontSize:8,color:B.sub}}>High</span>
+                    </div>
+                    <span style={{fontSize:8,color:B.sub}}>· Today outlined in blue</span>
+                  </div>
+                  <span style={{fontSize:8,color:B.sub,alignSelf:'flex-end'}}>
+                    Updated: {hmData?.lastUpdated ? hmData.lastUpdated.replace('T',' ') : '—'}
+                  </span>
+                </div>
+              </div>
+            )}
+          </div>
+        );
+      })()}
 
       {/* PERIOD PILLS — directly above Sales Overview KPIs */}
       {viewTab !== 'Custom' && (
@@ -805,17 +1164,13 @@ export default function Sales({ filters = {} }) {
         </>}
       </div>
 
-      {/* Sales Charts period bar */}
-      <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',flexWrap:'wrap',gap:8,margin:'6px 0 10px'}}>
-        <div style={{fontSize:10,color:'var(--txt3)',fontWeight:600,textTransform:'uppercase',letterSpacing:'.08em'}}>Charts</div>
-        <PeriodBar value={cpSales} onChange={setCpSales}/>
-      </div>
-
-      {/* Monthly YOY */}
-      {/* Monthly Revenue — custom header with year toggles on left */}
+      {/* Monthly Revenue YOY — independent chart, NOT controlled by the Charts period bar below */}
       <div style={{background:'var(--surf)',border:'1px solid var(--brd)',borderRadius:14,padding:16,marginBottom:12,transition:'background .3s'}}>
-        <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:14}}>
-          <div style={{display:'flex',gap:5,alignItems:'center'}}>
+        <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:12,flexWrap:'wrap',gap:8}}>
+          {/* Left: title + year toggles */}
+          <div style={{display:'flex',gap:6,alignItems:'center',flexWrap:'wrap'}}>
+            <span style={{fontSize:12,fontWeight:700,color:'var(--txt)',marginRight:4}}>Monthly Revenue</span>
+            <div style={{width:1,height:14,background:'var(--brd)',margin:'0 2px'}}/>
             {[['2024','y2024',B.dim],['2025','y2025',B.b2],['2026','y2026',B.o2]].map(([lbl,key,col])=>(
               <button key={key} onClick={()=>setYearVis(v=>({...v,[key]:!v[key]}))} style={{
                 fontSize:10,fontWeight:600,padding:'3px 10px',borderRadius:6,cursor:'pointer',
@@ -825,13 +1180,42 @@ export default function Sales({ filters = {} }) {
               }}>{lbl}</button>
             ))}
           </div>
-          <div style={{display:'flex',alignItems:'center',gap:8}}>
-            <span style={{fontSize:12,fontWeight:700,color:'var(--txt)'}}>Monthly Revenue</span>
-            <span style={{fontSize:10,padding:'2px 9px',borderRadius:99,background:'rgba(46,111,187,.15)',color:B.b3,border:'1px solid rgba(46,111,187,.2)'}}>Year over Year</span>
+          {/* Right: FY summary boxes — same row as year toggles */}
+          <div style={{display:'flex',gap:5,alignItems:'center',flexWrap:'wrap'}}>
+            {yearVis.y2024 && fy24Total>0 && (
+              <div style={{background:'#0b1829',border:`1px solid ${B.dim}55`,borderRadius:7,padding:'3px 11px',textAlign:'center',minWidth:58}}>
+                <div style={{fontSize:7,color:B.sub,lineHeight:'1.4',letterSpacing:'.05em'}}>FY 24</div>
+                <div style={{fontSize:12,fontWeight:700,color:B.dim,lineHeight:'1.3'}}>{f$(fy24Total)}</div>
+              </div>
+            )}
+            {yearVis.y2025 && fy25Total>0 && (
+              <div style={{background:'#0b1829',border:`1px solid ${B.b2}55`,borderRadius:7,padding:'3px 11px',textAlign:'center',minWidth:58}}>
+                <div style={{fontSize:7,color:B.sub,lineHeight:'1.4',letterSpacing:'.05em'}}>FY 25</div>
+                <div style={{fontSize:12,fontWeight:700,color:B.b2,lineHeight:'1.3'}}>{f$(fy25Total)}</div>
+              </div>
+            )}
+            {yearVis.y2026 && ytd26>0 && (
+              <div style={{background:'#0b1829',border:`1px solid ${B.o2}55`,borderRadius:7,padding:'3px 11px',textAlign:'center',minWidth:58}}>
+                <div style={{fontSize:7,color:B.sub,lineHeight:'1.4',letterSpacing:'.05em'}}>&apos;26 YTD</div>
+                <div style={{fontSize:12,fontWeight:700,color:B.o2,lineHeight:'1.3'}}>{f$(ytd26)}</div>
+              </div>
+            )}
+            {yearVis.y2026 && proj26>ytd26 && (
+              <div style={{background:'#0b1829',border:'1px solid #f59e0b55',borderRadius:7,padding:'3px 11px',textAlign:'center',minWidth:58}}>
+                <div style={{fontSize:7,color:B.sub,lineHeight:'1.4',letterSpacing:'.05em'}}>&apos;26 Proj</div>
+                <div style={{fontSize:12,fontWeight:700,color:'#f59e0b',lineHeight:'1.3'}}>{f$(proj26)}</div>
+              </div>
+            )}
           </div>
         </div>
         {errors.yoy && <div style={{padding:'12px 14px',color:'#fb923c',fontSize:11,background:'rgba(251,146,60,.08)',border:'1px solid rgba(251,146,60,.18)',borderRadius:8}}>⚠ {errors.yoy}</div>}
-        {loading.yoy ? <Spinner/> : svgChart(yoyBarSVG(yoyMonths, forecastMap, yearVis))}
+        {loading.yoy ? <Spinner/> : <SVGTip html={yoyBarSVG(yoyMonths, forecastMap, yearVis, 1100, 195, yoyMeta?.current_month)}/>}
+      </div>
+
+      {/* Sales Charts period bar — controls trend/rolling charts only, NOT the monthly revenue chart above */}
+      <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',flexWrap:'wrap',gap:8,margin:'6px 0 10px'}}>
+        <div style={{fontSize:10,color:'var(--txt3)',fontWeight:600,textTransform:'uppercase',letterSpacing:'.08em'}}>Trend Charts</div>
+        <PeriodBar value={cpSales} onChange={setCpSales}/>
       </div>
 
       {/* Sales $ Trend */}
