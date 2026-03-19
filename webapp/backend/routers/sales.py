@@ -951,7 +951,8 @@ def sales_period_comparison(
                         SELECT COALESCE(COUNT(*), 0),
                                COALESCE(SUM(ABS(product_charges)), 0)
                         FROM financial_events
-                        WHERE date >= ? AND date <= ? AND event_type ILIKE '%%refund%%' {fw}
+                        WHERE date >= ? AND date <= ?
+                          AND (event_type ILIKE '%%refund%%' OR event_type ILIKE '%%return%%') {fw}
                     """, [str(s), str(e)] + extra_params).fetchone()
                     return int(r[0]) if r else 0, round(float(r[1]), 2) if r else 0
                 except Exception:
@@ -973,16 +974,9 @@ def sales_period_comparison(
                 now_ct = datetime.now(CENTRAL)
                 snapshot_time = now_ct.strftime("%-I:%M %p CT")
 
-                # TY confirmed-only: exclude Pending estimates so number matches
-                # Amazon Seller Central which shows only confirmed order revenue.
-                # Uses _orders_supplement(include_pending=False) so we reuse the
-                # same proven query logic (Step 1 only — no pending estimation).
-                conf_sales, conf_units, conf_cnt = _orders_supplement(
-                    con, sd, ed, hw, hp, include_pending=False
-                )
-                if conf_sales > 0 or conf_cnt > 0:
-                    sales, units = conf_sales, conf_units
-                    aur = round(sales / units, 2) if units else aur
+                # TY sales already set above by _orders_supplement(include_pending=True).
+                # Amazon Seller Central "Today's Sales" includes Pending orders at face value,
+                # which matches our pending-estimation approach — no override needed here.
 
                 # Use SP-API Sales.getOrderMetrics for LY same-time data.
                 # The orders table only has recent history and won't have LY rows.

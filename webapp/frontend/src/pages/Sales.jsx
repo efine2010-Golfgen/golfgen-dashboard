@@ -692,85 +692,139 @@ export default function Sales({ filters = {} }) {
               );
             };
 
-            // ── TODAY: wider card with 6 columns (TY | LY Now | CHG | LY EOD | Forecast) ──
+            // ── TODAY: wider card — TY NOW | LY NOW | CHG | TY FCST | LY EOD | vs LY% ──
             if (p === 'Today') {
               const lyEod   = d.ly_eod_sales ?? d.ly_sales;
               const lyEodU  = d.ly_eod_units ?? d.ly_units;
               const lyNow   = d.ly_same_time_sales;
               const lyNowU  = d.ly_same_time_units;
-              // Compute AURs from raw sales/units — avoids 0-unit divide issues
               const lyNowAur  = lyNowU  > 0 ? lyNow  / lyNowU  : null;
               const lyEodAur  = lyEodU  > 0 ? lyEod  / lyEodU  : (d.ly_aur || null);
               const tyProjAur = (d.ty_units_forecast > 0 && d.ty_forecast > 0) ? d.ty_forecast / d.ty_units_forecast : null;
-              // rows: [label, TY, LY-now, delta, invert, LY-EOD, Forecast]
+              // rows: [label, TY, LY-now, delta, invert, TY-FCST, LY-EOD]
+              // Returns row uses objects {amt, units} for TY and LY-EOD so flatMap can render two-line
               const todayRows = [
-                ['Sales $',     f$(d.sales),       f$(lyNow),       pct(d.sales, lyNow),   false, f$(lyEod),       f$(d.ty_forecast)],
-                ['Units',       fN(d.units),        fN(lyNowU),      pct(d.units, lyNowU),  false, fN(lyEodU),      fN(d.ty_units_forecast)],
-                ['AUR',         f$(d.aur),          f$(lyNowAur),    pct(d.aur, lyNowAur),  false, f$(lyEodAur),    f$(tyProjAur)],
-                ['Amazon Fees', f$(d.amazon_fees),  '—',             null,                  true,  f$(d.ly_amazon_fees),'—'],
-                ['Returns',     d.returns_amount > 0 ? `${d.returns}·${f$(d.returns_amount)}` : fN(d.returns),
-                                '—', null, true,
-                                d.ly_returns_amount > 0 ? `${d.ly_returns}·${f$(d.ly_returns_amount)}` : fN(d.ly_returns), '—'],
-                ['Orders',      fN(d.orders),       '—',        null,                  false, fN(d.ly_orders),     '—'],
-                ['Sessions',    '—',                '—',        null,                  false, '—',                 '—'],
-                ['Conv %',      d.sessions > 0 ? fP(d.conversion) : '—', '—', null, false, fP(d.ly_conversion), '—'],
+                ['Sales $',    d.sales,            lyNow,        pct(d.sales, lyNow),           false, d.ty_forecast,         lyEod],
+                ['Units',      d.units,             lyNowU,       pct(d.units, lyNowU),           false, d.ty_units_forecast,   lyEodU],
+                ['AUR',        d.aur,               lyNowAur,     pct(d.aur, lyNowAur),           false, tyProjAur,             lyEodAur],
+                ['Amzn Fees',  d.amazon_fees,       null,         null,                           true,  null,                  d.ly_amazon_fees],
+                ['Returns',    {amt:d.returns_amount||0, units:d.returns||0},
+                               null, null, true,
+                               null,
+                               {amt:d.ly_returns_amount||0, units:d.ly_returns||0}],
+                ['Orders',     d.orders,            null,         null,                           false, null,                  d.ly_orders],
+                ['Sessions',   null,                null,         null,                           false, null,                  null],
+                ['Conv %',     d.sessions > 0 ? d.conversion : null, null, null, false, null, d.ly_conversion],
               ];
+              // Format helpers
+              const fmt = (l, v) => {
+                if (v == null || v === 0 && l === 'Sessions') return '—';
+                if (l === 'Sales $' || l === 'Amzn Fees') return f$(v);
+                if (l === 'AUR') return f$(v);
+                if (l === 'Conv %') return fP(v);
+                return fN(v);
+              };
               return (
-                <div key={p} style={{flex:'1 1 445px',minWidth:445,background:'var(--card2)',border:'1px solid var(--acc1)',borderRadius:12,padding:'12px 14px',transition:'background .3s',boxShadow:'0 0 0 1px rgba(46,207,170,.15)'}}>
+                <div key={p} style={{flex:'1 1 490px',minWidth:490,background:'var(--card2)',border:'1px solid var(--acc1)',borderRadius:12,padding:'12px 14px',transition:'background .3s',boxShadow:'0 0 0 1px rgba(46,207,170,.15)'}}>
                   <div style={{display:'flex',alignItems:'baseline',gap:8,paddingBottom:9,borderBottom:'1px solid var(--brd)',marginBottom:9}}>
                     <span style={{fontSize:10,fontWeight:700,textTransform:'uppercase',letterSpacing:'.12em',color:B.b2}}>Today</span>
                     <span style={{fontSize:9,color:'var(--txt3)'}}>
                       {d.snapshot_time ? `through ${d.snapshot_time}` : 'so far'}{' · LY = same time last year'}
                     </span>
                   </div>
-                  <div style={{display:'grid',gridTemplateColumns:'80px 60px 58px 46px 58px 62px',columnGap:4,rowGap:6,alignItems:'center'}}>
-                    {/* header */}
+                  {/* 7-col grid: Label | TY NOW | LY NOW | CHG | TY FCST | LY EOD | vs LY% */}
+                  <div style={{display:'grid',gridTemplateColumns:'80px 60px 58px 44px 62px 58px 44px',columnGap:4,rowGap:0,alignItems:'start'}}>
+                    {/* header row */}
                     <span/>
-                    <span style={{fontSize:9,fontWeight:700,color:'var(--txt3)',textTransform:'uppercase',letterSpacing:'.05em'}}>TY NOW</span>
-                    <span style={{fontSize:9,fontWeight:700,color:B.b3,textTransform:'uppercase',letterSpacing:'.05em'}}>LY NOW</span>
-                    <span style={{fontSize:9,fontWeight:700,color:'var(--txt3)',textTransform:'uppercase',letterSpacing:'.05em',textAlign:'left'}}>CHG</span>
-                    <span style={{fontSize:9,fontWeight:700,color:'var(--txt3)',textTransform:'uppercase',letterSpacing:'.05em'}}>LY EOD</span>
-                    <span style={{fontSize:9,fontWeight:700,color:B.t2,textTransform:'uppercase',letterSpacing:'.05em'}}>FCST</span>
-                    {todayRows.flatMap(([l, ty, lyNowV, delta, inv, lyEodV, fcst]) => [
-                      <span key={l+'-l'} style={{fontSize:10,color:'var(--txt3)',overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>{l}</span>,
-                      <span key={l+'-ty'} style={{fontSize:11,fontWeight:400,color:'var(--txt)'}}>{ty}</span>,
-                      <span key={l+'-ln'} style={{fontSize:10,color:B.b3}}>{lyNowV}</span>,
-                      pctEl(delta, inv, l+'-chg'),
-                      <span key={l+'-eod'} style={{fontSize:10,color:'var(--txt2)'}}>{lyEodV}</span>,
-                      <span key={l+'-fc'} style={{fontSize:11,fontWeight:700,color:B.t2}}>{fcst}</span>,
-                    ])}
+                    <span style={{fontSize:9,fontWeight:700,color:'var(--txt3)',textTransform:'uppercase',letterSpacing:'.04em',paddingBottom:6}}>TY NOW</span>
+                    <span style={{fontSize:9,fontWeight:700,color:B.b3,textTransform:'uppercase',letterSpacing:'.04em',paddingBottom:6}}>LY NOW</span>
+                    <span style={{fontSize:9,fontWeight:700,color:'var(--txt3)',textTransform:'uppercase',letterSpacing:'.04em',paddingBottom:6}}>CHG</span>
+                    <span style={{fontSize:9,fontWeight:700,color:B.t2,textTransform:'uppercase',letterSpacing:'.04em',paddingBottom:6}}>TY FCST</span>
+                    <span style={{fontSize:9,fontWeight:700,color:'var(--txt3)',textTransform:'uppercase',letterSpacing:'.04em',paddingBottom:6}}>LY EOD</span>
+                    <span style={{fontSize:9,fontWeight:700,color:'var(--txt3)',textTransform:'uppercase',letterSpacing:'.04em',paddingBottom:6}}>vs LY</span>
+                    {todayRows.flatMap(([l, ty, lyNowV, delta, inv, fcst, lyEodV]) => {
+                      const isRet = l === 'Returns';
+                      const rowH = {minHeight: isRet ? 34 : 26, display:'flex', alignItems:'center'};
+                      const retH = {minHeight: isRet ? 34 : 26, display:'flex', flexDirection:'column', justifyContent:'center', gap:1};
+                      // two-line Returns cell renderer
+                      const retCell = (val, baseStyle, amtStyle, unitsStyle) => isRet
+                        ? <div style={retH}>
+                            <span style={amtStyle}>{val.amt > 0 ? f$(val.amt) : '—'}</span>
+                            {val.units > 0 && <span style={unitsStyle}>{val.units} units</span>}
+                          </div>
+                        : <span style={{...rowH,...baseStyle}}>{fmt(l, val)}</span>;
+                      return [
+                        <span key={l+'-l'} style={{...rowH,fontSize:10,color:'var(--txt3)',overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>{l}</span>,
+                        retCell(ty,
+                          {fontSize:11,fontWeight:400,color:'var(--txt)'},
+                          {fontSize:11,fontWeight:400,color:'var(--txt)'},
+                          {fontSize:8,color:'var(--txt3)'}),
+                        isRet
+                          ? <span key={l+'-ln'} style={{...rowH,fontSize:10,color:B.b3}}>—</span>
+                          : <span key={l+'-ln'} style={{...rowH,fontSize:10,color:B.b3}}>{lyNowV != null ? fmt(l, lyNowV) : '—'}</span>,
+                        <span key={l+'-chg'} style={rowH}>{pctEl(delta, inv, l+'-chg-inner')}</span>,
+                        isRet
+                          ? <span key={l+'-fc'} style={{...rowH,fontSize:11,fontWeight:700,color:B.t2}}>—</span>
+                          : <span key={l+'-fc'} style={{...rowH,fontSize:11,fontWeight:700,color:B.t2}}>{fcst != null ? fmt(l, fcst) : '—'}</span>,
+                        retCell(lyEodV,
+                          {fontSize:10,color:'var(--txt2)'},
+                          {fontSize:10,color:'var(--txt2)'},
+                          {fontSize:8,color:'var(--txt3)'}),
+                        <span key={l+'-vs'} style={rowH}>{isRet ? pctEl(pct(ty.amt, lyEodV.amt), inv, l+'-vs-inner') : pctEl(pct(fcst, lyEodV), inv, l+'-vs-inner')}</span>,
+                      ];
+                    })}
                   </div>
                 </div>
               );
             }
 
             // ── All other periods: standard 4-column layout ──
+            // Returns row: {amt, units} object so flatMap can render two-line cell
             const rows = [
-              ['Sales $',      f$(d.sales),         f$(d.ly_sales),         pct(d.sales, d.ly_sales),         false],
-              ['Units',        fN(d.units),          fN(d.ly_units),         pct(d.units, d.ly_units),          false],
-              ['AUR',          f$(d.aur),            f$(d.ly_aur),           pct(d.aur, d.ly_aur),              false],
-              ['Amazon Fees',  f$(d.amazon_fees),    f$(d.ly_amazon_fees),   pct(d.amazon_fees, d.ly_amazon_fees), true],
-              ['Returns',      d.returns_amount > 0 ? `${d.returns} · ${f$(d.returns_amount)}` : fN(d.returns),
-                               d.ly_returns_amount > 0 ? `${d.ly_returns} · ${f$(d.ly_returns_amount)}` : fN(d.ly_returns),
-                               pct(d.returns_amount || d.returns, d.ly_returns_amount || d.ly_returns), true],
-              ['Orders',       fN(d.orders),         fN(d.ly_orders),        pct(d.orders, d.ly_orders),        false],
-              ['Sessions',     fN(d.sessions),       fN(d.ly_sessions),      pct(d.sessions, d.ly_sessions),    false],
-              ['Conv %',       fP(d.conversion),     fP(d.ly_conversion),    pct(d.conversion, d.ly_conversion), false],
+              ['Sales $',    d.sales,         d.ly_sales,         pct(d.sales, d.ly_sales),         false],
+              ['Units',      d.units,          d.ly_units,         pct(d.units, d.ly_units),          false],
+              ['AUR',        d.aur,            d.ly_aur,           pct(d.aur, d.ly_aur),              false],
+              ['Amzn Fees',  d.amazon_fees,    d.ly_amazon_fees,   pct(d.amazon_fees, d.ly_amazon_fees), true],
+              ['Returns',    {amt:d.returns_amount||0, units:d.returns||0},
+                             {amt:d.ly_returns_amount||0, units:d.ly_returns||0},
+                             pct(d.returns_amount||0, d.ly_returns_amount||0), true],
+              ['Orders',     d.orders,         d.ly_orders,        pct(d.orders, d.ly_orders),        false],
+              ['Sessions',   d.sessions,       d.ly_sessions,      pct(d.sessions, d.ly_sessions),    false],
+              ['Conv %',     d.conversion,     d.ly_conversion,    pct(d.conversion, d.ly_conversion), false],
             ];
+            const fmtP = (l, v) => {
+              if (v == null) return '—';
+              if (l === 'Sales $' || l === 'Amzn Fees') return f$(v);
+              if (l === 'AUR') return f$(v);
+              if (l === 'Conv %') return fP(v);
+              if (l === 'Sessions' && v === 0) return '—';
+              return fN(v);
+            };
             return (
               <div key={p} style={{flex:'1 1 240px',minWidth:240,background:'var(--card2)',border:'1px solid var(--brd)',borderRadius:12,padding:'12px 14px',transition:'background .3s'}}>
                 <div style={{fontSize:10,fontWeight:700,textTransform:'uppercase',letterSpacing:'.12em',color:B.b2,paddingBottom:9,borderBottom:'1px solid var(--brd)',marginBottom:9}}>{p}</div>
-                <div style={{display:'grid',gridTemplateColumns:'68px 52px 48px 44px',columnGap:3,rowGap:6,alignItems:'center'}}>
+                <div style={{display:'grid',gridTemplateColumns:'68px 52px 48px 44px',columnGap:3,rowGap:0,alignItems:'start'}}>
                   <span/>
-                  <span style={{fontSize:9,fontWeight:700,color:'var(--txt3)',textTransform:'uppercase',letterSpacing:'.06em'}}>TY</span>
-                  <span style={{fontSize:9,fontWeight:700,color:'var(--txt3)',textTransform:'uppercase',letterSpacing:'.06em'}}>LY</span>
-                  <span style={{fontSize:9,fontWeight:700,color:'var(--txt3)',textTransform:'uppercase',letterSpacing:'.06em',textAlign:'left'}}>Chg</span>
-                  {rows.flatMap(([l, ty, lyv, delta, inv]) => [
-                    <span key={l+'-l'} style={{fontSize:10,color:'var(--txt3)',overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>{l}</span>,
-                    <span key={l+'-ty'} style={{fontSize:11,fontWeight:400,color:'var(--txt)'}}>{ty}</span>,
-                    <span key={l+'-ly'} style={{fontSize:10,color:'var(--txt2)'}}>{lyv}</span>,
-                    pctEl(delta, inv, l+'-chg'),
-                  ])}
+                  <span style={{fontSize:9,fontWeight:700,color:'var(--txt3)',textTransform:'uppercase',letterSpacing:'.06em',paddingBottom:6}}>TY</span>
+                  <span style={{fontSize:9,fontWeight:700,color:'var(--txt3)',textTransform:'uppercase',letterSpacing:'.06em',paddingBottom:6}}>LY</span>
+                  <span style={{fontSize:9,fontWeight:700,color:'var(--txt3)',textTransform:'uppercase',letterSpacing:'.06em',textAlign:'left',paddingBottom:6}}>Chg</span>
+                  {rows.flatMap(([l, ty, lyv, delta, inv]) => {
+                    const isRet = l === 'Returns';
+                    const rowH = {minHeight: isRet ? 34 : 26, display:'flex', alignItems:'center'};
+                    const retH = {minHeight: isRet ? 34 : 26, display:'flex', flexDirection:'column', justifyContent:'center', gap:1};
+                    const retCell = (val, amtStyle, unitsStyle) => isRet
+                      ? <div style={retH}>
+                          <span style={amtStyle}>{val.amt > 0 ? f$(val.amt) : '—'}</span>
+                          {val.units > 0 && <span style={unitsStyle}>{val.units} units</span>}
+                        </div>
+                      : <span style={{...rowH,...amtStyle}}>{fmtP(l, val)}</span>;
+                    return [
+                      <span key={l+'-l'} style={{...rowH,fontSize:10,color:'var(--txt3)',overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>{l}</span>,
+                      retCell(ty, {fontSize:11,fontWeight:400,color:'var(--txt)'}, {fontSize:8,color:'var(--txt3)'}),
+                      retCell(lyv, {fontSize:10,color:'var(--txt2)'}, {fontSize:8,color:'var(--txt3)'}),
+                      <span key={l+'-chg'} style={rowH}>{pctEl(delta, inv, l+'-chg-inner')}</span>,
+                    ];
+                  })}
                 </div>
               </div>
             );
