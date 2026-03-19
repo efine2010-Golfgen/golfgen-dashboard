@@ -779,6 +779,10 @@ def sales_period_comparison(
                 "Today": "today", "Yesterday": "yesterday",
                 "WTD": "wtd", "MTD": "mtd", "YTD": "ytd",
             },
+            "sales summary": {
+                "Today": "today", "Yesterday": "yesterday",
+                "WTD": "wtd", "MTD": "mtd", "YTD": "ytd",
+            },
             "daily": {
                 "Today": "today", "Yesterday": "yesterday",
                 "2 Days Ago": "2_days_ago", "3 Days Ago": "3_days_ago",
@@ -1031,7 +1035,6 @@ def sales_monthly_yoy(
             GROUP BY EXTRACT(YEAR FROM CAST(date AS DATE)), EXTRACT(MONTH FROM CAST(date AS DATE))
             ORDER BY yr, mo
         """, hp).fetchall()
-        con.close()
 
         months_map = {}
         for r in rows:
@@ -1043,6 +1046,24 @@ def sales_monthly_yoy(
         _today = _today_central()
         current_month = _today.month
         current_year  = _today.year
+        today_day     = _today.day
+        ly_year       = current_year - 1
+        compare_day   = max(1, today_day - 1)  # S&T has ~1d lag
+
+        # LY MTD: LY sales through same day-of-month as today
+        ly_mtd_row = con.execute(f"""
+            SELECT COALESCE(SUM(ordered_product_sales), 0)
+            FROM daily_sales
+            WHERE asin = 'ALL'
+              AND EXTRACT(YEAR  FROM CAST(date AS DATE)) = {ly_year}
+              AND EXTRACT(MONTH FROM CAST(date AS DATE)) = {current_month}
+              AND EXTRACT(DAY   FROM CAST(date AS DATE)) <= {compare_day}
+              {hw}
+        """, hp).fetchone()
+        ly_mtd = round(float(ly_mtd_row[0] or 0), 2)
+
+        con.close()
+
         result = []
         for mo in range(1, 13):
             entry = {
@@ -1052,7 +1073,16 @@ def sales_monthly_yoy(
                 "y2026": months_map.get(mo, {}).get(2026, None) if (current_year > 2026 or (current_year == 2026 and mo <= current_month)) else None,
             }
             result.append(entry)
-        return result
+
+        return {
+            "months": result,
+            "meta": {
+                "current_month": current_month,
+                "current_year":  current_year,
+                "today_day":     today_day,
+                "ly_mtd":        ly_mtd,
+            }
+        }
     except Exception as e:
         logger.error(f"sales/monthly-yoy error: {e}")
         return {"error": str(e)}

@@ -11,7 +11,7 @@ const B = {
 
 // ── CONSTANTS ─────────────────────────────────────────────────────
 const PERIODS = {
-  Exec:    ['Today','Yesterday','WTD','MTD','YTD'],
+  'Sales Summary': ['Today','Yesterday','WTD','MTD','YTD'],
   Daily:   ['Today','Yesterday','2 Days Ago','3 Days Ago','4 Days Ago','5 Days Ago','6 Days Ago'],
   Weekly:  ['WTD','Last Week','4 Weeks','8 Weeks','13 Weeks','26 Weeks'],
   Monthly: ['MTD','Last Month','2 Months Ago','3 Months Ago','Last 12 Months'],
@@ -32,7 +32,7 @@ const GOLF_CUSTOMERS    = ['All Channels','Amazon','Walmart','Shopify','First Te
 const HW_CUSTOMERS      = ['All Channels','Belk',"Albertson's",'Family Dollar','Hobby Lobby'];
 const CHART_PERIODS     = ['7D','30D','60D','90D','180D'];
 const CHART_PERIOD_API  = {'7D':'last_7d','30D':'last_30d','60D':'last_60d','90D':'last_90d','180D':'last_180d'};
-const VIEW_TABS         = ['Exec','Daily','Weekly','Monthly','Yearly','Custom'];
+const VIEW_TABS         = ['Sales Summary','Daily','Weekly','Monthly','Yearly','Custom'];
 const MONTHS = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
 
 // ── FORMATTERS ─────────────────────────────────────────────────────
@@ -113,38 +113,61 @@ function stackedBarSVG(data, W=1100, H=130) {
   return s + '</svg>';
 }
 
-function yoyBarSVG(data, W=1100, H=180) {
+function yoyBarSVG(data, forecast={}, yearVis={y2024:true,y2025:true,y2026:true}, W=1100, H=195) {
   if (!data || data.length === 0) return '<div style="color:#374f66;padding:20px;text-align:center;font-size:12px">No YOY data</div>';
-  const CC = {y2024:B.dim, y2025:B.b2, y2026:B.o2};
+  const CC = {y2024:B.dim, y2025:B.b2, y2026:B.o2, forecast:'#f59e0b'};
+  // Build active bar definitions (only visible years + forecast when y2026 visible)
+  const barDefs = [
+    yearVis.y2024 && {key:'y2024',   color:CC.y2024,    lc:'#8899aa', lbl:'2024'},
+    yearVis.y2025 && {key:'y2025',   color:CC.y2025,    lc:B.b3,      lbl:'2025'},
+    yearVis.y2026 && {key:'y2026',   color:CC.y2026,    lc:B.o3,      lbl:'2026 Actual'},
+    yearVis.y2026 && {key:'forecast',color:CC.forecast,  lc:'#fbbf24', lbl:'2026 Forecast'},
+  ].filter(Boolean);
+  const nBars = Math.max(barDefs.length, 1);
+  const hasForecast = Object.keys(forecast).length > 0;
+
   const pad = {t:28,r:16,b:26,l:58};
-  const maxV = Math.max(...data.flatMap(d => [d.y2024||0, d.y2025||0, d.y2026||0]), 1);
+  // Compute max value across all visible bars including forecast
+  const allVals = data.flatMap(d => barDefs.map(b =>
+    b.key === 'forecast' ? (forecast[d.month_num]||0) : (d[b.key]||0)
+  ));
+  const maxV = Math.max(...allVals, 1);
   const iw = W-pad.l-pad.r, ih = H-pad.t-pad.b;
   const slotW = iw / data.length;
-  // Group occupies 62% of the slot — remaining 38% becomes inter-month breathing room
-  const groupW = slotW * 0.62;
-  const innerGap = Math.max(2, groupW * 0.05); // ~5% of group as inner gap
-  const bw = Math.max((groupW - innerGap * 2) / 3, 3);
-  const x = (mi,yi) => pad.l + mi * slotW + (slotW - groupW) / 2 + yi * (bw + innerGap);
-  const h = v => Math.max((v/maxV)*ih, v > 0 ? 4 : 0);
+  const groupW  = slotW * 0.72;
+  const innerGap = Math.max(1.5, groupW * 0.04);
+  const bw = Math.max((groupW - innerGap * (nBars-1)) / nBars, 3);
+  const groupX = mi => pad.l + mi*slotW + (slotW-groupW)/2;
+  const barX   = (mi,bi) => groupX(mi) + bi*(bw+innerGap);
+  const barH   = v => Math.max(((v||0)/maxV)*ih, (v||0) > 0 ? 3 : 0);
+
   let s = `<svg width="100%" viewBox="0 0 ${W} ${H}" style="overflow:visible;display:block">`;
-  for (let i=0;i<=3;i++) { const v=maxV*(i/3); s+=`<line x1="${pad.l}" y1="${(pad.t+ih*(1-i/3)).toFixed(1)}" x2="${W-pad.r}" y2="${(pad.t+ih*(1-i/3)).toFixed(1)}" stroke="#1a2f4a" stroke-width="0.5"/><text x="${pad.l-5}" y="${(pad.t+ih*(1-i/3)+4).toFixed(1)}" text-anchor="end" font-size="9" fill="#374f66">${f$(v)}</text>`; }
+  // Grid lines
+  for (let i=0;i<=3;i++) {
+    const v=maxV*(i/3);
+    s+=`<line x1="${pad.l}" y1="${(pad.t+ih*(1-i/3)).toFixed(1)}" x2="${W-pad.r}" y2="${(pad.t+ih*(1-i/3)).toFixed(1)}" stroke="#1a2f4a" stroke-width="0.5"/>`;
+    s+=`<text x="${pad.l-5}" y="${(pad.t+ih*(1-i/3)+4).toFixed(1)}" text-anchor="end" font-size="9" fill="#374f66">${f$(v)}</text>`;
+  }
+  // Bars
   data.forEach((d,mi) => {
-    [[d.y2024,'y2024',0],[d.y2025,'y2025',1],[d.y2026,'y2026',2]].forEach(([v,k,yi]) => {
-      if (v == null) return;
-      const hh = h(v);
-      const bx = x(mi,yi);
-      s += `<rect x="${bx.toFixed(1)}" y="${(pad.t+ih-hh).toFixed(1)}" width="${bw.toFixed(1)}" height="${hh.toFixed(1)}" fill="${CC[k]}" rx="2" opacity="${k==='y2026'?1:.82}"/>`;
-      if (v > 0) {
-        const barLabelColor = k === 'y2024' ? '#8899aa' : k === 'y2025' ? B.b3 : B.o3;
-        const barLabel = v >= 1e6 ? `$${(v/1e6).toFixed(1)}M` : v >= 1000 ? `$${Math.round(v/1000)}k` : `$${Math.round(v)}`;
-        s += `<text x="${(bx+bw/2).toFixed(1)}" y="${(pad.t+ih-hh-3).toFixed(1)}" text-anchor="middle" font-size="7" font-weight="600" fill="${barLabelColor}">${barLabel}</text>`;
+    barDefs.forEach((bar,bi) => {
+      const v = bar.key==='forecast' ? (forecast[d.month_num]||null) : d[bar.key];
+      if (v==null||v<=0) return;
+      const hh = barH(v);
+      const bx = barX(mi,bi);
+      const isFcst = bar.key==='forecast';
+      s += `<rect x="${bx.toFixed(1)}" y="${(pad.t+ih-hh).toFixed(1)}" width="${bw.toFixed(1)}" height="${hh.toFixed(1)}" fill="${bar.color}" rx="2" opacity="${isFcst?0.7:bar.key==='y2026'?1:0.82}"${isFcst?' stroke-dasharray="3,2" stroke="#f59e0b" stroke-width="0.8"':''}/>`;
+      if (v>0) {
+        const lbl = v>=1e6?`$${(v/1e6).toFixed(1)}M`:v>=1000?`$${Math.round(v/1000)}k`:`$${Math.round(v)}`;
+        s += `<text x="${(bx+bw/2).toFixed(1)}" y="${(pad.t+ih-hh-3).toFixed(1)}" text-anchor="middle" font-size="7" font-weight="600" fill="${bar.lc}">${lbl}</text>`;
       }
     });
-    s += `<text x="${(pad.l+(mi+.5)/data.length*iw).toFixed(1)}" y="${H-6}" text-anchor="middle" font-size="9" fill="#374f66">${d.month}</text>`;
+    s += `<text x="${(groupX(mi)+groupW/2).toFixed(1)}" y="${H-6}" text-anchor="middle" font-size="9" fill="#374f66">${d.month}</text>`;
   });
-  [['2024',CC.y2024],['2025',CC.y2025],['2026 (YTD)',CC.y2026]].forEach(([l,c],i) =>
-    s += `<g transform="translate(${pad.l+i*92},${pad.t-16})"><rect width="8" height="8" y="-1" rx="2" fill="${c}"/><text x="11" y="7" font-size="9" fill="${B.sub}">${l}</text></g>`);
-  return s + '</svg>';
+  // Legend (skip forecast entry if no forecast data)
+  barDefs.filter(b=>b.key!=='forecast'||hasForecast).forEach((b,i)=>
+    s+=`<g transform="translate(${pad.l+i*105},${pad.t-16})"><rect width="8" height="8" y="-1" rx="2" fill="${b.color}"/><text x="11" y="7" font-size="9" fill="${B.sub}">${b.lbl}</text></g>`);
+  return s+'</svg>';
 }
 
 function heatmapSVG(data, W=1100) {
@@ -490,8 +513,9 @@ export default function Sales({ filters = {} }) {
   const custRaw = filters.customer  || '';   // 'amazon' | '' etc.
   const mpRaw   = filters.marketplace || 'US'; // 'US' | 'CA'
 
-  const [viewTab,     setViewTab]     = useState('Exec');
+  const [viewTab,     setViewTab]     = useState('Sales Summary');
   const [activePeriod,setActivePeriod]= useState('MTD');
+  const [yearVis,     setYearVis]     = useState({y2024:true,y2025:true,y2026:true});
   const [cpSales,     setCpSales]     = useState('30D');
   const [cpTraffic,   setCpTraffic]   = useState('30D');
   const [customStart, setCustomStart] = useState('');
@@ -575,12 +599,43 @@ export default function Sales({ filters = {} }) {
   const svgChart = html => <div dangerouslySetInnerHTML={{__html: html}}/>;
   const periods = viewTab === 'Custom' ? [] : PERIODS[viewTab] || [];
 
+  // ── Extract YOY months + meta from new {months, meta} response ──
+  const yoyMonths = yoy?.months ?? (Array.isArray(yoy) ? yoy : []);
+  const yoyMeta   = yoy?.meta   ?? null;
+
+  // ── Forecast computation ──
+  const forecastMap = {};
+  if (yoyMeta && yoyMonths.length > 0) {
+    const { current_month, ly_mtd } = yoyMeta;
+    const lyYearTotal = yoyMonths.reduce((s, m2) => s + (m2.y2025 || 0), 0);
+    const curData     = yoyMonths.find(m2 => m2.month_num === current_month);
+    const tyMtd       = curData?.y2026 || 0;
+    const lyFullMonth = curData?.y2025 || 0;
+    const lyPct       = (ly_mtd > 0 && lyFullMonth > 0) ? ly_mtd / lyFullMonth : 0;
+    const curForecast = (lyPct > 0.01 && tyMtd > 0) ? tyMtd / lyPct : 0;
+    if (curForecast > 0) forecastMap[current_month] = Math.round(curForecast);
+
+    if (curForecast > 0 && lyYearTotal > 0 && lyFullMonth > 0) {
+      const curLyShare  = lyFullMonth / lyYearTotal;
+      const impliedM1   = curForecast / curLyShare;
+      const ytdActs     = yoyMonths.filter(m2 => m2.month_num < current_month).reduce((s,m2)=>s+(m2.y2026||0),0);
+      const lyYtdShare  = yoyMonths.filter(m2 => m2.month_num <= current_month).reduce((s,m2)=>s+(m2.y2025||0),0) / lyYearTotal;
+      const impliedM2   = lyYtdShare > 0 ? (ytdActs + curForecast) / lyYtdShare : impliedM1;
+      yoyMonths.forEach(m2 => {
+        if (m2.month_num <= current_month || m2.y2026 != null) return;
+        const moShare = (m2.y2025 || 0) / lyYearTotal;
+        const avg = ((impliedM1 + impliedM2) / 2) * moShare;
+        if (avg > 0) forecastMap[m2.month_num] = Math.round(avg);
+      });
+    }
+  }
+
   return (
     <div style={{fontFamily:"'Sora',-apple-system,BlinkMacSystemFont,sans-serif",color:'var(--txt)'}}>
 
       {/* HEADER */}
       <div style={{marginBottom:20}}>
-        <h2 style={{fontFamily:"'DM Serif Display',Georgia,serif",fontSize:22,fontWeight:400,margin:0,color:'var(--txt)'}}>Performance Snapshot</h2>
+        <h2 style={{fontFamily:"'DM Serif Display',Georgia,serif",fontSize:22,fontWeight:400,margin:0,color:'var(--txt)'}}>{viewTab === 'Sales Summary' ? 'Sales Summary' : viewTab === 'Daily' ? 'Daily Sales' : viewTab === 'Weekly' ? 'Weekly Sales' : viewTab === 'Monthly' ? 'Monthly Sales' : viewTab === 'Yearly' ? 'Year-over-Year' : 'Sales Analytics'}</h2>
         <div style={{fontSize:12,color:'var(--txt3)',marginTop:3,fontFamily:"'Space Grotesk',monospace"}}>
           {mpRaw === 'CA' ? 'Amazon.ca (Canada)' : 'Amazon.com (US)'}
           {' \u00B7 '}
@@ -657,7 +712,7 @@ export default function Sales({ filters = {} }) {
                 ['Conv %',      d.sessions > 0 ? fP(d.conversion) : '—', '—', null, false, fP(d.ly_conversion), '—'],
               ];
               return (
-                <div key={p} style={{flex:'1 1 430px',minWidth:430,background:'var(--card2)',border:'1px solid var(--acc1)',borderRadius:12,padding:'12px 14px',transition:'background .3s',boxShadow:'0 0 0 1px rgba(46,207,170,.15)'}}>
+                <div key={p} style={{flex:'1 1 445px',minWidth:445,background:'var(--card2)',border:'1px solid var(--acc1)',borderRadius:12,padding:'12px 14px',transition:'background .3s',boxShadow:'0 0 0 1px rgba(46,207,170,.15)'}}>
                   <div style={{display:'flex',alignItems:'baseline',gap:8,paddingBottom:9,borderBottom:'1px solid var(--brd)',marginBottom:9}}>
                     <span style={{fontSize:10,fontWeight:700,textTransform:'uppercase',letterSpacing:'.12em',color:B.b2}}>Today</span>
                     <span style={{fontSize:9,color:'var(--txt3)'}}>so far · LY = same time last year</span>
@@ -671,8 +726,8 @@ export default function Sales({ filters = {} }) {
                     <span style={{fontSize:9,fontWeight:700,color:'var(--txt3)',textTransform:'uppercase',letterSpacing:'.05em'}}>LY EOD</span>
                     <span style={{fontSize:9,fontWeight:700,color:B.t2,textTransform:'uppercase',letterSpacing:'.05em',textAlign:'right'}}>FCST</span>
                     {todayRows.flatMap(([l, ty, lyNowV, delta, inv, lyEodV, fcst]) => [
-                      <span key={l+'-l'} style={{fontSize:10,color:'var(--txt3)',whiteSpace:'nowrap',paddingRight:4}}>{l}</span>,
-                      <span key={l+'-ty'} style={{fontSize:12,fontWeight:700,color:'var(--txt)'}}>{ty}</span>,
+                      <span key={l+'-l'} style={{fontSize:10,color:'var(--txt3)',overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>{l}</span>,
+                      <span key={l+'-ty'} style={{fontSize:11,fontWeight:400,color:'var(--txt)'}}>{ty}</span>,
                       <span key={l+'-ln'} style={{fontSize:10,color:B.b3}}>{lyNowV}</span>,
                       pctEl(delta, inv, l+'-chg'),
                       <span key={l+'-eod'} style={{fontSize:10,color:'var(--txt2)'}}>{lyEodV}</span>,
@@ -697,16 +752,16 @@ export default function Sales({ filters = {} }) {
               ['Conv %',       fP(d.conversion),     fP(d.ly_conversion),    pct(d.conversion, d.ly_conversion), false],
             ];
             return (
-              <div key={p} style={{flex:'1 1 185px',minWidth:185,background:'var(--card2)',border:'1px solid var(--brd)',borderRadius:12,padding:'12px 14px',transition:'background .3s'}}>
+              <div key={p} style={{flex:'1 1 240px',minWidth:240,background:'var(--card2)',border:'1px solid var(--brd)',borderRadius:12,padding:'12px 14px',transition:'background .3s'}}>
                 <div style={{fontSize:10,fontWeight:700,textTransform:'uppercase',letterSpacing:'.12em',color:B.b2,paddingBottom:9,borderBottom:'1px solid var(--brd)',marginBottom:9}}>{p}</div>
-                <div style={{display:'grid',gridTemplateColumns:'auto 62px 54px 48px',columnGap:3,rowGap:6,alignItems:'center'}}>
+                <div style={{display:'grid',gridTemplateColumns:'68px 52px 48px 44px',columnGap:3,rowGap:6,alignItems:'center'}}>
                   <span/>
                   <span style={{fontSize:9,fontWeight:700,color:'var(--txt3)',textTransform:'uppercase',letterSpacing:'.06em'}}>TY</span>
                   <span style={{fontSize:9,fontWeight:700,color:'var(--txt3)',textTransform:'uppercase',letterSpacing:'.06em'}}>LY</span>
                   <span style={{fontSize:9,fontWeight:700,color:'var(--txt3)',textTransform:'uppercase',letterSpacing:'.06em',textAlign:'right'}}>Chg</span>
                   {rows.flatMap(([l, ty, lyv, delta, inv]) => [
-                    <span key={l+'-l'} style={{fontSize:10,color:'var(--txt3)',whiteSpace:'nowrap',paddingRight:14}}>{l}</span>,
-                    <span key={l+'-ty'} style={{fontSize:12,fontWeight:700,color:'var(--txt)'}}>{ty}</span>,
+                    <span key={l+'-l'} style={{fontSize:10,color:'var(--txt3)',overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>{l}</span>,
+                    <span key={l+'-ty'} style={{fontSize:11,fontWeight:400,color:'var(--txt)'}}>{ty}</span>,
                     <span key={l+'-ly'} style={{fontSize:10,color:'var(--txt2)'}}>{lyv}</span>,
                     pctEl(delta, inv, l+'-chg'),
                   ])}
@@ -751,9 +806,27 @@ export default function Sales({ filters = {} }) {
       </div>
 
       {/* Monthly YOY */}
-      <ChartCard title="Monthly Revenue — 2024 / 2025 / 2026" badge="Year over Year" error={errors.yoy}>
-        {loading.yoy ? <Spinner/> : svgChart(yoyBarSVG(toArr(yoy)))}
-      </ChartCard>
+      {/* Monthly Revenue — custom header with year toggles on left */}
+      <div style={{background:'var(--surf)',border:'1px solid var(--brd)',borderRadius:14,padding:16,marginBottom:12,transition:'background .3s'}}>
+        <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:14}}>
+          <div style={{display:'flex',gap:5,alignItems:'center'}}>
+            {[['2024','y2024',B.dim],['2025','y2025',B.b2],['2026','y2026',B.o2]].map(([lbl,key,col])=>(
+              <button key={key} onClick={()=>setYearVis(v=>({...v,[key]:!v[key]}))} style={{
+                fontSize:10,fontWeight:600,padding:'3px 10px',borderRadius:6,cursor:'pointer',
+                border:`1px solid ${yearVis[key]?col:'var(--brd)'}`,
+                background:yearVis[key]?`${col}22`:'transparent',
+                color:yearVis[key]?col:'var(--txt3)',transition:'all .15s',
+              }}>{lbl}</button>
+            ))}
+          </div>
+          <div style={{display:'flex',alignItems:'center',gap:8}}>
+            <span style={{fontSize:12,fontWeight:700,color:'var(--txt)'}}>Monthly Revenue</span>
+            <span style={{fontSize:10,padding:'2px 9px',borderRadius:99,background:'rgba(46,111,187,.15)',color:B.b3,border:'1px solid rgba(46,111,187,.2)'}}>Year over Year</span>
+          </div>
+        </div>
+        {errors.yoy && <div style={{padding:'12px 14px',color:'#fb923c',fontSize:11,background:'rgba(251,146,60,.08)',border:'1px solid rgba(251,146,60,.18)',borderRadius:8}}>⚠ {errors.yoy}</div>}
+        {loading.yoy ? <Spinner/> : svgChart(yoyBarSVG(yoyMonths, forecastMap, yearVis))}
+      </div>
 
       {/* Sales $ Trend */}
       <ChartCard title="Sales $ Trend" badge={cpSales} error={errors.trend}>
