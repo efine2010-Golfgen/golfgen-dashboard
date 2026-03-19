@@ -1697,6 +1697,7 @@ def get_ly_same_time_sales(ly_date, cutoff_dt) -> tuple:
     try:
         from sp_api.api import Sales as SalesAPI
         from sp_api.base import Marketplaces
+        from sp_api.base.sales_enum import Granularity
     except ImportError:
         logger.warning("get_ly_same_time_sales: sp_api library not installed")
         return (0.0, 0)
@@ -1715,13 +1716,15 @@ def get_ly_same_time_sales(ly_date, cutoff_dt) -> tuple:
                                cutoff_dt.hour, max(cutoff_dt.minute, 1), 0,
                                tzinfo=CENTRAL)
 
-        # SP-API interval format: start--end (double hyphen)
-        interval = f"{ly_start.isoformat()}--{safe_cutoff.isoformat()}"
-
+        # SP-API expects interval as a tuple of two datetimes; library joins with "--"
+        # granularity must be the Granularity enum, not a string
         @retry_with_backoff(max_retries=2, base_delay=1.0, max_delay=10.0)
         def _call_api():
             api = SalesAPI(credentials=credentials, marketplace=Marketplaces.US)
-            return api.get_order_metrics(interval=interval, granularity='Total')
+            return api.get_order_metrics(
+                interval=(ly_start, safe_cutoff),
+                granularity=Granularity.TOTAL,
+            )
 
         response = _call_api()
         metrics = response.payload or []
