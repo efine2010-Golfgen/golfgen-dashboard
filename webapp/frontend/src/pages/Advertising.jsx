@@ -16,6 +16,7 @@ const RANGES = [
 
 const TABS = [
   { key: "overview", label: "Overview" },
+  { key: "funnel", label: "Conversion Funnel" },
   { key: "campaigns", label: "Campaigns" },
   { key: "keywords", label: "Keywords" },
   { key: "searchTerms", label: "Search Terms" },
@@ -31,6 +32,7 @@ export default function Advertising({ filters = {} }) {
   const [keywords, setKeywords] = useState([]);
   const [searchTerms, setSearchTerms] = useState([]);
   const [negKeywords, setNegKeywords] = useState([]);
+  const [funnelData, setFunnelData] = useState(null);
   const [loading, setLoading] = useState(true);
   const [sortKey, setSortKey] = useState("spend");
   const [sortDir, setSortDir] = useState("desc");
@@ -42,6 +44,8 @@ export default function Advertising({ filters = {} }) {
 
     if (tab === "overview") {
       promises.push(api.adsDaily(days, h));
+    } else if (tab === "funnel") {
+      promises.push(api.adsFunnel(days, h));
     } else if (tab === "campaigns") {
       promises.push(api.adsCampaigns(days, h));
     } else if (tab === "keywords") {
@@ -55,6 +59,7 @@ export default function Advertising({ filters = {} }) {
     Promise.all(promises).then(([s, detail]) => {
       setSummary(s);
       if (tab === "overview") setDaily(detail?.data || []);
+      else if (tab === "funnel") setFunnelData(detail || null);
       else if (tab === "campaigns") setCampaigns(detail?.campaigns || []);
       else if (tab === "keywords") setKeywords(detail?.keywords || []);
       else if (tab === "searchTerms") setSearchTerms(detail?.searchTerms || []);
@@ -153,6 +158,7 @@ export default function Advertising({ filters = {} }) {
 
       {/* Tab content */}
       {tab === "overview" && <OverviewTab daily={daily} />}
+      {tab === "funnel" && <FunnelTab funnelData={funnelData} days={days} />}
       {tab === "campaigns" && <CampaignsTab data={sortData(campaigns)} onSort={handleSort} sortKey={sortKey} sortDir={sortDir} />}
       {tab === "keywords" && <KeywordsTab data={sortData(keywords)} onSort={handleSort} sortKey={sortKey} sortDir={sortDir} />}
       {tab === "searchTerms" && <SearchTermsTab data={sortData(searchTerms)} onSort={handleSort} sortKey={sortKey} sortDir={sortDir} />}
@@ -534,5 +540,338 @@ function MatchBadge({ type }) {
     }}>
       {t || "—"}
     </span>
+  );
+}
+
+
+// ── Conversion Funnel Tab ──────────────────────────────
+// Colors matching the mockup design
+const C = {
+  b1: "#1B4F8A", b2: "#2E6FBB", b3: "#5B9FD4",
+  o2: "#E8821E", t2: "#1AA392",
+  grn: "#22c55e", amb: "#f59e0b", red: "#ef4444",
+  brd: "#1a2f4a", sub: "#5b7fa0", dim: "#374f66",
+  card: "#122138", card2: "#0f1d33",
+};
+
+function fN(v) { return v == null ? "—" : Number(v).toLocaleString(); }
+function fPct(v) { return v == null ? "—" : `${Number(v).toFixed(1)}%`; }
+function f$(v) { return v == null ? "—" : `$${Number(v).toFixed(2)}`; }
+
+function delta(ty, ly) {
+  if (!ly || ly === 0) return null;
+  return ((ty - ly) / ly * 100).toFixed(1);
+}
+
+function DeltaBadge({ ty, ly, invert = false }) {
+  const d = delta(ty, ly);
+  if (d === null) return <span style={{ color: C.sub, fontSize: 11 }}>—</span>;
+  const pos = invert ? Number(d) < 0 : Number(d) >= 0;
+  return (
+    <span style={{
+      color: pos ? C.grn : C.red,
+      fontSize: 11,
+      fontWeight: 600,
+      background: pos ? `${C.grn}18` : `${C.red}18`,
+      padding: "1px 6px",
+      borderRadius: 4,
+    }}>
+      {Number(d) >= 0 ? "+" : ""}{d}%
+    </span>
+  );
+}
+
+function SparkLine({ data, key1, color = C.o2, h = 32 }) {
+  if (!data || data.length < 2) return <svg width="100%" height={h}><text x="50%" y="50%" textAnchor="middle" fill={C.sub} fontSize="10">no data</text></svg>;
+  const vals = data.map(d => d[key1] ?? 0);
+  const mx = Math.max(...vals, 1);
+  const mn = Math.min(...vals);
+  const range = mx - mn || 1;
+  const W = 120, H = h;
+  const pts = vals.map((v, i) => `${(i / (vals.length - 1)) * W},${H - ((v - mn) / range) * (H - 4) - 2}`).join(" ");
+  return (
+    <svg width="100%" height={H} viewBox={`0 0 ${W} ${H}`} preserveAspectRatio="none">
+      <polyline points={pts} fill="none" stroke={color} strokeWidth="1.8" strokeLinejoin="round" />
+    </svg>
+  );
+}
+
+function FunnelStageBar({ label, value, maxVal, color, pct, showPct }) {
+  const barW = maxVal > 0 ? Math.max(4, (value / maxVal) * 100) : 0;
+  return (
+    <div style={{ marginBottom: 14 }}>
+      <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 4 }}>
+        <span style={{ fontSize: 12, color: C.sub }}>{label}</span>
+        <span style={{ fontSize: 13, fontWeight: 700, color: "#e8edf2" }}>{fN(value)}</span>
+      </div>
+      <div style={{ position: "relative", height: 22, background: `${color}20`, borderRadius: 4, overflow: "hidden" }}>
+        <div style={{ width: `${barW}%`, height: "100%", background: `linear-gradient(90deg,${color}cc,${color})`, borderRadius: 4, transition: "width 0.5s" }} />
+      </div>
+      {showPct && pct != null && (
+        <div style={{ fontSize: 11, color: C.sub, marginTop: 3, textAlign: "right" }}>{fPct(pct)} step-through</div>
+      )}
+    </div>
+  );
+}
+
+function FunnelTab({ funnelData, days }) {
+  if (!funnelData) {
+    return <div className="chart-card" style={{ textAlign: "center", padding: 60, color: C.sub }}>Loading funnel data…</div>;
+  }
+
+  const ty = funnelData.ty || {};
+  const ly = funnelData.ly || {};
+  const daily = funnelData.daily || [];
+
+  // Stage values
+  const stages = [
+    { label: "Impressions", key: "impressions", color: C.b3, icon: "👁" },
+    { label: "Clicks",      key: "clicks",      color: C.b2, icon: "🖱" },
+    { label: "Sessions",    key: "sessions",    color: C.b1, icon: "🌐" },
+    { label: "Add to Cart", key: "atc",         color: C.o2, icon: "🛒" },
+    { label: "Orders",      key: "orders",      color: C.t2, icon: "✅" },
+  ];
+  const maxStage = Math.max(...stages.map(s => ty[s.key] || 0), 1);
+
+  // Step-through rates
+  const stepRates = [
+    null,
+    ty.ctr,
+    ty.clickToSession,
+    ty.atcRate,
+    ty.atcConv,
+  ];
+
+  // Bottleneck: find the worst step-through rate
+  const rates = [ty.ctr, ty.clickToSession, ty.atcRate, ty.atcConv].filter(v => v != null && v > 0);
+  const benchmarks = [2.0, 80, 12, 35]; // Amazon avg: CTR 2%, Click→Sess 80%, ATC 12%, ATC→Order 35%
+  let bottleneckIdx = -1;
+  let worstRatio = Infinity;
+  [ty.ctr, ty.clickToSession, ty.atcRate, ty.atcConv].forEach((v, i) => {
+    if (v != null && v > 0) {
+      const ratio = v / benchmarks[i];
+      if (ratio < worstRatio) { worstRatio = ratio; bottleneckIdx = i; }
+    }
+  });
+  const bottleneckLabels = ["CTR (Ads→Clicks)", "Click→Session rate", "Add-to-Cart rate", "Cart→Order conversion"];
+  const bottleneckName = bottleneckIdx >= 0 ? bottleneckLabels[bottleneckIdx] : null;
+
+  // Insights bullets
+  const insights = [];
+  if (ty.ctr != null && ty.ctr < 2) insights.push({ color: C.amb, text: `CTR is ${fPct(ty.ctr)} — below 2% Amazon avg. Test new ad creative or tighten targeting.` });
+  if (ty.sessionConv != null && ty.sessionConv < 10) insights.push({ color: C.red, text: `Session conv. ${fPct(ty.sessionConv)} is low. Review product page, images, and pricing.` });
+  if (ty.atcRate != null && ty.atcRate < 8) insights.push({ color: C.amb, text: `ATC rate ${fPct(ty.atcRate)} is below avg. Check competitors' pricing and A+ content.` });
+  if (insights.length === 0) insights.push({ color: C.grn, text: "All funnel stages are performing at or above Amazon average benchmarks." });
+
+  const cardStyle = { background: C.card, border: `1px solid ${C.brd}`, borderRadius: 8, padding: "16px 20px" };
+  const secHdr = { fontSize: 11, fontWeight: 700, color: C.sub, letterSpacing: "0.08em", textTransform: "uppercase", marginBottom: 12 };
+
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 20 }}>
+
+      {/* ── KPI Row ── */}
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(5, 1fr)", gap: 12 }}>
+        {stages.map((s, i) => (
+          <div key={s.key} style={{ ...cardStyle, borderTop: `3px solid ${s.color}` }}>
+            <div style={{ fontSize: 11, color: C.sub, marginBottom: 6 }}>{s.icon} {s.label}</div>
+            <div style={{ fontSize: 22, fontWeight: 800, color: "#e8edf2", lineHeight: 1.1 }}>
+              {fN(ty[s.key])}
+            </div>
+            <div style={{ marginTop: 6 }}>
+              <DeltaBadge ty={ty[s.key]} ly={ly[s.key]} />
+              <span style={{ fontSize: 10, color: C.sub, marginLeft: 6 }}>vs LY</span>
+            </div>
+            {i > 0 && stepRates[i] != null && (
+              <div style={{ fontSize: 11, color: s.color, marginTop: 4, fontWeight: 600 }}>
+                {fPct(stepRates[i])} step-through
+              </div>
+            )}
+          </div>
+        ))}
+      </div>
+
+      {/* ── Main Grid: Funnel Bars + Stage Metrics Table ── */}
+      <div style={{ display: "grid", gridTemplateColumns: "300px 1fr", gap: 16 }}>
+
+        {/* Visual Funnel */}
+        <div style={cardStyle}>
+          <div style={secHdr}>Funnel Stages</div>
+          {stages.map((s, i) => (
+            <FunnelStageBar
+              key={s.key}
+              label={s.label}
+              value={ty[s.key] || 0}
+              maxVal={maxStage}
+              color={s.color}
+              pct={i > 0 ? stepRates[i] : null}
+              showPct={i > 0}
+            />
+          ))}
+
+          {/* LY outline comparison */}
+          <div style={{ marginTop: 16, paddingTop: 12, borderTop: `1px solid ${C.brd}` }}>
+            <div style={{ fontSize: 11, color: C.sub, marginBottom: 8 }}>Last Year Comparison</div>
+            {stages.map(s => (
+              <div key={s.key} style={{ display: "flex", justifyContent: "space-between", marginBottom: 5 }}>
+                <span style={{ fontSize: 11, color: C.dim }}>{s.label}</span>
+                <span style={{ fontSize: 12, color: C.sub }}>{fN(ly[s.key])}</span>
+              </div>
+            ))}
+          </div>
+        </div>
+
+        {/* Stage Metrics Table + Benchmarks */}
+        <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+          <div style={cardStyle}>
+            <div style={secHdr}>Stage Metrics · TY vs LY</div>
+            <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
+              <thead>
+                <tr style={{ borderBottom: `1px solid ${C.brd}` }}>
+                  <th style={{ textAlign: "left", color: C.sub, fontWeight: 600, padding: "4px 8px 8px 0", fontSize: 11 }}>Metric</th>
+                  <th style={{ textAlign: "right", color: C.sub, fontWeight: 600, padding: "4px 8px 8px", fontSize: 11 }}>This Year</th>
+                  <th style={{ textAlign: "right", color: C.sub, fontWeight: 600, padding: "4px 8px 8px", fontSize: 11 }}>Last Year</th>
+                  <th style={{ textAlign: "right", color: C.sub, fontWeight: 600, padding: "4px 0 8px", fontSize: 11 }}>Δ</th>
+                </tr>
+              </thead>
+              <tbody>
+                {[
+                  { label: "📣 Ad Layer", header: true },
+                  { label: "Impressions",   ty: ty.impressions,  ly: ly.impressions,  fmt: fN },
+                  { label: "Clicks",        ty: ty.clicks,       ly: ly.clicks,       fmt: fN },
+                  { label: "CTR",           ty: ty.ctr,          ly: ly.ctr,          fmt: fPct, invert: false },
+                  { label: "CPC",           ty: ty.cpc,          ly: ly.cpc,          fmt: f$,   invert: true },
+                  { label: "Ad Spend",      ty: ty.spend,        ly: ly.spend,        fmt: f$,   invert: true },
+                  { label: "🌐 Traffic Layer", header: true },
+                  { label: "Sessions",      ty: ty.sessions,     ly: ly.sessions,     fmt: fN },
+                  { label: "Glance Views",  ty: ty.glanceViews,  ly: ly.glanceViews,  fmt: fN },
+                  { label: "Click→Session", ty: ty.clickToSession, ly: ly.clickToSession, fmt: fPct },
+                  { label: "🛍 Conversion Layer", header: true },
+                  { label: "Add to Cart",   ty: ty.atc,          ly: ly.atc,          fmt: fN },
+                  { label: "ATC Rate",      ty: ty.atcRate,      ly: ly.atcRate,      fmt: fPct },
+                  { label: "Orders",        ty: ty.orders,       ly: ly.orders,       fmt: fN },
+                  { label: "Session Conv%", ty: ty.sessionConv,  ly: ly.sessionConv,  fmt: fPct },
+                  { label: "ATC Conv%",     ty: ty.atcConv,      ly: ly.atcConv,      fmt: fPct },
+                ].map((row, i) => row.header ? (
+                  <tr key={i}>
+                    <td colSpan={4} style={{ padding: "10px 0 4px", fontSize: 11, fontWeight: 700, color: C.sub, letterSpacing: "0.05em" }}>{row.label}</td>
+                  </tr>
+                ) : (
+                  <tr key={i} style={{ borderBottom: `1px solid ${C.brd}40` }}>
+                    <td style={{ padding: "6px 8px 6px 0", color: "#c5cfd8" }}>{row.label}</td>
+                    <td style={{ textAlign: "right", padding: "6px 8px", fontWeight: 600, color: "#e8edf2" }}>{row.fmt(row.ty)}</td>
+                    <td style={{ textAlign: "right", padding: "6px 8px", color: C.sub }}>{row.fmt(row.ly)}</td>
+                    <td style={{ textAlign: "right", padding: "6px 0" }}><DeltaBadge ty={row.ty} ly={row.ly} invert={row.invert} /></td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+
+          {/* Benchmark Cards */}
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 12 }}>
+            {[
+              { label: "Session Conv%",  val: ty.sessionConv,  bench: 12,  fmt: fPct, desc: "Amazon avg ~12%" },
+              { label: "CTR",            val: ty.ctr,          bench: 2,   fmt: fPct, desc: "Amazon avg ~2%" },
+              { label: "ATC Rate",       val: ty.atcRate,      bench: 12,  fmt: fPct, desc: "Amazon avg ~12%" },
+            ].map((b, i) => {
+              const good = b.val != null && b.val >= b.bench;
+              return (
+                <div key={i} style={{ ...cardStyle, borderLeft: `3px solid ${good ? C.grn : C.amb}`, padding: "12px 14px" }}>
+                  <div style={{ fontSize: 11, color: C.sub }}>{b.label}</div>
+                  <div style={{ fontSize: 20, fontWeight: 700, color: good ? C.grn : C.amb, margin: "4px 0 2px" }}>{fPct(b.val)}</div>
+                  <div style={{ fontSize: 10, color: C.dim }}>{b.desc}</div>
+                  <div style={{ marginTop: 6, height: 4, background: `${C.brd}`, borderRadius: 2, overflow: "hidden" }}>
+                    <div style={{ width: `${Math.min(100, (b.val || 0) / (b.bench * 2) * 100)}%`, height: "100%", background: good ? C.grn : C.amb, transition: "width 0.5s" }} />
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      </div>
+
+      {/* ── Sparklines Row ── */}
+      <div style={{ ...cardStyle, padding: "16px 20px" }}>
+        <div style={secHdr}>Stage Trend · {days}D</div>
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(6, 1fr)", gap: 16 }}>
+          {[
+            { label: "Impressions", k: "impressions", color: C.b3 },
+            { label: "CTR %",       k: "ctr",         color: C.b2 },
+            { label: "Sessions",    k: "sessions",    color: C.b1 },
+            { label: "Add to Cart", k: "atc",         color: C.o2 },
+            { label: "Orders",      k: "orders",      color: C.t2 },
+            { label: "Conv %",      k: "convPct",     color: "#8b5cf6" },
+          ].map(s => (
+            <div key={s.k} style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+              <div style={{ fontSize: 11, color: C.sub }}>{s.label}</div>
+              <SparkLine data={daily} key1={s.k} color={s.color} h={36} />
+              <div style={{ fontSize: 12, fontWeight: 600, color: "#e8edf2" }}>
+                {s.k === "ctr" || s.k === "convPct" ? fPct(ty[s.k === "convPct" ? "sessionConv" : s.k]) : fN(ty[s.k])}
+              </div>
+            </div>
+          ))}
+        </div>
+      </div>
+
+      {/* ── Bottom: Insights + Trend Chart ── */}
+      <div style={{ display: "grid", gridTemplateColumns: "280px 1fr", gap: 16 }}>
+
+        {/* Insights Panel */}
+        <div style={cardStyle}>
+          <div style={secHdr}>Actionable Insights</div>
+          {bottleneckName && (
+            <div style={{ background: `${C.amb}18`, border: `1px solid ${C.amb}40`, borderRadius: 6, padding: "10px 12px", marginBottom: 14 }}>
+              <div style={{ fontSize: 11, fontWeight: 700, color: C.amb, marginBottom: 4 }}>⚠ Bottleneck Detected</div>
+              <div style={{ fontSize: 12, color: "#c5cfd8" }}>{bottleneckName} is the weakest funnel stage</div>
+            </div>
+          )}
+          {insights.map((ins, i) => (
+            <div key={i} style={{ display: "flex", gap: 10, marginBottom: 12, alignItems: "flex-start" }}>
+              <div style={{ width: 8, height: 8, borderRadius: "50%", background: ins.color, marginTop: 4, flexShrink: 0 }} />
+              <div style={{ fontSize: 12, color: "#c5cfd8", lineHeight: 1.5 }}>{ins.text}</div>
+            </div>
+          ))}
+
+          {/* Spend efficiency */}
+          <div style={{ marginTop: 16, paddingTop: 12, borderTop: `1px solid ${C.brd}` }}>
+            <div style={{ fontSize: 11, color: C.sub, marginBottom: 8 }}>Spend Efficiency</div>
+            {[
+              { label: "Cost/Session",  val: ty.sessions > 0 ? f$(ty.spend / ty.sessions) : "—" },
+              { label: "Cost/Order",    val: ty.orders > 0 ? f$(ty.spend / ty.orders) : "—" },
+              { label: "ROAS",          val: `${ty.roas || "—"}x` },
+            ].map((r, i) => (
+              <div key={i} style={{ display: "flex", justifyContent: "space-between", marginBottom: 6 }}>
+                <span style={{ fontSize: 12, color: C.dim }}>{r.label}</span>
+                <span style={{ fontSize: 12, fontWeight: 600, color: "#e8edf2" }}>{r.val}</span>
+              </div>
+            ))}
+          </div>
+        </div>
+
+        {/* Trend Chart: Clicks bar + CTR line */}
+        <div style={cardStyle}>
+          <div style={{ marginBottom: 12 }}>
+            <div style={secHdr}>Ad Clicks &amp; CTR Trend</div>
+          </div>
+          {daily.length > 1 ? (
+            <ResponsiveContainer width="100%" height={200}>
+              <ComposedChart data={daily} margin={{ top: 4, right: 40, bottom: 0, left: 0 }}>
+                <CartesianGrid strokeDasharray="3 3" stroke={`${C.brd}80`} />
+                <XAxis dataKey="date" tick={{ fill: C.sub, fontSize: 10 }} tickFormatter={d => d.slice(5)} />
+                <YAxis yAxisId="left" tick={{ fill: C.sub, fontSize: 10 }} />
+                <YAxis yAxisId="right" orientation="right" tick={{ fill: C.sub, fontSize: 10 }} tickFormatter={v => `${v}%`} />
+                <Tooltip contentStyle={TOOLTIP_STYLE}
+                  formatter={(v, name) => [name === "CTR %" ? `${v}%` : v.toLocaleString(), name]} />
+                <Bar yAxisId="left" dataKey="clicks" fill={C.b2} opacity={0.75} radius={[3,3,0,0]} name="Clicks" />
+                <Line yAxisId="right" type="monotone" dataKey="ctr" stroke={C.o2} strokeWidth={2} dot={false} name="CTR %" />
+              </ComposedChart>
+            </ResponsiveContainer>
+          ) : (
+            <div style={{ textAlign: "center", color: C.sub, padding: 40 }}>No daily data yet — run a full sync to populate</div>
+          )}
+        </div>
+      </div>
+
+    </div>
   );
 }

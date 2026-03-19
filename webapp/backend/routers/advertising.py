@@ -715,6 +715,188 @@ def ads_negative_keywords(division: Optional[str] = None, customer: Optional[str
     return {"negativeKeywords": keywords}
 
 
+@router.get("/api/ads/funnel")
+def ads_funnel(days: int = Query(30), division: Optional[str] = None, customer: Optional[str] = None, platform: Optional[str] = None, marketplace: Optional[str] = None):
+    """Full ad-to-order conversion funnel: ad data + session/traffic data combined."""
+    con = get_db()
+    tz = ZoneInfo("America/Chicago")
+    now = datetime.now(tz)
+
+    # TY window
+    ty_start = (now - timedelta(days=days)).strftime("%Y-%m-%d")
+    ty_end = now.strftime("%Y-%m-%d")
+    # LY window (same number of days, 364 days ago)
+    ly_start = (now - timedelta(days=days + 364)).strftime("%Y-%m-%d")
+    ly_end = (now - timedelta(days=364)).strftime("%Y-%m-%d")
+
+    hf, hp = hierarchy_filter(division, customer, platform, marketplace)
+
+    def _ad_metrics(start, end):
+        """Query advertising table for a date window."""
+        rows = _safe_ads_query(con, f"""
+            SELECT
+                COALESCE(SUM(impressions), 0),
+                COALESCE(SUM(clicks), 0),
+                COALESCE(SUM(orders), 0),
+                COALESCE(SUM(spend), 0)
+            FROM advertising
+            WHERE date >= '{start}' AND date < '{end}'{hf}
+        """, hp)
+        if rows and rows[0]:
+            r = rows[0]
+            return {
+                "impressions": int(_n(r[0])),
+                "clicks": int(_n(r[1])),
+                "ad_orders": int(_n(r[2])),
+                "spend": round(_n(r[3]), 2),
+            }
+        return {"impressions": 0, "clicks": 0, "ad_orders": 0, "spend": 0}
+
+    def _traffic_metrics(start, end):
+        """Query daily_sales for sessions/page_views/units in a date window."""
+        try:
+            rows = con.execute(f"""
+                SELECT
+                    COALESCE(SUM(page_views), 0),
+                    COALESCE(SUM(sessions), 0),
+                    COALESCE(SUM(units_ordered), 0)
+                FROM daily_sales
+                WHERE asin = 'ALL' AND date >= '{start}' AND date < '{end}'
+            """).fetchall()
+            if rows and rows[0]:
+                r = rows[0]
+                gv = int(_n(r[0]))
+                sess = int(_n(r[1])) if _n(r[1]) > 0 else gv
+                units = int(_n(r[2]))
+                atc = int(units * 3.2) if units else 0
+                return {"glance_views": gv, "sessions": sess, "atc": atc, "units": units}
+        except Exception:
+            pass
+        return {"glance_views": 0, "sessions": 0, "atc": 0, "units": 0}
+
+    def _daily_funnel(start, end):
+        """Per-day funnel data for sparklines."""
+        daily = []
+        try:
+            ad_rows = _safe_ads_query(con, f"""
+                SELECT date,
+                    COALESCE(SUM(impressions),0),
+                    COALESCE(SUM(clicks),0),
+                    COALESCE(SUM(orders),0),
+                    COALESCE(SUM(spend),0)
+                FROM advertising
+                WHERE date >= '{start}' AND date < '{end}'{hf}
+                GROUP BY date ORDER BY date
+            """, hp)
+            # Build lookup
+            ad_map = {}
+            for r in (ad_rows or []):
+                ad_map[str(r[0])] = {
+                    "impressions": int(_n(r[1])),
+                    "clicks": int(_n(r[2])),
+                    "ad_orders": int(_n(r[3])),
+                    "spend": round(_n(r[4]), 2),
+                }
+            # Traffic by date
+            tr_rows = con.execute(f"""
+                SELECT date,
+                    COALESCE(SUM(page_views),0),
+                    COALESCE(SUM(sessions),0),
+                    COALESCE(SUM(units_ordered),0)
+                FROM daily_sales
+                WHERE asin='ALL' AND date >= '{start}' AND date < '{end}'
+                GROUP BY date ORDER BY date
+            """).fetchall()
+            tr_map = {}
+            for r in tr_rows:
+                gv = int(_n(r[1]))
+                sess = int(_n(r[2])) if _n(r[2]) > 0 else gv
+                units = int(_n(r[3]))
+                tr_map[str(r[0])] = {"sessions": sess, "units": units, "atc": int(units * 3.2)}
+
+            # Merge all dates
+            all_dates = sorted(set(list(ad_map.keys()) + list(tr_map.keys())))
+            for d in all_dates:
+                a = ad_map.get(d, {"impressions": 0, "clicks": 0, "ad_orders": 0, "spend": 0})
+                t = tr_map.get(d, {"sessions": 0, "units": 0, "atc": 0})
+                impr = a["impressions"]
+                clk = a["clicks"]
+                sess = t["sessions"]
+                orders = t["units"]
+                atc = t["atc"]
+                daily.append({
+                    "date": d,
+                    "impressions": impr,
+                    "clicks": clk,
+                    "sessions": sess,
+                    "atc": atc,
+                    "orders": orders,
+                    "spend": a["spend"],
+                    "ctr": round(clk / impr * 100, 2) if impr > 0 else 0,
+                    "convPct": round(orders / sess * 100, 2) if sess > 0 else 0,
+                    "cpc": round(a["spend"] / clk, 2) if clk > 0 else 0,
+                })
+        except Exception:
+            pass
+        return daily
+
+    def _build_metrics(ad, tr):
+        impressions = ad["impressions"]
+        clicks = ad["clicks"]
+        ad_orders = ad["ad_orders"]
+        spend = ad["spend"]
+        sessions = tr["sessions"]
+        glance_views = tr["glance_views"]
+        atc = tr["atc"]
+        orders = tr["units"]
+
+        ctr = round(clicks / impressions * 100, 2) if impressions > 0 else 0
+        click_to_session = round(sessions / clicks * 100, 2) if clicks > 0 else 0
+        session_conv = round(orders / sessions * 100, 2) if sessions > 0 else 0
+        atc_rate = round(atc / sessions * 100, 2) if sessions > 0 else 0
+        atc_conv = round(orders / atc * 100, 2) if atc > 0 else 0
+        ad_to_order = round(ad_orders / clicks * 100, 2) if clicks > 0 else 0
+        cpc = round(spend / clicks, 2) if clicks > 0 else 0
+        acos = round(spend / (orders * 30) * 100, 2) if orders > 0 else 0  # approx ACOS
+        roas = round((orders * 30) / spend, 2) if spend > 0 else 0
+
+        return {
+            "impressions": impressions,
+            "clicks": clicks,
+            "sessions": sessions,
+            "glanceViews": glance_views,
+            "atc": atc,
+            "orders": orders,
+            "adOrders": ad_orders,
+            "spend": spend,
+            "ctr": ctr,
+            "clickToSession": click_to_session,
+            "sessionConv": session_conv,
+            "atcRate": atc_rate,
+            "atcConv": atc_conv,
+            "adToOrder": ad_to_order,
+            "cpc": cpc,
+            "acos": acos,
+            "roas": roas,
+        }
+
+    ty_ad = _ad_metrics(ty_start, ty_end)
+    ty_tr = _traffic_metrics(ty_start, ty_end)
+    ly_ad = _ad_metrics(ly_start, ly_end)
+    ly_tr = _traffic_metrics(ly_start, ly_end)
+
+    daily = _daily_funnel(ty_start, ty_end)
+
+    con.close()
+
+    return {
+        "days": days,
+        "ty": _build_metrics(ty_ad, ty_tr),
+        "ly": _build_metrics(ly_ad, ly_tr),
+        "daily": daily,
+    }
+
+
 # ── Ads: Profile Discovery + Manual Sync ────────────────────
 
 

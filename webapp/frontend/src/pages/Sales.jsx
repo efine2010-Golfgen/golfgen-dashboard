@@ -1754,6 +1754,56 @@ export default function Sales({ filters = {} }) {
           <Legend items={[['Sessions TY',B.o2],['Sessions LY',B.sub,true],['Conv% TY','#1AA392'],['Conv% LY','#1AA392',true]]}/>
         </>}
       </ChartCard>
+      {/* Compact Conversion Pipeline summary */}
+      {!loading.funnel && Array.isArray(funnel) && funnel.length > 0 && (() => {
+        const stages = funnel;
+        const colors = ['#5B9FD4','#2E6FBB','#1B4F8A','#E8821E','#1AA392'];
+        const maxVal = Math.max(...stages.map(s => s.ty || 0), 1);
+        // Compute step-through rates
+        const rates = stages.map((s, i) => {
+          if (i === 0) return null;
+          const prev = stages[i-1].ty || 0;
+          return prev > 0 ? ((s.ty || 0) / prev * 100).toFixed(1) : null;
+        });
+        // Find bottleneck (worst step-through rate)
+        let minRate = Infinity, bottleneckI = -1;
+        rates.forEach((r, i) => { if (r !== null && Number(r) < minRate) { minRate = Number(r); bottleneckI = i; } });
+        return (
+          <div style={{background:'var(--card)',border:'1px solid var(--border)',borderRadius:8,padding:'14px 18px',marginBottom:12}}>
+            <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:12}}>
+              <span style={{fontSize:11,fontWeight:700,color:'var(--txt3)',textTransform:'uppercase',letterSpacing:'.08em'}}>Conversion Pipeline</span>
+              <a href="#advertising" style={{fontSize:10,color:B.b3,textDecoration:'none',fontWeight:600}} onClick={e=>{e.preventDefault();}}>Full Funnel →</a>
+            </div>
+            <div style={{display:'grid',gridTemplateColumns:`repeat(${stages.length},1fr)`,gap:10}}>
+              {stages.map((s, i) => {
+                const barW = maxVal > 0 ? Math.max(4, (s.ty / maxVal) * 100) : 0;
+                const isBottleneck = i === bottleneckI;
+                const stageColor = isBottleneck ? '#f59e0b' : colors[i] || B.b3;
+                const lyDelta = s.ly > 0 ? ((s.ty - s.ly) / s.ly * 100).toFixed(1) : null;
+                return (
+                  <div key={s.label} style={{display:'flex',flexDirection:'column',gap:4}}>
+                    <div style={{fontSize:10,color:isBottleneck?'#f59e0b':'var(--txt3)',fontWeight:isBottleneck?700:400,whiteSpace:'nowrap',overflow:'hidden',textOverflow:'ellipsis'}}>{isBottleneck ? '⚠ ' : ''}{s.label}</div>
+                    <div style={{fontSize:16,fontWeight:700,color:stageColor}}>{(s.ty||0).toLocaleString()}</div>
+                    {/* Bar */}
+                    <div style={{height:5,background:'var(--surface)',borderRadius:3,overflow:'hidden'}}>
+                      <div style={{width:`${barW}%`,height:'100%',background:`linear-gradient(90deg,${stageColor}99,${stageColor})`,borderRadius:3}}/>
+                    </div>
+                    {/* Step rate */}
+                    {rates[i] !== null && (
+                      <div style={{fontSize:10,color:isBottleneck?'#f59e0b':B.sub}}>{rates[i]}% step-through</div>
+                    )}
+                    {/* YoY delta */}
+                    {lyDelta !== null && (
+                      <div style={{fontSize:10,color:Number(lyDelta)>=0?'#4ade80':'#f87171',fontWeight:600}}>{Number(lyDelta)>=0?'+':''}{lyDelta}% vs LY</div>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        );
+      })()}
+
       <ChartCard title="Conversion Funnel vs LY" noMargin error={errors.funnel}>
         {loading.funnel ? <Spinner/> : svgChart(funnelSVG(toArr(funnel)))}
       </ChartCard>

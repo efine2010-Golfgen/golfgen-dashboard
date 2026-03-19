@@ -126,6 +126,7 @@ export const api = {
   adsSearchTerms: (days = 30, limit = 50, h = {}) =>
     fetchJSON(`/api/ads/search-terms?days=${days}&limit=${limit}${_hq(h)}`),
   adsNegativeKeywords: (h = {}) => fetchJSON(`/api/ads/negative-keywords${_hq(h) ? '?' + _hq(h).slice(1) : ''}`),
+  adsFunnel: (days = 30, h = {}) => fetchJSON(`/api/ads/funnel?days=${days}${_hq(h)}`),
 
   // Original Warehouse (Moose 3PL grouped)
   warehouse: () => fetchJSON(`/api/warehouse`),
