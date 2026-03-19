@@ -33,12 +33,14 @@ const HW_CUSTOMERS      = ['All Channels','Belk',"Albertson's",'Family Dollar','
 const CHART_PERIODS     = ['7D','30D','60D','90D','120D','180D','1Y'];
 const CHART_PERIOD_API  = {'7D':'last_7d','30D':'last_30d','60D':'last_60d','90D':'last_90d','120D':'last_120d','180D':'last_180d','1Y':'last_1y'};
 const HM_WEEKS_MAP      = {'13W':13,'26W':26,'52W':52};
-// 4 × 13-week buckets within 52W data (index 0=oldest, 51=most recent)
+// 4 × 13-week buckets within 52W data
+// Backend: week=0 = THIS week, week=N = N weeks ago
+// LY proxy: week≈52−N means "what happened N weeks from now, last year"
 const HM_WINDOWS_DEF = {
-  D: { label: '+14-26w LY', range: 'future', indices: Array.from({length:13},(_,i)=>i) },      // 0-12
-  C: { label: '+1-13w LY',  range: 'future', indices: Array.from({length:13},(_,i)=>13+i) },   // 13-25
-  A: { label: 'Past 26-14w',range: 'past',   indices: Array.from({length:13},(_,i)=>26+i) },   // 26-38
-  B: { label: 'Past 13w',   range: 'past',   indices: Array.from({length:13},(_,i)=>39+i) },   // 39-51
+  B: { label: 'Past 13w',    range: 'past',   indices: Array.from({length:13},(_,i)=>i) },      // 0-12:  most recent 13w
+  A: { label: 'Past 14-26w', range: 'past',   indices: Array.from({length:13},(_,i)=>13+i) },   // 13-25: 13-25 weeks ago
+  D: { label: '+14-26w LY',  range: 'future', indices: Array.from({length:13},(_,i)=>26+i) },   // 26-38: LY proxy 14-26w ahead
+  C: { label: '+1-13w LY',   range: 'future', indices: Array.from({length:13},(_,i)=>39+i) },   // 39-51: LY proxy 1-13w ahead
 };
 const VIEW_TABS         = ['Sales Summary','Daily','Weekly','Monthly','Yearly','Custom'];
 const MONTHS = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
@@ -278,44 +280,47 @@ function yoyBarSVG(data, forecast={}, yearVis={y2024:true,y2025:true,y2026:true}
 }
 
 // futureSvgCols: Set of SVG column indices (0=leftmost) that contain LY-proxy forecast data
-function heatmapSVG(data, W=1100, weeks=26, metricKey='units', futureSvgCols=new Set()) {
+// weekStartDates: array[w] → "Mon DD" string for each SVG column (may be empty '')
+function heatmapSVG(data, W=1100, weeks=26, metricKey='units', futureSvgCols=new Set(), weekStartDates=[]) {
   if (!data || data.length === 0) return '<div style="color:#374f66;padding:20px;text-align:center;font-size:12px">No heatmap data</div>';
   const DAYS = ['Mon','Tue','Wed','Thu','Fri','Sat','Sun'];
   const WEEKS = weeks;
   const mx = Math.max(...data.map(d => d[metricKey]||0), 1);
-  const padL=36,padT=18,padR=8,padB=8,cellH=26;
+  // Extra top padding: W-number row (y=padT-20) + date row (y=padT-9) + gap
+  const padL=36,padT=34,padR=8,padB=8,cellH=26;
   const cellW = Math.max(12, Math.floor((W-padL-padR)/WEEKS));
   const svgW = padL+WEEKS*cellW+padR, svgH = padT+7*cellH+padB;
   // Build lookup: "week,day" → metricKey value
   const lookup = {};
   data.forEach(d => { lookup[`${d.week},${d.day}`] = d[metricKey]||0; });
   let s = `<svg width="100%" viewBox="0 0 ${svgW} ${svgH}" style="overflow:visible;display:block">`;
-  Array.from({length:WEEKS},(_,w) => { if(w%4===0||w===WEEKS-1) s+=`<text x="${padL+(w+.5)*cellW}" y="${padT-5}" text-anchor="middle" font-size="8" fill="${B.sub}">W${WEEKS-w}</text>`; });
+  // Week labels: raised W-number + date below
+  Array.from({length:WEEKS},(_,w) => {
+    const showLabel = w%4===0 || w===WEEKS-1;
+    if (!showLabel) return;
+    const cx = (padL+(w+.5)*cellW).toFixed(1);
+    const isFut = futureSvgCols.has(w);
+    const wLblColor = isFut ? '#4ade80' : B.sub;
+    s += `<text x="${cx}" y="${padT-20}" text-anchor="middle" font-size="8" font-weight="600" fill="${wLblColor}">W${WEEKS-w}</text>`;
+    const dt = weekStartDates[w] || '';
+    if (dt) s += `<text x="${cx}" y="${padT-9}" text-anchor="middle" font-size="7" fill="${isFut ? '#4ade80' : '#374f66'}" opacity="0.85">${dt}</text>`;
+  });
   DAYS.forEach((d,i) => s+=`<text x="${padL-3}" y="${padT+(i+.5)*cellH+4}" text-anchor="end" font-size="9" fill="${B.sub}">${d}</text>`);
   // Full-spectrum heatmap: cool→warm color gradient based on value intensity
-  // Color stops: dark navy → blue → teal → green → yellow → orange → red
   const stops = [
-    [21,37,62],    // 0.00 dark navy
-    [15,82,115],   // 0.17 deep blue
-    [13,115,119],  // 0.33 teal
-    [34,139,34],   // 0.50 green
-    [218,165,32],  // 0.67 golden yellow
-    [230,101,30],  // 0.83 orange
-    [214,40,57],   // 1.00 red
+    [21,37,62],[15,82,115],[13,115,119],[34,139,34],[218,165,32],[230,101,30],[214,40,57],
   ];
   const heatColor = (t) => {
     if (t <= 0) return 'rgb(21,37,62)';
     if (t >= 1) return 'rgb(214,40,57)';
     const seg = t * (stops.length - 1);
-    const i = Math.floor(seg);
-    const f = seg - i;
+    const i = Math.floor(seg), f = seg - i;
     const a = stops[i], b = stops[Math.min(i+1, stops.length-1)];
     return `rgb(${Math.round(a[0]+(b[0]-a[0])*f)},${Math.round(a[1]+(b[1]-a[1])*f)},${Math.round(a[2]+(b[2]-a[2])*f)})`;
   };
-  // Power scaling (sqrt) — spreads values more than log, clear peaks vs valleys
   const sqrtMax = Math.sqrt(mx || 1);
   const isSales = metricKey === 'sales';
-  // Draw column background for forecast (LY-proxy) columns before cells
+  // Draw column background for forecast (LY-proxy) columns
   if (futureSvgCols.size > 0) {
     for (const w of futureSvgCols) {
       s += `<rect x="${(padL+w*cellW).toFixed(1)}" y="${padT}" width="${cellW.toFixed(1)}" height="${(7*cellH).toFixed(1)}" fill="#0a2a1a" opacity="0.55" rx="2"/>`;
@@ -327,7 +332,7 @@ function heatmapSVG(data, W=1100, weeks=26, metricKey='units', futureSvgCols=new
       const isFuture = futureSvgCols.has(w);
       const pct = val > 0 ? Math.sqrt(val) / sqrtMax : 0;
       const fill = val > 0 ? heatColor(pct) : isFuture ? 'rgb(10,42,26)' : 'rgb(21,37,62)';
-      const opacity = val > 0 ? (0.55 + pct * 0.45).toFixed(2) : isFuture ? '0.55' : '0.18';
+      const opacity = val > 0 ? (0.55 + pct * 0.45).toFixed(2) : isFuture ? '0.45' : '0.18';
       s += `<rect x="${(padL+w*cellW+2).toFixed(1)}" y="${(padT+d*cellH+2).toFixed(1)}" width="${Math.max(4,cellW-4).toFixed(1)}" height="${(cellH-4).toFixed(1)}" rx="3" fill="${fill}" opacity="${opacity}"${isFuture && val===0 ? ' stroke="#1a4a2a" stroke-width="0.5"':''}/>`;
       if (val > 0 && cellW > 14) {
         const dispVal = isSales ? (val>=1000?`$${(val/1000).toFixed(0)}k`:`$${Math.round(val)}`) : val;
@@ -337,28 +342,20 @@ function heatmapSVG(data, W=1100, weeks=26, metricKey='units', futureSvgCols=new
       }
     }
   }
-  // Separator line between past and forecast sections
+  // Separator line + "LY Proxy" label between past and forecast sections
   if (futureSvgCols.size > 0 && futureSvgCols.size < WEEKS) {
-    // Find boundaries: rightmost future col and leftmost past col
     const futureCols = [...futureSvgCols].sort((a,b)=>a-b);
-    const pastCols = Array.from({length:WEEKS},(_,i)=>i).filter(i=>!futureSvgCols.has(i)).sort((a,b)=>a-b);
-    // Draw dashed vertical separator between the two sections
-    const boundaries = [];
+    const boundaries = new Set();
     for (const fc of futureCols) {
-      if (!futureSvgCols.has(fc+1) && (fc+1)<WEEKS) boundaries.push(fc+1);
-      if (!futureSvgCols.has(fc-1) && (fc-1)>=0) boundaries.push(fc);
+      if (!futureSvgCols.has(fc+1) && (fc+1)<WEEKS) boundaries.add(fc+1);
+      if (!futureSvgCols.has(fc-1) && (fc-1)>=0) boundaries.add(fc);
     }
-    const drawn = new Set();
     for (const bw of boundaries) {
-      if (drawn.has(bw)) continue; drawn.add(bw);
       const lx = (padL + bw*cellW - 1).toFixed(1);
-      s += `<line x1="${lx}" y1="${padT-2}" x2="${lx}" y2="${padT+7*cellH+2}" stroke="#22c55e" stroke-width="1" stroke-dasharray="3 2" opacity="0.55"/>`;
+      s += `<line x1="${lx}" y1="${padT-4}" x2="${lx}" y2="${padT+7*cellH+2}" stroke="#22c55e" stroke-width="1" stroke-dasharray="3 2" opacity="0.55"/>`;
     }
-    // "LY Proxy" label above forecast region
-    const firstFutureX = (padL + Math.min(...futureCols)*cellW).toFixed(1);
-    const lastFutureX  = (padL + (Math.max(...futureCols)+1)*cellW).toFixed(1);
-    const midFutureX   = ((parseFloat(firstFutureX)+parseFloat(lastFutureX))/2).toFixed(1);
-    s += `<text x="${midFutureX}" y="${padT-7}" text-anchor="middle" font-size="8" fill="#22c55e" font-weight="600" opacity="0.75">LY Proxy</text>`;
+    const fcMidX = ((padL + Math.min(...futureCols)*cellW + padL + (Math.max(...futureCols)+1)*cellW)/2).toFixed(1);
+    s += `<text x="${fcMidX}" y="${padT-24}" text-anchor="middle" font-size="7" fill="#22c55e" font-weight="700" opacity="0.8">── LY PROXY ──</text>`;
   }
   return s + '</svg>';
 }
@@ -1469,27 +1466,73 @@ export default function Sales({ filters = {} }) {
         };
         // Build filtered + remapped heatmap data for selected windows
         const allSelIdx = hmWindows.flatMap(w => HM_WINDOWS_DEF[w].indices);
-        const sortedIdx = [...allSelIdx].sort((a,b) => a-b); // ascending = oldest first
+        const sortedIdx = [...allSelIdx].sort((a,b) => a-b); // ascending = oldest index first
         const indexMap  = Object.fromEntries(sortedIdx.map((idx, pos) => [idx, pos]));
         const filteredHm = toArr(heatmap)
           .filter(d => allSelIdx.includes(d.week))
           .map(d => ({...d, week: indexMap[d.week]}));
         const totalWks = sortedIdx.length || 26;
+
         // Compute which SVG columns are "future" (LY proxy) — SVG col w shows position TOTAL-1-w
         const futureOrigIdx = new Set(['C','D'].flatMap(w => hmWindows.includes(w) ? HM_WINDOWS_DEF[w].indices : []));
         const futureSvgCols = new Set(
           sortedIdx.map((idx, pos) => futureOrigIdx.has(idx) ? (totalWks-1-pos) : -1).filter(p => p >= 0)
         );
-        const metricLabel = hmMetric2==='units' ? 'Sales Units' : hmMetric2==='sales' ? 'Sales $' : 'Return Units';
+
+        // Compute week-start dates for each SVG column (0=leftmost)
+        // week=N in backend means N weeks ago from today (Mon–Sun)
+        const todayJs = new Date();
+        const dow = todayJs.getDay(); // 0=Sun
+        const daysToMon = dow === 0 ? 6 : dow - 1;
+        const thisMonday = new Date(todayJs);
+        thisMonday.setDate(todayJs.getDate() - daysToMon);
+        const weekStartDates = Array.from({length:totalWks}, (_, w) => {
+          const pos = totalWks - 1 - w;           // position in sorted array (oldest first)
+          if (pos < 0 || pos >= sortedIdx.length) return '';
+          const weeksAgo = sortedIdx[pos];         // original backend index = weeks ago
+          const d = new Date(thisMonday);
+          d.setDate(thisMonday.getDate() - weeksAgo * 7);
+          return `${MONTHS[d.getMonth()]} ${d.getDate()}`;
+        });
+
+        // ── Day-of-week averages (recalculated for currently shown data) ──
+        const DAY_NAMES = ['Mon','Tue','Wed','Thu','Fri','Sat','Sun'];
+        // Per-window breakdowns for comparison
+        const winProfiles = hmWindows.map(wKey => {
+          const wIdxSet = new Set(HM_WINDOWS_DEF[wKey].indices);
+          const dayAvgs = DAY_NAMES.map((_, d) => {
+            const rows = toArr(heatmap).filter(r => wIdxSet.has(r.week) && r.day === d);
+            const vals = rows.map(r => r[hmMetric2] || 0);
+            return vals.length ? vals.reduce((s,v)=>s+v,0)/vals.length : 0;
+          });
+          return { key: wKey, label: HM_WINDOWS_DEF[wKey].label, range: HM_WINDOWS_DEF[wKey].range, dayAvgs };
+        });
+        // Combined across all selected data
+        const combinedDayAvgs = DAY_NAMES.map((_, d) => {
+          const vals = filteredHm.filter(r => r.day === d).map(r => r[hmMetric2] || 0);
+          return vals.length ? vals.reduce((s,v)=>s+v,0)/vals.length : 0;
+        });
+        const combinedMax = Math.max(...combinedDayAvgs, 1);
+        const overallAvg = combinedDayAvgs.reduce((s,v)=>s+v,0) / 7;
+        // Rank days by combined avg
+        const dayRanks = combinedDayAvgs.map((v, d) => ({d, v})).sort((a,b)=>b.v-a.v);
+        const bestDay = dayRanks[0];
+        const worstDay = dayRanks[6];
+        const weekendAvg = ((combinedDayAvgs[5]||0)+(combinedDayAvgs[6]||0))/2;
+        const weekdayAvg = combinedDayAvgs.slice(0,5).reduce((s,v)=>s+v,0)/5;
+
+        const metricFmt = hmMetric2==='sales' ? f$ : fN;
+        const metricLabel = hmMetric2==='units' ? 'Units' : hmMetric2==='sales' ? 'Sales $' : 'Returns';
         const windowLabel = hmWindows.map(w => HM_WINDOWS_DEF[w].label).join(' + ');
+
         return (
           <div style={{background:'var(--surf)',border:'1px solid var(--brd)',borderRadius:14,padding:16,marginBottom:12,transition:'background .3s'}}>
-            <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:12,flexWrap:'wrap',gap:8}}>
+            {/* Controls row */}
+            <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:8,flexWrap:'wrap',gap:8}}>
               <span style={{fontSize:13,fontWeight:700,color:'var(--txt)'}}>
                 {metricLabel} — {windowLabel} × Day of Week
               </span>
               <div style={{display:'flex',gap:4,alignItems:'center',flexWrap:'wrap'}}>
-                {/* 4 window buttons — ordered D, C, A, B (furthest future → furthest past) */}
                 {['D','C','A','B'].map(w => pillBtn2(w, HM_WINDOWS_DEF[w].label, HM_WINDOWS_DEF[w].range))}
                 <div style={{width:1,height:16,background:'var(--brd)',margin:'0 4px'}}/>
                 {[['Units','units'],['Sales $','sales'],['Returns','returns']].map(([lbl,key]) => (
@@ -1502,11 +1545,117 @@ export default function Sales({ filters = {} }) {
                 ))}
               </div>
             </div>
-            <div style={{fontSize:10,color:'var(--txt3)',marginBottom:8}}>
-              Select up to 2 windows to display 26 weeks. Green = LY data (forecast proxy).
-            </div>
+
             {errors.heatmap && <div style={{padding:'10px 14px',color:'#fb923c',fontSize:11,background:'rgba(251,146,60,.08)',border:'1px solid rgba(251,146,60,.18)',borderRadius:8,marginBottom:8}}>⚠ {errors.heatmap}</div>}
-            {loading.heatmap ? <Spinner/> : svgChart(heatmapSVG(filteredHm, 1100, totalWks, hmMetric2, futureSvgCols))}
+            {loading.heatmap ? <Spinner/> : svgChart(heatmapSVG(filteredHm, 1100, totalWks, hmMetric2, futureSvgCols, weekStartDates))}
+
+            {/* ── Day-of-Week Averages panel ── */}
+            {!loading.heatmap && filteredHm.length > 0 && (
+              <div style={{marginTop:12,padding:'12px 14px',background:'var(--card)',borderRadius:10,border:'1px solid var(--brd)'}}>
+                <div style={{display:'flex',justifyContent:'space-between',alignItems:'flex-start',gap:16,flexWrap:'wrap'}}>
+                  {/* Left: bar chart of day averages */}
+                  <div style={{flex:'1 1 380px'}}>
+                    <div style={{fontSize:10,fontWeight:700,color:'var(--txt3)',textTransform:'uppercase',letterSpacing:'.08em',marginBottom:8}}>
+                      Day Strength — Avg {metricLabel} / Week
+                    </div>
+                    <div style={{display:'flex',flexDirection:'column',gap:4}}>
+                      {dayRanks.map(({d, v}) => {
+                        const rank = dayRanks.findIndex(r=>r.d===d);
+                        const barPct = combinedMax > 0 ? (v/combinedMax)*100 : 0;
+                        const vsAvg = overallAvg > 0 ? ((v-overallAvg)/overallAvg*100) : 0;
+                        const isBest = rank === 0;
+                        const isWeakest = rank === 6;
+                        const barColor = isBest ? B.o2 : isWeakest ? B.dim : (d >= 5 ? B.t2 : B.b2);
+                        // If 2 windows, show both bars side by side
+                        const w0avg = winProfiles[0]?.dayAvgs[d] ?? 0;
+                        const w1avg = winProfiles[1]?.dayAvgs[d] ?? null;
+                        const w0pct = combinedMax > 0 ? (w0avg/combinedMax)*100 : 0;
+                        const w1pct = w1avg != null && combinedMax > 0 ? (w1avg/combinedMax)*100 : 0;
+                        return (
+                          <div key={d} style={{display:'grid',gridTemplateColumns:'32px 1fr 54px 54px',gap:6,alignItems:'center'}}>
+                            <div style={{fontSize:10,fontWeight:700,color: d>=5 ? B.t3 : 'var(--txt2)',textAlign:'right'}}>{DAY_NAMES[d]}</div>
+                            <div style={{position:'relative',height:14,borderRadius:3,background:'rgba(255,255,255,.04)'}}>
+                              {winProfiles.length === 2 ? (
+                                <>
+                                  <div style={{position:'absolute',left:0,top:1,height:5,borderRadius:2,width:`${w0pct.toFixed(1)}%`,background:winProfiles[0].range==='future'?'#22c55e':B.b2,opacity:.9}}/>
+                                  <div style={{position:'absolute',left:0,top:8,height:5,borderRadius:2,width:`${w1pct.toFixed(1)}%`,background:winProfiles[1].range==='future'?'#22c55e':B.b3,opacity:.75}}/>
+                                </>
+                              ) : (
+                                <div style={{position:'absolute',left:0,top:2,height:10,borderRadius:3,width:`${barPct.toFixed(1)}%`,background:barColor,opacity:.85}}/>
+                              )}
+                            </div>
+                            <div style={{fontSize:10,fontWeight:700,color:'var(--txt2)',textAlign:'right'}}>{metricFmt(v)}</div>
+                            <div style={{fontSize:9,textAlign:'right',
+                              color: vsAvg > 10 ? '#4ade80' : vsAvg < -10 ? '#fb923c' : 'var(--txt3)',
+                              fontWeight: Math.abs(vsAvg) > 10 ? 700 : 400,
+                            }}>
+                              {vsAvg >= 0 ? '+' : ''}{vsAvg.toFixed(0)}% vs avg
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                    {/* Legend for 2-window comparison */}
+                    {winProfiles.length === 2 && (
+                      <div style={{display:'flex',gap:12,marginTop:8,flexWrap:'wrap'}}>
+                        {winProfiles.map((wp, i) => (
+                          <div key={wp.key} style={{display:'flex',alignItems:'center',gap:5,fontSize:9,color:'var(--txt3)'}}>
+                            <div style={{width:14,height:4,borderRadius:2,background:wp.range==='future'?'#22c55e':(i===0?B.b2:B.b3)}}/>
+                            {wp.label}
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Right: insight callouts */}
+                  <div style={{flex:'0 0 220px',display:'flex',flexDirection:'column',gap:8}}>
+                    <div style={{fontSize:10,fontWeight:700,color:'var(--txt3)',textTransform:'uppercase',letterSpacing:'.08em',marginBottom:2}}>
+                      Key Insights
+                    </div>
+                    <div style={{background:'rgba(234,179,8,.08)',border:'1px solid rgba(234,179,8,.2)',borderRadius:8,padding:'8px 10px'}}>
+                      <div style={{fontSize:9,color:'#fbbf24',fontWeight:700,textTransform:'uppercase',marginBottom:3}}>🏆 Best Day</div>
+                      <div style={{fontSize:14,fontWeight:800,color:'var(--txt)'}}>{DAY_NAMES[bestDay.d]}</div>
+                      <div style={{fontSize:10,color:'var(--txt2)'}}>{metricFmt(bestDay.v)} avg · {bestDay.v>0&&overallAvg>0 ? `${((bestDay.v/overallAvg-1)*100).toFixed(0)}% above avg` : ''}</div>
+                    </div>
+                    <div style={{background:'rgba(100,116,139,.08)',border:'1px solid rgba(100,116,139,.2)',borderRadius:8,padding:'8px 10px'}}>
+                      <div style={{fontSize:9,color:'var(--txt3)',fontWeight:700,textTransform:'uppercase',marginBottom:3}}>Wknd vs Wkday</div>
+                      <div style={{display:'flex',gap:12,alignItems:'baseline'}}>
+                        <div>
+                          <div style={{fontSize:10,color:B.t3,fontWeight:700}}>Sa–Su</div>
+                          <div style={{fontSize:13,fontWeight:800,color:'var(--txt)'}}>{metricFmt(weekendAvg)}</div>
+                        </div>
+                        <div style={{fontSize:11,color:'var(--txt3)'}}>vs</div>
+                        <div>
+                          <div style={{fontSize:10,color:B.b3,fontWeight:700}}>M–F</div>
+                          <div style={{fontSize:13,fontWeight:800,color:'var(--txt)'}}>{metricFmt(weekdayAvg)}</div>
+                        </div>
+                      </div>
+                      {weekdayAvg > 0 && <div style={{fontSize:9,color:'var(--txt3)',marginTop:4}}>
+                        Weekend is {weekendAvg > weekdayAvg
+                          ? <span style={{color:'#4ade80',fontWeight:700}}>{((weekendAvg/weekdayAvg-1)*100).toFixed(0)}% stronger</span>
+                          : <span style={{color:'#fb923c',fontWeight:700}}>{((weekdayAvg/weekendAvg-1)*100).toFixed(0)}% weaker</span>} than weekdays
+                      </div>}
+                    </div>
+                    <div style={{background:'rgba(59,130,246,.06)',border:'1px solid rgba(59,130,246,.15)',borderRadius:8,padding:'8px 10px'}}>
+                      <div style={{fontSize:9,color:B.b3,fontWeight:700,textTransform:'uppercase',marginBottom:4}}>Day Spread</div>
+                      <div style={{display:'flex',gap:6,flexWrap:'wrap'}}>
+                        {dayRanks.slice(0,3).map(({d},i) => (
+                          <span key={d} style={{fontSize:9,padding:'2px 6px',borderRadius:99,
+                            background: i===0?`${B.o2}22`:i===1?`${B.b2}22`:`${B.t2}22`,
+                            color: i===0?B.o2:i===1?B.b3:B.t3,fontWeight:700}}>
+                            #{i+1} {DAY_NAMES[d]}
+                          </span>
+                        ))}
+                      </div>
+                      <div style={{fontSize:9,color:'var(--txt3)',marginTop:5}}>
+                        Weakest: <span style={{color:'#fb923c',fontWeight:700}}>{DAY_NAMES[worstDay.d]}</span> ({metricFmt(worstDay.v)})
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            )}
           </div>
         );
       })()}
