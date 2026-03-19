@@ -662,6 +662,71 @@ function convGaugeSVG(tyRate, lyRate, W=300, H=155) {
   return s + '</svg>';
 }
 
+// ── Sessions + Conversion Rate (dual Y-axis) ──────────────────────────────
+// Left Y: sessions count (orange lines). Right Y: conversion % (teal bars TY/LY).
+function sessionsConvSVG(data, W=1100, H=165) {
+  if (!data || data.length < 2) return '<div style="color:#374f66;padding:20px;text-align:center;font-size:12px">No data for this period</div>';
+  const pad = {t:14, r:64, b:24, l:58};
+  const iw = W-pad.l-pad.r, ih = H-pad.t-pad.b;
+  const n = data.length;
+  // Bar-center x (for bars); line x (for lines, edge-to-edge)
+  const xB = i => pad.l + ((i+0.5)/n)*iw;
+  const xL = i => pad.l + (i/(n-1||1))*iw;
+  // Sessions axis (left)
+  const sessVals = data.flatMap(d => [d.ty_sessions, d.ly_sessions]).filter(v => v != null && v >= 0);
+  const smx = Math.max(...sessVals, 1);
+  const yS = v => pad.t + ih - Math.min(1,Math.max(0,(v||0)/smx))*ih;
+  // Conversion axis (right) — use natural max with 20% headroom
+  const convVals = data.flatMap(d => [d.ty_conv, d.ly_conv]).filter(v => v != null && v > 0);
+  const cmx = convVals.length ? Math.max(...convVals)*1.25 : 0.08;
+  const yC = v => pad.t + ih - Math.min(1,Math.max(0,(v||0)/cmx))*ih;
+  const bw = Math.max(3, Math.floor((iw/n)*0.28)); // half-bar width
+  const uid = `sc${Math.random().toString(36).slice(2,6)}`;
+  let s = `<svg width="100%" viewBox="0 0 ${W} ${H}" style="overflow:visible;display:block">`;
+  s += `<defs><linearGradient id="${uid}" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stop-color="${B.o2}" stop-opacity=".16"/><stop offset="100%" stop-color="${B.o2}" stop-opacity="0"/></linearGradient></defs>`;
+  // Grid lines + left axis (sessions)
+  for (let i=0; i<=4; i++) {
+    const sv=smx/4*i, ya=yS(sv);
+    s += `<line x1="${pad.l}" y1="${ya.toFixed(1)}" x2="${W-pad.r}" y2="${ya.toFixed(1)}" stroke="#1a2f4a" stroke-width="0.5"/>`;
+    s += `<text x="${pad.l-5}" y="${(ya+4).toFixed(1)}" text-anchor="end" font-size="9" fill="${B.sub}">${fN(sv)}</text>`;
+  }
+  // Right axis (conversion %)
+  for (let i=0; i<=4; i++) {
+    const cv=cmx/4*i, ya=yC(cv);
+    s += `<text x="${W-pad.r+5}" y="${(ya+4).toFixed(1)}" text-anchor="start" font-size="9" fill="#1aa39270">${(cv*100).toFixed(1)}%</text>`;
+  }
+  s += `<text x="${W-pad.r+5}" y="${pad.t-2}" text-anchor="start" font-size="8" fill="#1AA392" font-weight="600">Conv% →</text>`;
+  // X axis labels
+  const step = Math.max(1, Math.floor(n/7));
+  data.forEach((d,i) => {
+    if (i%step===0||i===n-1) {
+      const lbl = d.date ? d.date.slice(5) : d.d||'';
+      s += `<text x="${xL(i).toFixed(1)}" y="${H-4}" text-anchor="middle" font-size="8" fill="#374f66">${lbl}</text>`;
+    }
+  });
+  // Conversion bars (drawn first, behind lines)
+  data.forEach((d,i) => {
+    const cx = xB(i);
+    if ((d.ty_conv||0) > 0) {
+      const bh = Math.max(2, ((d.ty_conv||0)/cmx)*ih);
+      s += `<rect x="${(cx-bw*1.15).toFixed(1)}" y="${yC(d.ty_conv).toFixed(1)}" width="${bw.toFixed(1)}" height="${bh.toFixed(1)}" fill="#1AA392" opacity="0.62" rx="2"/>`;
+    }
+    if ((d.ly_conv||0) > 0) {
+      const bh = Math.max(2, ((d.ly_conv||0)/cmx)*ih);
+      s += `<rect x="${(cx+0.15).toFixed(1)}" y="${yC(d.ly_conv).toFixed(1)}" width="${bw.toFixed(1)}" height="${bh.toFixed(1)}" fill="none" stroke="#1AA392" stroke-width="1" stroke-dasharray="3 2" opacity="0.55" rx="2"/>`;
+    }
+  });
+  // Sessions TY area fill + line
+  const area = `M${xL(0)},${yS(data[0].ty_sessions||0)} ${data.map((d,i)=>`L${xL(i)},${yS(d.ty_sessions||0)}`).join(' ')} L${xL(n-1)},${pad.t+ih} L${xL(0)},${pad.t+ih} Z`;
+  s += `<path d="${area}" fill="url(#${uid})"/>`;
+  const ptsTy = data.map((d,i)=>d.ty_sessions!=null?`${xL(i).toFixed(1)},${yS(d.ty_sessions).toFixed(1)}`:null).filter(Boolean).join(' ');
+  if (ptsTy) s += `<polyline points="${ptsTy}" fill="none" stroke="${B.o2}" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/>`;
+  // Sessions LY dashed line
+  const ptsLy = data.map((d,i)=>d.ly_sessions!=null?`${xL(i).toFixed(1)},${yS(d.ly_sessions).toFixed(1)}`:null).filter(Boolean).join(' ');
+  if (ptsLy) s += `<polyline points="${ptsLy}" fill="none" stroke="${B.sub}" stroke-width="1.5" stroke-dasharray="4 3" stroke-linecap="round" stroke-linejoin="round"/>`;
+  return s + '</svg>';
+}
+
 // ── SVGTip: wraps dangerouslySetInnerHTML SVG and shows floating tooltip ──
 // Uses data-tip attributes on <g> elements — reliable in all browsers unlike SVG <title>
 function SVGTip({ html }) {
@@ -1682,42 +1747,12 @@ export default function Sales({ filters = {} }) {
         <PeriodBar value={cpTraffic} onChange={setCpTraffic}/>
         <div style={{fontSize:10,color:'var(--txt3)',fontWeight:600,textTransform:'uppercase',letterSpacing:'.08em'}}>Traffic Charts</div>
       </div>
-      {/* Sessions trend + Conversion gauge side-by-side */}
-      <ChartCard title="Sessions Trend & Conversion Rate" badge={cpTraffic} error={errors.trendTraffic}>
-        {loading.trendTraffic ? <Spinner/> : (
-          <div style={{display:'grid',gridTemplateColumns:'1fr 280px',gap:16,alignItems:'center'}}>
-            {/* Left: sessions line chart */}
-            <div>
-              {svgChart(dualLineSVG(toArr(trendTraffic),'ty_sessions','ly_sessions',B.o2,B.sub,fN))}
-              <Legend items={[['Sessions TY',B.o2],['Sessions LY',B.sub,true]]}/>
-            </div>
-            {/* Right: conversion arc gauge — computed from trendTraffic (period-aware) */}
-            <div style={{display:'flex',flexDirection:'column',alignItems:'center'}}>
-              {(() => {
-                const rows = toArr(trendTraffic);
-                const tySessTotal = rows.reduce((s,d) => s + (d.ty_sessions||0), 0);
-                const tyUnitsEst  = rows.reduce((s,d) => s + ((d.ty_conv||0)*(d.ty_sessions||0)), 0);
-                const lySessTotal = rows.reduce((s,d) => s + (d.ly_sessions||0), 0);
-                const lyUnitsEst  = rows.reduce((s,d) => s + ((d.ly_conv||0)*(d.ly_sessions||0)), 0);
-                const tyConv = tySessTotal > 0 ? tyUnitsEst / tySessTotal : null;
-                const lyConv = lySessTotal > 0 ? lyUnitsEst / lySessTotal : null;
-                return svgChart(convGaugeSVG(tyConv, lyConv));
-              })()}
-              <div style={{display:'flex',alignItems:'center',gap:5,fontSize:8,color:B.sub,marginTop:2}}>
-                <div style={{width:8,height:8,borderRadius:'50%',background:'#5b7fa0',border:'2px solid #0c1a2e',flexShrink:0}}/>
-                <span>Last year position on arc</span>
-              </div>
-              <div style={{display:'flex',gap:8,marginTop:6}}>
-                {[['< 2%','#c0392b'],['2–4%','#d68910'],['> 4%','#1AA392']].map(([l,c])=>(
-                  <div key={l} style={{display:'flex',alignItems:'center',gap:3,fontSize:8,color:B.sub}}>
-                    <div style={{width:7,height:7,borderRadius:1,background:c,opacity:.7}}/>
-                    <span>{l}</span>
-                  </div>
-                ))}
-              </div>
-            </div>
-          </div>
-        )}
+      {/* Sessions trend + Conversion rate — dual Y-axis (sessions lines left, conv% bars right) */}
+      <ChartCard title="Sessions & Conversion Rate" badge={cpTraffic} error={errors.trendTraffic}>
+        {loading.trendTraffic ? <Spinner/> : <>
+          {svgChart(sessionsConvSVG(toArr(trendTraffic)))}
+          <Legend items={[['Sessions TY',B.o2],['Sessions LY',B.sub,true],['Conv% TY','#1AA392'],['Conv% LY','#1AA392',true]]}/>
+        </>}
       </ChartCard>
       <ChartCard title="Conversion Funnel vs LY" noMargin error={errors.funnel}>
         {loading.funnel ? <Spinner/> : svgChart(funnelSVG(toArr(funnel)))}
