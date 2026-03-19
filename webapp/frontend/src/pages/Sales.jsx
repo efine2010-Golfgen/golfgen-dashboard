@@ -33,6 +33,13 @@ const HW_CUSTOMERS      = ['All Channels','Belk',"Albertson's",'Family Dollar','
 const CHART_PERIODS     = ['7D','30D','60D','90D','120D','180D','1Y'];
 const CHART_PERIOD_API  = {'7D':'last_7d','30D':'last_30d','60D':'last_60d','90D':'last_90d','120D':'last_120d','180D':'last_180d','1Y':'last_1y'};
 const HM_WEEKS_MAP      = {'13W':13,'26W':26,'52W':52};
+// 4 × 13-week buckets within 52W data (index 0=oldest, 51=most recent)
+const HM_WINDOWS_DEF = {
+  D: { label: '+14-26w LY', range: 'future', indices: Array.from({length:13},(_,i)=>i) },      // 0-12
+  C: { label: '+1-13w LY',  range: 'future', indices: Array.from({length:13},(_,i)=>13+i) },   // 13-25
+  A: { label: 'Past 26-14w',range: 'past',   indices: Array.from({length:13},(_,i)=>26+i) },   // 26-38
+  B: { label: 'Past 13w',   range: 'past',   indices: Array.from({length:13},(_,i)=>39+i) },   // 39-51
+};
 const VIEW_TABS         = ['Sales Summary','Daily','Weekly','Monthly','Yearly','Custom'];
 const MONTHS = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
 
@@ -84,6 +91,64 @@ function dualLineSVG(data, k1, k2, c1, c2, fmtFn, W=1100, H=130) {
   s += `<path d="${area}" fill="url(#${uid})"/>`;
   s += `<polyline points="${pts1}" fill="none" stroke="${c1}" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>`;
   if (pts2) s += `<polyline points="${pts2}" fill="none" stroke="${c2}" stroke-width="1.5" stroke-dasharray="4 3" stroke-linecap="round" stroke-linejoin="round"/>`;
+  return s + '</svg>';
+}
+
+// ── Dual-axis Sales $ + AUR chart (Sales on left blue axis, AUR on right green axis) ──
+function salesAurSVG(data, W=1100, H=165) {
+  if (!data || data.length < 2) return '<div style="color:#374f66;padding:20px;text-align:center;font-size:12px">No data for this period</div>';
+  const pad = {t:14, r:68, b:24, l:58};
+  const iw = W-pad.l-pad.r, ih = H-pad.t-pad.b;
+  const n = data.length;
+  const x = i => pad.l + (i/(n-1||1))*iw;
+  // Sales axis (left) — zero-based
+  const sv = data.flatMap(d => [d.ty_sales, d.ly_sales]).filter(v => v != null && v >= 0);
+  const smx = Math.max(...sv, 1);
+  const yS = v => pad.t + ih - Math.min(1, Math.max(0, (v||0)/smx)) * ih;
+  // AUR axis (right) — natural range with 10% padding
+  const av = data.flatMap(d => [d.ty_aur, d.ly_aur]).filter(v => v != null && v > 0);
+  const amn = av.length ? Math.max(0, Math.min(...av)*0.88) : 0;
+  const amx = av.length ? Math.max(...av)*1.12 : 1;
+  const yA = v => pad.t + ih - Math.min(1, Math.max(0, (v-amn)/(amx-amn||1))) * ih;
+  const uid = `sa${Math.random().toString(36).slice(2,6)}`;
+  let s = `<svg width="100%" viewBox="0 0 ${W} ${H}" style="overflow:visible;display:block">`;
+  s += `<defs><linearGradient id="${uid}" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stop-color="#2E6FBB" stop-opacity=".18"/><stop offset="100%" stop-color="#2E6FBB" stop-opacity="0"/></linearGradient></defs>`;
+  // Grid lines + left (Sales $) labels
+  for (let i=0; i<=4; i++) {
+    const sv2 = smx/4*i, ya = yS(sv2);
+    s += `<line x1="${pad.l}" y1="${ya.toFixed(1)}" x2="${W-pad.r}" y2="${ya.toFixed(1)}" stroke="#1a2f4a" stroke-width="0.5"/>`;
+    s += `<text x="${pad.l-5}" y="${(ya+4).toFixed(1)}" text-anchor="end" font-size="9" fill="#5b7fa0">${f$(sv2)}</text>`;
+  }
+  // Right (AUR $) labels
+  for (let i=0; i<=4; i++) {
+    const av2 = amn+(amx-amn)/4*i, ya = yA(av2);
+    s += `<text x="${W-pad.r+5}" y="${(ya+4).toFixed(1)}" text-anchor="start" font-size="9" fill="#22c55e88">${f$(av2)}</text>`;
+  }
+  // Right axis label
+  s += `<text x="${W-pad.r+5}" y="${pad.t-2}" text-anchor="start" font-size="8" fill="#22c55e99" font-weight="600">AUR →</text>`;
+  // X axis labels
+  const step = Math.max(1, Math.floor(n/7));
+  data.forEach((d,i) => {
+    if (i%step===0 || i===n-1) {
+      const lbl = d.date ? d.date.slice(5) : d.d || '';
+      s += `<text x="${x(i).toFixed(1)}" y="${H-4}" text-anchor="middle" font-size="8" fill="#374f66">${lbl}</text>`;
+    }
+  });
+  // Sales TY area fill
+  const area = `M${x(0)},${yS(data[0].ty_sales||0)} ${data.map((d,i)=>`L${x(i)},${yS(d.ty_sales||0)}`).join(' ')} L${x(n-1)},${pad.t+ih} L${x(0)},${pad.t+ih} Z`;
+  s += `<path d="${area}" fill="url(#${uid})"/>`;
+  // Sales TY line (solid blue)
+  const ptsSty = data.map((d,i) => d.ty_sales!=null?`${x(i).toFixed(1)},${yS(d.ty_sales).toFixed(1)}`:null).filter(Boolean).join(' ');
+  if (ptsSty) s += `<polyline points="${ptsSty}" fill="none" stroke="#2E6FBB" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/>`;
+  // Sales LY line (dashed lighter blue)
+  const ptsSly = data.map((d,i) => d.ly_sales!=null?`${x(i).toFixed(1)},${yS(d.ly_sales).toFixed(1)}`:null).filter(Boolean).join(' ');
+  if (ptsSly) s += `<polyline points="${ptsSly}" fill="none" stroke="#5B9FD4" stroke-width="1.5" stroke-dasharray="4 3" stroke-linecap="round" stroke-linejoin="round"/>`;
+  // AUR TY line (solid green, right axis)
+  const ptsAty = data.map((d,i) => d.ty_aur!=null&&d.ty_aur>0?`${x(i).toFixed(1)},${yA(d.ty_aur).toFixed(1)}`:null).filter(Boolean).join(' ');
+  if (ptsAty) s += `<polyline points="${ptsAty}" fill="none" stroke="#22c55e" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>`;
+  // AUR LY line (dashed darker green, right axis)
+  const ptsAly = data.map((d,i) => d.ly_aur!=null&&d.ly_aur>0?`${x(i).toFixed(1)},${yA(d.ly_aur).toFixed(1)}`:null).filter(Boolean).join(' ');
+  if (ptsAly) s += `<polyline points="${ptsAly}" fill="none" stroke="#16a34a" stroke-width="1.5" stroke-dasharray="4 3" stroke-linecap="round" stroke-linejoin="round"/>`;
   return s + '</svg>';
 }
 
@@ -212,7 +277,8 @@ function yoyBarSVG(data, forecast={}, yearVis={y2024:true,y2025:true,y2026:true}
   return s+'</svg>';
 }
 
-function heatmapSVG(data, W=1100, weeks=26, metricKey='units') {
+// futureSvgCols: Set of SVG column indices (0=leftmost) that contain LY-proxy forecast data
+function heatmapSVG(data, W=1100, weeks=26, metricKey='units', futureSvgCols=new Set()) {
   if (!data || data.length === 0) return '<div style="color:#374f66;padding:20px;text-align:center;font-size:12px">No heatmap data</div>';
   const DAYS = ['Mon','Tue','Wed','Thu','Fri','Sat','Sun'];
   const WEEKS = weeks;
@@ -249,20 +315,50 @@ function heatmapSVG(data, W=1100, weeks=26, metricKey='units') {
   // Power scaling (sqrt) — spreads values more than log, clear peaks vs valleys
   const sqrtMax = Math.sqrt(mx || 1);
   const isSales = metricKey === 'sales';
+  // Draw column background for forecast (LY-proxy) columns before cells
+  if (futureSvgCols.size > 0) {
+    for (const w of futureSvgCols) {
+      s += `<rect x="${(padL+w*cellW).toFixed(1)}" y="${padT}" width="${cellW.toFixed(1)}" height="${(7*cellH).toFixed(1)}" fill="#0a2a1a" opacity="0.55" rx="2"/>`;
+    }
+  }
   for (let w=0; w<WEEKS; w++) {
     for (let d=0; d<7; d++) {
       const val = lookup[`${WEEKS-1-w},${d}`] || 0;
+      const isFuture = futureSvgCols.has(w);
       const pct = val > 0 ? Math.sqrt(val) / sqrtMax : 0;
-      const fill = val > 0 ? heatColor(pct) : 'rgb(21,37,62)';
-      const opacity = val > 0 ? (0.55 + pct * 0.45).toFixed(2) : '0.18';
-      s += `<rect x="${(padL+w*cellW+2).toFixed(1)}" y="${(padT+d*cellH+2).toFixed(1)}" width="${Math.max(4,cellW-4).toFixed(1)}" height="${(cellH-4).toFixed(1)}" rx="3" fill="${fill}" opacity="${opacity}"/>`;
+      const fill = val > 0 ? heatColor(pct) : isFuture ? 'rgb(10,42,26)' : 'rgb(21,37,62)';
+      const opacity = val > 0 ? (0.55 + pct * 0.45).toFixed(2) : isFuture ? '0.55' : '0.18';
+      s += `<rect x="${(padL+w*cellW+2).toFixed(1)}" y="${(padT+d*cellH+2).toFixed(1)}" width="${Math.max(4,cellW-4).toFixed(1)}" height="${(cellH-4).toFixed(1)}" rx="3" fill="${fill}" opacity="${opacity}"${isFuture && val===0 ? ' stroke="#1a4a2a" stroke-width="0.5"':''}/>`;
       if (val > 0 && cellW > 14) {
         const dispVal = isSales ? (val>=1000?`$${(val/1000).toFixed(0)}k`:`$${Math.round(val)}`) : val;
         const fs = String(dispVal).length > 4 ? 5 : 7;
-        const txtFill = pct > 0.5 ? '#fff' : '#c8d6e5';
+        const txtFill = pct > 0.5 ? '#fff' : isFuture ? '#86efac' : '#c8d6e5';
         s += `<text x="${(padL+(w+.5)*cellW).toFixed(1)}" y="${(padT+(d+.5)*cellH+3.5).toFixed(1)}" text-anchor="middle" font-size="${fs}" font-weight="600" fill="${txtFill}">${dispVal}</text>`;
       }
     }
+  }
+  // Separator line between past and forecast sections
+  if (futureSvgCols.size > 0 && futureSvgCols.size < WEEKS) {
+    // Find boundaries: rightmost future col and leftmost past col
+    const futureCols = [...futureSvgCols].sort((a,b)=>a-b);
+    const pastCols = Array.from({length:WEEKS},(_,i)=>i).filter(i=>!futureSvgCols.has(i)).sort((a,b)=>a-b);
+    // Draw dashed vertical separator between the two sections
+    const boundaries = [];
+    for (const fc of futureCols) {
+      if (!futureSvgCols.has(fc+1) && (fc+1)<WEEKS) boundaries.push(fc+1);
+      if (!futureSvgCols.has(fc-1) && (fc-1)>=0) boundaries.push(fc);
+    }
+    const drawn = new Set();
+    for (const bw of boundaries) {
+      if (drawn.has(bw)) continue; drawn.add(bw);
+      const lx = (padL + bw*cellW - 1).toFixed(1);
+      s += `<line x1="${lx}" y1="${padT-2}" x2="${lx}" y2="${padT+7*cellH+2}" stroke="#22c55e" stroke-width="1" stroke-dasharray="3 2" opacity="0.55"/>`;
+    }
+    // "LY Proxy" label above forecast region
+    const firstFutureX = (padL + Math.min(...futureCols)*cellW).toFixed(1);
+    const lastFutureX  = (padL + (Math.max(...futureCols)+1)*cellW).toFixed(1);
+    const midFutureX   = ((parseFloat(firstFutureX)+parseFloat(lastFutureX))/2).toFixed(1);
+    s += `<text x="${midFutureX}" y="${padT-7}" text-anchor="middle" font-size="8" fill="#22c55e" font-weight="600" opacity="0.75">LY Proxy</text>`;
   }
   return s + '</svg>';
 }
@@ -727,7 +823,7 @@ export default function Sales({ filters = {} }) {
   const [hmMetric,    setHmMetric]    = useState('$');        // '$' | 'units' (hourly heatmap)
   const [hideNight,   setHideNight]   = useState(false);      // hide hours 0-5
   const [hideLate,    setHideLate]    = useState(false);      // hide hours 18-23
-  const [hmWeeks,     setHmWeeks]     = useState('26W');       // '13W'|'26W'|'52W' (weekly heatmap)
+  const [hmWindows,   setHmWindows]   = useState(['A','B']);   // up to 2 of ['A','B','C','D'] (weekly heatmap windows)
   const [hmMetric2,   setHmMetric2]   = useState('units');     // 'units'|'sales'|'returns' (weekly heatmap)
 
   // Data state
@@ -795,10 +891,10 @@ export default function Sales({ filters = {} }) {
     load('yoy',     setYoy,     'monthly-yoy',baseParams);
   }, [divRaw, custRaw, cpSales]);
 
-  // Fetch weekly heatmap — reloads when weeks selection or filters change
+  // Fetch weekly heatmap — always 52W so any window selection works client-side
   useEffect(() => {
-    load('heatmap', setHeatmap, 'heatmap', {...baseParams, weeks: HM_WEEKS_MAP[hmWeeks]});
-  }, [divRaw, custRaw, hmWeeks]);
+    load('heatmap', setHeatmap, 'heatmap', {...baseParams, weeks: 52});
+  }, [divRaw, custRaw]);
 
   // Fetch traffic chart data + period-aware traffic KPIs when cpTraffic changes
   useEffect(() => {
@@ -1329,19 +1425,11 @@ export default function Sales({ filters = {} }) {
         <div style={{fontSize:10,color:'var(--txt3)',fontWeight:600,textTransform:'uppercase',letterSpacing:'.08em'}}>Trend Charts</div>
       </div>
 
-      {/* Sales $ Trend */}
-      <ChartCard title="Sales $ Trend" badge={cpSales} error={errors.trend}>
+      {/* Sales $ + AUR Trend — dual Y-axis: Sales (left, blue) + AUR (right, green) */}
+      <ChartCard title="Sales $ & AUR Trend" badge={cpSales} error={errors.trend}>
         {loading.trend ? <Spinner/> : <>
-          {svgChart(dualLineSVG(toArr(trend),'ty_sales','ly_sales',B.b2,B.sub,f$))}
-          <Legend items={[['This Year',B.b2],['Last Year',B.sub,true]]}/>
-        </>}
-      </ChartCard>
-
-      {/* AUR Trend */}
-      <ChartCard title="AUR Trend" badge={cpSales} error={errors.trend}>
-        {loading.trend ? <Spinner/> : <>
-          {svgChart(dualLineSVG(toArr(trend),'ty_aur','ly_aur',B.t2,B.sub,f$))}
-          <Legend items={[['AUR TY',B.t2],['AUR LY',B.sub,true]]}/>
+          {svgChart(salesAurSVG(toArr(trend)))}
+          <Legend items={[['Sales TY','#2E6FBB'],['Sales LY','#5B9FD4',true],['AUR TY','#22c55e'],['AUR LY','#16a34a',true]]}/>
         </>}
       </ChartCard>
 
@@ -1353,34 +1441,72 @@ export default function Sales({ filters = {} }) {
         </>}
       </ChartCard>
 
-      {/* Weekly Sales Heatmap — with week-count + metric toggles */}
+      {/* Weekly Sales Heatmap — 4 × 13-week window toggles (max 2 open = 26 weeks shown) */}
       {(() => {
-        const pillBtn2 = (label, active, onClick) => (
-          <button key={label} onClick={onClick} style={{
-            padding:'3px 10px',borderRadius:6,fontSize:10,fontWeight:600,cursor:'pointer',transition:'all .15s',
-            border:`1px solid ${active ? B.b2 : 'var(--brd)'}`,
-            background: active ? `${B.b1}33` : 'transparent',
-            color: active ? B.b3 : 'var(--txt3)',
-          }}>{label}</button>
+        // Toggle a window in/out; enforce max 2 active
+        const toggleWindow = (w) => {
+          setHmWindows(prev => {
+            if (prev.includes(w)) {
+              return prev.length > 1 ? prev.filter(x => x !== w) : prev;
+            }
+            if (prev.length >= 2) return [prev[1], w]; // drop oldest, add new
+            return [...prev, w];
+          });
+        };
+        const pillBtn2 = (key, label, range) => {
+          const active = hmWindows.includes(key);
+          const isFuture = range === 'future';
+          return (
+            <button key={key} onClick={() => toggleWindow(key)} style={{
+              padding:'3px 10px', borderRadius:6, fontSize:10, fontWeight:600, cursor:'pointer', transition:'all .15s',
+              border:`1px solid ${active ? (isFuture ? '#22c55e' : B.b2) : 'var(--brd)'}`,
+              background: active ? (isFuture ? 'rgba(34,197,94,.12)' : `${B.b1}33`) : 'transparent',
+              color: active ? (isFuture ? '#4ade80' : B.b3) : 'var(--txt3)',
+            }}>
+              {isFuture ? '🌿 ' : ''}{label}
+            </button>
+          );
+        };
+        // Build filtered + remapped heatmap data for selected windows
+        const allSelIdx = hmWindows.flatMap(w => HM_WINDOWS_DEF[w].indices);
+        const sortedIdx = [...allSelIdx].sort((a,b) => a-b); // ascending = oldest first
+        const indexMap  = Object.fromEntries(sortedIdx.map((idx, pos) => [idx, pos]));
+        const filteredHm = toArr(heatmap)
+          .filter(d => allSelIdx.includes(d.week))
+          .map(d => ({...d, week: indexMap[d.week]}));
+        const totalWks = sortedIdx.length || 26;
+        // Compute which SVG columns are "future" (LY proxy) — SVG col w shows position TOTAL-1-w
+        const futureOrigIdx = new Set(['C','D'].flatMap(w => hmWindows.includes(w) ? HM_WINDOWS_DEF[w].indices : []));
+        const futureSvgCols = new Set(
+          sortedIdx.map((idx, pos) => futureOrigIdx.has(idx) ? (totalWks-1-pos) : -1).filter(p => p >= 0)
         );
-        const hmWeeksNum = HM_WEEKS_MAP[hmWeeks];
         const metricLabel = hmMetric2==='units' ? 'Sales Units' : hmMetric2==='sales' ? 'Sales $' : 'Return Units';
+        const windowLabel = hmWindows.map(w => HM_WINDOWS_DEF[w].label).join(' + ');
         return (
           <div style={{background:'var(--surf)',border:'1px solid var(--brd)',borderRadius:14,padding:16,marginBottom:12,transition:'background .3s'}}>
             <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:12,flexWrap:'wrap',gap:8}}>
               <span style={{fontSize:13,fontWeight:700,color:'var(--txt)'}}>
-                {metricLabel} — {hmWeeks} × Day of Week
+                {metricLabel} — {windowLabel} × Day of Week
               </span>
               <div style={{display:'flex',gap:4,alignItems:'center',flexWrap:'wrap'}}>
-                {['13W','26W','52W'].map(w => pillBtn2(w, hmWeeks===w, ()=>setHmWeeks(w)))}
+                {/* 4 window buttons — ordered D, C, A, B (furthest future → furthest past) */}
+                {['D','C','A','B'].map(w => pillBtn2(w, HM_WINDOWS_DEF[w].label, HM_WINDOWS_DEF[w].range))}
                 <div style={{width:1,height:16,background:'var(--brd)',margin:'0 4px'}}/>
-                {[['Sales Units','units'],['Sales $','sales'],['Return Units','returns']].map(([lbl,key]) =>
-                  pillBtn2(lbl, hmMetric2===key, ()=>setHmMetric2(key))
-                )}
+                {[['Units','units'],['Sales $','sales'],['Returns','returns']].map(([lbl,key]) => (
+                  <button key={key} onClick={() => setHmMetric2(key)} style={{
+                    padding:'3px 10px',borderRadius:6,fontSize:10,fontWeight:600,cursor:'pointer',transition:'all .15s',
+                    border:`1px solid ${hmMetric2===key ? B.b2 : 'var(--brd)'}`,
+                    background: hmMetric2===key ? `${B.b1}33` : 'transparent',
+                    color: hmMetric2===key ? B.b3 : 'var(--txt3)',
+                  }}>{lbl}</button>
+                ))}
               </div>
             </div>
+            <div style={{fontSize:10,color:'var(--txt3)',marginBottom:8}}>
+              Select up to 2 windows to display 26 weeks. Green = LY data (forecast proxy).
+            </div>
             {errors.heatmap && <div style={{padding:'10px 14px',color:'#fb923c',fontSize:11,background:'rgba(251,146,60,.08)',border:'1px solid rgba(251,146,60,.18)',borderRadius:8,marginBottom:8}}>⚠ {errors.heatmap}</div>}
-            {loading.heatmap ? <Spinner/> : svgChart(heatmapSVG(toArr(heatmap), 1100, hmWeeksNum, hmMetric2))}
+            {loading.heatmap ? <Spinner/> : svgChart(heatmapSVG(filteredHm, 1100, totalWks, hmMetric2, futureSvgCols))}
           </div>
         );
       })()}
