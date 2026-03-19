@@ -958,13 +958,14 @@ def sales_period_comparison(
                     e_buf = e + timedelta(days=2)
                     r = con.execute(f"""
                         SELECT COALESCE(COUNT(*), 0),
-                               COALESCE(SUM(ABS(product_charges)), 0)
+                               COALESCE(SUM(ABS(COALESCE(product_charges, 0))), 0)
                         FROM financial_events
                         WHERE date >= ? AND date <= ?
                           AND (event_type ILIKE '%%refund%%' OR event_type ILIKE '%%return%%') {fw}
                     """, [str(s), str(e_buf)] + extra_params).fetchone()
                     return int(r[0]) if r else 0, round(float(r[1]), 2) if r else 0
-                except Exception:
+                except Exception as _ref_ex:
+                    logger.warning(f"_pc_refunds({s}→{e}) error: {_ref_ex}")
                     return 0, 0
 
             ty_ret_units, ty_ret_amt = _pc_refunds(sd, ed, fp)
@@ -1022,6 +1023,17 @@ def sales_period_comparison(
                 except Exception as _ex:
                     logger.warning(f"get_ly_same_time_sales failed: {_ex}")
                     ly_same_time_sales, ly_same_time_units, ly_same_time_orders = 0.0, 0, 0
+
+                # ── Time-fraction fallback ────────────────────────────────────────
+                # If SP-API returned 0 (throttle / no data) but we have LY full-day
+                # data, estimate LY same-time using a linear time fraction.
+                # e.g. at 9 AM (37.5% through the day) → ly_same_time ≈ ly_eod × 0.375
+                if ly_same_time_sales == 0 and ly_sales > 0:
+                    day_frac = (now_ct.hour * 60 + now_ct.minute) / (24 * 60)
+                    ly_same_time_sales  = round(float(ly_sales) * day_frac, 2)
+                    ly_same_time_units  = round(float(ly_units) * day_frac) if ly_units else 0
+                    ly_same_time_orders = round(float(ly_orders) * day_frac) if ly_orders else 0
+                    logger.info(f"LY NOW time-fraction fallback: {day_frac:.1%} of day → ${ly_same_time_sales:,.2f} / {ly_same_time_units} units")
                 # Forecast = TY × (LY full-day / LY same-time)  [pacing ratio]
                 if ly_same_time_sales > 0 and ly_sales > 0:
                     ty_forecast = round(sales * (ly_sales / ly_same_time_sales), 2)
@@ -1373,24 +1385,28 @@ def sales_rolling(
         return {"error": str(e)}
 
 
-# ── ENDPOINT 7: Units heatmap data ────────────────────────
+# ── ENDPOINT 7: Units/Sales/Returns heatmap data ──────────
 @router.get("/api/sales/heatmap")
 def sales_heatmap(
     division: str | None = Query(None),
     customer: str | None = Query(None),
     marketplace: str | None = Query(None),
+    weeks: int = Query(26, ge=13, le=52),
 ):
-    """26 weeks x 7 days heatmap of units sold."""
+    """N weeks x 7 days heatmap of units sold, sales $, and return units.
+    weeks param controls history depth (13, 26, or 52).
+    Returns rows with: week, day, day_name, units, sales, returns
+    """
     try:
         con = get_db()
         hw, hp = _hier_where(division, customer, marketplace=marketplace)
         today = _today_central()
-        start_date = today - timedelta(weeks=26)
+        start_date = today - timedelta(weeks=weeks)
         expected_days = (today - start_date).days + 1
 
         # Try asin='ALL' first (has full historical coverage from S&T report backfill)
         rows = con.execute(f"""
-            SELECT date, COALESCE(units_ordered, 0)
+            SELECT date, COALESCE(units_ordered, 0), COALESCE(ordered_product_sales, 0)
             FROM daily_sales
             WHERE asin = 'ALL' AND date >= ? AND date <= ? {hw}
             ORDER BY date
@@ -1399,7 +1415,7 @@ def sales_heatmap(
         # Fallback: if ALL rows are sparse, aggregate from per-ASIN rows
         if len(rows) < (expected_days * 0.3):
             agg_rows = con.execute(f"""
-                SELECT date, COALESCE(SUM(units_ordered), 0)
+                SELECT date, COALESCE(SUM(units_ordered), 0), COALESCE(SUM(ordered_product_sales), 0)
                 FROM daily_sales
                 WHERE asin != 'ALL' AND date >= ? AND date <= ? {hw}
                 GROUP BY date ORDER BY date
@@ -1427,16 +1443,32 @@ def sales_heatmap(
                 s_iso = datetime(today.year, today.month, today.day, 0, 0, 0, tzinfo=CENTRAL).isoformat()
                 e_iso = datetime(today.year, today.month, today.day, 23, 59, 59, tzinfo=CENTRAL).isoformat()
                 o_row = con.execute(f"""
-                    SELECT COALESCE(SUM(number_of_items), 0)
+                    SELECT COALESCE(SUM(number_of_items), 0), COALESCE(SUM(order_total), 0)
                     FROM orders
                     WHERE purchase_date >= ? AND purchase_date <= ?
                       AND (order_status IS NULL OR order_status NOT IN ('Cancelled')) {hw}
                 """, [s_iso, e_iso] + hp).fetchone()
                 today_units = int(o_row[0]) if o_row and o_row[0] else 0
+                today_sales = float(o_row[1]) if o_row and o_row[1] else 0.0
                 if today_units > 0:
-                    rows = list(rows) + [(today_str, today_units)]
+                    rows = list(rows) + [(today_str, today_units, today_sales)]
             except Exception:
                 pass
+
+        # Build returns map: date → return_units from financial_events
+        returns_map: dict = {}
+        try:
+            ret_rows = con.execute(f"""
+                SELECT date, COUNT(*)
+                FROM financial_events
+                WHERE date >= ? AND date <= ?
+                  AND (event_type ILIKE '%refund%' OR event_type ILIKE '%return%') {hw}
+                GROUP BY date
+            """, [str(start_date), str(today)] + hp).fetchall()
+            for rr in ret_rows:
+                returns_map[fmt_date(rr[0])] = int(rr[1])
+        except Exception:
+            pass
 
         con.close()
 
@@ -1445,6 +1477,8 @@ def sales_heatmap(
         for r in rows:
             d_str = fmt_date(r[0])
             units = int(r[1])
+            sales = float(r[2]) if len(r) > 2 and r[2] else 0.0
+            returns_ct = returns_map.get(d_str, 0)
             try:
                 dt = datetime.strptime(d_str, "%Y-%m-%d").date()
             except Exception:
@@ -1452,10 +1486,13 @@ def sales_heatmap(
             days_ago = (today - dt).days
             week = days_ago // 7
             day = dt.weekday()  # 0=Mon, 6=Sun
-            if week < 26:
+            if week < weeks:
                 result.append({
                     "week": week, "day": day,
-                    "day_name": day_names[day], "units": units,
+                    "day_name": day_names[day],
+                    "units": units,
+                    "sales": round(sales, 2),
+                    "returns": returns_ct,
                 })
         return result
     except Exception as e:
@@ -2667,7 +2704,7 @@ def save_hourly_to_db(target_date=None):
         return 0
 
 
-@router.get("/sales/hourly-heatmap")
+@router.get("/api/sales/hourly-heatmap")
 def hourly_heatmap(
     days: int = Query(30, ge=1, le=90),
     division: str = Query(""),
@@ -2730,33 +2767,12 @@ def hourly_heatmap(
             "orders": int(row[4] or 0),
         }
 
-    # ── Fill gaps from SP-API for recent dates ──
-    recent_cutoff = today_ct - timedelta(days=7)
-    for d in dates:
-        ds = str(d)
-        # Only try to fill if we have no data at all for this date
-        if ds not in db_map or not db_map[ds]:
-            if d >= recent_cutoff:
-                saved = save_hourly_to_db(d)
-                if saved > 0:
-                    # Re-query for this date
-                    con2 = get_db()
-                    fresh = con2.execute("""
-                        SELECT hour, sales, units, orders
-                        FROM hourly_sales
-                        WHERE sale_date = ? AND division='all' AND customer='amazon' AND platform='sp_api'
-                    """, [ds]).fetchall()
-                    con2.close()
-                    if fresh:
-                        db_map[ds] = {}
-                        for fr in fresh:
-                            h = int(fr[0])
-                            db_map[ds][h] = {
-                                "hour": h,
-                                "sales": float(fr[1] or 0),
-                                "units": int(fr[2] or 0),
-                                "orders": int(fr[3] or 0),
-                            }
+    # ── Fire background fill for today only if we have no data yet ──
+    # (Non-blocking: returns immediately, scheduler fills history over time)
+    today_str = str(today_ct)
+    if today_str not in db_map or not db_map[today_str]:
+        import threading
+        threading.Thread(target=save_hourly_to_db, args=(today_ct,), daemon=True).start()
 
     # ── Build response ──
     day_names = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]
