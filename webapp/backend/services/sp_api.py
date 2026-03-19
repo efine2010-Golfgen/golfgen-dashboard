@@ -1693,7 +1693,7 @@ def _sync_reimbursements_report():
 
 # ── LY Same-Time Sales — SP-API Sales.getOrderMetrics ─────────────────────────
 _ly_same_time_cache: dict = {}
-_LY_CACHE_TTL = 300  # seconds (5 minutes)
+_LY_CACHE_TTL = 1800  # seconds (30 minutes — LY data is historical, never changes)
 
 
 def get_ly_same_time_sales(ly_date, cutoff_dt) -> tuple:
@@ -1945,6 +1945,89 @@ def get_ly_full_day_sales(ly_date) -> tuple:
 
     except Exception as e:
         logger.warning(f"get_ly_full_day_sales error: {e}")
+        return (0.0, 0, 0)
+
+
+# ── TY same-time-of-day via getOrderMetrics ────────────────────────────────────
+_ty_same_time_cache: dict = {}
+_TY_CACHE_TTL = 300  # 5 minutes (today's data changes constantly)
+
+
+def get_ty_same_time_sales(ty_date, cutoff_dt) -> tuple:
+    """Fetch TY sales-so-far today via SP-API getOrderMetrics (TOTAL granularity).
+
+    Matches what Amazon Seller Central "Today's Sales" shows — more reliable than
+    summing the orders table which has a 50-order sync cap and estimates Pending prices.
+
+    Args:
+        ty_date   : datetime.date — today in Central time
+        cutoff_dt : datetime (tz-aware, Central) — current wall-clock time
+
+    Returns:
+        (total_sales: float, unit_count: int, order_count: int)
+        Falls back to (0.0, 0, 0) on any error.
+
+    Cached per (ty_date, hour) for 5 minutes.
+    """
+    import time as _t
+    global _ty_same_time_cache
+
+    cache_key = (str(ty_date), cutoff_dt.hour, cutoff_dt.minute // 5)  # bucket per 5 min
+    now_ts = _t.time()
+    if cache_key in _ty_same_time_cache:
+        cached_val, cached_at = _ty_same_time_cache[cache_key]
+        if now_ts - cached_at < _TY_CACHE_TTL:
+            logger.debug(f"get_ty_same_time_sales: cache hit {cache_key}")
+            return cached_val
+
+    try:
+        from sp_api.api import Sales as SalesAPI
+        from sp_api.base import Marketplaces
+        from sp_api.base.sales_enum import Granularity
+    except ImportError:
+        logger.warning("get_ty_same_time_sales: sp_api library not installed")
+        return (0.0, 0, 0)
+
+    credentials = _load_sp_api_credentials()
+    if not credentials:
+        logger.warning("get_ty_same_time_sales: no credentials")
+        return (0.0, 0, 0)
+
+    try:
+        CENTRAL = ZoneInfo("America/Chicago")
+        day_start  = datetime(ty_date.year, ty_date.month, ty_date.day,
+                              0, 0, 0, tzinfo=CENTRAL)
+        safe_cutoff = datetime(ty_date.year, ty_date.month, ty_date.day,
+                               cutoff_dt.hour, max(cutoff_dt.minute, 1), 0,
+                               tzinfo=CENTRAL)
+
+        @retry_with_backoff(max_retries=2, base_delay=1.0, max_delay=10.0)
+        def _call():
+            api = SalesAPI(credentials=credentials, marketplace=Marketplaces.US)
+            return api.get_order_metrics(
+                interval=(day_start, safe_cutoff),
+                granularity=Granularity.TOTAL,
+            )
+
+        response = _call()
+        metrics  = response.payload or []
+
+        if not metrics:
+            result = (0.0, 0, 0)
+        else:
+            m      = metrics[0]
+            ts     = m.get('totalSales') or {}
+            amount = float(ts.get('amount', 0) or 0) if isinstance(ts, dict) else float(ts or 0)
+            units  = int(m.get('unitCount', 0) or 0)
+            ords   = int(m.get('orderCount', 0) or 0)
+            result = (round(amount, 2), units, ords)
+
+        _ty_same_time_cache[cache_key] = (result, now_ts)
+        logger.info(f"get_ty_same_time_sales: {ty_date} through {cutoff_dt.hour}:{cutoff_dt.minute:02d} CT → ${result[0]:,.2f} / {result[1]} units / {result[2]} orders")
+        return result
+
+    except Exception as e:
+        logger.warning(f"get_ty_same_time_sales error: {e}")
         return (0.0, 0, 0)
 
 

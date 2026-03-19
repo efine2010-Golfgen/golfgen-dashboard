@@ -985,9 +985,23 @@ def sales_period_comparison(
                 now_ct = datetime.now(CENTRAL)
                 snapshot_time = now_ct.strftime("%-I:%M %p CT")
 
-                # TY sales already set above by _orders_supplement(include_pending=True).
-                # Amazon Seller Central "Today's Sales" includes Pending orders at face value,
-                # which matches our pending-estimation approach — no override needed here.
+                # ── TY NOW: SP-API getOrderMetrics for exact match with Amazon SC ──────
+                # getOrderMetrics returns the canonical "Today's Sales" figure —
+                # same source Amazon Seller Central uses. Preferred over the orders table
+                # which has a 50-order sync cap and estimates Pending order prices.
+                # Falls back to the orders table value (already set above) on any error.
+                try:
+                    from services.sp_api import get_ty_same_time_sales
+                    _ty_st = get_ty_same_time_sales(sd, now_ct)
+                    if _ty_st[0] > 0:
+                        sales  = _ty_st[0]
+                        units  = max(_ty_st[1], units)   # take higher (API vs orders table)
+                        orders = max(_ty_st[2], orders) if _ty_st[2] > 0 else orders
+                        aur    = round(float(sales) / units, 2) if units else 0
+                        aov    = round(float(sales) / orders, 2) if orders else 0
+                        logger.info(f"today TY NOW: SP-API → ${sales:,.2f} / {units} units / {orders} orders")
+                except Exception as _ex:
+                    logger.warning(f"get_ty_same_time_sales failed, using orders table: {_ex}")
 
                 # ── LY full-day SP-API fallback ──────────────────────────────────────
                 # daily_sales often has no row for the LY date (364 days ago), leaving
