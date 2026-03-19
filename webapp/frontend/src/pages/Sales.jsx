@@ -953,7 +953,7 @@ export default function Sales({ filters = {} }) {
                 return fN(v);
               };
               return (
-                <div key={p} style={{flex:'1 1 520px',minWidth:520,background:'var(--card2)',border:'1px solid var(--acc1)',borderRadius:12,padding:'12px 16px',transition:'background .3s',boxShadow:'0 0 0 1px rgba(46,207,170,.15)'}}>
+                <div key={p} style={{flex:'1 1 400px',minWidth:400,background:'var(--card2)',border:'1px solid var(--brd)',borderRadius:12,padding:'10px 12px',transition:'background .3s'}}>
                   <div style={{display:'flex',alignItems:'baseline',gap:8,paddingBottom:9,borderBottom:'1px solid var(--brd)',marginBottom:9}}>
                     <span style={{fontSize:10,fontWeight:700,textTransform:'uppercase',letterSpacing:'.12em',color:B.b2}}>Today</span>
                     <span style={{fontSize:9,color:'var(--txt3)'}}>
@@ -977,12 +977,12 @@ export default function Sales({ filters = {} }) {
                         : <span style={{...rowH(false),...baseStyle}}>{fmt(l, val)}</span>;
                     };
                     return (
-                      <div style={{display:'flex',gap:10,alignItems:'flex-start'}}>
+                      <div style={{display:'flex',gap:8,alignItems:'flex-start'}}>
 
                         {/* ── GROUP 1: Label | TY NOW | LY NOW | CHG ── */}
-                        <div style={{flex:'0 0 auto',background:'rgba(46,207,170,.05)',border:'1px solid rgba(46,207,170,.18)',borderRadius:8,padding:'6px 8px'}}>
-                          <div style={{fontSize:8,fontWeight:700,color:'var(--acc1)',textTransform:'uppercase',letterSpacing:'.06em',textAlign:'center',marginBottom:5}}>NOW vs LY</div>
-                          <div style={{display:'grid',gridTemplateColumns:'76px 68px 62px 40px',columnGap:4,rowGap:0,alignItems:'start'}}>
+                        <div style={{flex:'0 0 auto',background:'rgba(46,207,170,.05)',border:'1px solid rgba(46,207,170,.18)',borderRadius:8,padding:'5px 7px'}}>
+                          <div style={{fontSize:8,fontWeight:700,color:'var(--acc1)',textTransform:'uppercase',letterSpacing:'.06em',textAlign:'center',marginBottom:4}}>TODAY LIVE</div>
+                          <div style={{display:'grid',gridTemplateColumns:'60px 54px 50px 34px',columnGap:3,rowGap:0,alignItems:'start'}}>
                             {/* headers */}
                             <span/>
                             <span style={{...hdr,color:'var(--txt3)'}}>TY NOW</span>
@@ -1007,9 +1007,9 @@ export default function Sales({ filters = {} }) {
                         </div>
 
                         {/* ── GROUP 2: TY FCST | LY EOD | CHG ── */}
-                        <div style={{flex:'0 0 auto',background:'rgba(245,158,11,.05)',border:'1px solid rgba(245,158,11,.18)',borderRadius:8,padding:'6px 8px'}}>
-                          <div style={{fontSize:8,fontWeight:700,color:B.t2,textTransform:'uppercase',letterSpacing:'.06em',textAlign:'center',marginBottom:5}}>FORECAST vs EOD</div>
-                          <div style={{display:'grid',gridTemplateColumns:'68px 62px 40px',columnGap:4,rowGap:0,alignItems:'start'}}>
+                        <div style={{flex:'0 0 auto',background:'rgba(245,158,11,.05)',border:'1px solid rgba(245,158,11,.18)',borderRadius:8,padding:'5px 7px'}}>
+                          <div style={{fontSize:8,fontWeight:700,color:B.t2,textTransform:'uppercase',letterSpacing:'.06em',textAlign:'center',marginBottom:4}}>TODAY FORECAST</div>
+                          <div style={{display:'grid',gridTemplateColumns:'54px 50px 34px',columnGap:3,rowGap:0,alignItems:'start'}}>
                             {/* headers */}
                             <span style={{...hdr,color:B.t2}}>TY FCST</span>
                             <span style={{...hdr,color:'var(--txt3)'}}>LY EOD</span>
@@ -1061,7 +1061,7 @@ export default function Sales({ filters = {} }) {
               return fN(v);
             };
             return (
-              <div key={p} style={{flex:'1 1 240px',minWidth:240,background:'var(--card2)',border:'1px solid var(--brd)',borderRadius:12,padding:'12px 14px',transition:'background .3s'}}>
+              <div key={p} style={{flex:'1 1 220px',minWidth:220,background:'var(--card2)',border:'1px solid var(--brd)',borderRadius:12,padding:'12px 12px',transition:'background .3s'}}>
                 <div style={{fontSize:10,fontWeight:700,textTransform:'uppercase',letterSpacing:'.12em',color:B.b2,paddingBottom:9,borderBottom:'1px solid var(--brd)',marginBottom:9}}>{p}</div>
                 <div style={{display:'grid',gridTemplateColumns:'68px 52px 48px 44px',columnGap:3,rowGap:0,alignItems:'start'}}>
                   <span/>
