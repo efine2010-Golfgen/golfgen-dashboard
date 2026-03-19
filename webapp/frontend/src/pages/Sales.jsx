@@ -738,7 +738,8 @@ export default function Sales({ filters = {} }) {
   const [channel,     setChannel]     = useState(null);
   const [rolling,     setRolling]     = useState(null);
   const [heatmap,     setHeatmap]     = useState(null);
-  const [trendTraffic, setTrendTraffic] = useState(null);
+  const [trendTraffic,   setTrendTraffic]   = useState(null);
+  const [metricsTraffic, setMetricsTraffic] = useState(null); // period-aware traffic KPIs
   const [funnel,      setFunnel]      = useState(null);
   const [adEff,       setAdEff]       = useState(null);
   const [feeBreak,    setFeeBreak]    = useState(null);
@@ -799,10 +800,11 @@ export default function Sales({ filters = {} }) {
     load('heatmap', setHeatmap, 'heatmap', {...baseParams, weeks: HM_WEEKS_MAP[hmWeeks]});
   }, [divRaw, custRaw, hmWeeks]);
 
-  // Fetch traffic chart data when cpTraffic changes
+  // Fetch traffic chart data + period-aware traffic KPIs when cpTraffic changes
   useEffect(() => {
     const params = {...baseParams, period: chartTrafficApi};
-    load('trendTraffic', setTrendTraffic, 'trend', params);
+    load('trendTraffic',   setTrendTraffic,   'trend',   params);
+    load('metricsTraffic', setMetricsTraffic, 'summary', params);
   }, [divRaw, custRaw, cpTraffic]);
 
   // Fetch 30-day hourly heatmap data — reload on filter changes only
@@ -1354,12 +1356,16 @@ export default function Sales({ filters = {} }) {
       {/* ══ TRAFFIC & CONVERSION ════════════════════════════════════ */}
       <SectionDivider label="Traffic & Conversion"/>
       <div style={{display:'flex',gap:8,marginBottom:14,overflowX:'auto',paddingBottom:2}}>
-        {loading.metrics ? <Spinner/> : <>
-          <MetricCard label="Sessions"     value={fN(m.sessions)}    ly={fN(ly('sessions'))}    delta={dp(m.sessions,ly('sessions'))}/>
-          <MetricCard label="Glance Views" value={fN(m.glance_views)} ly={fN(ly('glance_views'))} delta={dp(m.glance_views,ly('glance_views'))}/>
-          <MetricCard label="Click Through" value={fP(m.ctr)}         ly={fP(ly('ctr'))}         delta={dp(m.ctr,ly('ctr'))}/>
-          <MetricCard label="Conversion"   value={fP(m.conversion)}  ly={fP(ly('conversion'))}  delta={dp(m.conversion,ly('conversion'))}/>
-        </>}
+        {loading.metricsTraffic ? <Spinner/> : (() => {
+          const mt = metricsTraffic || {};
+          const mlt = k => mt[`ly_${k}`]; // same pattern as main ly() helper
+          return <>
+            <MetricCard label="Sessions"     value={fN(mt.sessions)}    ly={fN(mlt('sessions'))}    delta={dp(mt.sessions,mlt('sessions'))}/>
+            <MetricCard label="Glance Views" value={fN(mt.glance_views)} ly={fN(mlt('glance_views'))} delta={dp(mt.glance_views,mlt('glance_views'))}/>
+            <MetricCard label="Click Through" value={fP(mt.ctr)}         ly={fP(mlt('ctr'))}         delta={dp(mt.ctr,mlt('ctr'))}/>
+            <MetricCard label="Conversion"   value={fP(mt.conversion)}  ly={fP(mlt('conversion'))}  delta={dp(mt.conversion,mlt('conversion'))}/>
+          </>;
+        })()}
       </div>
       <div style={{display:'flex',alignItems:'center',gap:10,flexWrap:'wrap',margin:'6px 0 10px'}}>
         <PeriodBar value={cpTraffic} onChange={setCpTraffic}/>
@@ -1374,9 +1380,18 @@ export default function Sales({ filters = {} }) {
               {svgChart(dualLineSVG(toArr(trendTraffic),'ty_sessions','ly_sessions',B.o2,B.sub,fN))}
               <Legend items={[['Sessions TY',B.o2],['Sessions LY',B.sub,true]]}/>
             </div>
-            {/* Right: conversion arc gauge */}
+            {/* Right: conversion arc gauge — computed from trendTraffic (period-aware) */}
             <div style={{display:'flex',flexDirection:'column',alignItems:'center'}}>
-              {svgChart(convGaugeSVG(m.conversion, ly('conversion')))}
+              {(() => {
+                const rows = toArr(trendTraffic);
+                const tySessTotal = rows.reduce((s,d) => s + (d.ty_sessions||0), 0);
+                const tyUnitsEst  = rows.reduce((s,d) => s + ((d.ty_conv||0)*(d.ty_sessions||0)), 0);
+                const lySessTotal = rows.reduce((s,d) => s + (d.ly_sessions||0), 0);
+                const lyUnitsEst  = rows.reduce((s,d) => s + ((d.ly_conv||0)*(d.ly_sessions||0)), 0);
+                const tyConv = tySessTotal > 0 ? tyUnitsEst / tySessTotal : null;
+                const lyConv = lySessTotal > 0 ? lyUnitsEst / lySessTotal : null;
+                return svgChart(convGaugeSVG(tyConv, lyConv));
+              })()}
               <div style={{display:'flex',alignItems:'center',gap:5,fontSize:8,color:B.sub,marginTop:2}}>
                 <div style={{width:8,height:8,borderRadius:'50%',background:'#5b7fa0',border:'2px solid #0c1a2e',flexShrink:0}}/>
                 <span>Last year position on arc</span>
