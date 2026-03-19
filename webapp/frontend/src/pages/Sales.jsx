@@ -42,7 +42,7 @@ const HM_WINDOWS_DEF = {
   D: { label: '+14-26w LY',  range: 'future', indices: Array.from({length:13},(_,i)=>26+i) },   // 26-38: LY proxy 14-26w ahead
   C: { label: '+1-13w LY',   range: 'future', indices: Array.from({length:13},(_,i)=>39+i) },   // 39-51: LY proxy 1-13w ahead
 };
-const VIEW_TABS         = ['Sales Summary','Daily','Weekly','Monthly','Yearly','Custom'];
+const VIEW_TABS         = ['Executive','Sales Summary','Daily','Weekly','Monthly','Yearly','Custom'];
 const MONTHS = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
 
 // ── FORMATTERS ─────────────────────────────────────────────────────
@@ -1061,8 +1061,172 @@ export default function Sales({ filters = {} }) {
         </div>
       )}
 
+      {/* ══ EXECUTIVE DASHBOARD ══════════════════════════════════ */}
+      {viewTab === 'Executive' && (() => {
+        const tod = periodCols?.['Today'] || {};
+        // TY NOW
+        const tyS   = tod.sales  || 0;
+        const tyU   = tod.units  || 0;
+        const tyO   = tod.orders || 0;
+        const tyAur = tyU > 0 ? tyS / tyU : 0;
+        // LY NOW (same time last year)
+        const lyNowS   = tod.ly_same_time_sales  || 0;
+        const lyNowU   = tod.ly_same_time_units  || 0;
+        const lyNowO   = tod.ly_same_time_orders || 0;
+        const lyNowAur = lyNowU > 0 ? lyNowS / lyNowU : 0;
+        // TY EOD Forecast
+        const tyFcstS   = tod.ty_forecast        || 0;
+        const tyFcstU   = tod.ty_units_forecast  || 0;
+        const tyFcstAur = tyFcstU > 0 ? tyFcstS / tyFcstU : 0;
+        // LY EOD Actual
+        const lyEodS   = tod.ly_eod_sales  ?? tod.ly_sales  ?? 0;
+        const lyEodU   = tod.ly_eod_units  ?? tod.ly_units  ?? 0;
+        const lyEodO   = tod.ly_orders || 0;
+        const lyEodAur = lyEodU > 0 ? lyEodS / lyEodU : 0;
+
+        const dp2 = (a, b) => (a && b) ? (a - b) / b * 100 : null;
+        const chgSpan = (delta, inv = false) => {
+          if (delta == null) return <span style={{color:'var(--txt3)',fontSize:9}}>—</span>;
+          const pos = inv ? delta < 0 : delta > 0;
+          return <span style={{color: pos ? '#4ade80' : '#fb923c', fontWeight:700, fontSize:9, whiteSpace:'nowrap'}}>
+            {delta > 0 ? '▲' : '▼'}{Math.abs(delta).toFixed(1)}%
+          </span>;
+        };
+
+        const heroRows = (rows) => rows.map(([lbl, val]) => (
+          <div key={lbl} style={{display:'flex',justifyContent:'space-between',alignItems:'center',padding:'4px 0',borderBottom:'1px solid rgba(26,47,74,.5)',fontSize:11}}>
+            <span style={{color:'var(--txt3)'}}>{lbl}</span>
+            <span style={{fontWeight:600,color:'var(--txt)'}}>{val}</span>
+          </div>
+        ));
+
+        const EXEC_PERIODS = ['Today','Yesterday','WTD','MTD','YTD'];
+        const ACCENTS      = [B.o2, 'var(--brd2)', 'var(--brd2)', B.b2, B.t2];
+
+        return (
+          <>
+            {/* 4-column Today Hero */}
+            {loading.periodCols
+              ? <div style={{height:180,display:'flex',alignItems:'center',justifyContent:'center'}}><Spinner/></div>
+              : (
+              <div style={{display:'flex',background:'var(--card2)',border:'1px solid var(--brd)',borderRadius:12,overflow:'hidden',marginBottom:14}}>
+                {[
+                  { lbl:'🟠 TY NOW', sub:`thru ${tod.snapshot_time||'today'} · ${fN(tyO)} orders`, val:f$(tyS), color:B.o2,
+                    rows:[['Units', fN(tyU)], ['AUR', f$(tyAur)], ['Fees', f$(tod.amazon_fees||0)], ['Returns', f$(tod.returns_amount||0)], ['Conv %', fP(tod.conversion)]] },
+                  { lbl:'🔵 LY NOW', sub:'same time last year', val:f$(lyNowS), color:B.b3,
+                    rows:[['Units', fN(lyNowU)], ['AUR', f$(lyNowAur)], ['Fees', '—'], ['Returns', '—'], ['Conv %', fP(tod.ly_conversion)]] },
+                  { lbl:'🟢 TY EOD FCST', sub:`projected full day · pacing ${tyFcstS > 0 && lyEodS > 0 ? ((tyFcstS/lyEodS-1)*100).toFixed(1)+'% vs LY EOD' : '—'}`, val:f$(tyFcstS), color:B.t2,
+                    rows:[['Units', tyFcstU > 0 ? `~${fN(tyFcstU)}` : '—'], ['AUR', tyFcstAur > 0 ? f$(tyFcstAur) : '—'], ['Fees', '—'], ['Returns', '—'], ['Conv %', '—']] },
+                  { lbl:'⬜ LY EOD ACTUAL', sub:'full day last year', val:f$(lyEodS), color:'var(--txt3)',
+                    rows:[['Units', fN(lyEodU)], ['AUR', f$(lyEodAur)], ['Fees', f$(tod.ly_amazon_fees||0)], ['Returns', f$(tod.ly_returns_amount||0)], ['Conv %', fP(tod.ly_conversion)]] },
+                ].map((col, i, arr) => (
+                  <div key={col.lbl} style={{
+                    flex:'1 1 0', padding:'14px 16px', minWidth:0,
+                    borderRight: i < arr.length-1 ? '1px solid var(--brd)' : 'none',
+                    background: i===0 ? 'rgba(27,79,138,.1)' : 'transparent',
+                  }}>
+                    <div style={{fontSize:9,fontWeight:700,textTransform:'uppercase',letterSpacing:'.1em',color:col.color,marginBottom:4}}>{col.lbl}</div>
+                    <div style={{fontSize:28,fontWeight:800,color:col.color,lineHeight:1,marginBottom:3}}>{col.val}</div>
+                    <div style={{fontSize:10,color:'var(--txt3)',marginBottom:10}}>{col.sub}</div>
+                    {heroRows(col.rows)}
+                  </div>
+                ))}
+              </div>
+            )}
+
+            {/* Period Summary — 5 compact cards */}
+            {periodCols && (
+              <div style={{display:'grid',gridTemplateColumns:'repeat(5,1fr)',gap:10,marginBottom:20}}>
+                {EXEC_PERIODS.map((lbl, idx) => {
+                  const d  = periodCols[lbl] || {};
+                  const isToday = lbl === 'Today';
+                  const rows = [
+                    { k:'Sales $', ty: isToday ? tyS   : d.sales,         ly: isToday ? lyNowS   : d.ly_sales,   fmt:f$,  inv:false },
+                    { k:'Units',   ty: isToday ? tyU   : d.units,          ly: isToday ? lyNowU   : d.ly_units,   fmt:fN,  inv:false },
+                    { k:'AUR',     ty: isToday ? tyAur : d.aur,            ly: isToday ? lyNowAur : d.ly_aur,     fmt:f$,  inv:false },
+                    { k:'Orders',  ty: isToday ? tyO   : d.orders,         ly: isToday ? lyNowO   : d.ly_orders,  fmt:fN,  inv:false },
+                    { k:'Fees',    ty: d.amazon_fees,                       ly: d.ly_amazon_fees,                  fmt:f$,  inv:true  },
+                    { k:'Returns', ty: d.returns_amount||0,                 ly: d.ly_returns_amount||0,            fmt:f$,  inv:true  },
+                    { k:'Conv %',  ty: d.conversion,                        ly: isToday ? tod.ly_conversion : d.ly_conversion, fmt:fP, inv:false },
+                  ];
+                  return (
+                    <div key={lbl} style={{background:'var(--card2)',border:'1px solid var(--brd)',borderTop:`2px solid ${ACCENTS[idx]}`,borderRadius:10,padding:'10px 12px'}}>
+                      <div style={{fontSize:9,fontWeight:700,textTransform:'uppercase',letterSpacing:'.1em',color:ACCENTS[idx],paddingBottom:5,marginBottom:6,borderBottom:'1px solid var(--brd)',display:'flex',justifyContent:'space-between',alignItems:'center'}}>
+                        <span>{lbl}</span>
+                        {isToday && tod.snapshot_time && <span style={{fontSize:8,color:'var(--txt3)',fontWeight:400,textTransform:'none'}}>thru {tod.snapshot_time}</span>}
+                      </div>
+                      {rows.map(r => (
+                        <div key={r.k} style={{display:'grid',gridTemplateColumns:'1.1fr 1fr 1fr 0.6fr',gap:2,alignItems:'center',padding:'3px 0',borderBottom:'1px solid rgba(26,47,74,.4)',fontSize:11}}>
+                          <span style={{fontSize:10,color:'var(--txt3)',overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>{r.k}</span>
+                          <span style={{fontWeight:600,color:'var(--txt)'}}>{r.ty != null ? r.fmt(r.ty) : '—'}</span>
+                          <span style={{color:'var(--txt3)',fontSize:10}}>{r.ly != null ? r.fmt(r.ly) : '—'}</span>
+                          {chgSpan(dp2(r.ty, r.ly), r.inv)}
+                        </div>
+                      ))}
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+
+            {/* 3-Year Monthly Revenue + Year Totals */}
+            <div style={{background:'var(--surf)',border:'1px solid var(--brd)',borderRadius:14,padding:16,marginBottom:12}}>
+              <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:12,flexWrap:'wrap',gap:8}}>
+                <div style={{display:'flex',gap:6,alignItems:'center',flexWrap:'wrap'}}>
+                  <span style={{fontSize:12,fontWeight:700,color:'var(--txt)',marginRight:4}}>Monthly Revenue — 3 Year View</span>
+                  <div style={{width:1,height:14,background:'var(--brd)',margin:'0 2px'}}/>
+                  {[['2024','y2024',B.dim],['2025','y2025',B.b2],['2026','y2026',B.o2]].map(([lbl,key,col])=>(
+                    <button key={key} onClick={()=>setYearVis(v=>({...v,[key]:!v[key]}))} style={{
+                      fontSize:10,fontWeight:600,padding:'3px 10px',borderRadius:6,cursor:'pointer',
+                      border:`1px solid ${yearVis[key]?col:'var(--brd)'}`,
+                      background:yearVis[key]?`${col}22`:'transparent',
+                      color:yearVis[key]?col:'var(--txt3)',transition:'all .15s',
+                    }}>{lbl}</button>
+                  ))}
+                </div>
+                <div style={{display:'flex',gap:5,alignItems:'center',flexWrap:'wrap'}}>
+                  {yearVis.y2024 && fy24Total>0 && <div style={{background:'#0b1829',border:`1px solid ${B.dim}55`,borderRadius:7,padding:'3px 11px',textAlign:'center',minWidth:58}}><div style={{fontSize:7,color:B.sub,lineHeight:'1.4'}}>FY 24</div><div style={{fontSize:12,fontWeight:700,color:B.dim}}>{f$(fy24Total)}</div></div>}
+                  {yearVis.y2025 && fy25Total>0 && <div style={{background:'#0b1829',border:`1px solid ${B.b2}55`,borderRadius:7,padding:'3px 11px',textAlign:'center',minWidth:58}}><div style={{fontSize:7,color:B.sub,lineHeight:'1.4'}}>FY 25</div><div style={{fontSize:12,fontWeight:700,color:B.b2}}>{f$(fy25Total)}</div></div>}
+                  {yearVis.y2026 && ytd26>0    && <div style={{background:'#0b1829',border:`1px solid ${B.o2}55`,borderRadius:7,padding:'3px 11px',textAlign:'center',minWidth:58}}><div style={{fontSize:7,color:B.sub,lineHeight:'1.4'}}>'26 YTD</div><div style={{fontSize:12,fontWeight:700,color:B.o2}}>{f$(ytd26)}</div></div>}
+                  {yearVis.y2026 && proj26>ytd26 && <div style={{background:'#0b1829',border:'1px solid #f59e0b55',borderRadius:7,padding:'3px 11px',textAlign:'center',minWidth:58}}><div style={{fontSize:7,color:B.sub,lineHeight:'1.4'}}>'26 Proj</div><div style={{fontSize:12,fontWeight:700,color:'#f59e0b'}}>{f$(proj26)}</div></div>}
+                </div>
+              </div>
+              {errors.yoy && <div style={{padding:'8px 12px',color:'#fb923c',fontSize:11,background:'rgba(251,146,60,.08)',border:'1px solid rgba(251,146,60,.18)',borderRadius:8,marginBottom:8}}>⚠ {errors.yoy}</div>}
+              {loading.yoy ? <Spinner/> : <SVGTip html={yoyBarSVG(yoyMonths, forecastMap, yearVis, 1100, 195, yoyMeta?.current_month)}/>}
+              {/* Year Totals row */}
+              {(fy24Total > 0 || fy25Total > 0 || ytd26 > 0) && (
+                <div style={{display:'grid',gridTemplateColumns:'repeat(4,1fr)',gap:0,border:'1px solid var(--brd)',borderRadius:8,overflow:'hidden',background:'#0b1829',marginTop:12}}>
+                  {[
+                    { lbl:'2024 Full Year', val:f$(fy24Total), sub:'Actual',          color:B.dim, chg:null },
+                    { lbl:'2025 Full Year', val:f$(fy25Total), sub:'Actual',          color:B.b2,  chg: fy24Total > 0 ? `▲ ${((fy25Total-fy24Total)/fy24Total*100).toFixed(1)}% vs 2024` : null },
+                    { lbl:'2026 YTD',       val:f$(ytd26),     sub:'Jan–Mar Actual',  color:B.o2,  chg:null },
+                    { lbl:'2026 Full Year', val:f$(proj26),    sub:'YTD + Projected', color:'#f59e0b', chg: fy25Total > 0 ? `▲ ${((proj26-fy25Total)/fy25Total*100).toFixed(1)}% vs 2025` : null },
+                  ].map((t, i) => (
+                    <div key={t.lbl} style={{padding:'10px 14px',borderRight:i<3?'1px solid var(--brd)':'none'}}>
+                      <div style={{fontSize:9,fontWeight:700,textTransform:'uppercase',letterSpacing:'.08em',color:'var(--txt3)',marginBottom:3}}>{t.lbl}</div>
+                      <div style={{fontSize:18,fontWeight:800,color:t.color,lineHeight:1}}>{t.val}</div>
+                      <div style={{fontSize:9,color:'var(--txt3)',marginTop:2}}>
+                        {t.sub}{t.chg && <span style={{color:'#4ade80',fontWeight:700}}> · {t.chg}</span>}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+
+            {/* Sales & AUR Trend */}
+            <ChartCard title="Sales $ & AUR Trend" badge={cpSales} error={errors.trend}>
+              {loading.trend ? <Spinner/> : <>
+                {svgChart(salesAurSVG(toArr(trend)))}
+                <Legend items={[['Sales TY','#2E6FBB'],['Sales LY','#5B9FD4',true],['AUR TY','#22c55e'],['AUR LY','#16a34a',true]]}/>
+              </>}
+            </ChartCard>
+          </>
+        );
+      })()}
+
       {/* PERIOD COMPARISON COLUMNS */}
-      {viewTab !== 'Custom' && periodCols && (
+      {viewTab !== 'Custom' && viewTab !== 'Executive' && periodCols && (
         <div style={{display:'grid',gridTemplateColumns:'minmax(380px,2.1fr) repeat(4,minmax(185px,1fr))',gap:8,overflowX:'auto',paddingBottom:6,marginBottom:24}}>
           {periods.slice(0,5).map(p => {
             const d = periodCols[p] || {};
@@ -1255,7 +1419,7 @@ export default function Sales({ filters = {} }) {
       )}
 
       {/* HOURLY SALES HEATMAP — 30 days × 24 hours */}
-      {(viewTab === 'Sales Summary' || viewTab === 'Daily') && (() => {
+      {(viewTab === 'Sales Summary' || viewTab === 'Daily' || viewTab === 'Executive') && (() => {
         // ── Color scale (same as 26-week heatmap) ──
         const hmStops = [
           [21,37,62],[15,82,115],[13,115,119],[34,139,34],
