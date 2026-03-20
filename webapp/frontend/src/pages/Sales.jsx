@@ -365,27 +365,16 @@ function heatmapSVG(data, W=1100, weeks=26, metricKey='units', futureSvgCols=new
 function funnelSVG(data) {
   if (!data || data.length === 0) return '<div style="color:#374f66;padding:20px;text-align:center;font-size:12px">No funnel data</div>';
   const n = data.length;
+  const W = 1060, rowH = 64, padT = 44, padB = 48;
+  const derivedRowH = 32;
+  const H = padT + n * rowH + 16 + 2 * derivedRowH + padB;
 
-  // Layout constants — funnel LEFT, comparison table RIGHT
-  const W = 1010;
-  const rowH = 56;
-  const padT = 38;        // space above first row (header row)
-  const padB = 44;        // legend below
-  const derivedRowH = 28;
-  const nDerived = 2;     // ATC%, Conv%
-  const H = padT + n * rowH + 14 + nDerived * derivedRowH + padB;
+  const funnelCX = 256, maxFW = 436;
+  const labelX = 530, tyX = 706, lyX = 840, chgX = 956, stepX = 1052;
 
-  // Funnel geometry (left side)
-  const funnelCX = 280;
-  const maxFW = 480;
+  const stepRates = data.map((d, i) =>
+    i === 0 ? null : data[i-1].ty > 0 ? (d.ty / data[i-1].ty * 100) : null);
 
-  // Table column x-positions (right side)
-  const labelX = 560;
-  const tyX    = 720;   // right-anchored
-  const lyX    = 850;   // right-anchored
-  const chgX   = 980;  // right-anchored
-
-  // Pre-compute derived metrics
   const sessIdx = data.findIndex(d => d.label === 'Sessions');
   const atcIdx  = data.findIndex(d => d.label === 'Add to Cart');
   const ordIdx  = data.findIndex(d => d.label === 'Orders');
@@ -400,155 +389,184 @@ function funnelSVG(data) {
   const conv_ty   = sess_ty > 0 ? (ord_ty / sess_ty * 100).toFixed(2) : null;
   const conv_ly   = sess_ly > 0 ? (ord_ly / sess_ly * 100).toFixed(2) : null;
 
-  // TY bar width: normalized to first stage TY — drives the funnel shape
   const maxVal = data[0].ty || 1;
-  const minW = maxFW * 0.10;
-  const tyW_fn  = val => Math.max(minW, (val / maxVal) * maxFW);
-  // LY bar width: proportional to TY width *within that row* so visual ratio is always correct
-  // e.g. TY=320, LY=240 → LY bar = 75% of TY bar regardless of absolute scale
-  const lyW_fn  = (ty, ly) => ty > 0 ? (ly / ty) * tyW_fn(ty) : tyW_fn(ly);
+  const minW = maxFW * 0.08;
+  const tyW_fn = val => Math.max(minW, (val / maxVal) * maxFW);
+  const lyW_fn = (ty, ly) => ty > 0 ? (ly / ty) * tyW_fn(ty) : tyW_fn(ly);
+
+  const stageColors = ['#1B4F8A','#1e5fa8','#1a6ba0','#186e8a','#0e7dad'];
 
   let s = `<svg width="100%" viewBox="0 0 ${W} ${H}" style="overflow:visible;display:block">`;
-  s += `<defs>${data.map((_,i) => `<linearGradient id="fg${i}" x1="0" y1="0" x2="1" y2="0"><stop offset="0%" stop-color="${B.b1}" stop-opacity=".92"/><stop offset="100%" stop-color="${B.b3}" stop-opacity=".92"/></linearGradient>`).join('')}</defs>`;
+  s += `<defs>`;
+  data.forEach((_, i) => {
+    const c = stageColors[i % stageColors.length];
+    s += `<linearGradient id="fg${i}" x1="0" y1="0" x2="1" y2="0"><stop offset="0%" stop-color="${c}" stop-opacity=".98"/><stop offset="100%" stop-color="${c}" stop-opacity=".72"/></linearGradient>`;
+  });
+  s += `</defs>`;
 
-  // ── Table header row ──────────────────────────────────────
-  s += `<text x="${labelX}" y="${padT - 10}" text-anchor="start" font-size="9" font-weight="700" fill="${B.sub}" letter-spacing="1">METRIC</text>`;
-  s += `<text x="${tyX}"    y="${padT - 10}" text-anchor="end"   font-size="9" font-weight="700" fill="${B.sub}" letter-spacing="1">TY</text>`;
-  s += `<text x="${lyX}"    y="${padT - 10}" text-anchor="end"   font-size="9" font-weight="700" fill="${B.sub}" letter-spacing="1">LY</text>`;
-  s += `<text x="${chgX}"   y="${padT - 10}" text-anchor="end"   font-size="9" font-weight="700" fill="${B.sub}" letter-spacing="1">% CHG</text>`;
-  s += `<line x1="${labelX}" y1="${padT - 4}" x2="${W - 8}" y2="${padT - 4}" stroke="${B.brd}" stroke-width="0.5" opacity=".9"/>`;
+  // Dark panel behind table
+  s += `<rect x="${labelX - 14}" y="${padT - 36}" width="${W - labelX + 14}" height="${n * rowH + 44}" rx="8" fill="#0a1929" opacity=".65"/>`;
 
-  // ── Funnel + table rows ───────────────────────────────────
+  // Column headers
+  s += `<text x="${labelX}"  y="${padT - 15}" text-anchor="start" font-size="8" font-weight="700" fill="${B.sub}" letter-spacing="1.2">STAGE</text>`;
+  s += `<text x="${tyX}"     y="${padT - 15}" text-anchor="end"   font-size="8" font-weight="700" fill="${B.t3}"  letter-spacing="1.2">TY</text>`;
+  s += `<text x="${lyX}"     y="${padT - 15}" text-anchor="end"   font-size="8" font-weight="700" fill="${B.sub}" letter-spacing="1.2">LY</text>`;
+  s += `<text x="${chgX}"    y="${padT - 15}" text-anchor="end"   font-size="8" font-weight="700" fill="${B.sub}" letter-spacing="1.2">VS LY</text>`;
+  s += `<text x="${stepX}"   y="${padT - 15}" text-anchor="end"   font-size="8" font-weight="700" fill="${B.sub}" letter-spacing="1.2">STEP %</text>`;
+  s += `<line x1="${labelX - 14}" y1="${padT - 7}" x2="${W - 6}" y2="${padT - 7}" stroke="${B.t2}" stroke-width="0.6" opacity=".45"/>`;
+
   data.forEach((f, i) => {
-    const tyW  = tyW_fn(f.ty);
-    const lyW  = lyW_fn(f.ty, f.ly);
-    const nextF    = i < n - 1 ? data[i+1] : null;
-    const nextTyW  = nextF ? tyW_fn(nextF.ty)            : tyW  * 0.55;
-    const nextLyW  = nextF ? lyW_fn(nextF.ty, nextF.ly)  : lyW  * 0.55;
-    const rowY  = padT + i * rowH;
-    const segH  = rowH - 4;
-    const rowMid = rowY + rowH / 2;
+    const tyW = tyW_fn(f.ty);
+    const lyW = lyW_fn(f.ty, f.ly);
+    const nextF   = i < n - 1 ? data[i+1] : null;
+    const nextTyW = nextF ? tyW_fn(nextF.ty) : tyW * 0.52;
+    const nextLyW = nextF ? lyW_fn(nextF.ty, nextF.ly) : lyW * 0.52;
+    const rowY = padT + i * rowH, segH = rowH - 5, rowMid = rowY + rowH / 2;
 
-    // Funnel trapezoid
-    s += `<path d="M${funnelCX - tyW/2},${rowY + 2} L${funnelCX + tyW/2},${rowY + 2} L${funnelCX + nextTyW/2},${rowY + segH - 1} L${funnelCX - nextTyW/2},${rowY + segH - 1} Z" fill="url(#fg${i})" opacity=".92"/>`;
-    s += `<path d="M${funnelCX - lyW/2},${rowY} L${funnelCX + lyW/2},${rowY} L${funnelCX + nextLyW/2},${rowY + segH} L${funnelCX - nextLyW/2},${rowY + segH} Z" fill="none" stroke="#f59e0b" stroke-width="1.8" stroke-dasharray="6 3" opacity=".95"/>`;
-    // TY value on funnel bar
-    s += `<text x="${funnelCX}" y="${rowMid + 4}" text-anchor="middle" font-size="12" font-weight="700" fill="#fff">${fN(f.ty)}</text>`;
+    s += `<path d="M${funnelCX - tyW/2},${rowY+2} L${funnelCX + tyW/2},${rowY+2} L${funnelCX + nextTyW/2},${rowY+segH} L${funnelCX - nextTyW/2},${rowY+segH} Z" fill="url(#fg${i})" opacity=".93"/>`;
+    s += `<path d="M${funnelCX - lyW/2},${rowY} L${funnelCX + lyW/2},${rowY} L${funnelCX + nextLyW/2},${rowY+segH+2} L${funnelCX - nextLyW/2},${rowY+segH+2} Z" fill="none" stroke="#f59e0b" stroke-width="1.6" stroke-dasharray="5 3" opacity=".82"/>`;
+    s += `<text x="${funnelCX}" y="${rowMid+5}" text-anchor="middle" font-size="13" font-weight="800" fill="#ffffff">${fN(f.ty)}</text>`;
 
-    // Table row
     const lyDelta = f.ly > 0 ? dp(f.ty, f.ly) : null;
-    const deltaColor = lyDelta != null ? (lyDelta >= 0 ? '#4ade80' : '#fb923c') : B.sub;
+    const dCol = lyDelta != null ? (lyDelta >= 0 ? '#4ade80' : '#fb923c') : B.sub;
+    const sr   = stepRates[i];
+    const srCol = sr == null ? B.sub : sr >= 50 ? '#4ade80' : sr >= 20 ? B.t2 : '#f59e0b';
 
-    s += `<text x="${labelX}" y="${rowMid + 4}" text-anchor="start" font-size="11" font-weight="600" fill="#e2e8f0">${f.label}</text>`;
-    s += `<text x="${tyX}"    y="${rowMid + 4}" text-anchor="end"   font-size="12" font-weight="700" fill="#e2e8f0">${fN(f.ty)}</text>`;
-    s += `<text x="${lyX}"    y="${rowMid + 4}" text-anchor="end"   font-size="11"                   fill="${B.sub}">${fN(f.ly)}</text>`;
-    if (lyDelta != null) {
-      s += `<text x="${chgX}" y="${rowMid + 4}" text-anchor="end" font-size="11" font-weight="700" fill="${deltaColor}">${lyDelta >= 0 ? '\u25B2' : '\u25BC'} ${Math.abs(lyDelta).toFixed(1)}%</text>`;
-    } else {
-      s += `<text x="${chgX}" y="${rowMid + 4}" text-anchor="end" font-size="11" fill="${B.sub}">\u2014</text>`;
-    }
+    if (i % 2 === 0) s += `<rect x="${labelX-14}" y="${rowY}" width="${W - labelX + 14}" height="${rowH}" fill="white" opacity=".02" rx="2"/>`;
 
-    // Row divider (not after last)
-    if (i < n - 1) {
-      s += `<line x1="${labelX}" y1="${rowY + rowH}" x2="${W - 8}" y2="${rowY + rowH}" stroke="${B.brd}" stroke-width="0.4" opacity=".5"/>`;
-    }
+    s += `<text x="${labelX}" y="${rowMid+5}" text-anchor="start" font-size="12" font-weight="600" fill="#dde8f5">${f.label}</text>`;
+    s += `<text x="${tyX}"    y="${rowMid+5}" text-anchor="end"   font-size="14" font-weight="800" fill="#f0f8ff">${fN(f.ty)}</text>`;
+    s += `<text x="${lyX}"    y="${rowMid+5}" text-anchor="end"   font-size="11"                   fill="${B.sub}">${fN(f.ly)}</text>`;
+    s += lyDelta != null
+      ? `<text x="${chgX}" y="${rowMid+5}" text-anchor="end" font-size="11" font-weight="700" fill="${dCol}">${lyDelta>=0?'\u25B2':'\u25BC'} ${Math.abs(lyDelta).toFixed(1)}%</text>`
+      : `<text x="${chgX}" y="${rowMid+5}" text-anchor="end" font-size="11" fill="${B.sub}">\u2014</text>`;
+    s += sr != null
+      ? `<text x="${stepX}" y="${rowMid+5}" text-anchor="end" font-size="12" font-weight="700" fill="${srCol}">${sr.toFixed(0)}%</text>`
+      : `<text x="${stepX}" y="${rowMid+5}" text-anchor="end" font-size="9"  font-weight="600" fill="${B.sub}">ENTRY</text>`;
+
+    if (i < n-1) s += `<line x1="${labelX-14}" y1="${rowY+rowH}" x2="${W-6}" y2="${rowY+rowH}" stroke="${B.brd}" stroke-width="0.4" opacity=".4"/>`;
   });
 
-  // ── Derived rows: ATC% and Conv% ──────────────────────────
-  const divY = padT + n * rowH + 8;
-  s += `<line x1="${labelX}" y1="${divY}" x2="${W - 8}" y2="${divY}" stroke="${B.brd}" stroke-width="0.6" opacity=".8"/>`;
-
+  const divY = padT + n * rowH + 12;
+  s += `<line x1="${labelX-14}" y1="${divY}" x2="${W-6}" y2="${divY}" stroke="${B.t2}" stroke-width="0.6" opacity=".35"/>`;
   const derivedRows = [];
   if (atcPct_ty != null) {
     const atcChg = atcPct_ly != null ? dp(parseFloat(atcPct_ty), parseFloat(atcPct_ly)) : null;
-    derivedRows.push({ label: 'ATC %', ty: atcPct_ty + '%', ly: atcPct_ly != null ? atcPct_ly + '%' : '\u2014', chg: atcChg });
+    derivedRows.push({ label:'Add-to-Cart %', ty:atcPct_ty+'%', ly:atcPct_ly!=null?atcPct_ly+'%':'\u2014', chg:atcChg });
   }
   if (conv_ty != null) {
     const convChg = conv_ly != null ? dp(parseFloat(conv_ty), parseFloat(conv_ly)) : null;
-    derivedRows.push({ label: 'Conversion %', ty: conv_ty + '%', ly: conv_ly != null ? conv_ly + '%' : '\u2014', chg: convChg });
+    derivedRows.push({ label:'Conversion %', ty:conv_ty+'%', ly:conv_ly!=null?conv_ly+'%':'\u2014', chg:convChg });
   }
-
   derivedRows.forEach((dm, i) => {
-    const ry = divY + 20 + i * derivedRowH;
-    const chgColor = dm.chg != null ? (dm.chg >= 0 ? '#4ade80' : '#fb923c') : B.sub;
-    s += `<text x="${labelX}" y="${ry}" text-anchor="start" font-size="11" font-weight="600" fill="#e2e8f0">${dm.label}</text>`;
-    s += `<text x="${tyX}"    y="${ry}" text-anchor="end"   font-size="12" font-weight="700" fill="#e2e8f0">${dm.ty}</text>`;
-    s += `<text x="${lyX}"    y="${ry}" text-anchor="end"   font-size="11"               fill="${B.sub}">${dm.ly}</text>`;
-    if (dm.chg != null) {
-      s += `<text x="${chgX}" y="${ry}" text-anchor="end" font-size="11" font-weight="700" fill="${chgColor}">${dm.chg >= 0 ? '\u25B2' : '\u25BC'} ${Math.abs(dm.chg).toFixed(1)}%</text>`;
-    } else {
-      s += `<text x="${chgX}" y="${ry}" text-anchor="end" font-size="11" fill="${B.sub}">\u2014</text>`;
-    }
+    const ry = divY + 24 + i * derivedRowH;
+    const cCol = dm.chg != null ? (dm.chg>=0?'#4ade80':'#fb923c') : B.sub;
+    s += `<rect x="${labelX-14}" y="${ry-18}" width="${W-labelX+14}" height="${derivedRowH}" fill="${B.t1}" opacity=".18" rx="3"/>`;
+    s += `<text x="${labelX}" y="${ry+2}" text-anchor="start" font-size="11" font-weight="600" fill="${B.t3}">${dm.label}</text>`;
+    s += `<text x="${tyX}"    y="${ry+2}" text-anchor="end"   font-size="14" font-weight="800" fill="${B.t2}">${dm.ty}</text>`;
+    s += `<text x="${lyX}"    y="${ry+2}" text-anchor="end"   font-size="11"                   fill="${B.sub}">${dm.ly}</text>`;
+    if (dm.chg != null) s += `<text x="${chgX}" y="${ry+2}" text-anchor="end" font-size="11" font-weight="700" fill="${cCol}">${dm.chg>=0?'\u25B2':'\u25BC'} ${Math.abs(dm.chg).toFixed(1)}%</text>`;
   });
 
-  // ── Legend (bottom-left, under funnel) ────────────────────
   const legY = H - padB + 18;
   s += `<g transform="translate(16,${legY})">`;
-  s += `<rect width="10" height="10" y="-1" rx="2" fill="${B.b2}" opacity=".9"/><text x="14" y="8" font-size="9" fill="${B.sub}">This Year</text>`;
-  s += `<rect x="90" width="10" height="8" y="0" rx="2" fill="none" stroke="${B.sub}" stroke-width="1" stroke-dasharray="4 2"/><text x="104" y="8" font-size="9" fill="${B.sub}">Last Year</text>`;
+  s += `<rect width="12" height="12" y="-2" rx="2" fill="${B.b2}" opacity=".9"/><text x="16" y="9" font-size="9" fill="${B.sub}">This Year (TY)</text>`;
+  s += `<rect x="130" width="12" height="9" y="0" rx="2" fill="none" stroke="#f59e0b" stroke-width="1.5" stroke-dasharray="4 2"/><text x="146" y="9" font-size="9" fill="${B.sub}">Last Year outline</text>`;
+  s += `<text x="300" y="9" font-size="9" fill="${B.sub}">STEP% \u2014 % of visitors passing through from prior stage</text>`;
   s += `</g>`;
-
   return s + '</svg>';
 }
+
 
 function adQuadrantSVG(data) {
   if (!data || !data.ty) return '<div style="color:#374f66;padding:20px;text-align:center;font-size:12px">No ad efficiency data</div>';
-  const W=1100, H=340, pad={t:50,r:120,b:60,l:80};
+  const W=1100, H=340, pad={t:52,r:130,b:62,l:82};
   const iw=W-pad.l-pad.r, ih=H-pad.t-pad.b;
   const acosMin=0, acosMax=0.40, roasMin=0, roasMax=12;
   const {acos:tyAcos, roas:tyRoas} = data.ty;
-  const {acos:lyAcos, roas:lyRoas} = data.ly;
+  const {acos:lyAcos, roas:lyRoas} = data.ly || {acos:0,roas:0};
   const px = v => pad.l+((v-acosMin)/(acosMax-acosMin))*iw;
   const py = v => pad.t+ih-((v-roasMin)/(roasMax-roasMin))*ih;
   const lyx=px(lyAcos), lyy=py(lyRoas), tyx=px(tyAcos), tyy=py(tyRoas);
-  const midX=lyx, midY=lyy;
   let s = `<svg width="100%" viewBox="0 0 ${W} ${H}" style="overflow:visible;display:block">`;
-  // Quadrant backgrounds
-  s+=`<rect x="${pad.l}" y="${pad.t}" width="${midX-pad.l}" height="${midY-pad.t}" fill="${B.t1}" opacity=".12" rx="4"/>`;
-  s+=`<rect x="${midX}" y="${pad.t}" width="${pad.l+iw-midX}" height="${midY-pad.t}" fill="${B.o2}" opacity=".08" rx="4"/>`;
-  s+=`<rect x="${pad.l}" y="${midY}" width="${midX-pad.l}" height="${pad.t+ih-midY}" fill="${B.b1}" opacity=".08" rx="4"/>`;
-  s+=`<rect x="${midX}" y="${midY}" width="${pad.l+iw-midX}" height="${pad.t+ih-midY}" fill="${B.o1}" opacity=".14" rx="4"/>`;
+
+  // Quadrant backgrounds — use LY as crosshair origin
+  const qX = lyx, qY = lyy;
+  s+=`<rect x="${pad.l}" y="${pad.t}"  width="${qX-pad.l}"     height="${qY-pad.t}"      fill="${B.t1}" opacity=".10" rx="3"/>`;
+  s+=`<rect x="${qX}"    y="${pad.t}"  width="${pad.l+iw-qX}"  height="${qY-pad.t}"      fill="${B.o2}" opacity=".07" rx="3"/>`;
+  s+=`<rect x="${pad.l}" y="${qY}"     width="${qX-pad.l}"     height="${pad.t+ih-qY}"   fill="${B.b1}" opacity=".07" rx="3"/>`;
+  s+=`<rect x="${qX}"    y="${qY}"     width="${pad.l+iw-qX}"  height="${pad.t+ih-qY}"   fill="${B.o1}" opacity=".12" rx="3"/>`;
+
   // Quadrant labels
-  s+=`<text x="${(pad.l+midX)/2}" y="${(pad.t+midY)/2-8}" text-anchor="middle" font-size="11" font-weight="600" fill="${B.t2}" opacity=".7">IDEAL</text>`;
-  s+=`<text x="${(pad.l+midX)/2}" y="${(pad.t+midY)/2+7}" text-anchor="middle" font-size="9" fill="${B.t2}" opacity=".5">Low ACOS \u00B7 High ROAS</text>`;
-  s+=`<text x="${(midX+pad.l+iw)/2}" y="${(pad.t+midY)/2-8}" text-anchor="middle" font-size="11" font-weight="600" fill="${B.o2}" opacity=".7">HIGH SPEND</text>`;
-  s+=`<text x="${(midX+pad.l+iw)/2}" y="${(pad.t+midY)/2+7}" text-anchor="middle" font-size="9" fill="${B.o2}" opacity=".5">Optimize bids</text>`;
-  s+=`<text x="${(pad.l+midX)/2}" y="${(midY+pad.t+ih)/2-2}" text-anchor="middle" font-size="11" font-weight="600" fill="${B.sub}" opacity=".5">UNDERINVESTING</text>`;
-  s+=`<text x="${(midX+pad.l+iw)/2}" y="${(midY+pad.t+ih)/2-2}" text-anchor="middle" font-size="11" font-weight="600" fill="${B.o1}" opacity=".7">INEFFICIENT</text>`;
-  // Grid
-  for(let i=0;i<=4;i++){const xv=acosMin+(acosMax-acosMin)*(i/4),xp=px(xv);s+=`<line x1="${xp}" y1="${pad.t}" x2="${xp}" y2="${pad.t+ih}" stroke="#1a2f4a" stroke-width="0.5"/><text x="${xp}" y="${pad.t+ih+14}" text-anchor="middle" font-size="9" fill="#374f66">${(xv*100).toFixed(0)}%</text>`;const yv=roasMin+(roasMax-roasMin)*(i/4),yp=py(yv);s+=`<line x1="${pad.l}" y1="${yp}" x2="${pad.l+iw}" y2="${yp}" stroke="#1a2f4a" stroke-width="0.5"/><text x="${pad.l-8}" y="${yp+4}" text-anchor="end" font-size="9" fill="#374f66">${yv.toFixed(1)}x</text>`;}
-  // LY crosshair
-  s+=`<line x1="${lyx}" y1="${pad.t}" x2="${lyx}" y2="${pad.t+ih}" stroke="${B.sub}" stroke-width="1" stroke-dasharray="5 4" opacity=".5"/>`;
-  s+=`<line x1="${pad.l}" y1="${lyy}" x2="${pad.l+iw}" y2="${lyy}" stroke="${B.sub}" stroke-width="1" stroke-dasharray="5 4" opacity=".5"/>`;
-  s+=`<text x="${lyx+4}" y="${pad.t-6}" font-size="9" fill="${B.sub}">LY avg (ACOS ${(lyAcos*100).toFixed(0)}%)</text>`;
-  // Trajectory arrow
-  const angle=Math.atan2(tyy-lyy,tyx-lyx),dist=Math.sqrt((tyx-lyx)**2+(tyy-lyy)**2),shorten=18;
-  const ex=lyx+Math.cos(angle)*(dist-shorten),ey=lyy+Math.sin(angle)*(dist-shorten);
-  s+=`<line x1="${lyx}" y1="${lyy}" x2="${ex}" y2="${ey}" stroke="${B.t2}" stroke-width="1.5" stroke-dasharray="4 3" opacity=".7"/>`;
-  const aw=8,ah=5,ax1=ex-aw*Math.cos(angle)+ah*Math.sin(angle),ay1=ey-aw*Math.sin(angle)-ah*Math.cos(angle),ax2=ex-aw*Math.cos(angle)-ah*Math.sin(angle),ay2=ey-aw*Math.sin(angle)+ah*Math.cos(angle);
-  s+=`<path d="M${ex},${ey} L${ax1},${ay1} L${ax2},${ay2} Z" fill="${B.t2}" opacity=".7"/>`;
+  s+=`<text x="${(pad.l+qX)/2}"      y="${(pad.t+qY)/2-6}"   text-anchor="middle" font-size="11" font-weight="700" fill="${B.t2}"  opacity=".75">IDEAL</text>`;
+  s+=`<text x="${(pad.l+qX)/2}"      y="${(pad.t+qY)/2+9}"   text-anchor="middle" font-size="9"                    fill="${B.t2}"  opacity=".5">Low ACOS \u00B7 High ROAS</text>`;
+  s+=`<text x="${(qX+pad.l+iw)/2}"   y="${(pad.t+qY)/2-6}"   text-anchor="middle" font-size="11" font-weight="700" fill="${B.o2}"  opacity=".7">HIGH SPEND</text>`;
+  s+=`<text x="${(qX+pad.l+iw)/2}"   y="${(pad.t+qY)/2+9}"   text-anchor="middle" font-size="9"                    fill="${B.o2}"  opacity=".5">Optimize bids</text>`;
+  s+=`<text x="${(pad.l+qX)/2}"      y="${(qY+pad.t+ih)/2}"  text-anchor="middle" font-size="10" font-weight="600" fill="${B.sub}" opacity=".5">UNDERINVESTING</text>`;
+  s+=`<text x="${(qX+pad.l+iw)/2}"   y="${(qY+pad.t+ih)/2}"  text-anchor="middle" font-size="11" font-weight="700" fill="${B.o1}"  opacity=".7">INEFFICIENT</text>`;
+
+  // Grid lines + axis labels
+  for(let i=0;i<=5;i++){
+    const xv=acosMin+(acosMax-acosMin)*(i/5), xp=px(xv);
+    s+=`<line x1="${xp}" y1="${pad.t}" x2="${xp}" y2="${pad.t+ih}" stroke="#1a2f4a" stroke-width="0.6"/>`;
+    s+=`<text x="${xp}" y="${pad.t+ih+14}" text-anchor="middle" font-size="9" fill="#4a6a88">${(xv*100).toFixed(0)}%</text>`;
+    const yv=roasMin+(roasMax-roasMin)*(i/5), yp=py(yv);
+    s+=`<line x1="${pad.l}" y1="${yp}" x2="${pad.l+iw}" y2="${yp}" stroke="#1a2f4a" stroke-width="0.6"/>`;
+    s+=`<text x="${pad.l-8}" y="${yp+4}" text-anchor="end" font-size="9" fill="#4a6a88">${yv.toFixed(1)}x</text>`;
+  }
+
+  // LY crosshair dashes
+  s+=`<line x1="${lyx}" y1="${pad.t}" x2="${lyx}" y2="${pad.t+ih}" stroke="${B.sub}" stroke-width="1.2" stroke-dasharray="5 4" opacity=".45"/>`;
+  s+=`<line x1="${pad.l}" y1="${lyy}" x2="${pad.l+iw}" y2="${lyy}" stroke="${B.sub}" stroke-width="1.2" stroke-dasharray="5 4" opacity=".45"/>`;
+  s+=`<text x="${lyx+4}" y="${pad.t-8}" font-size="9" fill="${B.sub}" opacity=".8">LY (ACOS ${(lyAcos*100).toFixed(0)}%)</text>`;
+
+  // Trajectory arrow LY → TY
+  const angle=Math.atan2(tyy-lyy,tyx-lyx);
+  const dist=Math.sqrt((tyx-lyx)**2+(tyy-lyy)**2);
+  if(dist>20){
+    const shorten=19;
+    const ex=lyx+Math.cos(angle)*(dist-shorten), ey=lyy+Math.sin(angle)*(dist-shorten);
+    s+=`<line x1="${lyx}" y1="${lyy}" x2="${ex}" y2="${ey}" stroke="${B.t2}" stroke-width="1.5" stroke-dasharray="4 3" opacity=".7"/>`;
+    const aw=8,ah=5;
+    const ax1=ex-aw*Math.cos(angle)+ah*Math.sin(angle), ay1=ey-aw*Math.sin(angle)-ah*Math.cos(angle);
+    const ax2=ex-aw*Math.cos(angle)-ah*Math.sin(angle), ay2=ey-aw*Math.sin(angle)+ah*Math.cos(angle);
+    s+=`<path d="M${ex},${ey} L${ax1},${ay1} L${ax2},${ay2} Z" fill="${B.t2}" opacity=".7"/>`;
+  }
+
   // Dots
-  s+=`<circle cx="${lyx}" cy="${lyy}" r="8" fill="${B.dim}" opacity=".8" stroke="#0c1a2e" stroke-width="2"/><text x="${lyx}" y="${lyy+4}" text-anchor="middle" font-size="8" font-weight="700" fill="#fff">LY</text>`;
-  s+=`<circle cx="${tyx}" cy="${tyy}" r="16" fill="${B.b2}" opacity=".18"/><circle cx="${tyx}" cy="${tyy}" r="11" fill="${B.b2}" stroke="#0c1a2e" stroke-width="2"/><text x="${tyx}" y="${tyy+4}" text-anchor="middle" font-size="9" font-weight="700" fill="#fff">TY</text>`;
-  // Callout
-  s+=`<rect x="${tyx+18}" y="${tyy-30}" width="155" height="56" rx="6" fill="#122138" stroke="#1a2f4a" stroke-width="1"/>`;
-  s+=`<text x="${tyx+26}" y="${tyy-14}" font-size="10" font-weight="700" fill="#f1f5f9">ACOS: ${(tyAcos*100).toFixed(1)}%  ROAS: ${tyRoas.toFixed(2)}x</text>`;
+  s+=`<circle cx="${lyx}" cy="${lyy}" r="9"  fill="${B.dim}" opacity=".85" stroke="#0c1a2e" stroke-width="2"/>`;
+  s+=`<text   x="${lyx}"  y="${lyy+4}" text-anchor="middle" font-size="8" font-weight="700" fill="#fff">LY</text>`;
+  s+=`<circle cx="${tyx}" cy="${tyy}" r="18" fill="${B.b2}" opacity=".15"/>`;
+  s+=`<circle cx="${tyx}" cy="${tyy}" r="12" fill="${B.b2}" stroke="#0c1a2e" stroke-width="2"/>`;
+  s+=`<text   x="${tyx}"  y="${tyy+4}" text-anchor="middle" font-size="9" font-weight="700" fill="#fff">TY</text>`;
+
+  // Callout box — flip left if TY dot is near right edge
+  const goLeft = tyx > W * 0.60;
+  const boxW = 168, boxH = 60;
+  const bx = goLeft ? tyx - 22 - boxW : tyx + 22;
+  const by = Math.min(pad.t, tyy - 35);
+  s+=`<rect x="${bx}" y="${by}" width="${boxW}" height="${boxH}" rx="7" fill="#0f1f35" stroke="#1e3a5a" stroke-width="1.2"/>`;
+  s+=`<text x="${bx+12}" y="${by+18}" font-size="11" font-weight="700" fill="#e8f4fd">ACOS: ${(tyAcos*100).toFixed(1)}%   ROAS: ${tyRoas.toFixed(2)}x</text>`;
   const acosChg = lyAcos > 0 ? ((1-tyAcos/lyAcos)*100).toFixed(1) : '0.0';
   const roasChg = lyRoas > 0 ? ((tyRoas/lyRoas-1)*100).toFixed(1) : '0.0';
-  s+=`<text x="${tyx+26}" y="${tyy+2}" font-size="9" fill="${B.t2}">\u25B2 ${acosChg}% ACOS improvement</text>`;
-  s+=`<text x="${tyx+26}" y="${tyy+18}" font-size="9" fill="${B.t2}">\u25B2 ${roasChg}% ROAS improvement</text>`;
+  const acosUp = parseFloat(acosChg) >= 0;
+  const roasUp = parseFloat(roasChg) >= 0;
+  s+=`<text x="${bx+12}" y="${by+35}" font-size="9" fill="${acosUp?'#4ade80':'#fb923c'}">${acosUp?'\u25B2':'\u25BC'} ${Math.abs(acosChg)}% ACOS ${acosUp?'improvement':'increase'}</text>`;
+  s+=`<text x="${bx+12}" y="${by+51}" font-size="9" fill="${roasUp?'#4ade80':'#fb923c'}">${roasUp?'\u25B2':'\u25BC'} ${Math.abs(roasChg)}% ROAS ${roasUp?'improvement':'decline'}</text>`;
+
   // Axis labels
-  s+=`<text x="${pad.l+iw/2}" y="${H-4}" text-anchor="middle" font-size="11" fill="${B.sub}">ACOS \u2192  (lower is better)</text>`;
-  s+=`<text x="${pad.l-55}" y="${pad.t+ih/2}" text-anchor="middle" font-size="11" fill="${B.sub}" transform="rotate(-90,${pad.l-55},${pad.t+ih/2})">ROAS \u2192  (higher is better)</text>`;
+  s+=`<text x="${pad.l+iw/2}" y="${H-6}" text-anchor="middle" font-size="11" fill="${B.sub}">ACOS \u2192  (lower is better)</text>`;
+  s+=`<text x="${pad.l-60}" y="${pad.t+ih/2}" text-anchor="middle" font-size="11" fill="${B.sub}" transform="rotate(-90,${pad.l-60},${pad.t+ih/2})">ROAS \u2192  (higher is better)</text>`;
   return s + '</svg>';
 }
 
-function hourlySVG(tyData, lyData, currentHour, W=1100, H=160) {
+
+function hourlySVG(tyData, lyData, currentHour, W=1100, H=180) {
   if (!tyData || tyData.length === 0) return '<div style="color:#374f66;padding:20px;text-align:center;font-size:12px">No hourly data</div>';
-  const pad = {t:16, r:16, b:28, l:54};
+  const pad = {t:20, r:18, b:36, l:58};
   const iw = W - pad.l - pad.r, ih = H - pad.t - pad.b;
   const nHours = 24;
-  const barW = Math.max(10, (iw / nHours) * 0.62);
+  const barW = Math.max(12, (iw / nHours) * 0.58);
   const tyMap = {}, lyMap = {};
   tyData.forEach(d => { tyMap[d.hour] = d.sales || 0; });
   lyData.forEach(d => { lyMap[d.hour] = d.sales || 0; });
@@ -559,42 +577,60 @@ function hourlySVG(tyData, lyData, currentHour, W=1100, H=160) {
   const fmtHr = h => h === 0 ? '12a' : h < 12 ? `${h}a` : h === 12 ? '12p' : `${h-12}p`;
   const uid = `hr${Math.random().toString(36).slice(2,6)}`;
   let s = `<svg width="100%" viewBox="0 0 ${W} ${H}" style="overflow:visible;display:block">`;
-  s += `<defs><linearGradient id="${uid}" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stop-color="#2E6FBB" stop-opacity=".9"/><stop offset="100%" stop-color="#2E6FBB" stop-opacity=".4"/></linearGradient></defs>`;
-  // Grid lines
+  s += `<defs>`;
+  s += `<linearGradient id="${uid}ty" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stop-color="#2E6FBB" stop-opacity=".92"/><stop offset="100%" stop-color="#2E6FBB" stop-opacity=".35"/></linearGradient>`;
+  s += `<linearGradient id="${uid}now" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stop-color="#4DC5B8" stop-opacity=".95"/><stop offset="100%" stop-color="#4DC5B8" stop-opacity=".4"/></linearGradient>`;
+  s += `</defs>`;
+
+  // Grid lines + Y-axis labels
   for (let i = 0; i <= 4; i++) {
     const v = maxV * (i/4);
-    s += `<line x1="${pad.l}" y1="${yV(v).toFixed(1)}" x2="${W-pad.r}" y2="${yV(v).toFixed(1)}" stroke="#1a2f4a" stroke-width="0.5"/>`;
-    s += `<text x="${pad.l-5}" y="${(yV(v)+4).toFixed(1)}" text-anchor="end" font-size="9" fill="#374f66">${f$(v)}</text>`;
+    const y = yV(v).toFixed(1);
+    s += `<line x1="${pad.l}" y1="${y}" x2="${W-pad.r}" y2="${y}" stroke="#1a2f4a" stroke-width="${i===0?'0.8':'0.5'}"/>`;
+    s += `<text x="${pad.l-6}" y="${(parseFloat(y)+4).toFixed(1)}" text-anchor="end" font-size="9" fill="#4a6a88">${f$(v)}</text>`;
   }
+
+  // Hour bands for readability (alternating light shading)
+  for (let h = 0; h < 24; h+=2) {
+    const bx = xH(h) - barW * 1.4;
+    const bw = barW * 2.8;
+    s += `<rect x="${bx.toFixed(1)}" y="${pad.t}" width="${bw.toFixed(1)}" height="${ih}" fill="white" opacity=".012"/>`;
+  }
+
   // TY bars
   for (let h = 0; h < 24; h++) {
     const v = tyMap[h] || 0;
-    const bh = maxV > 0 ? (v / maxV) * ih : 0;
-    const bx = xH(h) - barW/2;
-    const isFuture = currentHour != null && h > currentHour;
-    if (bh > 0) {
-      s += `<rect x="${bx.toFixed(1)}" y="${yV(v).toFixed(1)}" width="${barW.toFixed(1)}" height="${bh.toFixed(1)}" fill="url(#${uid})" rx="2" opacity="${isFuture ? 0.18 : 0.9}"/>`;
-    }
+    if (v <= 0) continue;
+    const bh = (v / maxV) * ih;
+    const isCurrent = currentHour != null && h === currentHour;
+    const isFuture  = currentHour != null && h > currentHour;
+    s += `<rect x="${(xH(h) - barW/2).toFixed(1)}" y="${yV(v).toFixed(1)}" width="${barW.toFixed(1)}" height="${bh.toFixed(1)}" fill="${isCurrent ? `url(#${uid}now)` : `url(#${uid}ty)`}" rx="2" opacity="${isFuture ? 0.22 : 0.92}"/>`;
   }
-  // LY dashed line
+
+  // LY line
   const lyPts = Array.from({length:24}, (_,h) => `${xH(h).toFixed(1)},${yV(lyMap[h]||0).toFixed(1)}`).join(' ');
-  s += `<polyline points="${lyPts}" fill="none" stroke="#f59e0b" stroke-width="1.8" stroke-dasharray="5 3" stroke-linejoin="round" opacity=".85"/>`;
-  // LY dots at each hour with data
+  s += `<polyline points="${lyPts}" fill="none" stroke="#f59e0b" stroke-width="2" stroke-dasharray="5 3" stroke-linejoin="round" opacity=".85"/>`;
   for (let h = 0; h < 24; h++) {
-    if ((lyMap[h]||0) > 0) s += `<circle cx="${xH(h).toFixed(1)}" cy="${yV(lyMap[h]).toFixed(1)}" r="2.5" fill="#f59e0b" opacity=".7"/>`;
+    if ((lyMap[h]||0) > 0) s += `<circle cx="${xH(h).toFixed(1)}" cy="${yV(lyMap[h]).toFixed(1)}" r="2.5" fill="#f59e0b" opacity=".75"/>`;
   }
-  // Current hour vertical marker
+
+  // "Now" marker
   if (currentHour != null && currentHour >= 0 && currentHour <= 23) {
     const mx = xH(currentHour).toFixed(1);
-    s += `<line x1="${mx}" y1="${pad.t}" x2="${mx}" y2="${pad.t+ih}" stroke="#4DC5B8" stroke-width="1.2" stroke-dasharray="4 3" opacity=".9"/>`;
-    s += `<text x="${parseFloat(mx)+3}" y="${pad.t+10}" font-size="8" fill="#4DC5B8" font-weight="700">now</text>`;
+    s += `<line x1="${mx}" y1="${pad.t-4}" x2="${mx}" y2="${pad.t+ih}" stroke="#4DC5B8" stroke-width="1.4" stroke-dasharray="3 3" opacity=".9"/>`;
+    s += `<text x="${parseFloat(mx)+4}" y="${pad.t+2}" font-size="8" font-weight="700" fill="#4DC5B8">now</text>`;
   }
-  // Hour labels
+
+  // X-axis hour labels — every 3 hours
   [0,3,6,9,12,15,18,21,23].forEach(h => {
-    s += `<text x="${xH(h).toFixed(1)}" y="${H-6}" text-anchor="middle" font-size="8" fill="#374f66">${fmtHr(h)}</text>`;
+    s += `<text x="${xH(h).toFixed(1)}" y="${H-10}" text-anchor="middle" font-size="9" fill="#4a6a88">${fmtHr(h)}</text>`;
+    s += `<line x1="${xH(h).toFixed(1)}" y1="${pad.t+ih}" x2="${xH(h).toFixed(1)}" y2="${pad.t+ih+4}" stroke="#1a2f4a" stroke-width="0.8"/>`;
   });
+  s += `<line x1="${pad.l}" y1="${pad.t+ih}" x2="${W-pad.r}" y2="${pad.t+ih}" stroke="#1a2f4a" stroke-width="0.8"/>`;
+
   return s + '</svg>';
 }
+
 
 // ── Conversion Rate Arc Gauge ──────────────────────────────────────────────
 // Semi-circular gauge: left=0%, right=max. TY arc colored by delta vs LY.
@@ -1778,11 +1814,17 @@ export default function Sales({ filters = {} }) {
           }}>{label}</button>
         );
 
+        // New layout: days = rows (last 7), hours = columns, labels at bottom
+        const HCOL_W = 34;  // px per hour column
+        const DLW    = 72;  // px for day-label column
+        const DRH    = 30;  // px row height
+        const last7  = hmDays.slice(-7);
+
         return (
           <div style={{background:'var(--surf)',border:'1px solid var(--brd)',borderRadius:14,padding:'14px 16px',marginBottom:12}}>
             {/* Header */}
             <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:10,flexWrap:'wrap',gap:8}}>
-              <span style={{fontSize:13,fontWeight:700,color:'var(--txt)'}}>Hourly Sales — 30 Day View</span>
+              <span style={{fontSize:13,fontWeight:700,color:'var(--txt)'}}>Hourly Sales — Last 7 Days</span>
               <div style={{display:'flex',gap:5,alignItems:'center',flexWrap:'wrap'}}>
                 {pillBtn('$', hmMetric==='$', ()=>setHmMetric('$'))}
                 {pillBtn('Units', hmMetric==='units', ()=>setHmMetric('units'))}
@@ -1794,61 +1836,47 @@ export default function Sales({ filters = {} }) {
 
             {errors.hmData && <div style={{padding:'10px 14px',color:'#fb923c',fontSize:11,background:'rgba(251,146,60,.08)',border:'1px solid rgba(251,146,60,.18)',borderRadius:8,marginBottom:8}}>⚠ {errors.hmData}</div>}
 
-            {loading.hmData ? <Spinner/> : hmDays.length === 0 ? (
+            {loading.hmData ? <Spinner/> : last7.length === 0 ? (
               <div style={{padding:'24px',textAlign:'center',color:B.sub,fontSize:12}}>No hourly data yet — data accumulates over time</div>
             ) : (
               <div style={{overflowX:'auto',overflowY:'visible'}}>
-                {/* Day header: month labels */}
-                <div style={{display:'flex',marginLeft:LABEL_W,marginBottom:1}}>
-                  {hmDays.map(d => (
-                    <div key={d.date} style={{width:CELL_W,flexShrink:0,textAlign:'center',overflow:'hidden'}}>
-                      <div style={{fontSize:7,color:d.isToday?B.b3:B.sub,fontWeight:d.isToday?700:400,lineHeight:'1.3',whiteSpace:'nowrap',overflow:'hidden'}}>
-                        {d.label.replace(/\s+/,'<br>')}
-                      </div>
-                    </div>
-                  ))}
-                </div>
-                {/* Day header: day-of-week labels */}
-                <div style={{display:'flex',marginLeft:LABEL_W,marginBottom:3}}>
-                  {hmDays.map(d => (
-                    <div key={`dow-${d.date}`} style={{width:CELL_W,flexShrink:0,textAlign:'center'}}>
-                      <div style={{fontSize:7,color:d.isToday?B.b3:(d.dayOfWeek==='Sat'||d.dayOfWeek==='Sun'?'#5a7a9a':B.sub),
-                        fontWeight:d.isToday?700:400,lineHeight:'1.3'}}>
+                {/* Day rows */}
+                {last7.map(d => (
+                  <div key={d.date} style={{display:'flex',alignItems:'center',marginBottom:2}}>
+                    {/* Day label */}
+                    <div style={{
+                      width:DLW, flexShrink:0, paddingRight:8, textAlign:'right',
+                    }}>
+                      <div style={{fontSize:9,fontWeight:d.isToday?700:500,color:d.isToday?B.b3:B.txt,lineHeight:'1.2',whiteSpace:'nowrap'}}>
                         {d.dayOfWeek}
                       </div>
+                      <div style={{fontSize:8,color:d.isToday?B.b2:B.sub,lineHeight:'1.2',whiteSpace:'nowrap'}}>
+                        {d.label}
+                      </div>
                     </div>
-                  ))}
-                </div>
-
-                {/* Hour rows */}
-                {visHours.map(h => (
-                  <div key={h} style={{display:'flex',alignItems:'center',marginBottom:1}}>
-                    {/* Hour label */}
-                    <div style={{width:LABEL_W,flexShrink:0,textAlign:'right',paddingRight:5,fontSize:8,color:B.sub,fontVariantNumeric:'tabular-nums'}}>
-                      {HOUR_LABELS[h]}
-                    </div>
-                    {/* Day cells */}
-                    {hmDays.map(d => {
+                    {/* Hour cells */}
+                    {visHours.map(h => {
                       const cell = d.hours[h] || {};
                       const val = hmMetric === '$' ? cell.sales : cell.units;
                       const isFuture = (val === null || val === undefined);
                       const numVal = isFuture ? 0 : (Number(val) || 0);
                       const pct = (numVal > 0) ? Math.sqrt(numVal) / sqrtMax : 0;
                       const bgColor = isFuture ? 'rgb(21,37,62)' : (numVal > 0 ? hmColor(pct) : 'rgb(21,37,62)');
-                      const opacity = isFuture ? 0.08 : (numVal > 0 ? 0.55 + pct*0.45 : 0.18);
+                      const opacity = isFuture ? 0.06 : (numVal > 0 ? 0.55 + pct*0.45 : 0.16);
                       const txtColor = pct > 0.5 ? '#ffffff' : '#7a9bbf';
                       const tipLabel = `${d.label} ${HOUR_LABELS[h]}`;
                       const tipVal = hmMetric === '$' ? f$(numVal) : `${numVal} units`;
                       return (
-                        <div key={d.date} title={isFuture ? `${tipLabel}: future` : `${tipLabel}: ${tipVal}`}
+                        <div key={h}
+                          title={isFuture ? `${tipLabel}: future` : `${tipLabel}: ${tipVal}`}
                           style={{
-                            width: CELL_W-2, height: CELL_H, marginRight:2,
+                            width: HCOL_W-2, height: DRH, marginRight:2,
                             background: bgColor, opacity,
                             borderRadius:3, flexShrink:0,
                             display:'flex',alignItems:'center',justifyContent:'center',
                             fontSize:7, color:txtColor, fontWeight:600,
                             overflow:'hidden', cursor:'default',
-                            border: d.isToday ? `1px solid ${B.b2}33` : 'none',
+                            border: d.isToday ? `1px solid ${B.b2}44` : 'none',
                           }}>
                           {!isFuture && numVal > 0 && fCell(numVal)}
                         </div>
@@ -1857,10 +1885,22 @@ export default function Sales({ filters = {} }) {
                   </div>
                 ))}
 
+                {/* Hour labels at bottom */}
+                <div style={{display:'flex',marginLeft:DLW,marginTop:4}}>
+                  {visHours.map(h => (
+                    <div key={h} style={{
+                      width:HCOL_W-2, marginRight:2, flexShrink:0,
+                      textAlign:'center', fontSize:7, color:B.sub,
+                      fontVariantNumeric:'tabular-nums', lineHeight:'1.2',
+                    }}>
+                      {HOUR_LABELS[h]}
+                    </div>
+                  ))}
+                </div>
+
                 {/* Footer */}
-                <div style={{display:'flex',justifyContent:'space-between',marginTop:6,marginLeft:LABEL_W}}>
+                <div style={{display:'flex',justifyContent:'space-between',marginTop:8,marginLeft:DLW}}>
                   <div style={{display:'flex',gap:10,alignItems:'center'}}>
-                    {/* Color scale legend */}
                     <div style={{display:'flex',alignItems:'center',gap:3}}>
                       <span style={{fontSize:8,color:B.sub}}>Low</span>
                       {[0,.17,.33,.5,.67,.83,1].map(t => (
@@ -2293,20 +2333,85 @@ export default function Sales({ filters = {} }) {
 
       {/* ══ INVENTORY HEALTH ════════════════════════════════════════ */}
       <SectionDivider label="Inventory Health"/>
-      <ChartCard title="Days of Supply Trend" noMargin>
-        <div style={{display:'flex',gap:24,marginBottom:10}}>
-          {[['Current DOS',`${m.dos || 0}d`,B.t2],['Units on Hand',fN(m.stock_units),B.b3],['LY DOS','42d',B.sub]].map(([l,v,c])=>(
-            <div key={l}><div style={{fontSize:9,textTransform:'uppercase',letterSpacing:'.08em',color:B.sub}}>{l}</div><div style={{fontSize:18,fontWeight:700,color:c,marginTop:2}}>{v}</div></div>
-          ))}
-        </div>
-        <div style={{height:6,borderRadius:3,background:'var(--card)',overflow:'hidden',marginBottom:14}}>
-          <div style={{height:'100%',width:`${Math.min(100,((m.dos||0)/90)*100)}%`,background:`linear-gradient(90deg,${B.o1},${B.o2},${B.t2})`,borderRadius:3}}/>
-        </div>
-        <Legend items={[['DOS This Year',B.t2],['DOS Last Year',B.sub,true]]}/>
-        <div style={{display:'flex',alignItems:'center',gap:6,marginTop:8}}>
-          <div style={{width:22,height:1.5,background:B.o1,borderRadius:1}}/>
-          <span style={{fontSize:9,color:B.o2,fontWeight:700}}>30-day reorder threshold</span>
-        </div>
+      <ChartCard title="Days of Supply" noMargin>
+        {(() => {
+          const dos = m.dos || 0;
+          const stockUnits = m.stock_units || 0;
+          // Zone thresholds
+          const zones = [
+            { label:'Critical', max:14,  color:'#ef4444', bg:'rgba(239,68,68,.12)',   icon:'🔴' },
+            { label:'Reorder',  max:30,  color:'#f59e0b', bg:'rgba(245,158,11,.12)',  icon:'🟡' },
+            { label:'Healthy',  max:60,  color:'#22c55e', bg:'rgba(34,197,94,.12)',   icon:'🟢' },
+            { label:'Surplus',  max:999, color:'#3b82f6', bg:'rgba(59,130,246,.12)',  icon:'🔵' },
+          ];
+          const zone = zones.find(z => dos <= z.max) || zones[3];
+          // Track: 0-90 days, clamp pointer at 90
+          const TRACK_MAX = 90;
+          const pct = Math.min(100, (dos / TRACK_MAX) * 100);
+          // Zone widths on track (14/30/60/90 → 15.5%/33.3%/66.7%/100%)
+          const zonePcts = [14/TRACK_MAX*100, 30/TRACK_MAX*100, 60/TRACK_MAX*100, 100];
+          const zoneColors = ['rgba(239,68,68,.35)','rgba(245,158,11,.35)','rgba(34,197,94,.35)','rgba(59,130,246,.35)'];
+          return (
+            <div>
+              {/* KPI row */}
+              <div style={{display:'flex',gap:16,marginBottom:14,flexWrap:'wrap'}}>
+                <div>
+                  <div style={{fontSize:9,textTransform:'uppercase',letterSpacing:'.08em',color:B.sub,marginBottom:3}}>Current DOS</div>
+                  <div style={{display:'flex',alignItems:'baseline',gap:5}}>
+                    <span style={{fontSize:26,fontWeight:800,color:zone.color,lineHeight:1}}>{dos}</span>
+                    <span style={{fontSize:13,fontWeight:600,color:zone.color}}>days</span>
+                    <span style={{fontSize:10,fontWeight:700,padding:'2px 8px',borderRadius:10,
+                      background:zone.bg,color:zone.color,border:`1px solid ${zone.color}44`,marginLeft:4}}>
+                      {zone.icon} {zone.label}
+                    </span>
+                  </div>
+                </div>
+                <div style={{borderLeft:'1px solid var(--brd)',paddingLeft:16}}>
+                  <div style={{fontSize:9,textTransform:'uppercase',letterSpacing:'.08em',color:B.sub,marginBottom:3}}>Units on Hand</div>
+                  <div style={{fontSize:22,fontWeight:700,color:B.b3,lineHeight:1}}>{fN(stockUnits)}</div>
+                </div>
+                <div style={{borderLeft:'1px solid var(--brd)',paddingLeft:16}}>
+                  <div style={{fontSize:9,textTransform:'uppercase',letterSpacing:'.08em',color:B.sub,marginBottom:3}}>Reorder Point</div>
+                  <div style={{fontSize:22,fontWeight:700,color:B.o2,lineHeight:1}}>30d</div>
+                </div>
+              </div>
+
+              {/* Color-coded track */}
+              <div style={{position:'relative',height:18,borderRadius:9,overflow:'hidden',display:'flex',marginBottom:6}}>
+                {zones.map((z,i)=>{
+                  const w = i===0 ? zonePcts[0] : zonePcts[i]-zonePcts[i-1];
+                  return <div key={i} style={{width:`${w}%`,height:'100%',background:zoneColors[i]}}/>;
+                })}
+                {/* Pointer */}
+                <div style={{
+                  position:'absolute',left:`${pct}%`,top:'50%',transform:'translate(-50%,-50%)',
+                  width:4,height:22,background:zone.color,borderRadius:2,
+                  boxShadow:`0 0 6px ${zone.color}`,zIndex:2,
+                }}/>
+              </div>
+
+              {/* Zone labels below track */}
+              <div style={{display:'flex',justifyContent:'space-between',marginBottom:12}}>
+                <span style={{fontSize:8,color:'#ef4444',fontWeight:600}}>0 — 14d Critical</span>
+                <span style={{fontSize:8,color:'#f59e0b',fontWeight:600}}>15 — 30d Reorder</span>
+                <span style={{fontSize:8,color:'#22c55e',fontWeight:600}}>31 — 60d Healthy</span>
+                <span style={{fontSize:8,color:'#3b82f6',fontWeight:600}}>61d+ Surplus</span>
+              </div>
+
+              {/* Threshold marker note */}
+              <div style={{display:'flex',alignItems:'center',gap:6,background:'rgba(245,158,11,.07)',
+                border:'1px solid rgba(245,158,11,.2)',borderRadius:7,padding:'5px 10px'}}>
+                <span style={{fontSize:12}}>⚠️</span>
+                <span style={{fontSize:10,color:B.o2,fontWeight:600}}>
+                  {dos <= 14 ? 'Stock critically low — create shipment plan immediately'
+                   : dos <= 30 ? 'Approaching reorder threshold — plan replenishment now'
+                   : dos <= 60 ? 'Inventory healthy — monitor weekly'
+                   : 'Overstocked — consider slowing replenishment'}
+                </span>
+              </div>
+            </div>
+          );
+        })()}
       </ChartCard>
 
     </div>
