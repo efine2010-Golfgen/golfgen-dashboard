@@ -802,6 +802,9 @@ export default function Inventory({ filters = {} }) {
                 </div>
               );
             })}
+            {aging.estimated && (
+              <div style={{ padding: "4px 20px 8px", color: "var(--txt3)", ...SG({ fontSize: 9, fontStyle: "italic" }) }}>Estimated distribution — actual aging data available after SP-API report sync</div>
+            )}
             {(!aging.brackets || aging.brackets.length === 0) && (
               <div style={{ padding: "16px 20px", color: "var(--txt3)", ...SG({ fontSize: 10 }) }}>Aging data will appear after the next SP-API sync</div>
             )}
