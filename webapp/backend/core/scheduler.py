@@ -15,7 +15,7 @@ from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.cron import CronTrigger
 
 from core.config import DB_PATH, DB_DIR, TIMEZONE, SYNC_INTERVAL_HOURS
-from services.sp_api import _sync_today_orders, _run_sp_api_sync, _backfill_orders
+from services.sp_api import _sync_today_orders, _run_sp_api_sync, _backfill_orders, _sync_aging_report
 from services.ads_api import _sync_ads_data, _sync_pricing_and_coupons
 from services.sync_engine import _auto_backfill_if_needed, _write_sync_log, run_nightly_deep_sync, run_incremental_gap_fill, run_fba_inventory_snapshot
 from services.analytics_rollup import run_full_rollup
@@ -37,6 +37,7 @@ _scheduler_locks = {
     "docs": threading.Lock(),
     "inventory_snapshot": threading.Lock(),
     "hourly_sales": threading.Lock(),
+    "aging_sync": threading.Lock(),
 }
 
 
@@ -243,6 +244,26 @@ def _run_scheduled_inventory_snapshot():
         logger.error(f"FBA inventory snapshot failed: {e}")
     finally:
         _scheduler_locks["inventory_snapshot"].release()
+
+
+def _run_scheduled_aging_sync():
+    """Weekly job: pull GET_FBA_INVENTORY_AGED_DATA report from SP-API into fba_inventory_aging."""
+    if not _scheduler_locks["aging_sync"].acquire(blocking=False):
+        logger.warning("Skipping aging sync — previous run still active")
+        return
+    try:
+        started_at = datetime.now(ZoneInfo("America/Chicago"))
+        _sync_aging_report()
+        _write_sync_log("aging_sync", started_at, "SUCCESS")
+        logger.info("FBA aging sync completed")
+    except Exception as e:
+        logger.error(f"FBA aging sync failed: {e}")
+        try:
+            _write_sync_log("aging_sync", started_at, "FAILED", error=str(e))
+        except Exception:
+            pass
+    finally:
+        _scheduler_locks["aging_sync"].release()
 
 
 def _run_scheduled_hourly_sales_save():
@@ -554,6 +575,9 @@ async def _sync_loop():
         # Schedule weekly backup verification — Sundays at 4am Central
         scheduler.add_job(_run_scheduled_backup_verification, CronTrigger(day_of_week="sun", hour=4, minute=0, timezone=_tz), id="backup_verification_weekly", misfire_grace_time=7200)
 
+        # Schedule FBA aging report sync — weekly Sundays at 1am Central (slow report, ~15-40 min)
+        scheduler.add_job(_run_scheduled_aging_sync, CronTrigger(day_of_week="sun", hour=1, minute=0, timezone=_tz), id="aging_sync_weekly", misfire_grace_time=7200)
+
         scheduler.start()
         logger.info("APScheduler started — all CronTriggers use ZoneInfo('America/Chicago') for correct Central Time scheduling")
 
@@ -608,6 +632,16 @@ async def _startup_sync_catchup():
                     await loop.run_in_executor(None, job_fn)
             except Exception as e:
                 print(f"[STARTUP] {job_name}: catchup error — {e}")
+
+        # Trigger aging sync in background if fba_inventory_aging table is empty
+        try:
+            aging_count = con.execute("SELECT COUNT(*) FROM fba_inventory_aging").fetchone()[0]
+            if aging_count == 0:
+                logger.info("[STARTUP] fba_inventory_aging is empty — triggering aging report sync in background")
+                loop = asyncio.get_event_loop()
+                loop.run_in_executor(None, _run_scheduled_aging_sync)
+        except Exception as e:
+            print(f"[STARTUP] aging sync check error — {e}")
 
         con.close()
     except Exception as e:

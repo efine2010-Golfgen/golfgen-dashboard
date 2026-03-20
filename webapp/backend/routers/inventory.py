@@ -2067,29 +2067,8 @@ def inventory_command_center(
         inv_trend = [{"date": str(r[0]), "sellable": _n(r[1]), "inbound": _n(r[2])} for r in trend_rows]
     except Exception:
         pass
-    # Fallback: build 90-day trend from daily_sales when snapshots table is empty
-    if len(inv_trend) < 2 and total_fulfillable > 0:
-        try:
-            fb_rows = con.execute("""
-                SELECT date, SUM(units_ordered) AS units
-                FROM daily_sales
-                WHERE asin = 'ALL' AND date >= CURRENT_DATE - 90
-                GROUP BY date ORDER BY date
-            """).fetchall()
-            if len(fb_rows) < 2:
-                fb_rows = con.execute("""
-                    SELECT date, SUM(units_ordered) AS units
-                    FROM daily_sales
-                    WHERE asin != 'ALL' AND date >= CURRENT_DATE - 90
-                    GROUP BY date ORDER BY date
-                """).fetchall()
-            if len(fb_rows) >= 2:
-                inv_trend = [
-                    {"date": str(r[0]), "sellable": total_fulfillable, "inbound": total_inbound}
-                    for r in fb_rows
-                ]
-        except Exception:
-            pass
+    # Note: when inv_trend is empty (snapshots not yet captured), the frontend
+    # falls back to showing velTrend velocity-only with a "building history" note.
 
     # ── 10b. FC Distribution (estimated from inventory patterns) ─────────────
     fc_distribution = []

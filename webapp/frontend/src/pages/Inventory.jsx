@@ -119,22 +119,64 @@ function InvTrendChart({ data, velTrend }) {
       </div>
     );
   }
+  // Snapshot bars + velocity line overlay (dual Y-axis)
   const maxS = Math.max(...data.map(d => d.sellable), 1);
   const barW = w / data.length;
+  // Velocity overlay — map velTrend dates onto the same x-axis as snapshot dates
+  const hasVel = useVel && velTrend.length >= 2;
+  const maxV = hasVel ? Math.max(...velTrend.map(d => d.units), 1) : 1;
+  // Build date→x lookup from snapshot dates
+  const dateToX = {};
+  data.forEach((d, i) => { dateToX[d.date] = padL + (i / Math.max(data.length - 1, 1)) * chartW; });
+  // For velTrend, use a separate time-based x scale spanning the chart width
+  const velDates = hasVel ? velTrend.map(d => d.date) : [];
+  const velMinDate = velDates[0] || '';
+  const velMaxDate = velDates[velDates.length - 1] || '';
+  const velSpan = Math.max(velDates.length - 1, 1);
+  const velPts = hasVel ? velTrend.map((d, i) =>
+    `${padL + (i / velSpan) * chartW},${chartH - (d.units / maxV) * (chartH - 20)}`
+  ).join(" ") : "";
+  const velAvg = hasVel ? velTrend.reduce((s, d) => s + d.units, 0) / velTrend.length : 0;
+  const xStep = Math.max(1, Math.floor(velTrend.length / 6));
   return (
     <div style={{ padding: "12px 20px" }}>
-      <svg width="100%" height={h} viewBox={`0 0 ${w} ${h}`} preserveAspectRatio="none">
+      <svg width="100%" viewBox={`0 0 ${w} ${h}`} style={{ display: "block" }}>
+        {/* Inventory bars */}
         {data.map((d, i) => {
-          const bh = (d.sellable / maxS) * (h - 20);
-          return <rect key={i} x={i * barW + 1} y={h - bh} width={barW - 2} height={bh} fill="#1A2D42" stroke="#3E658C" strokeWidth="0.5" rx="1" />;
+          const bh = (d.sellable / maxS) * (chartH - 10);
+          return <rect key={i} x={padL + (i / Math.max(data.length - 1, 1)) * chartW - barW / 2 + 1} y={chartH - bh} width={Math.max(barW - 2, 4)} height={bh} fill="#1A2D42" stroke="#3E658C" strokeWidth="0.5" rx="1" />;
         })}
+        {/* Inbound pipeline bars stacked on top */}
         {data.map((d, i) => {
-          const ih = (d.inbound / maxS) * (h - 20);
-          return <rect key={`ib-${i}`} x={i * barW + 1} y={h - (d.sellable / maxS) * (h - 20) - ih} width={barW - 2} height={ih} fill="rgba(248,113,113,.3)" rx="1" />;
+          const sellH = (d.sellable / maxS) * (chartH - 10);
+          const ih = (d.inbound / maxS) * (chartH - 10);
+          return ih > 0 ? <rect key={`ib-${i}`} x={padL + (i / Math.max(data.length - 1, 1)) * chartW - barW / 2 + 1} y={chartH - sellH - ih} width={Math.max(barW - 2, 4)} height={ih} fill="rgba(248,113,113,.3)" rx="1" /> : null;
         })}
+        {/* Left Y-axis: inventory units */}
+        {[0, Math.round(maxS / 2), Math.round(maxS)].map((v, i) => {
+          const y = chartH - (v / maxS) * (chartH - 10);
+          return <g key={i}><line x1={padL} y1={y} x2={w} y2={y} stroke="var(--brd)" strokeWidth="0.5" opacity=".2" /><text x={padL - 4} y={y + 3} textAnchor="end" fontSize="7" fill="#3E658C">{v}</text></g>;
+        })}
+        {/* Velocity line overlay */}
+        {hasVel && <polyline points={velPts} fill="none" stroke="#2ECFAA" strokeWidth="2" opacity=".9" />}
+        {hasVel && <line x1={padL} y1={chartH - (velAvg / maxV) * (chartH - 20)} x2={w} y2={chartH - (velAvg / maxV) * (chartH - 20)} stroke="#2ECFAA" strokeWidth="1" strokeDasharray="4,3" opacity=".5" />}
+        {/* Right Y-axis: velocity */}
+        {hasVel && [0, Math.round(maxV / 2), Math.round(maxV)].map((v, i) => {
+          const y = chartH - (v / maxV) * (chartH - 20);
+          return <text key={`rv-${i}`} x={w + 2} y={y + 3} textAnchor="start" fontSize="7" fill="#2ECFAA">{v}</text>;
+        })}
+        {/* X-axis date labels from velTrend */}
+        {hasVel && velTrend.filter((_, i) => i % xStep === 0 || i === velTrend.length - 1).map((d, idx) => {
+          const origI = idx * xStep >= velTrend.length ? velTrend.length - 1 : idx * xStep;
+          const x = padL + (origI / velSpan) * chartW;
+          return <text key={idx} x={x} y={h - 2} textAnchor="middle" fontSize="7" fill="var(--txt3)">{d.date?.slice(5)}</text>;
+        })}
+        <text x={padL - 2} y={8} textAnchor="end" fontSize="6" fill="#3E658C">units</text>
+        {hasVel && <text x={w + 2} y={8} textAnchor="start" fontSize="6" fill="#2ECFAA">vel/d</text>}
       </svg>
-      <div style={{ display: "flex", justifyContent: "space-between", ...SG({ fontSize: 8, color: "var(--txt3)", marginTop: 4 }) }}>
-        <span>{data[0]?.date?.slice(5)}</span><span>{data[data.length - 1]?.date?.slice(5)}</span>
+      <div style={{ display: "flex", justifyContent: "space-between", ...SG({ fontSize: 8, color: "var(--txt3)", marginTop: 2 }) }}>
+        <span>Inventory snapshots: {data.length} days</span>
+        {hasVel && <span style={{ color: "#2ECFAA" }}>avg velocity: {Math.round(velAvg)}/day</span>}
       </div>
     </div>
   );
