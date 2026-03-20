@@ -32,6 +32,8 @@ const GOLF_CUSTOMERS    = ['All Channels','Amazon','Walmart','Shopify','First Te
 const HW_CUSTOMERS      = ['All Channels','Belk',"Albertson's",'Family Dollar','Hobby Lobby'];
 const CHART_PERIODS     = ['7D','30D','60D','90D','120D','180D','1Y'];
 const CHART_PERIOD_API  = {'7D':'last_7d','30D':'last_30d','60D':'last_60d','90D':'last_90d','120D':'last_120d','180D':'last_180d','1Y':'last_1y'};
+const EXEC_PERIODS_LIST = ['L7','L30','L60','L90','L180','L365'];
+const EXEC_PERIOD_MAP   = {'L7':'7D','L30':'30D','L60':'60D','L90':'90D','L180':'180D','L365':'1Y'};
 const HM_WEEKS_MAP      = {'13W':13,'26W':26,'52W':52};
 // 4 × 13-week buckets within 52W data
 // Backend: week=0 = THIS week, week=N = N weeks ago
@@ -887,6 +889,7 @@ export default function Sales({ filters = {} }) {
   const [hideLate,    setHideLate]    = useState(false);      // hide hours 18-23
   const [hmWindows,   setHmWindows]   = useState(['A','B']);   // up to 2 of ['A','B','C','D'] (weekly heatmap windows)
   const [hmMetric2,   setHmMetric2]   = useState('units');     // 'units'|'sales'|'returns' (weekly heatmap)
+  const [execPeriod,  setExecPeriod]  = useState('L30');       // executive tab chart period
 
   // Data state
   const [metrics,     setMetrics]     = useState(null);
@@ -899,6 +902,9 @@ export default function Sales({ filters = {} }) {
   const [trendTraffic,   setTrendTraffic]   = useState(null);
   const [metricsTraffic, setMetricsTraffic] = useState(null); // period-aware traffic KPIs
   const [funnel,      setFunnel]      = useState(null);
+  const [execTrend,         setExecTrend]         = useState(null);
+  const [execTrendTraffic,  setExecTrendTraffic]  = useState(null);
+  const [execFunnel,        setExecFunnel]        = useState(null);
   const [adEff,       setAdEff]       = useState(null);
   const [feeBreak,    setFeeBreak]    = useState(null);
   const [adBreak,     setAdBreak]     = useState(null);
@@ -964,6 +970,16 @@ export default function Sales({ filters = {} }) {
     load('trendTraffic',   setTrendTraffic,   'trend',   params);
     load('metricsTraffic', setMetricsTraffic, 'summary', params);
   }, [divRaw, custRaw, cpTraffic]);
+
+  // Fetch executive tab chart data when execPeriod changes or exec tab is active
+  useEffect(() => {
+    if (viewTab !== 'Executive') return;
+    const api = CHART_PERIOD_API[EXEC_PERIOD_MAP[execPeriod]];
+    const params = {...baseParams, period: api};
+    load('execTrend',        setExecTrend,        'trend',  params);
+    load('execTrendTraffic', setExecTrendTraffic, 'trend',  params);
+    load('execFunnel',       setExecFunnel,       'funnel', params);
+  }, [divRaw, custRaw, execPeriod, viewTab]);
 
   // Fetch 30-day hourly heatmap data — reload on filter changes only
   useEffect(() => {
@@ -1169,6 +1185,145 @@ export default function Sales({ filters = {} }) {
               </div>
             )}
 
+            {/* ── Exec Chart Period Selector ── */}
+            <div style={{display:'flex',alignItems:'center',gap:8,marginBottom:12,flexWrap:'wrap'}}>
+              <span style={{fontSize:10,fontWeight:700,textTransform:'uppercase',letterSpacing:'.08em',color:'var(--txt3)',whiteSpace:'nowrap'}}>Chart Period</span>
+              {EXEC_PERIODS_LIST.map(p => (
+                <button key={p} onClick={() => setExecPeriod(p)} style={{
+                  fontSize:11,fontWeight:700,padding:'4px 12px',borderRadius:7,cursor:'pointer',
+                  border:`1px solid ${execPeriod===p ? B.b2 : 'var(--brd)'}`,
+                  background: execPeriod===p ? `${B.b2}22` : 'var(--card2)',
+                  color: execPeriod===p ? B.b2 : 'var(--txt3)',
+                  transition:'all .15s',
+                }}>{p}</button>
+              ))}
+            </div>
+
+            {/* ── Revenue & AUR Trend + Units Sold ── */}
+            {execPeriod === 'L7' ? (
+              <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:12,marginBottom:12}}>
+                <ChartCard title="Revenue & AUR Trend" badge={execPeriod} error={errors.execTrend}>
+                  {loading.execTrend ? <Spinner/> : <>
+                    {svgChart(salesAurSVG(toArr(execTrend)))}
+                    <Legend items={[['Sales TY','#2E6FBB'],['Sales LY','#5B9FD4',true],['AUR TY','#22c55e'],['AUR LY','#16a34a',true]]}/>
+                  </>}
+                </ChartCard>
+                <ChartCard title="Units Sold — TY vs LY" badge={execPeriod} error={errors.execTrend}>
+                  {loading.execTrend ? <Spinner/> : (() => {
+                    const tArr = toArr(execTrend);
+                    if (!tArr || tArr.length < 2) return <div style={{color:'var(--txt3)',padding:20,textAlign:'center',fontSize:12}}>No data</div>;
+                    const W=1100,H=165,pad={t:14,r:20,b:24,l:54};
+                    const iw=W-pad.l-pad.r, ih=H-pad.t-pad.b, n=tArr.length;
+                    const xB=i=>pad.l+((i+0.5)/n)*iw;
+                    const uvArr=tArr.flatMap(d=>[d.ty_units,d.ly_units]).filter(v=>v!=null&&v>=0);
+                    const umx=Math.max(...uvArr,1);
+                    const yU=v=>pad.t+ih-Math.min(1,Math.max(0,(v||0)/umx))*ih;
+                    const bw=Math.max(3,Math.floor((iw/n)*0.35));
+                    let s=`<svg width="100%" viewBox="0 0 ${W} ${H}" style="overflow:visible;display:block">`;
+                    for(let i=0;i<=4;i++){const uval=umx/4*i,ya=yU(uval);s+=`<line x1="${pad.l}" y1="${ya.toFixed(1)}" x2="${W-pad.r}" y2="${ya.toFixed(1)}" stroke="#1a2f4a" stroke-width="0.5"/><text x="${pad.l-5}" y="${(ya+4).toFixed(1)}" text-anchor="end" font-size="9" fill="#5b7fa0">${fN(uval)}</text>`;}
+                    const step=Math.max(1,Math.floor(n/7));
+                    tArr.forEach((d,i)=>{if(i%step===0||i===n-1)s+=`<text x="${xB(i).toFixed(1)}" y="${H-4}" text-anchor="middle" font-size="8" fill="#374f66">${d.date?d.date.slice(5):''}</text>`;});
+                    tArr.forEach((d,i)=>{if((d.ly_units||0)>0){const bh=Math.max(2,(d.ly_units/umx)*ih);s+=`<rect x="${xB(i).toFixed(1)}" y="${yU(d.ly_units).toFixed(1)}" width="${bw.toFixed(1)}" height="${bh.toFixed(1)}" fill="rgba(91,159,212,.35)" rx="2"/>`;}});
+                    tArr.forEach((d,i)=>{if((d.ty_units||0)>0){const bh=Math.max(2,(d.ty_units/umx)*ih);s+=`<rect x="${(xB(i)-bw).toFixed(1)}" y="${yU(d.ty_units).toFixed(1)}" width="${bw.toFixed(1)}" height="${bh.toFixed(1)}" fill="${B.b1}" rx="2"/>`;}});
+                    return <>{svgChart(s+'</svg>')}<Legend items={[['TY Units',B.b1],['LY Units','#5B9FD4',true]]}/></>;
+                  })()}
+                </ChartCard>
+              </div>
+            ) : (
+              <div style={{display:'flex',flexDirection:'column',gap:12,marginBottom:12}}>
+                <ChartCard title="Revenue & AUR Trend" badge={execPeriod} error={errors.execTrend}>
+                  {loading.execTrend ? <Spinner/> : <>
+                    {svgChart(salesAurSVG(toArr(execTrend)))}
+                    <Legend items={[['Sales TY','#2E6FBB'],['Sales LY','#5B9FD4',true],['AUR TY','#22c55e'],['AUR LY','#16a34a',true]]}/>
+                  </>}
+                </ChartCard>
+                <ChartCard title="Units Sold — TY vs LY" badge={execPeriod} error={errors.execTrend}>
+                  {loading.execTrend ? <Spinner/> : (() => {
+                    const tArr = toArr(execTrend);
+                    if (!tArr || tArr.length < 2) return <div style={{color:'var(--txt3)',padding:20,textAlign:'center',fontSize:12}}>No data</div>;
+                    const W=1100,H=190,pad={t:14,r:20,b:24,l:54};
+                    const iw=W-pad.l-pad.r, ih=H-pad.t-pad.b, n=tArr.length;
+                    const xB=i=>pad.l+((i+0.5)/n)*iw;
+                    const uvArr=tArr.flatMap(d=>[d.ty_units,d.ly_units]).filter(v=>v!=null&&v>=0);
+                    const umx=Math.max(...uvArr,1);
+                    const yU=v=>pad.t+ih-Math.min(1,Math.max(0,(v||0)/umx))*ih;
+                    const bw=Math.max(3,Math.floor((iw/n)*0.35));
+                    let s=`<svg width="100%" viewBox="0 0 ${W} ${H}" style="overflow:visible;display:block">`;
+                    for(let i=0;i<=4;i++){const uval=umx/4*i,ya=yU(uval);s+=`<line x1="${pad.l}" y1="${ya.toFixed(1)}" x2="${W-pad.r}" y2="${ya.toFixed(1)}" stroke="#1a2f4a" stroke-width="0.5"/><text x="${pad.l-5}" y="${(ya+4).toFixed(1)}" text-anchor="end" font-size="9" fill="#5b7fa0">${fN(uval)}</text>`;}
+                    const step=Math.max(1,Math.floor(n/7));
+                    tArr.forEach((d,i)=>{if(i%step===0||i===n-1)s+=`<text x="${xB(i).toFixed(1)}" y="${H-4}" text-anchor="middle" font-size="8" fill="#374f66">${d.date?d.date.slice(5):''}</text>`;});
+                    tArr.forEach((d,i)=>{if((d.ly_units||0)>0){const bh=Math.max(2,(d.ly_units/umx)*ih);s+=`<rect x="${xB(i).toFixed(1)}" y="${yU(d.ly_units).toFixed(1)}" width="${bw.toFixed(1)}" height="${bh.toFixed(1)}" fill="rgba(91,159,212,.35)" rx="2"/>`;}});
+                    tArr.forEach((d,i)=>{if((d.ty_units||0)>0){const bh=Math.max(2,(d.ty_units/umx)*ih);s+=`<rect x="${(xB(i)-bw).toFixed(1)}" y="${yU(d.ty_units).toFixed(1)}" width="${bw.toFixed(1)}" height="${bh.toFixed(1)}" fill="${B.b1}" rx="2"/>`;}});
+                    return <>{svgChart(s+'</svg>')}<Legend items={[['TY Units',B.b1],['LY Units','#5B9FD4',true]]}/></>;
+                  })()}
+                </ChartCard>
+              </div>
+            )}
+
+            {/* ── Traffic & Conversion Pipeline (exec period-controlled) ── */}
+            <div style={{background:'var(--card)',border:'1px solid var(--brd)',borderRadius:12,padding:16,marginBottom:12}}>
+              <div style={{display:'flex',alignItems:'center',gap:10,marginBottom:12}}>
+                <div style={{flex:1,height:1,background:'var(--brd)'}}/>
+                <span style={{fontSize:10,fontWeight:700,textTransform:'uppercase',letterSpacing:'.1em',color:'var(--txt3)',whiteSpace:'nowrap'}}>Traffic &amp; Conversion Pipeline</span>
+                <div style={{flex:1,height:1,background:'var(--brd)'}}/>
+              </div>
+              {Array.isArray(execFunnel) && execFunnel.length > 0 && (() => {
+                const maxV=Math.max(...execFunnel.map(s2=>s2.ty||0),1);
+                const sColors=[B.b3,B.b2,B.o2,B.t2];
+                const rates=execFunnel.map((s2,i)=>i===0?null:execFunnel[i-1].ty>0?((s2.ty||0)/execFunnel[i-1].ty*100).toFixed(1)+'%':null);
+                return (
+                  <div style={{display:'grid',gridTemplateColumns:`repeat(${execFunnel.length},1fr)`,gap:0,border:'1px solid var(--brd)',borderRadius:8,overflow:'hidden',marginBottom:12}}>
+                    {execFunnel.map((s2,i)=>{
+                      const lyDelta=s2.ly>0?((s2.ty-s2.ly)/s2.ly*100):null;
+                      const col=sColors[i%sColors.length];
+                      return (
+                        <div key={s2.label} style={{padding:'10px 14px',borderRight:i<execFunnel.length-1?'1px solid var(--brd)':'none',position:'relative'}}>
+                          <div style={{fontSize:10,color:'var(--txt3)',fontWeight:600,marginBottom:4,whiteSpace:'nowrap',overflow:'hidden',textOverflow:'ellipsis'}}>{s2.label}</div>
+                          <div style={{fontSize:20,fontWeight:800,color:col}}>{(s2.ty||0).toLocaleString()}</div>
+                          <div style={{height:4,background:'var(--brd)',borderRadius:2,overflow:'hidden',margin:'6px 0 4px'}}>
+                            <div style={{height:'100%',width:`${Math.max(4,(s2.ty/maxV)*100)}%`,background:col,borderRadius:2}}/>
+                          </div>
+                          {rates[i] && <div style={{fontSize:9,color:'var(--txt3)'}}>{rates[i]} step-through</div>}
+                          {lyDelta!==null && <div style={{fontSize:10,fontWeight:700,color:lyDelta>=0?'#4ade80':'#fb923c'}}>{lyDelta>=0?'▲':'▼'}{Math.abs(lyDelta).toFixed(1)}% vs LY</div>}
+                          {i<execFunnel.length-1 && <div style={{position:'absolute',right:-9,top:'50%',transform:'translateY(-50%)',fontSize:14,color:'var(--brd2)',zIndex:1}}>›</div>}
+                        </div>
+                      );
+                    })}
+                  </div>
+                );
+              })()}
+              <div style={{display:'grid',gridTemplateColumns:'3fr 1fr',gap:12}}>
+                <ChartCard title="Sessions & Conversion Rate" badge={execPeriod} error={errors.execTrendTraffic} noMargin>
+                  {loading.execTrendTraffic ? <Spinner/> : <>
+                    {svgChart(sessionsConvSVG(toArr(execTrendTraffic)))}
+                    <Legend items={[['Sessions TY',B.o2],['Sessions LY',B.sub,true],['Conv% TY',B.t2]]}/>
+                  </>}
+                </ChartCard>
+                <div style={{display:'flex',flexDirection:'column',gap:10}}>
+                  <div style={{background:'var(--card2)',border:'1px solid var(--brd)',borderRadius:10,padding:'12px 14px'}}>
+                    <div style={{fontSize:9,fontWeight:700,textTransform:'uppercase',letterSpacing:'.08em',color:'var(--txt3)',marginBottom:8}}>Traffic KPIs · MTD</div>
+                    {metricsTraffic && [
+                      ['Page Views', fN(metricsTraffic.glance_views||0), metricsTraffic.glance_views||0, metricsTraffic.ly_glance_views||0],
+                      ['Sessions',   fN(metricsTraffic.sessions||0),     metricsTraffic.sessions||0,     metricsTraffic.ly_sessions||0],
+                      ['Conv %',     fP(metricsTraffic.conversion||0),   metricsTraffic.conversion||0,   metricsTraffic.ly_conversion||0],
+                      ['Buy Box %',  fP(metricsTraffic.buy_box||0),      metricsTraffic.buy_box||0,      metricsTraffic.ly_buy_box||0],
+                    ].map(([lbl,val,ty,ly2])=>{
+                      const delta=ly2>0?((ty-ly2)/ly2*100):null;
+                      return (
+                        <div key={lbl} style={{display:'flex',justifyContent:'space-between',alignItems:'center',padding:'4px 0',borderBottom:'1px solid rgba(26,47,74,.4)'}}>
+                          <span style={{fontSize:11,color:'var(--txt3)'}}>{lbl}</span>
+                          <div style={{display:'flex',alignItems:'center',gap:5}}>
+                            <span style={{fontSize:13,fontWeight:700,color:'var(--txt)'}}>{val}</span>
+                            {delta!==null && <span style={{fontSize:9,fontWeight:700,padding:'1px 5px',borderRadius:4,background:delta>=0?'rgba(34,197,94,.12)':'rgba(239,68,68,.12)',color:delta>=0?'#4ade80':'#f87171'}}>{delta>=0?'▲':'▼'}{Math.abs(delta).toFixed(1)}%</span>}
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>{/* closes right-side flex col */}
+              </div>{/* closes 3fr/1fr grid */}
+            </div>{/* closes Traffic & Conversion outer card */}
+
             {/* 3-Year Monthly Revenue + Year Totals */}
             <div style={{background:'var(--surf)',border:'1px solid var(--brd)',borderRadius:14,padding:16,marginBottom:12}}>
               <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:12,flexWrap:'wrap',gap:8}}>
@@ -1212,120 +1367,6 @@ export default function Sales({ filters = {} }) {
                   ))}
                 </div>
               )}
-            </div>
-
-            {/* ── Section 4: Sales Trends — 2-col ── */}
-            <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:12,marginBottom:12}}>
-              <ChartCard title="Revenue & AUR Trend" badge={cpSales} error={errors.trend}>
-                {loading.trend ? <Spinner/> : <>
-                  {svgChart(salesAurSVG(toArr(trend)))}
-                  <Legend items={[['Sales TY','#2E6FBB'],['Sales LY','#5B9FD4',true],['AUR TY','#22c55e'],['AUR LY','#16a34a',true]]}/>
-                </>}
-              </ChartCard>
-              <ChartCard title="Units Sold — TY vs LY" badge={cpSales} error={errors.trend}>
-                {loading.trend ? <Spinner/> : (() => {
-                  const tArr = toArr(trend);
-                  if (!tArr || tArr.length < 2) return <div style={{color:'var(--txt3)',padding:20,textAlign:'center',fontSize:12}}>No data</div>;
-                  const W=1100,H=165,pad={t:14,r:20,b:24,l:54};
-                  const iw=W-pad.l-pad.r, ih=H-pad.t-pad.b, n=tArr.length;
-                  const xB=i=>pad.l+((i+0.5)/n)*iw;
-                  const uvArr=tArr.flatMap(d=>[d.ty_units,d.ly_units]).filter(v=>v!=null&&v>=0);
-                  const umx=Math.max(...uvArr,1);
-                  const yU=v=>pad.t+ih-Math.min(1,Math.max(0,(v||0)/umx))*ih;
-                  const bw=Math.max(3,Math.floor((iw/n)*0.35));
-                  let s=`<svg width="100%" viewBox="0 0 ${W} ${H}" style="overflow:visible;display:block">`;
-                  for(let i=0;i<=4;i++){const uval=umx/4*i,ya=yU(uval);s+=`<line x1="${pad.l}" y1="${ya.toFixed(1)}" x2="${W-pad.r}" y2="${ya.toFixed(1)}" stroke="#1a2f4a" stroke-width="0.5"/><text x="${pad.l-5}" y="${(ya+4).toFixed(1)}" text-anchor="end" font-size="9" fill="#5b7fa0">${fN(uval)}</text>`;}
-                  const step=Math.max(1,Math.floor(n/7));
-                  tArr.forEach((d,i)=>{if(i%step===0||i===n-1)s+=`<text x="${xB(i).toFixed(1)}" y="${H-4}" text-anchor="middle" font-size="8" fill="#374f66">${d.date?d.date.slice(5):''}</text>`;});
-                  tArr.forEach((d,i)=>{if((d.ly_units||0)>0){const bh=Math.max(2,(d.ly_units/umx)*ih);s+=`<rect x="${xB(i).toFixed(1)}" y="${yU(d.ly_units).toFixed(1)}" width="${bw.toFixed(1)}" height="${bh.toFixed(1)}" fill="rgba(91,159,212,.35)" rx="2"/>`;}});
-                  tArr.forEach((d,i)=>{if((d.ty_units||0)>0){const bh=Math.max(2,(d.ty_units/umx)*ih);s+=`<rect x="${(xB(i)-bw).toFixed(1)}" y="${yU(d.ty_units).toFixed(1)}" width="${bw.toFixed(1)}" height="${bh.toFixed(1)}" fill="${B.b1}" rx="2"/>`;}});
-                  return <>{svgChart(s+'</svg>')}<Legend items={[['TY Units',B.b1],['LY Units','#5B9FD4',true]]}/></>;
-                })()}
-              </ChartCard>
-            </div>
-
-            {/* ── Section 5: Traffic & Conversion Pipeline ── */}
-            <div style={{background:'var(--card)',border:'1px solid var(--brd)',borderRadius:12,padding:16,marginBottom:12}}>
-              <div style={{display:'flex',alignItems:'center',gap:10,marginBottom:12}}>
-                <div style={{flex:1,height:1,background:'var(--brd)'}}/>
-                <span style={{fontSize:10,fontWeight:700,textTransform:'uppercase',letterSpacing:'.1em',color:'var(--txt3)',whiteSpace:'nowrap'}}>Traffic &amp; Conversion Pipeline</span>
-                <div style={{flex:1,height:1,background:'var(--brd)'}}/>
-              </div>
-              {Array.isArray(funnel) && funnel.length > 0 && (() => {
-                const maxV=Math.max(...funnel.map(s2=>s2.ty||0),1);
-                const sColors=[B.b3,B.b2,B.o2,B.t2];
-                const rates=funnel.map((s2,i)=>i===0?null:funnel[i-1].ty>0?((s2.ty||0)/funnel[i-1].ty*100).toFixed(1)+'%':null);
-                return (
-                  <div style={{display:'grid',gridTemplateColumns:`repeat(${funnel.length},1fr)`,gap:0,border:'1px solid var(--brd)',borderRadius:8,overflow:'hidden',marginBottom:12}}>
-                    {funnel.map((s2,i)=>{
-                      const lyDelta=s2.ly>0?((s2.ty-s2.ly)/s2.ly*100):null;
-                      const col=sColors[i%sColors.length];
-                      return (
-                        <div key={s2.label} style={{padding:'10px 14px',borderRight:i<funnel.length-1?'1px solid var(--brd)':'none',position:'relative'}}>
-                          <div style={{fontSize:10,color:'var(--txt3)',fontWeight:600,marginBottom:4,whiteSpace:'nowrap',overflow:'hidden',textOverflow:'ellipsis'}}>{s2.label}</div>
-                          <div style={{fontSize:20,fontWeight:800,color:col}}>{(s2.ty||0).toLocaleString()}</div>
-                          <div style={{height:4,background:'var(--brd)',borderRadius:2,overflow:'hidden',margin:'6px 0 4px'}}>
-                            <div style={{height:'100%',width:`${Math.max(4,(s2.ty/maxV)*100)}%`,background:col,borderRadius:2}}/>
-                          </div>
-                          {rates[i] && <div style={{fontSize:9,color:'var(--txt3)'}}>{rates[i]} step-through</div>}
-                          {lyDelta!==null && <div style={{fontSize:10,fontWeight:700,color:lyDelta>=0?'#4ade80':'#fb923c'}}>{lyDelta>=0?'▲':'▼'}{Math.abs(lyDelta).toFixed(1)}% vs LY</div>}
-                          {i<funnel.length-1 && <div style={{position:'absolute',right:-9,top:'50%',transform:'translateY(-50%)',fontSize:14,color:'var(--brd2)',zIndex:1}}>›</div>}
-                        </div>
-                      );
-                    })}
-                  </div>
-                );
-              })()}
-              <div style={{display:'grid',gridTemplateColumns:'3fr 1fr',gap:12}}>
-                <ChartCard title="Sessions & Conversion Rate" badge={cpSales} error={errors.trendTraffic} noMargin>
-                  {loading.trendTraffic ? <Spinner/> : <>
-                    {svgChart(sessionsConvSVG(toArr(trendTraffic)))}
-                    <Legend items={[['Sessions TY',B.o2],['Sessions LY',B.sub,true],['Conv% TY',B.t2]]}/>
-                  </>}
-                </ChartCard>
-                <div style={{display:'flex',flexDirection:'column',gap:10}}>
-                  <div style={{background:'var(--card2)',border:'1px solid var(--brd)',borderRadius:10,padding:'12px 14px'}}>
-                    <div style={{fontSize:9,fontWeight:700,textTransform:'uppercase',letterSpacing:'.08em',color:'var(--txt3)',marginBottom:8}}>Traffic KPIs · MTD</div>
-                    {metricsTraffic && [
-                      ['Page Views', fN(metricsTraffic.glance_views||0), metricsTraffic.glance_views||0, metricsTraffic.ly_glance_views||0],
-                      ['Sessions',   fN(metricsTraffic.sessions||0),     metricsTraffic.sessions||0,     metricsTraffic.ly_sessions||0],
-                      ['Conv %',     fP(metricsTraffic.conversion||0),   metricsTraffic.conversion||0,   metricsTraffic.ly_conversion||0],
-                      ['Buy Box %',  fP(metricsTraffic.buy_box||0),      metricsTraffic.buy_box||0,      metricsTraffic.ly_buy_box||0],
-                    ].map(([lbl,val,ty,ly2])=>{
-                      const delta=ly2>0?((ty-ly2)/ly2*100):null;
-                      return (
-                        <div key={lbl} style={{display:'flex',justifyContent:'space-between',alignItems:'center',padding:'4px 0',borderBottom:'1px solid rgba(26,47,74,.4)'}}>
-                          <span style={{fontSize:11,color:'var(--txt3)'}}>{lbl}</span>
-                          <div style={{display:'flex',alignItems:'center',gap:5}}>
-                            <span style={{fontSize:13,fontWeight:700,color:'var(--txt)'}}>{val}</span>
-                            {delta!==null && <span style={{fontSize:9,fontWeight:700,padding:'1px 5px',borderRadius:4,background:delta>=0?'rgba(34,197,94,.12)':'rgba(239,68,68,.12)',color:delta>=0?'#4ade80':'#f87171'}}>{delta>=0?'▲':'▼'}{Math.abs(delta).toFixed(1)}%</span>}
-                          </div>
-                        </div>
-                      );
-                    })}
-                  </div>
-                  <div style={{background:'var(--card2)',border:'1px solid var(--brd)',borderRadius:10,padding:'12px 14px'}}>
-                    <div style={{fontSize:9,fontWeight:700,textTransform:'uppercase',letterSpacing:'.08em',color:'var(--txt3)',marginBottom:8}}>Advertising · MTD</div>
-                    {[
-                      ['Ad Spend', f$(m.ad_spend||0), m.ad_spend||0, m.ly_ad_spend||0, true],
-                      ['ROAS',     fX(m.roas||0),     m.roas||0,     m.ly_roas||0,     false],
-                      ['TACOS',    fP(m.tacos||0),    m.tacos||0,    m.ly_tacos||0,    true],
-                    ].map(([lbl,val,ty,ly2,inv])=>{
-                      const delta=ly2>0?((ty-ly2)/ly2*100):null;
-                      const pos=inv?(delta!==null&&delta<0):(delta!==null&&delta>0);
-                      return (
-                        <div key={lbl} style={{display:'flex',justifyContent:'space-between',alignItems:'center',padding:'4px 0',borderBottom:'1px solid rgba(26,47,74,.4)'}}>
-                          <span style={{fontSize:11,color:'var(--txt3)'}}>{lbl}</span>
-                          <div style={{display:'flex',alignItems:'center',gap:5}}>
-                            <span style={{fontSize:13,fontWeight:700,color:'var(--txt)'}}>{val}</span>
-                            {delta!==null && <span style={{fontSize:9,fontWeight:700,padding:'1px 5px',borderRadius:4,background:pos?'rgba(34,197,94,.12)':'rgba(239,68,68,.12)',color:pos?'#4ade80':'#f87171'}}>{delta>0?'▲':'▼'}{Math.abs(delta).toFixed(1)}%</span>}
-                          </div>
-                        </div>
-                      );
-                    })}
-                  </div>
-                </div>
-              </div>
             </div>
 
             {/* ── Section 6: Business Health + Actions ── */}
