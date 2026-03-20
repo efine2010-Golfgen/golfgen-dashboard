@@ -1152,6 +1152,55 @@ export default function Sales({ filters = {} }) {
               </div>
             )}
 
+            {/* Period Summary — 5 compact cards */}
+            {periodCols && (
+              <div style={{display:'grid',gridTemplateColumns:'repeat(5,1fr)',gap:10,marginBottom:20}}>
+                {EXEC_PERIODS.map((lbl, idx) => {
+                  const d  = periodCols[lbl] || {};
+                  const isToday = lbl === 'Today';
+                  const rows = [
+                    { k:'Sales $', ty: isToday ? tyS   : d.sales,         ly: isToday ? lyNowS   : d.ly_sales,   fmt:f$,  inv:false },
+                    { k:'Units',   ty: isToday ? tyU   : d.units,          ly: isToday ? lyNowU   : d.ly_units,   fmt:fN,  inv:false },
+                    { k:'AUR',     ty: isToday ? tyAur : d.aur,            ly: isToday ? lyNowAur : d.ly_aur,     fmt:f$,  inv:false },
+                    { k:'Orders',  ty: isToday ? tyO   : d.orders,         ly: isToday ? lyNowO   : d.ly_orders,  fmt:fN,  inv:false },
+                    { k:'Fees',    ty: d.amazon_fees,                       ly: d.ly_amazon_fees,                  fmt:f$,  inv:true  },
+                    { k:'Returns', ty: d.returns_amount||0,                 ly: d.ly_returns_amount||0,            fmt:f$,  inv:true  },
+                    { k:'Conv %',  ty: d.conversion,                        ly: isToday ? tod.ly_conversion : d.ly_conversion, fmt:fP, inv:false },
+                  ];
+                  return (
+                    <div key={lbl} style={{background:'var(--card2)',border:'1px solid var(--brd)',borderTop:`2px solid ${ACCENTS[idx]}`,borderRadius:10,padding:'10px 12px'}}>
+                      <div style={{fontSize:9,fontWeight:700,textTransform:'uppercase',letterSpacing:'.1em',color:ACCENTS[idx],paddingBottom:5,marginBottom:6,borderBottom:'1px solid var(--brd)',display:'flex',justifyContent:'space-between',alignItems:'center'}}>
+                        <span>{lbl}</span>
+                        {isToday && tod.snapshot_time && <span style={{fontSize:8,color:'var(--txt3)',fontWeight:400,textTransform:'none'}}>thru {tod.snapshot_time}</span>}
+                      </div>
+                      {rows.map(r => (
+                        <div key={r.k} style={{display:'grid',gridTemplateColumns:'1.1fr 1fr 1fr 0.6fr',gap:2,alignItems:'center',padding:'3px 0',borderBottom:'1px solid rgba(26,47,74,.4)',fontSize:11}}>
+                          <span style={{fontSize:10,color:'var(--txt3)',overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>{r.k}</span>
+                          <span style={{fontWeight:600,color:'var(--txt)'}}>{r.ty != null ? r.fmt(r.ty) : '—'}</span>
+                          <span style={{color:'var(--txt3)',fontSize:10}}>{r.ly != null ? r.fmt(r.ly) : '—'}</span>
+                          {chgSpan(dp2(r.ty, r.ly), r.inv)}
+                        </div>
+                      ))}
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+
+            {/* ── Sales Overview KPIs ── */}
+            <div style={{display:'flex',gap:8,marginBottom:14,overflowX:'auto',paddingBottom:2}}>
+              {loading.metrics ? <Spinner/> : <>
+                <MetricCard label="Sales $"       value={f$(m.sales)}         ly={f$(ly('sales'))}         delta={dp(m.sales,ly('sales'))}/>
+                <MetricCard label="Unit Sales"    value={fN(m.unit_sales)}     ly={fN(ly('unit_sales'))}    delta={dp(m.unit_sales,ly('unit_sales'))}/>
+                <MetricCard label="AUR"           value={f$(m.aur)}            ly={f$(ly('aur'))}           delta={dp(m.aur,ly('aur'))}/>
+                <MetricCard label="COGS"          value={f$(m.cogs)}           ly={f$(ly('cogs'))}          delta={dp(m.cogs,ly('cogs'))}/>
+                <MetricCard label="Amazon Fees"   value={f$(m.amazon_fees)}    ly={f$(ly('amazon_fees'))}   delta={dp(m.amazon_fees,ly('amazon_fees'))}/>
+                <MetricCard label="Returns" value={`${fN(m.returns)} · ${f$(m.returns_amount)}`} ly={`${fN(ly('returns'))} · ${f$(ly('returns_amount'))}`} delta={dp(m.returns,ly('returns'))} invert/>
+                <MetricCard label="Gross Margin $"  value={f$(m.gross_margin)}     ly={f$(ly('gross_margin'))}     delta={dp(m.gross_margin,ly('gross_margin'))}/>
+                <MetricCard label="Gross Margin %"  value={fP(m.gross_margin_pct)} ly={fP(ly('gross_margin_pct'))} delta={dp(m.gross_margin_pct,ly('gross_margin_pct'))}/>
+              </>}
+            </div>
+
             {/* ── Revenue & AUR Trend + Units Sold ── */}
             {(() => {
               const execPeriodBtns = (
@@ -1226,41 +1275,6 @@ export default function Sales({ filters = {} }) {
                 </ChartCard>
               </div>
             );})()}
-
-            {/* Period Summary — 5 compact cards */}
-            {periodCols && (
-              <div style={{display:'grid',gridTemplateColumns:'repeat(5,1fr)',gap:10,marginBottom:20}}>
-                {EXEC_PERIODS.map((lbl, idx) => {
-                  const d  = periodCols[lbl] || {};
-                  const isToday = lbl === 'Today';
-                  const rows = [
-                    { k:'Sales $', ty: isToday ? tyS   : d.sales,         ly: isToday ? lyNowS   : d.ly_sales,   fmt:f$,  inv:false },
-                    { k:'Units',   ty: isToday ? tyU   : d.units,          ly: isToday ? lyNowU   : d.ly_units,   fmt:fN,  inv:false },
-                    { k:'AUR',     ty: isToday ? tyAur : d.aur,            ly: isToday ? lyNowAur : d.ly_aur,     fmt:f$,  inv:false },
-                    { k:'Orders',  ty: isToday ? tyO   : d.orders,         ly: isToday ? lyNowO   : d.ly_orders,  fmt:fN,  inv:false },
-                    { k:'Fees',    ty: d.amazon_fees,                       ly: d.ly_amazon_fees,                  fmt:f$,  inv:true  },
-                    { k:'Returns', ty: d.returns_amount||0,                 ly: d.ly_returns_amount||0,            fmt:f$,  inv:true  },
-                    { k:'Conv %',  ty: d.conversion,                        ly: isToday ? tod.ly_conversion : d.ly_conversion, fmt:fP, inv:false },
-                  ];
-                  return (
-                    <div key={lbl} style={{background:'var(--card2)',border:'1px solid var(--brd)',borderTop:`2px solid ${ACCENTS[idx]}`,borderRadius:10,padding:'10px 12px'}}>
-                      <div style={{fontSize:9,fontWeight:700,textTransform:'uppercase',letterSpacing:'.1em',color:ACCENTS[idx],paddingBottom:5,marginBottom:6,borderBottom:'1px solid var(--brd)',display:'flex',justifyContent:'space-between',alignItems:'center'}}>
-                        <span>{lbl}</span>
-                        {isToday && tod.snapshot_time && <span style={{fontSize:8,color:'var(--txt3)',fontWeight:400,textTransform:'none'}}>thru {tod.snapshot_time}</span>}
-                      </div>
-                      {rows.map(r => (
-                        <div key={r.k} style={{display:'grid',gridTemplateColumns:'1.1fr 1fr 1fr 0.6fr',gap:2,alignItems:'center',padding:'3px 0',borderBottom:'1px solid rgba(26,47,74,.4)',fontSize:11}}>
-                          <span style={{fontSize:10,color:'var(--txt3)',overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>{r.k}</span>
-                          <span style={{fontWeight:600,color:'var(--txt)'}}>{r.ty != null ? r.fmt(r.ty) : '—'}</span>
-                          <span style={{color:'var(--txt3)',fontSize:10}}>{r.ly != null ? r.fmt(r.ly) : '—'}</span>
-                          {chgSpan(dp2(r.ty, r.ly), r.inv)}
-                        </div>
-                      ))}
-                    </div>
-                  );
-                })}
-              </div>
-            )}
 
             {/* ── Traffic & Conversion Pipeline (exec period-controlled) ── */}
             <div style={{background:'var(--card)',border:'1px solid var(--brd)',borderRadius:12,padding:16,marginBottom:12}}>
