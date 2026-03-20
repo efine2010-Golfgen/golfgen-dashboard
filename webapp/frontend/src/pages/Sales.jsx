@@ -1349,7 +1349,7 @@ export default function Sales({ filters = {} }) {
                               <div style={{fontSize:8,color:d.isToday?B.b2:B.sub,lineHeight:'1.2',whiteSpace:'nowrap'}}>{d.label}</div>
                             </div>
                             {visHours.map(h=>{
-                              const cell=d.hours[h]||{};
+                              const cell=(d.hours||{})[h]||{};
                               const val=hmMetric==='$'?cell.sales:cell.units;
                               const isFuture=(val===null||val===undefined);
                               const numVal=isFuture?0:(Number(val)||0);
@@ -2075,7 +2075,7 @@ export default function Sales({ filters = {} }) {
                               <div style={{fontSize:8,color:d.isToday?B.b2:B.sub,lineHeight:'1.2',whiteSpace:'nowrap'}}>{d.label}</div>
                             </div>
                             {visHours.map(h=>{
-                              const cell=d.hours[h]||{};
+                              const cell=(d.hours||{})[h]||{};
                               const val=hmMetric==='$'?cell.sales:cell.units;
                               const isFuture=(val===null||val===undefined);
                               const numVal=isFuture?0:(Number(val)||0);
@@ -3139,7 +3139,7 @@ export default function Sales({ filters = {} }) {
                     </div>
                     {/* Hour cells */}
                     {visHours.map(h => {
-                      const cell = d.hours[h] || {};
+                      const cell = (d.hours||{})[h] || {};
                       const val = hmMetric === '$' ? cell.sales : cell.units;
                       const isFuture = (val === null || val === undefined);
                       const numVal = isFuture ? 0 : (Number(val) || 0);
