@@ -933,6 +933,7 @@ export default function Sales({ filters = {} }) {
   const [hmWindows,   setHmWindows]   = useState(['A','B']);   // up to 2 of ['A','B','C','D'] (weekly heatmap windows)
   const [hmMetric2,   setHmMetric2]   = useState('units');     // 'units'|'sales'|'returns' (weekly heatmap)
   const [execPeriod,  setExecPeriod]  = useState('L30');       // executive tab chart period
+  const [showDailyCharts, setShowDailyCharts] = useState(false); // daily tab heatmap toggle
 
   // Data state
   const [metrics,     setMetrics]     = useState(null);
@@ -1680,8 +1681,589 @@ export default function Sales({ filters = {} }) {
         );
       })()}
 
+
+      {/* ── DAILY TAB ─────────────────────────────────────────────────────── */}
+      {viewTab === 'Daily' && (() => {
+        const tod = periodCols?.['Today'] || {};
+        const tyS   = tod.sales  || 0;
+        const tyU   = Math.max(0, tod.units  || 0);
+        const tyO   = tod.orders || 0;
+        const tyAur = tyU > 0 ? tyS / tyU : 0;
+        const lyNowS   = tod.ly_same_time_sales  || 0;
+        const lyNowU   = tod.ly_same_time_units  || 0;
+        const lyNowO   = tod.ly_same_time_orders || 0;
+        const lyNowAur = lyNowU > 0 ? lyNowS / lyNowU : 0;
+        const tyFcstS   = tod.ty_forecast       || 0;
+        const tyFcstU   = Math.max(0, tod.ty_units_forecast || 0);
+        const tyFcstAur = tyFcstU > 0 ? tyFcstS / tyFcstU : 0;
+        const lyEodS   = tod.ly_eod_sales  ?? tod.ly_sales  ?? 0;
+        const lyEodU   = tod.ly_eod_units  ?? tod.ly_units  ?? 0;
+        const lyEodAur = lyEodU > 0 ? lyEodS / lyEodU : 0;
+
+        const dp2 = (a, b) => (a && b) ? (a - b) / b * 100 : null;
+        const chgSpan = (delta, inv = false) => {
+          if (delta == null) return <span style={{color:'var(--txt3)',fontSize:9}}>—</span>;
+          const pos = inv ? delta < 0 : delta > 0;
+          return <span style={{color: pos ? '#4ade80' : '#fb923c', fontWeight:700, fontSize:9, whiteSpace:'nowrap'}}>
+            {delta > 0 ? '▲' : '▼'}{Math.abs(delta).toFixed(1)}%
+          </span>;
+        };
+        const heroRows = (rows) => rows.map(([lbl, val]) => (
+          <div key={lbl} style={{display:'flex',justifyContent:'space-between',alignItems:'center',padding:'4px 0',borderBottom:'1px solid rgba(26,47,74,.5)',fontSize:11}}>
+            <span style={{color:'var(--txt3)'}}>{lbl}</span>
+            <span style={{fontWeight:600,color:'var(--txt)'}}>{val}</span>
+          </div>
+        ));
+        const EpochLabel = ({type, label, right}) => {
+          const st = type==='today'
+            ? {bg:'rgba(26,163,146,.15)',color:B.t3,border:'rgba(26,163,146,.25)'}
+            : type==='trend'
+            ? {bg:'rgba(232,130,30,.12)',color:B.o3,border:'rgba(232,130,30,.2)'}
+            : {bg:'rgba(46,111,187,.15)',color:B.b3,border:'rgba(46,111,187,.25)'};
+          return (
+            <div style={{display:'flex',alignItems:'center',gap:10,margin:'14px 0 8px'}}>
+              <div style={{fontSize:9,fontWeight:800,textTransform:'uppercase',letterSpacing:'.12em',padding:'3px 9px',borderRadius:99,background:st.bg,color:st.color,border:`1px solid ${st.border}`,whiteSpace:'nowrap'}}>{label}</div>
+              <div style={{flex:1,height:1,background:'var(--brd)'}}/>
+              {right && <span style={{fontSize:9,color:B.sub}}>{right}</span>}
+            </div>
+          );
+        };
+
+        const DAILY_PERIODS = ['Today','Yesterday','WTD','MTD','YTD'];
+        const ACCENTS = [B.o2, 'var(--brd2)', 'var(--brd2)', B.b2, B.t2];
+
+        return (
+          <>
+            {/* ── TODAY SNAPSHOT ── */}
+            <EpochLabel type="today" label="📍 Today Snapshot" right={tod.snapshot_time ? `thru ${tod.snapshot_time} CT` : 'live data'}/>
+            {loading.periodCols
+              ? <div style={{height:180,display:'flex',alignItems:'center',justifyContent:'center'}}><Spinner/></div>
+              : (
+              <div style={{display:'flex',background:'var(--card2)',border:'1px solid var(--brd)',borderRadius:12,overflow:'hidden',marginBottom:14}}>
+                {[
+                  { lbl:'🟠 TY NOW', sub:`thru ${tod.snapshot_time||'today'} · ${fN(tyO)} orders`, val:f$(tyS), color:B.o2,
+                    rows:[['Units', fN(tyU)], ['AUR', f$(tyAur)], ['Fees', f$(tod.amazon_fees||0)], ['Returns', f$(tod.returns_amount||0)], ['Conv %', fP(tod.conversion)]] },
+                  { lbl:'🔵 LY NOW', sub:'same time last year', val:f$(lyNowS), color:B.b3,
+                    rows:[['Units', fN(lyNowU)], ['AUR', f$(lyNowAur)], ['Fees', '—'], ['Returns', '—'], ['Conv %', fP(tod.ly_conversion)]] },
+                  { lbl:'🟢 TY EOD FCST', sub:`projected full day · pacing ${tyFcstS > 0 && lyEodS > 0 ? ((tyFcstS/lyEodS-1)*100).toFixed(1)+'% vs LY EOD' : '—'}`, val:f$(tyFcstS), color:B.t2,
+                    rows:[['Units', tyFcstU > 0 ? `~${fN(tyFcstU)}` : '—'], ['AUR', tyFcstAur > 0 ? f$(tyFcstAur) : '—'], ['Fees', '—'], ['Returns', '—'], ['Conv %', '—']] },
+                  { lbl:'⬜ LY EOD ACTUAL', sub:'full day last year', val:f$(lyEodS), color:'var(--txt3)',
+                    rows:[['Units', fN(lyEodU)], ['AUR', f$(lyEodAur)], ['Fees', f$(tod.ly_amazon_fees||0)], ['Returns', f$(tod.ly_returns_amount||0)], ['Conv %', fP(tod.ly_conversion)]] },
+                ].map((col, i, arr) => (
+                  <div key={col.lbl} style={{
+                    flex:'1 1 0', padding:'14px 16px', minWidth:0,
+                    borderRight: i < arr.length-1 ? '1px solid var(--brd)' : 'none',
+                    background: i===0 ? 'rgba(27,79,138,.1)' : 'transparent',
+                  }}>
+                    <div style={{fontSize:9,fontWeight:700,textTransform:'uppercase',letterSpacing:'.1em',color:col.color,marginBottom:4}}>{col.lbl}</div>
+                    <div style={{fontSize:28,fontWeight:800,color:col.color,lineHeight:1,marginBottom:3}}>{col.val}</div>
+                    <div style={{fontSize:10,color:'var(--txt3)',marginBottom:10}}>{col.sub}</div>
+                    {heroRows(col.rows)}
+                  </div>
+                ))}
+              </div>
+            )}
+
+            {/* ── PERIOD SUMMARY ── */}
+            <EpochLabel type="period" label="📅 Period Summary" right="5 comparison windows"/>
+            {periodCols && (
+              <div style={{display:'grid',gridTemplateColumns:'repeat(5,1fr)',gap:10,marginBottom:20}}>
+                {DAILY_PERIODS.map((lbl, idx) => {
+                  const d = periodCols[lbl] || {};
+                  const isToday = lbl === 'Today';
+                  const rows2 = [
+                    { k:'Sales $', ty: isToday ? tyS   : d.sales,         ly: isToday ? lyNowS   : d.ly_sales,   fmt:f$,  inv:false },
+                    { k:'Units',   ty: isToday ? tyU   : d.units,          ly: isToday ? lyNowU   : d.ly_units,   fmt:fN,  inv:false },
+                    { k:'AUR',     ty: isToday ? tyAur : d.aur,            ly: isToday ? lyNowAur : d.ly_aur,     fmt:f$,  inv:false },
+                    { k:'Orders',  ty: isToday ? tyO   : d.orders,         ly: isToday ? lyNowO   : d.ly_orders,  fmt:fN,  inv:false },
+                    { k:'Fees',    ty: d.amazon_fees,                       ly: d.ly_amazon_fees,                  fmt:f$,  inv:true  },
+                    { k:'Returns', ty: d.returns_amount||0,                 ly: d.ly_returns_amount||0,            fmt:f$,  inv:true  },
+                    { k:'Conv %',  ty: d.conversion,                        ly: isToday ? tod.ly_conversion : d.ly_conversion, fmt:fP, inv:false },
+                  ];
+                  return (
+                    <div key={lbl} style={{background:'var(--card2)',border:'1px solid var(--brd)',borderTop:`2px solid ${ACCENTS[idx]}`,borderRadius:10,padding:'10px 12px'}}>
+                      <div style={{fontSize:9,fontWeight:700,textTransform:'uppercase',letterSpacing:'.1em',color:ACCENTS[idx],paddingBottom:5,marginBottom:6,borderBottom:'1px solid var(--brd)',display:'flex',justifyContent:'space-between',alignItems:'center'}}>
+                        <span>{lbl}</span>
+                        {isToday && tod.snapshot_time && <span style={{fontSize:8,color:'var(--txt3)',fontWeight:400,textTransform:'none'}}>thru {tod.snapshot_time}</span>}
+                      </div>
+                      {rows2.map(r => (
+                        <div key={r.k} style={{display:'grid',gridTemplateColumns:'1.1fr 1fr 1fr 0.6fr',gap:2,alignItems:'center',padding:'3px 0',borderBottom:'1px solid rgba(26,47,74,.4)',fontSize:11}}>
+                          <span style={{fontSize:10,color:'var(--txt3)',overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>{r.k}</span>
+                          <span style={{fontWeight:600,color:'var(--txt)'}}>{r.ty != null ? r.fmt(r.ty) : '—'}</span>
+                          <span style={{color:'var(--txt3)',fontSize:10}}>{r.ly != null ? r.fmt(r.ly) : '—'}</span>
+                          {chgSpan(dp2(r.ty, r.ly), r.inv)}
+                        </div>
+                      ))}
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+
+            {/* ── Heatmap Charts Toggle ── */}
+            <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',marginBottom:showDailyCharts?10:14,padding:'8px 12px',
+              background:showDailyCharts?'rgba(30,58,92,.4)':'var(--card)',
+              border:`1px solid ${showDailyCharts?B.b2+'44':'var(--brd)'}`,borderRadius:9,cursor:'pointer'}}
+              onClick={()=>setShowDailyCharts(v=>!v)}>
+              <div style={{display:'flex',alignItems:'center',gap:8}}>
+                <span style={{fontSize:14}}>{showDailyCharts ? '📉' : '📊'}</span>
+                <span style={{fontSize:11,fontWeight:700,color:showDailyCharts?B.b3:'var(--txt2)'}}>Heatmap Charts</span>
+                <span style={{fontSize:9,color:B.sub}}>Hourly · 26-Week Daily</span>
+              </div>
+              <span style={{fontSize:11,color:showDailyCharts?B.b3:B.sub,fontWeight:700,userSelect:'none'}}>
+                {showDailyCharts ? '▲ Hide' : '▼ Show'}
+              </span>
+            </div>
+
+            {showDailyCharts && <>
+              {(()=>{
+                const hmStops=[[21,37,62],[15,82,115],[13,115,119],[34,139,34],[218,165,32],[230,101,30],[214,40,57]];
+                const hmColor=(t)=>{if(t<=0)return 'rgb(21,37,62)';if(t>=1)return 'rgb(214,40,57)';const seg=t*(hmStops.length-1);const i=Math.floor(seg),f=seg-i;const a=hmStops[i],b2=hmStops[Math.min(i+1,hmStops.length-1)];return `rgb(${Math.round(a[0]+(b2[0]-a[0])*f)},${Math.round(a[1]+(b2[1]-a[1])*f)},${Math.round(a[2]+(b2[2]-a[2])*f)})`};
+                const HOUR_LABELS=['12am','1am','2am','3am','4am','5am','6am','7am','8am','9am','10am','11am','12pm','1pm','2pm','3pm','4pm','5pm','6pm','7pm','8pm','9pm','10pm','11pm'];
+                const HCOL_W=26,DLW=72,DRH=28;
+                const hmDays=hmData?.days||[];
+                const maxVal=hmMetric==='$'?(hmData?.maxSales||0):(hmData?.maxUnits||0);
+                const sqrtMax=Math.sqrt(maxVal||1);
+                const visHours=Array.from({length:24},(_,i)=>i).filter(h=>!(hideNight&&h<6)).filter(h=>!(hideLate&&h>=18));
+                const fCell=(v)=>{if(v==null||v===0)return '';if(hmMetric==='$'){if(v>=1000)return `$${(v/1000).toFixed(1)}k`;return `$${Math.round(v)}`;}if(v>=1000)return `${(v/1000).toFixed(1)}k`;return String(v)};
+                const pillBtn=(label,active,onClick2)=>(<button key={label} onClick={e=>{e.stopPropagation();onClick2();}} style={{padding:'3px 10px',borderRadius:6,fontSize:10,fontWeight:600,cursor:'pointer',transition:'all .15s',border:`1px solid ${active?B.b2:'var(--brd)'}`,background:active?`${B.b1}33`:'transparent',color:active?B.b3:'var(--txt3)'}}>{label}</button>);
+                const last7=hmDays.slice(-7);
+                return (
+                  <div style={{background:'var(--surf)',border:'1px solid var(--brd)',borderRadius:14,padding:'14px 16px',marginBottom:10}}>
+                    <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:10,flexWrap:'wrap',gap:8}}>
+                      <span style={{fontSize:13,fontWeight:700,color:'var(--txt)'}}>Hourly Sales — Last 7 Days</span>
+                      <div style={{display:'flex',gap:5,alignItems:'center',flexWrap:'wrap'}}>
+                        {pillBtn('$',hmMetric==='$',()=>setHmMetric('$'))}
+                        {pillBtn('Units',hmMetric==='units',()=>setHmMetric('units'))}
+                        <div style={{width:1,height:16,background:'var(--brd)',margin:'0 2px'}}/>
+                        {pillBtn(hideNight?'Show 12–5am':'Hide 12–5am',hideNight,()=>setHideNight(v=>!v))}
+                        {pillBtn(hideLate?'Show 6–11pm':'Hide 6–11pm',hideLate,()=>setHideLate(v=>!v))}
+                      </div>
+                    </div>
+                    {loading.hmData?<Spinner/>:last7.length===0?(
+                      <div style={{padding:'24px',textAlign:'center',color:B.sub,fontSize:12}}>No hourly data yet</div>
+                    ):(
+                      <div style={{overflowX:'auto'}}>
+                        {last7.map(d=>(
+                          <div key={d.date} style={{display:'flex',alignItems:'center',marginBottom:2}}>
+                            <div style={{width:DLW,flexShrink:0,paddingRight:8,textAlign:'right'}}>
+                              <div style={{fontSize:9,fontWeight:d.isToday?700:500,color:d.isToday?B.b3:'var(--txt2)',lineHeight:'1.2',whiteSpace:'nowrap'}}>{d.dayOfWeek}</div>
+                              <div style={{fontSize:8,color:d.isToday?B.b2:B.sub,lineHeight:'1.2',whiteSpace:'nowrap'}}>{d.label}</div>
+                            </div>
+                            {visHours.map(h=>{
+                              const cell=d.hours[h]||{};
+                              const val=hmMetric==='$'?cell.sales:cell.units;
+                              const isFuture=(val===null||val===undefined);
+                              const numVal=isFuture?0:(Number(val)||0);
+                              const pct=(numVal>0)?Math.sqrt(numVal)/sqrtMax:0;
+                              const bgColor=isFuture?'rgb(21,37,62)':(numVal>0?hmColor(pct):'rgb(21,37,62)');
+                              const opacity=isFuture?0.06:(numVal>0?0.55+pct*0.45:0.16);
+                              const txtColor=pct>0.5?'#ffffff':'#7a9bbf';
+                              return (<div key={h} title={isFuture?`${d.label} ${HOUR_LABELS[h]}: future`:`${d.label} ${HOUR_LABELS[h]}: ${hmMetric==='$'?f$(numVal):`${numVal} units`}`} style={{width:HCOL_W-2,height:DRH,marginRight:2,background:bgColor,opacity,borderRadius:3,flexShrink:0,display:'flex',alignItems:'center',justifyContent:'center',fontSize:7,color:txtColor,fontWeight:600,overflow:'hidden',cursor:'default',border:d.isToday?`1px solid ${B.b2}44`:'none'}}>{!isFuture&&numVal>0&&fCell(numVal)}</div>);
+                            })}
+                          </div>
+                        ))}
+                        <div style={{display:'flex',marginLeft:DLW,marginTop:4}}>
+                          {visHours.map(h=>(<div key={h} style={{width:HCOL_W-2,marginRight:2,flexShrink:0,textAlign:'center',fontSize:7,color:B.sub,lineHeight:'1.2'}}>{HOUR_LABELS[h]}</div>))}
+                        </div>
+                        <div style={{display:'flex',justifyContent:'space-between',marginTop:8,marginLeft:DLW}}>
+                          <div style={{display:'flex',alignItems:'center',gap:3}}>
+                            <span style={{fontSize:8,color:B.sub}}>Low</span>
+                            {[0,.17,.33,.5,.67,.83,1].map(t=>(<div key={t} style={{width:10,height:10,borderRadius:2,background:t===0?'rgb(21,37,62)':hmColor(t),opacity:0.55+t*0.45}}/>))}
+                            <span style={{fontSize:8,color:B.sub}}>High</span>
+                          </div>
+                          <span style={{fontSize:8,color:B.sub}}>{hmData?.lastUpdated?hmData.lastUpdated.replace('T',' '):'—'}</span>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                );
+              })()}
+              {(()=>{
+                const toggleWindow=(w)=>{setHmWindows(prev=>{if(prev.includes(w)){return prev.length>1?prev.filter(x=>x!==w):prev;}const next=[...prev,w];return next.length>2?[next[1],next[2]]:next;});};
+                const pillBtn2=(key,label)=>(<button key={key} onClick={e=>{e.stopPropagation();toggleWindow(key);}} style={{padding:'3px 10px',borderRadius:6,fontSize:10,fontWeight:600,cursor:'pointer',transition:'all .15s',border:`1px solid ${hmWindows.includes(key)?B.b2:'var(--brd)'}`,background:hmWindows.includes(key)?`${B.b1}33`:'transparent',color:hmWindows.includes(key)?B.b3:'var(--txt3)'}}>{label}</button>);
+                const filteredHm=toArr(heatmap).filter(r=>hmWindows.some(w=>HM_WINDOWS_DEF[w].indices.has(r.week)));
+                const totalWks=hmWindows.reduce((s,w)=>s+HM_WINDOWS_DEF[w].count,0);
+                const futureSvgCols=new Set();
+                const weekStartDates=[];
+                const metricLabel2=hmMetric2==='units'?'Units':hmMetric2==='sales'?'Sales $':'Returns';
+                const windowLabel2=hmWindows.map(w=>HM_WINDOWS_DEF[w].label).join(' + ');
+                return (
+                  <div style={{background:'var(--surf)',border:'1px solid var(--brd)',borderRadius:14,padding:16,marginBottom:10}}>
+                    <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:8,flexWrap:'wrap',gap:8}}>
+                      <span style={{fontSize:13,fontWeight:700,color:'var(--txt)'}}>{metricLabel2} — {windowLabel2} x Day of Week</span>
+                      <div style={{display:'flex',gap:4,alignItems:'center',flexWrap:'wrap'}}>
+                        {['D','C','A','B'].map(w=>pillBtn2(w,HM_WINDOWS_DEF[w].label))}
+                        <div style={{width:1,height:16,background:'var(--brd)',margin:'0 4px'}}/>
+                        {[['Units','units'],['Sales $','sales'],['Returns','returns']].map(([lbl,key])=>(<button key={key} onClick={e=>{e.stopPropagation();setHmMetric2(key);}} style={{padding:'3px 10px',borderRadius:6,fontSize:10,fontWeight:600,cursor:'pointer',transition:'all .15s',border:`1px solid ${hmMetric2===key?B.b2:'var(--brd)'}`,background:hmMetric2===key?`${B.b1}33`:'transparent',color:hmMetric2===key?B.b3:'var(--txt3)'}}>{lbl}</button>))}
+                      </div>
+                    </div>
+                    {errors.heatmap&&<div style={{padding:'10px 14px',color:'#fb923c',fontSize:11,background:'rgba(251,146,60,.08)',border:'1px solid rgba(251,146,60,.18)',borderRadius:8,marginBottom:8}}>⚠ {errors.heatmap}</div>}
+                    {loading.heatmap?<Spinner/>:svgChart(heatmapSVG(filteredHm,1100,totalWks,hmMetric2,futureSvgCols,weekStartDates))}
+                  </div>
+                );
+              })()}
+            </>}
+
+            {/* ── TRENDS & PATTERNS ── */}
+            <EpochLabel type="trend" label="📊 Trends & Patterns" right="Period-controlled"/>
+
+            {/* ── Sales Overview KPIs ── */}
+            <div style={{display:'flex',gap:8,marginBottom:10,overflowX:'auto',paddingBottom:2}}>
+              {loading.metrics ? <Spinner/> : <>
+                <MetricCard label="Sales $"       value={f$(m.sales)}         ly={f$(ly('sales'))}         delta={dp(m.sales,ly('sales'))}/>
+                <MetricCard label="Unit Sales"    value={fN(m.unit_sales)}     ly={fN(ly('unit_sales'))}    delta={dp(m.unit_sales,ly('unit_sales'))}/>
+                <MetricCard label="AUR"           value={f$(m.aur)}            ly={f$(ly('aur'))}           delta={dp(m.aur,ly('aur'))}/>
+                <MetricCard label="COGS"          value={f$(m.cogs)}           ly={f$(ly('cogs'))}          delta={dp(m.cogs,ly('cogs'))}/>
+                <MetricCard label="Amazon Fees"   value={f$(m.amazon_fees)}    ly={f$(ly('amazon_fees'))}   delta={dp(m.amazon_fees,ly('amazon_fees'))}/>
+                <MetricCard label="Returns" value={`${fN(m.returns)} · ${f$(m.returns_amount)}`} ly={`${fN(ly('returns'))} · ${f$(ly('returns_amount'))}`} delta={dp(m.returns,ly('returns'))} invert/>
+                <MetricCard label="Gross Margin $"  value={f$(m.gross_margin)}     ly={f$(ly('gross_margin'))}     delta={dp(m.gross_margin,ly('gross_margin'))}/>
+                <MetricCard label="Gross Margin %"  value={fP(m.gross_margin_pct)} ly={fP(ly('gross_margin_pct'))} delta={dp(m.gross_margin_pct,ly('gross_margin_pct'))}/>
+              </>}
+            </div>
+
+            {/* ── Period selector ── */}
+            <div style={{display:'flex',alignItems:'center',gap:8,marginBottom:14,paddingBottom:10,borderBottom:'1px solid var(--brd)'}}>
+              <span style={{fontSize:9,fontWeight:700,textTransform:'uppercase',letterSpacing:'.08em',color:'var(--txt3)',whiteSpace:'nowrap'}}>Period</span>
+              {EXEC_PERIODS_LIST.map(p => (
+                <button key={p} onClick={() => { const cp = EXEC_PERIOD_MAP[p]; setCpSales(cp); setActivePeriod(cp); }} style={{
+                  fontSize:9,fontWeight:700,padding:'3px 9px',borderRadius:5,cursor:'pointer',
+                  border:`1px solid ${cpSales===EXEC_PERIOD_MAP[p] ? B.b2 : 'var(--brd)'}`,
+                  background: cpSales===EXEC_PERIOD_MAP[p] ? `${B.b2}22` : 'transparent',
+                  color: cpSales===EXEC_PERIOD_MAP[p] ? B.b2 : 'var(--txt3)',
+                  transition:'all .15s',
+                }}>{p}</button>
+              ))}
+            </div>
+
+            {/* ── Revenue & AUR Trend + Units ── */}
+            {(() => {
+              return cpSales === '7D' ? (
+                <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:12,marginBottom:12}}>
+                  <ChartCard title="Revenue & AUR Trend" error={errors.trend}>
+                    {loading.trend ? <Spinner/> : <>
+                      {svgChart(salesAurSVG(toArr(trend)))}
+                      <Legend items={[['Sales TY','#2E6FBB'],['Sales LY','#5B9FD4',true],['AUR TY','#22c55e'],['AUR LY','#16a34a',true]]}/>
+                    </>}
+                  </ChartCard>
+                  <ChartCard title="Units Sold — TY vs LY" error={errors.trend}>
+                    {loading.trend ? <Spinner/> : (() => {
+                      const tArr = toArr(trend);
+                      if (!tArr || tArr.length < 2) return <div style={{color:'var(--txt3)',padding:20,textAlign:'center',fontSize:12}}>No data</div>;
+                      const W=1100,H=165,pad={t:14,r:20,b:24,l:54};
+                      const iw=W-pad.l-pad.r, ih=H-pad.t-pad.b, n=tArr.length;
+                      const xB=i=>pad.l+((i+0.5)/n)*iw;
+                      const uvArr=tArr.flatMap(d=>[d.ty_units,d.ly_units]).filter(v=>v!=null&&v>=0);
+                      const umx=Math.max(...uvArr,1);
+                      const yU=v=>pad.t+ih-Math.min(1,Math.max(0,(v||0)/umx))*ih;
+                      const bw=Math.max(3,Math.floor((iw/n)*0.35));
+                      let s=`<svg width="100%" viewBox="0 0 ${W} ${H}" style="overflow:visible;display:block">`;
+                      for(let i=0;i<=4;i++){const uval=umx/4*i,ya=yU(uval);s+=`<line x1="${pad.l}" y1="${ya.toFixed(1)}" x2="${W-pad.r}" y2="${ya.toFixed(1)}" stroke="#1a2f4a" stroke-width="0.5"/><text x="${pad.l-5}" y="${(ya+4).toFixed(1)}" text-anchor="end" font-size="9" fill="#5b7fa0">${fN(uval)}</text>`;}
+                      const step=Math.max(1,Math.floor(n/7));
+                      tArr.forEach((d,i)=>{if(i%step===0||i===n-1)s+=`<text x="${xB(i).toFixed(1)}" y="${H-4}" text-anchor="middle" font-size="8" fill="#374f66">${d.date?d.date.slice(5):''}</text>`;});
+                      tArr.forEach((d,i)=>{if((d.ly_units||0)>0){const bh=Math.max(2,(d.ly_units/umx)*ih);s+=`<rect x="${xB(i).toFixed(1)}" y="${yU(d.ly_units).toFixed(1)}" width="${bw.toFixed(1)}" height="${bh.toFixed(1)}" fill="rgba(91,159,212,.35)" rx="2"/>`;}});
+                      tArr.forEach((d,i)=>{if((d.ty_units||0)>0){const bh=Math.max(2,(d.ty_units/umx)*ih);s+=`<rect x="${(xB(i)-bw).toFixed(1)}" y="${yU(d.ty_units).toFixed(1)}" width="${bw.toFixed(1)}" height="${bh.toFixed(1)}" fill="${B.b1}" rx="2"/>`;}});
+                      return <>{svgChart(s+'</svg>')}<Legend items={[['TY Units',B.b1],['LY Units','#5B9FD4',true]]}/></>;
+                    })()}
+                  </ChartCard>
+                </div>
+              ) : (
+                <div style={{display:'flex',flexDirection:'column',gap:12,marginBottom:12}}>
+                  <ChartCard title="Revenue & AUR Trend" error={errors.trend}>
+                    {loading.trend ? <Spinner/> : <>
+                      {svgChart(salesAurSVG(toArr(trend)))}
+                      <Legend items={[['Sales TY','#2E6FBB'],['Sales LY','#5B9FD4',true],['AUR TY','#22c55e'],['AUR LY','#16a34a',true]]}/>
+                    </>}
+                  </ChartCard>
+                  <ChartCard title="Units Sold — TY vs LY" error={errors.trend}>
+                    {loading.trend ? <Spinner/> : (() => {
+                      const tArr = toArr(trend);
+                      if (!tArr || tArr.length < 2) return <div style={{color:'var(--txt3)',padding:20,textAlign:'center',fontSize:12}}>No data</div>;
+                      const W=1100,H=190,pad={t:14,r:20,b:24,l:54};
+                      const iw=W-pad.l-pad.r, ih=H-pad.t-pad.b, n=tArr.length;
+                      const xB=i=>pad.l+((i+0.5)/n)*iw;
+                      const uvArr=tArr.flatMap(d=>[d.ty_units,d.ly_units]).filter(v=>v!=null&&v>=0);
+                      const umx=Math.max(...uvArr,1);
+                      const yU=v=>pad.t+ih-Math.min(1,Math.max(0,(v||0)/umx))*ih;
+                      const bw=Math.max(3,Math.floor((iw/n)*0.35));
+                      let s=`<svg width="100%" viewBox="0 0 ${W} ${H}" style="overflow:visible;display:block">`;
+                      for(let i=0;i<=4;i++){const uval=umx/4*i,ya=yU(uval);s+=`<line x1="${pad.l}" y1="${ya.toFixed(1)}" x2="${W-pad.r}" y2="${ya.toFixed(1)}" stroke="#1a2f4a" stroke-width="0.5"/><text x="${pad.l-5}" y="${(ya+4).toFixed(1)}" text-anchor="end" font-size="9" fill="#5b7fa0">${fN(uval)}</text>`;}
+                      const step=Math.max(1,Math.floor(n/7));
+                      tArr.forEach((d,i)=>{if(i%step===0||i===n-1)s+=`<text x="${xB(i).toFixed(1)}" y="${H-4}" text-anchor="middle" font-size="8" fill="#374f66">${d.date?d.date.slice(5):''}</text>`;});
+                      tArr.forEach((d,i)=>{if((d.ly_units||0)>0){const bh=Math.max(2,(d.ly_units/umx)*ih);s+=`<rect x="${xB(i).toFixed(1)}" y="${yU(d.ly_units).toFixed(1)}" width="${bw.toFixed(1)}" height="${bh.toFixed(1)}" fill="rgba(91,159,212,.35)" rx="2"/>`;}});
+                      tArr.forEach((d,i)=>{if((d.ty_units||0)>0){const bh=Math.max(2,(d.ty_units/umx)*ih);s+=`<rect x="${(xB(i)-bw).toFixed(1)}" y="${yU(d.ty_units).toFixed(1)}" width="${bw.toFixed(1)}" height="${bh.toFixed(1)}" fill="${B.b1}" rx="2"/>`;}});
+                      return <>{svgChart(s+'</svg>')}<Legend items={[['TY Units',B.b1],['LY Units','#5B9FD4',true]]}/></>;
+                    })()}
+                  </ChartCard>
+                </div>
+              );
+            })()}
+
+            {/* ── Traffic & Conversion Pipeline ── */}
+            <div style={{background:'var(--card)',border:'1px solid var(--brd)',borderRadius:12,padding:16,marginBottom:12}}>
+              <div style={{display:'flex',alignItems:'center',gap:10,marginBottom:12}}>
+                <div style={{flex:1,height:1,background:'var(--brd)'}}/>
+                <span style={{fontSize:10,fontWeight:700,textTransform:'uppercase',letterSpacing:'.1em',color:'var(--txt3)',whiteSpace:'nowrap'}}>Traffic & Conversion Pipeline</span>
+                <div style={{flex:1,height:1,background:'var(--brd)'}}/>
+              </div>
+              {Array.isArray(funnel) && funnel.length > 0 && (() => {
+                const maxV=Math.max(...funnel.map(s2=>s2.ty||0),1);
+                const sColors=[B.b3,B.b2,B.o2,B.t2];
+                const rates=funnel.map((s2,i)=>i===0?null:funnel[i-1].ty>0?((s2.ty||0)/funnel[i-1].ty*100).toFixed(1)+'%':null);
+                return (
+                  <div style={{display:'grid',gridTemplateColumns:`repeat(${funnel.length},1fr)`,gap:0,border:'1px solid var(--brd)',borderRadius:8,overflow:'hidden',marginBottom:12}}>
+                    {funnel.map((s2,i)=>{
+                      const lyDelta=s2.ly>0?((s2.ty-s2.ly)/s2.ly*100):null;
+                      const col=sColors[i%sColors.length];
+                      return (
+                        <div key={s2.label} style={{padding:'10px 14px',borderRight:i<funnel.length-1?'1px solid var(--brd)':'none',position:'relative'}}>
+                          <div style={{fontSize:10,color:'var(--txt3)',fontWeight:600,marginBottom:4,whiteSpace:'nowrap',overflow:'hidden',textOverflow:'ellipsis'}}>{s2.label}</div>
+                          <div style={{fontSize:20,fontWeight:800,color:col}}>{(s2.ty||0).toLocaleString()}</div>
+                          <div style={{height:4,background:'var(--brd)',borderRadius:2,overflow:'hidden',margin:'6px 0 4px'}}>
+                            <div style={{height:'100%',width:`${Math.max(4,(s2.ty/maxV)*100)}%`,background:col,borderRadius:2}}/>
+                          </div>
+                          {rates[i] && <div style={{fontSize:9,color:'var(--txt3)'}}>{rates[i]} step-through</div>}
+                          {lyDelta!==null && <div style={{fontSize:10,fontWeight:700,color:lyDelta>=0?'#4ade80':'#fb923c'}}>{lyDelta>=0?'▲':'▼'}{Math.abs(lyDelta).toFixed(1)}% vs LY</div>}
+                          {i<funnel.length-1 && <div style={{position:'absolute',right:-9,top:'50%',transform:'translateY(-50%)',fontSize:14,color:'var(--brd2)',zIndex:1}}>›</div>}
+                        </div>
+                      );
+                    })}
+                  </div>
+                );
+              })()}
+              <div style={{display:'grid',gridTemplateColumns:'3fr 1fr',gap:12}}>
+                <ChartCard title="Sessions & Conversion Rate" badge={cpSales} error={errors.trendTraffic} noMargin>
+                  {loading.trendTraffic ? <Spinner/> : <>
+                    {svgChart(sessionsConvSVG(toArr(trendTraffic)))}
+                    <Legend items={[['Sessions TY',B.o2],['Sessions LY',B.sub,true],['Conv% TY',B.t2]]}/>
+                  </>}
+                </ChartCard>
+                <div style={{display:'flex',flexDirection:'column',gap:10}}>
+                  <div style={{background:'var(--card2)',border:'1px solid var(--brd)',borderRadius:10,padding:'12px 14px'}}>
+                    <div style={{fontSize:9,fontWeight:700,textTransform:'uppercase',letterSpacing:'.08em',color:'var(--txt3)',marginBottom:8}}>Traffic KPIs · MTD</div>
+                    {metricsTraffic && [
+                      ['Page Views', fN(metricsTraffic.glance_views||0), metricsTraffic.glance_views||0, metricsTraffic.ly_glance_views||0],
+                      ['Sessions',   fN(metricsTraffic.sessions||0),     metricsTraffic.sessions||0,     metricsTraffic.ly_sessions||0],
+                      ['Conv %',     fP(metricsTraffic.conversion||0),   metricsTraffic.conversion||0,   metricsTraffic.ly_conversion||0],
+                      ['Buy Box %',  fP(metricsTraffic.buy_box||0),      metricsTraffic.buy_box||0,      metricsTraffic.ly_buy_box||0],
+                    ].map(([lbl,val,ty,ly2])=>{
+                      const delta=ly2>0?((ty-ly2)/ly2*100):null;
+                      return (
+                        <div key={lbl} style={{display:'flex',justifyContent:'space-between',alignItems:'center',padding:'4px 0',borderBottom:'1px solid rgba(26,47,74,.4)'}}>
+                          <span style={{fontSize:10,color:'var(--txt3)'}}>{lbl}</span>
+                          <div style={{textAlign:'right'}}>
+                            <div style={{fontSize:12,fontWeight:700,color:'var(--txt)'}}>{val}</div>
+                            {delta!==null && <div style={{fontSize:9,fontWeight:700,color:delta>=0?'#4ade80':'#fb923c'}}>{delta>=0?'▲':'▼'}{Math.abs(delta).toFixed(1)}% vs LY</div>}
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            {/* ── Business Health + Actions ── */}
+            <div style={{display:'grid',gridTemplateColumns:'1fr 2fr',gap:12,marginBottom:12}}>
+              {(() => {
+                const tod2=periodCols?.['Today']||{};
+                const mtdH=periodCols?.['MTD']||{};
+                const paceScore=tod2.ty_forecast>0&&tod2.ly_eod_sales>0?Math.min(100,Math.round((tod2.ty_forecast/(tod2.ly_eod_sales||1))*50+50)):72;
+                const convScore=metricsTraffic?.conversion>0?Math.min(100,Math.round((metricsTraffic.conversion/0.14)*85)):70;
+                const roasScore=m.roas>0?Math.min(100,Math.round((m.roas/3.5)*100)):65;
+                const atcS=Array.isArray(funnel)&&funnel.length>2?(funnel[2]?.ty||0)/(funnel[0]?.ty||1):0;
+                const atcScore=Math.min(100,Math.round((atcS/0.22)*80));
+                const retRatioH=(mtdH.returns_amount||0)/(mtdH.sales||1);
+                const retScore=Math.min(100,Math.max(0,Math.round((1-retRatioH/0.05)*100)));
+                const dosScore=m.dos>0?Math.min(100,Math.round(Math.min(m.dos,90)/90*100)):60;
+                const overall=Math.round((paceScore+convScore+roasScore+atcScore+retScore+dosScore)/6);
+                const scoreColor=overall>=80?'#22c55e':overall>=65?B.t2:overall>=50?'#f59e0b':'#ef4444';
+                const scoreLabel=overall>=80?'Excellent':overall>=65?'Good':overall>=50?'Fair':'Needs Attention';
+                const circ=2*Math.PI*38;
+                return (
+                  <div style={{background:'var(--card)',border:'1px solid var(--brd)',borderRadius:12,padding:16,display:'flex',flexDirection:'column',alignItems:'center',gap:14}}>
+                    <div style={{fontSize:9,fontWeight:700,textTransform:'uppercase',letterSpacing:'.1em',color:'var(--txt3)',width:'100%',textAlign:'center'}}>Business Health Score</div>
+                    <div style={{display:'flex',alignItems:'center',gap:16,width:'100%'}}>
+                      <div style={{position:'relative',width:88,height:88,flexShrink:0}}>
+                        <svg viewBox="0 0 88 88" width="88" height="88" style={{transform:'rotate(-90deg)'}}>
+                          <circle cx="44" cy="44" r="38" fill="none" stroke="var(--brd)" strokeWidth="8"/>
+                          <circle cx="44" cy="44" r="38" fill="none" stroke={scoreColor} strokeWidth="8"
+                            strokeDasharray={`${(overall/100)*circ} ${circ}`} strokeLinecap="round"/>
+                        </svg>
+                        <div style={{position:'absolute',inset:0,display:'flex',flexDirection:'column',alignItems:'center',justifyContent:'center'}}>
+                          <div style={{fontSize:22,fontWeight:800,lineHeight:1,color:scoreColor}}>{overall}</div>
+                          <div style={{fontSize:8,fontWeight:700,textTransform:'uppercase',letterSpacing:'.06em',color:'var(--txt3)',marginTop:1}}>/ 100</div>
+                        </div>
+                      </div>
+                      <div style={{flex:1}}>
+                        <div style={{fontSize:14,fontWeight:700,color:scoreColor,marginBottom:3}}>{scoreLabel}</div>
+                        <div style={{fontSize:10,color:'var(--txt3)',lineHeight:1.5}}>Revenue pace, conversion, ROAS, funnel efficiency, returns & inventory.</div>
+                      </div>
+                    </div>
+                    <div style={{width:'100%',display:'flex',flexDirection:'column',gap:5}}>
+                      {[['Revenue Pace',paceScore,'#22c55e'],['Conversion Rate',convScore,B.t2],['ROAS / Ad Eff.',roasScore,B.b3],['ATC / Funnel',atcScore,'#f59e0b'],['Return Rate',retScore,'#22c55e'],['Inventory DOS',dosScore,B.b3]].map(([lbl,sc,col])=>(
+                        <div key={lbl} style={{display:'flex',alignItems:'center',gap:8,fontSize:10}}>
+                          <span style={{width:96,color:'var(--txt3)',whiteSpace:'nowrap',overflow:'hidden',textOverflow:'ellipsis'}}>{lbl}</span>
+                          <div style={{flex:1,height:5,background:'var(--brd)',borderRadius:3,overflow:'hidden'}}>
+                            <div style={{width:`${sc}%`,height:'100%',background:col,borderRadius:3}}/>
+                          </div>
+                          <span style={{width:26,textAlign:'right',fontWeight:700,color:col}}>{sc}</span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                );
+              })()}
+              {(() => {
+                const mtdA=periodCols?.['MTD']||{};
+                const actions=[];
+                const atcIdx=Array.isArray(funnel)?funnel.findIndex(s2=>s2.label?.toLowerCase().includes('cart')):-1;
+                const sessIdx=Array.isArray(funnel)?funnel.findIndex(s2=>s2.label?.toLowerCase().includes('sess')):-1;
+                const atcRate=atcIdx>=0&&sessIdx>=0&&(funnel[sessIdx]?.ty||0)>0?(funnel[atcIdx].ty/funnel[sessIdx].ty):0;
+                if(atcRate>0&&atcRate<0.18) actions.push({type:'alert',title:`🛒 ATC Rate low at ${(atcRate*100).toFixed(1)}% — benchmark ~22%`,desc:'Add-to-cart rate is below the 90-day benchmark. Review top ASINs for pricing gaps, competitor undercutting, or missing A+ content.'});
+                if((m.tacos||0)>0.16) actions.push({type:'warn',title:`📣 TACOS at ${fP(m.tacos)} — approaching 16% threshold`,desc:'Ad spend as a % of revenue is elevated. Consider pausing underperforming campaigns or reducing bids on low-ROAS keywords.'});
+                if((m.dos||0)>0&&(m.dos||0)<30) actions.push({type:'alert',title:`📦 Days of Supply at ${m.dos}d — reorder approaching`,desc:`With ${m.dos} days of supply, FBA stock is running low. Create a shipment plan now to avoid stockouts and BSR drop.`});
+                const mtdChg=(mtdA.ly_sales||0)>0?((mtdA.sales||0)-(mtdA.ly_sales||0))/(mtdA.ly_sales||1):null;
+                if(mtdChg!==null&&mtdChg>=0.05) actions.push({type:'ok',title:`✅ MTD pacing ▲${(mtdChg*100).toFixed(1)}% vs LY`,desc:'Revenue is tracking above last year. Consider increasing ad budget to capture more share while TACOS is healthy.'});
+                else if(mtdChg!==null&&mtdChg<-0.02) actions.push({type:'warn',title:`📉 MTD revenue ▼${(Math.abs(mtdChg)*100).toFixed(1)}% vs LY`,desc:'Revenue is trailing last year MTD. Check for suppressed listings, lost Buy Box, or gaps in ad coverage.'});
+                const retR=(mtdA.returns_amount||0)/(mtdA.sales||1);
+                if(retR>0&&retR<0.04) actions.push({type:'ok',title:`✅ Return rate ${(retR*100).toFixed(1)}% — below 4% target`,desc:'Returns are well-controlled. Maintain current listing accuracy and A+ content that is driving this improvement.'});
+                else if(retR>0.07) actions.push({type:'alert',title:`⚠ Return rate ${(retR*100).toFixed(1)}% — above 7% threshold`,desc:'High returns may indicate listing inaccuracy, product issues, or sizing confusion. Review top return reasons in Seller Central.'});
+                if((m.roas||0)>0&&(m.roas||0)<2.5) actions.push({type:'warn',title:`📊 ROAS at ${fX(m.roas)} — below 2.5x floor`,desc:'Ad return on spend is low. Review campaign structure, negative keywords, and bid strategy. Consider pausing bottom-decile ASINs.'});
+                if(actions.length===0) actions.push({type:'info',title:'✅ All metrics within healthy ranges',desc:'No urgent actions detected. Review the detailed tabs for optimization opportunities in advertising, inventory, and pricing.'});
+                const tStyle={alert:{border:'rgba(239,68,68,.2)',bg:'rgba(239,68,68,.05)',dot:'#ef4444'},warn:{border:'rgba(245,158,11,.2)',bg:'rgba(245,158,11,.05)',dot:'#f59e0b'},ok:{border:'rgba(34,197,94,.2)',bg:'rgba(34,197,94,.05)',dot:'#22c55e'},info:{border:'rgba(91,159,212,.2)',bg:'rgba(91,159,212,.04)',dot:B.b3}};
+                return (
+                  <div style={{background:'var(--card)',border:'1px solid var(--brd)',borderRadius:12,padding:16}}>
+                    <div style={{fontSize:9,fontWeight:700,textTransform:'uppercase',letterSpacing:'.1em',color:'var(--txt3)',marginBottom:12}}>📋 Actions to Take Today</div>
+                    <div style={{display:'flex',flexDirection:'column',gap:8}}>
+                      {actions.slice(0,6).map((a,i)=>{
+                        const st=tStyle[a.type]||tStyle.info;
+                        return (
+                          <div key={i} style={{display:'flex',gap:10,alignItems:'flex-start',padding:'10px 12px',borderRadius:8,border:`1px solid ${st.border}`,background:st.bg}}>
+                            <div style={{width:8,height:8,borderRadius:'50%',background:st.dot,flexShrink:0,marginTop:4}}/>
+                            <div>
+                              <div style={{fontSize:12,fontWeight:600,color:'var(--txt)',marginBottom:2}}>{a.title}</div>
+                              <div style={{fontSize:10,color:'var(--txt3)',lineHeight:1.5}}>{a.desc}</div>
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+                );
+              })()}
+            </div>
+
+            {/* ── PROFITABILITY ── */}
+            <EpochLabel type="period" label="💰 Profitability" right="MTD"/>
+            <div style={{display:'grid',gridTemplateColumns:'1fr 1fr 1fr',gap:12,marginBottom:12}}>
+              {(() => {
+                const mtdP=periodCols?.['MTD']||{};
+                const rev=mtdP.sales||0;
+                const ret=mtdP.returns_amount||0;
+                const netRev=rev-ret;
+                const fees=Math.abs(mtdP.amazon_fees||0);
+                const adSpend=m.ad_spend||0;
+                const cogs=netRev*0.35;
+                const cm=netRev-fees-adSpend-cogs;
+                const cmPct=netRev>0?cm/netRev*100:0;
+                const wfRows=[
+                  {lbl:'Gross Revenue', val:rev,      col:B.t2,    neg:false, eq:false},
+                  {lbl:'- Returns',     val:-ret,     col:'#ef4444',neg:true, eq:false},
+                  {lbl:'= Net Revenue', val:netRev,   col:'var(--txt)',neg:false,eq:true},
+                  {lbl:'- Amazon Fees', val:-fees,    col:'#ef4444',neg:true, eq:false},
+                  {lbl:'- Ad Spend',    val:-adSpend, col:'#ef4444',neg:true, eq:false},
+                  {lbl:'- COGS (est.)', val:-cogs,    col:'#ef4444',neg:true, eq:false},
+                ];
+                return (
+                  <div style={{background:'var(--card)',border:'1px solid var(--brd)',borderRadius:12,padding:16}}>
+                    <div style={{fontSize:9,fontWeight:700,textTransform:'uppercase',letterSpacing:'.08em',color:'var(--txt3)',marginBottom:10}}>P&L Summary · MTD</div>
+                    {wfRows.map((r,idx)=>(
+                      <div key={idx} style={{display:'flex',justifyContent:'space-between',padding:'6px 0',borderBottom:r.eq?'1px solid var(--brd)':'1px solid rgba(26,47,74,.4)',alignItems:'center'}}>
+                        <span style={{fontSize:11,color:r.neg?'var(--txt3)':'var(--txt2)'}}>{r.lbl}</span>
+                        <span style={{fontSize:12,fontWeight:700,color:r.col}}>{r.neg?'−':''}{f$(Math.abs(r.val))}</span>
+                      </div>
+                    ))}
+                    <div style={{display:'flex',justifyContent:'space-between',padding:'8px 0 2px',alignItems:'center'}}>
+                      <span style={{fontSize:12,fontWeight:700,color:'var(--txt)'}}>Contribution Margin</span>
+                      <span style={{fontSize:16,fontWeight:800,color:B.t2}}>{f$(cm)}</span>
+                    </div>
+                    <div style={{display:'flex',justifyContent:'space-between',alignItems:'center'}}>
+                      <span style={{fontSize:10,color:'var(--txt3)'}}>Margin %</span>
+                      <span style={{fontSize:12,fontWeight:700,color:B.t3}}>{cmPct.toFixed(1)}%</span>
+                    </div>
+                  </div>
+                );
+              })()}
+              <div style={{background:'var(--card)',border:'1px solid var(--brd)',borderRadius:12,padding:16}}>
+                <div style={{fontSize:9,fontWeight:700,textTransform:'uppercase',letterSpacing:'.08em',color:'var(--txt3)',marginBottom:10}}>Amazon Fee Breakdown · MTD</div>
+                {feeBreak && (feeBreak.items||Array.isArray(feeBreak)) ? (() => {
+                  const items=feeBreak.items||feeBreak;
+                  const total=items.reduce((s2,f2)=>s2+(f2.amount||0),0);
+                  const fColors=['#E87830',B.b2,B.t2,B.sub,'#f59e0b'];
+                  return <>
+                    {items.slice(0,5).map((f2,i)=>{
+                      const pct=total>0?((f2.amount||0)/total*100).toFixed(1):'0';
+                      return (
+                        <div key={f2.type} style={{display:'flex',justifyContent:'space-between',alignItems:'center',padding:'5px 0',borderBottom:'1px solid rgba(26,47,74,.4)'}}>
+                          <div style={{display:'flex',alignItems:'center',gap:6}}>
+                            <div style={{width:10,height:10,borderRadius:2,background:fColors[i%fColors.length],flexShrink:0}}/>
+                            <span style={{fontSize:11,color:'var(--txt3)'}}>{f2.type}</span>
+                          </div>
+                          <div style={{textAlign:'right'}}>
+                            <div style={{fontSize:12,fontWeight:700,color:fColors[i%fColors.length]}}>{f$(f2.amount||0)}</div>
+                            <div style={{fontSize:9,color:'var(--txt3)'}}>{pct}%</div>
+                          </div>
+                        </div>
+                      );
+                    })}
+                    <div style={{display:'flex',justifyContent:'space-between',padding:'6px 0 0',alignItems:'center',borderTop:'1px solid var(--brd)',marginTop:2}}>
+                      <span style={{fontSize:11,fontWeight:700,color:'var(--txt)'}}>Total Fees</span>
+                      <span style={{fontSize:14,fontWeight:800,color:'#ef4444'}}>{f$(total)}</span>
+                    </div>
+                  </>;
+                })() : <div style={{color:'var(--txt3)',fontSize:11,textAlign:'center',padding:'20px 0'}}>Fee data loading…</div>}
+              </div>
+              {(() => {
+                const mtdM=periodCols?.['MTD']||{};
+                const rev5=mtdM.sales||0, lyRev5=mtdM.ly_sales||0;
+                const fees5=Math.abs(mtdM.amazon_fees||0), lyFees5=Math.abs(mtdM.ly_amazon_fees||0);
+                const ret5=mtdM.returns_amount||0, lyRet5=mtdM.ly_returns_amount||0;
+                const adS5=m.ad_spend||0, lyAd5=m.ly_ad_spend||0;
+                const cm5=rev5-ret5-fees5-adS5-(rev5-ret5)*0.35;
+                const lyCm5=lyRev5-lyRet5-lyFees5-lyAd5-(lyRev5-lyRet5)*0.35;
+                const cmPct5=rev5>0?cm5/rev5*100:0, lyCmPct5=lyRev5>0?lyCm5/lyRev5*100:0;
+                const cmChg=lyCmPct5>0?cmPct5-lyCmPct5:null;
+                return (
+                  <div style={{background:'var(--card)',border:'1px solid var(--brd)',borderTop:`2px solid ${B.t2}`,borderRadius:12,padding:16}}>
+                    <div style={{fontSize:9,fontWeight:700,textTransform:'uppercase',letterSpacing:'.08em',color:'var(--txt3)',marginBottom:10}}>Margin & AUR · MTD</div>
+                    <div style={{display:'flex',gap:14,alignItems:'flex-end',marginBottom:12,flexWrap:'wrap'}}>
+                      <div><div style={{fontSize:9,color:'var(--txt3)',marginBottom:2}}>TY CM%</div><div style={{fontSize:26,fontWeight:800,color:B.t2,lineHeight:1}}>{cmPct5.toFixed(1)}%</div></div>
+                      <div><div style={{fontSize:9,color:'var(--txt3)',marginBottom:2}}>LY CM%</div><div style={{fontSize:26,fontWeight:800,color:B.b3,lineHeight:1}}>{lyCmPct5.toFixed(1)}%</div></div>
+                      {cmChg!==null && <span style={{fontSize:11,fontWeight:700,padding:'3px 8px',borderRadius:6,background:cmChg>=0?'rgba(34,197,94,.12)':'rgba(239,68,68,.12)',color:cmChg>=0?'#4ade80':'#f87171',marginBottom:4}}>{cmChg>=0?'▲':'▼'}{Math.abs(cmChg).toFixed(1)}pt</span>}
+                    </div>
+                    <div style={{height:1,background:'var(--brd)',marginBottom:10}}/>
+                    {[
+                      ['ROAS',   fX(m.roas||0),  B.t2],
+                      ['TACOS',  fP(m.tacos||0), (m.tacos||0)>0.16?'#f59e0b':B.t3],
+                      ['AUR TY', f$(mtdM.aur||(rev5/(mtdM.units||1))), 'var(--txt)'],
+                      ['AUR LY', f$(mtdM.ly_aur||(lyRev5/(mtdM.ly_units||1))), B.sub],
+                    ].map(([lbl,val,col])=>(
+                      <div key={lbl} style={{display:'flex',justifyContent:'space-between',padding:'5px 0',borderBottom:'1px solid rgba(26,47,74,.4)'}}>
+                        <span style={{fontSize:11,color:'var(--txt3)'}}>{lbl}</span>
+                        <span style={{fontSize:13,fontWeight:700,color:col}}>{val}</span>
+                      </div>
+                    ))}
+                  </div>
+                );
+              })()}
+            </div>
+          </>
+        );
+      })()}
+
       {/* PERIOD COMPARISON COLUMNS */}
-      {viewTab !== 'Custom' && viewTab !== 'Executive' && periodCols && (
+      {viewTab !== 'Custom' && viewTab !== 'Executive' && viewTab !== 'Daily' && periodCols && (
         <div style={{display:'grid',gridTemplateColumns:'minmax(380px,2.1fr) repeat(4,minmax(185px,1fr))',gap:8,overflowX:'auto',paddingBottom:6,marginBottom:24}}>
           {periods.slice(0,5).map(p => {
             const d = periodCols[p] || {};
@@ -1874,7 +2456,7 @@ export default function Sales({ filters = {} }) {
       )}
 
       {/* HOURLY SALES HEATMAP — 30 days × 24 hours */}
-      {(viewTab === 'Sales Summary' || viewTab === 'Daily') && (() => {
+      {viewTab === 'Sales Summary' && (() => {
         // ── Color scale (same as 26-week heatmap) ──
         const hmStops = [
           [21,37,62],[15,82,115],[13,115,119],[34,139,34],
@@ -2034,7 +2616,7 @@ export default function Sales({ filters = {} }) {
       })()}
 
       {/* PERIOD PILLS — directly above Sales Overview KPIs */}
-      {viewTab !== 'Custom' && (
+      {viewTab !== 'Custom' && viewTab !== 'Daily' && (
         <div className="ppill-bar" style={{marginBottom:14}}>
           {periods.map(p => (
             <button key={p} className={`ppill${activePeriod===p?' active':''}`} onClick={() => setActivePeriod(p)}>
@@ -2044,6 +2626,7 @@ export default function Sales({ filters = {} }) {
         </div>
       )}
 
+      {viewTab !== 'Daily' && <>
       {/* ══ SALES OVERVIEW ══════════════════════════════════════════ */}
       <SectionDivider label="Sales Overview"/>
       <div style={{display:'flex',gap:8,marginBottom:14,overflowX:'auto',paddingBottom:2}}>
@@ -2543,6 +3126,7 @@ export default function Sales({ filters = {} }) {
           );
         })()}
       </ChartCard>
+      </>}
 
     </div>
   );
