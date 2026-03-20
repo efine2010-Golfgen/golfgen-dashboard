@@ -501,20 +501,21 @@ def sales_summary(
         ty_sales, ty_units, ty_sessions, ty_gv = _sum_sales(sd, ed, hp)
 
         # Supplement TY from orders table for recent periods where S&T report lags.
-        # Only override if orders table has MORE revenue (orders sync is more current
-        # for today; for yesterday S&T is usually complete and more accurate).
+        # Use include_pending=False so Pending orders don't inflate the count —
+        # Amazon Seller Central only shows confirmed (Shipped/Unshipped) orders.
+        # Only override daily_sales when it shows zero (no S&T data yet for today).
         fell_back = False
         if period in ('today', 'yesterday'):
-            o_sales, o_units, o_cnt = _orders_supplement(con, sd, ed, hw, hp)
-            if o_sales > ty_sales or (ty_sales == 0 and (o_sales > 0 or o_cnt > 0)):
+            o_sales, o_units, o_cnt = _orders_supplement(con, sd, ed, hw, hp, include_pending=False)
+            if ty_sales == 0 and (o_sales > 0 or o_cnt > 0):
                 ty_sales, ty_units = o_sales, o_units
 
         ly_sales, ly_units, ly_sessions, ly_gv = _sum_sales(ly_sd, ly_ed, hp)
 
-        # Supplement LY from orders table — only if orders shows more.
+        # Supplement LY from orders table — only if S&T data is absent.
         if period in ('today', 'yesterday'):
-            lo_sales, lo_units, lo_cnt = _orders_supplement(con, ly_sd, ly_ed, hw, hp)
-            if lo_sales > ly_sales or (ly_sales == 0 and (lo_sales > 0 or lo_cnt > 0)):
+            lo_sales, lo_units, lo_cnt = _orders_supplement(con, ly_sd, ly_ed, hw, hp, include_pending=False)
+            if ly_sales == 0 and (lo_sales > 0 or lo_cnt > 0):
                 ly_sales, ly_units = lo_sales, lo_units
 
         ty_aur = round(ty_sales / ty_units, 2) if ty_units else 0
@@ -840,19 +841,18 @@ def sales_period_comparison(
             sales, units, sessions, glance_views = _daily_sales_sum(sd, ed, hp)
 
             if period_key == 'today':
-                # orders supplement wins if it has more revenue (Today Orders sync
-                # is more current than S&T report; both write to asin='ALL').
-                o_sales, o_units, o_cnt = _orders_supplement(con, sd, ed, hw, hp)
-                if o_sales > sales or (sales == 0 and (o_sales > 0 or o_cnt > 0)):
+                # Only use orders supplement when S&T has no data yet for today.
+                # Use include_pending=False to match Amazon Seller Central's view
+                # (confirmed orders only — Pending orders inflate the count).
+                o_sales, o_units, o_cnt = _orders_supplement(con, sd, ed, hw, hp, include_pending=False)
+                if sales == 0 and (o_sales > 0 or o_cnt > 0):
                     sales, units = o_sales, o_units
 
             elif period_key == 'yesterday':
                 # S&T report is usually complete for yesterday — only supplement if empty.
-                o_sales, o_units, o_cnt = _orders_supplement(con, sd, ed, hw, hp)
+                o_sales, o_units, o_cnt = _orders_supplement(con, sd, ed, hw, hp, include_pending=False)
                 if sales == 0 and o_sales > 0:
                     sales, units = o_sales, o_units
-                elif o_units > units:
-                    units = o_units
 
             elif ed >= today and sd < today:
                 # Multi-day period that includes today (WTD, MTD, YTD).
@@ -865,7 +865,7 @@ def sales_period_comparison(
                 """, [str(today)] + hp).fetchone()
                 today_ds_sales = float(today_sales_row[0]) if today_sales_row else 0
                 if today_ds_sales == 0:
-                    o_sales, o_units, o_cnt = _orders_supplement(con, today, today, hw, hp)
+                    o_sales, o_units, o_cnt = _orders_supplement(con, today, today, hw, hp, include_pending=False)
                     if o_sales > 0 or o_cnt > 0:
                         sales += o_sales
                         units += o_units
