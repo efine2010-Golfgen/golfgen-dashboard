@@ -923,6 +923,7 @@ export default function Sales({ filters = {} }) {
   const [activePeriod,setActivePeriod]= useState('MTD');
   const [yearVis,     setYearVis]     = useState({y2024:true,y2025:true,y2026:true});
   const [cpSales,     setCpSales]     = useState('30D');
+  const [showExecCharts, setShowExecCharts] = useState(false);
   const [cpTraffic,   setCpTraffic]   = useState('30D');
   const [customStart, setCustomStart] = useState('');
   const [customEnd,   setCustomEnd]   = useState('');
@@ -1225,6 +1226,115 @@ export default function Sales({ filters = {} }) {
                 })}
               </div>
             )}
+
+            {/* ── Heatmap Charts Toggle ── */}
+            <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',marginBottom:showExecCharts?10:14,padding:'8px 12px',
+              background:showExecCharts?'rgba(30,58,92,.4)':'var(--card)',
+              border:`1px solid ${showExecCharts?B.b2+'44':'var(--brd)'}`,borderRadius:9,cursor:'pointer'}}
+              onClick={()=>setShowExecCharts(v=>!v)}>
+              <div style={{display:'flex',alignItems:'center',gap:8}}>
+                <span style={{fontSize:14}}>{showExecCharts ? '📉' : '📊'}</span>
+                <span style={{fontSize:11,fontWeight:700,color:showExecCharts?B.b3:'var(--txt2)'}}>Heatmap Charts</span>
+                <span style={{fontSize:9,color:B.sub}}>Hourly · 26-Week Daily</span>
+              </div>
+              <span style={{fontSize:11,color:showExecCharts?B.b3:B.sub,fontWeight:700,userSelect:'none'}}>
+                {showExecCharts ? '▲ Hide' : '▼ Show'}
+              </span>
+            </div>
+
+            {showExecCharts && <>
+              {/* ── Hourly Heatmap (exec) ── */}
+              {(()=>{
+                const hmStops=[[21,37,62],[15,82,115],[13,115,119],[34,139,34],[218,165,32],[230,101,30],[214,40,57]];
+                const hmColor=(t)=>{if(t<=0)return 'rgb(21,37,62)';if(t>=1)return 'rgb(214,40,57)';const seg=t*(hmStops.length-1);const i=Math.floor(seg),f=seg-i;const a=hmStops[i],b2=hmStops[Math.min(i+1,hmStops.length-1)];return `rgb(${Math.round(a[0]+(b2[0]-a[0])*f)},${Math.round(a[1]+(b2[1]-a[1])*f)},${Math.round(a[2]+(b2[2]-a[2])*f)})`};
+                const HOUR_LABELS=['12am','1am','2am','3am','4am','5am','6am','7am','8am','9am','10am','11am','12pm','1pm','2pm','3pm','4pm','5pm','6pm','7pm','8pm','9pm','10pm','11pm'];
+                const HCOL_W=26,DLW=72,DRH=28;
+                const hmDays=hmData?.days||[];
+                const maxVal=hmMetric==='$'?(hmData?.maxSales||0):(hmData?.maxUnits||0);
+                const sqrtMax=Math.sqrt(maxVal||1);
+                const visHours=Array.from({length:24},(_,i)=>i).filter(h=>!(hideNight&&h<6)).filter(h=>!(hideLate&&h>=18));
+                const fCell=(v)=>{if(v==null||v===0)return '';if(hmMetric==='$'){if(v>=1000)return `$${(v/1000).toFixed(1)}k`;return `$${Math.round(v)}`;}if(v>=1000)return `${(v/1000).toFixed(1)}k`;return String(v)};
+                const pillBtn=(label,active,onClick)=>(<button key={label} onClick={e=>{e.stopPropagation();onClick();}} style={{padding:'3px 10px',borderRadius:6,fontSize:10,fontWeight:600,cursor:'pointer',transition:'all .15s',border:`1px solid ${active?B.b2:'var(--brd)'}`,background:active?`${B.b1}33`:'transparent',color:active?B.b3:'var(--txt3)'}}>{label}</button>);
+                const last7=hmDays.slice(-7);
+                return (
+                  <div style={{background:'var(--surf)',border:'1px solid var(--brd)',borderRadius:14,padding:'14px 16px',marginBottom:10}}>
+                    <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:10,flexWrap:'wrap',gap:8}}>
+                      <span style={{fontSize:13,fontWeight:700,color:'var(--txt)'}}>Hourly Sales — Last 7 Days</span>
+                      <div style={{display:'flex',gap:5,alignItems:'center',flexWrap:'wrap'}}>
+                        {pillBtn('$',hmMetric==='$',()=>setHmMetric('$'))}
+                        {pillBtn('Units',hmMetric==='units',()=>setHmMetric('units'))}
+                        <div style={{width:1,height:16,background:'var(--brd)',margin:'0 2px'}}/>
+                        {pillBtn(hideNight?'Show 12–5am':'Hide 12–5am',hideNight,()=>setHideNight(v=>!v))}
+                        {pillBtn(hideLate?'Show 6–11pm':'Hide 6–11pm',hideLate,()=>setHideLate(v=>!v))}
+                      </div>
+                    </div>
+                    {loading.hmData?<Spinner/>:last7.length===0?(
+                      <div style={{padding:'24px',textAlign:'center',color:B.sub,fontSize:12}}>No hourly data yet</div>
+                    ):(
+                      <div style={{overflowX:'auto'}}>
+                        {last7.map(d=>(
+                          <div key={d.date} style={{display:'flex',alignItems:'center',marginBottom:2}}>
+                            <div style={{width:DLW,flexShrink:0,paddingRight:8,textAlign:'right'}}>
+                              <div style={{fontSize:9,fontWeight:d.isToday?700:500,color:d.isToday?B.b3:'var(--txt2)',lineHeight:'1.2',whiteSpace:'nowrap'}}>{d.dayOfWeek}</div>
+                              <div style={{fontSize:8,color:d.isToday?B.b2:B.sub,lineHeight:'1.2',whiteSpace:'nowrap'}}>{d.label}</div>
+                            </div>
+                            {visHours.map(h=>{
+                              const cell=d.hours[h]||{};
+                              const val=hmMetric==='$'?cell.sales:cell.units;
+                              const isFuture=(val===null||val===undefined);
+                              const numVal=isFuture?0:(Number(val)||0);
+                              const pct=(numVal>0)?Math.sqrt(numVal)/sqrtMax:0;
+                              const bgColor=isFuture?'rgb(21,37,62)':(numVal>0?hmColor(pct):'rgb(21,37,62)');
+                              const opacity=isFuture?0.06:(numVal>0?0.55+pct*0.45:0.16);
+                              const txtColor=pct>0.5?'#ffffff':'#7a9bbf';
+                              return (<div key={h} title={isFuture?`${d.label} ${HOUR_LABELS[h]}: future`:`${d.label} ${HOUR_LABELS[h]}: ${hmMetric==='$'?f$(numVal):`${numVal} units`}`} style={{width:HCOL_W-2,height:DRH,marginRight:2,background:bgColor,opacity,borderRadius:3,flexShrink:0,display:'flex',alignItems:'center',justifyContent:'center',fontSize:7,color:txtColor,fontWeight:600,overflow:'hidden',cursor:'default',border:d.isToday?`1px solid ${B.b2}44`:'none'}}>{!isFuture&&numVal>0&&fCell(numVal)}</div>);
+                            })}
+                          </div>
+                        ))}
+                        <div style={{display:'flex',marginLeft:DLW,marginTop:4}}>
+                          {visHours.map(h=>(<div key={h} style={{width:HCOL_W-2,marginRight:2,flexShrink:0,textAlign:'center',fontSize:7,color:B.sub,lineHeight:'1.2'}}>{HOUR_LABELS[h]}</div>))}
+                        </div>
+                        <div style={{display:'flex',justifyContent:'space-between',marginTop:8,marginLeft:DLW}}>
+                          <div style={{display:'flex',alignItems:'center',gap:3}}>
+                            <span style={{fontSize:8,color:B.sub}}>Low</span>
+                            {[0,.17,.33,.5,.67,.83,1].map(t=>(<div key={t} style={{width:10,height:10,borderRadius:2,background:t===0?'rgb(21,37,62)':hmColor(t),opacity:0.55+t*0.45}}/>))}
+                            <span style={{fontSize:8,color:B.sub}}>High</span>
+                          </div>
+                          <span style={{fontSize:8,color:B.sub}}>{hmData?.lastUpdated?hmData.lastUpdated.replace('T',' '):'—'}</span>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                );
+              })()}
+
+              {/* ── Weekly 26-Week Heatmap (exec) ── */}
+              {(()=>{
+                const toggleWindow=(w)=>{setHmWindows(prev=>{if(prev.includes(w)){return prev.length>1?prev.filter(x=>x!==w):prev;}const next=[...prev,w];return next.length>2?[next[1],next[2]]:next;});};
+                const pillBtn2=(key,label,_range)=>(<button key={key} onClick={e=>{e.stopPropagation();toggleWindow(key);}} style={{padding:'3px 10px',borderRadius:6,fontSize:10,fontWeight:600,cursor:'pointer',transition:'all .15s',border:`1px solid ${hmWindows.includes(key)?B.b2:'var(--brd)'}`,background:hmWindows.includes(key)?`${B.b1}33`:'transparent',color:hmWindows.includes(key)?B.b3:'var(--txt3)'}}>{label}</button>);
+                const filteredHm=toArr(heatmap).filter(r=>hmWindows.some(w=>HM_WINDOWS_DEF[w].indices.has(r.week)));
+                const totalWks=hmWindows.reduce((s,w)=>s+HM_WINDOWS_DEF[w].count,0);
+                const futureSvgCols=new Set();
+                const weekStartDates=[];
+                const metricFmt2=hmMetric2==='sales'?f$:fN;
+                const metricLabel2=hmMetric2==='units'?'Units':hmMetric2==='sales'?'Sales $':'Returns';
+                const windowLabel2=hmWindows.map(w=>HM_WINDOWS_DEF[w].label).join(' + ');
+                return (
+                  <div style={{background:'var(--surf)',border:'1px solid var(--brd)',borderRadius:14,padding:16,marginBottom:10}}>
+                    <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:8,flexWrap:'wrap',gap:8}}>
+                      <span style={{fontSize:13,fontWeight:700,color:'var(--txt)'}}>{metricLabel2} — {windowLabel2} × Day of Week</span>
+                      <div style={{display:'flex',gap:4,alignItems:'center',flexWrap:'wrap'}}>
+                        {['D','C','A','B'].map(w=>pillBtn2(w,HM_WINDOWS_DEF[w].label,HM_WINDOWS_DEF[w].range))}
+                        <div style={{width:1,height:16,background:'var(--brd)',margin:'0 4px'}}/>
+                        {[['Units','units'],['Sales $','sales'],['Returns','returns']].map(([lbl,key])=>(<button key={key} onClick={e=>{e.stopPropagation();setHmMetric2(key);}} style={{padding:'3px 10px',borderRadius:6,fontSize:10,fontWeight:600,cursor:'pointer',transition:'all .15s',border:`1px solid ${hmMetric2===key?B.b2:'var(--brd)'}`,background:hmMetric2===key?`${B.b1}33`:'transparent',color:hmMetric2===key?B.b3:'var(--txt3)'}}>{lbl}</button>))}
+                      </div>
+                    </div>
+                    {errors.heatmap&&<div style={{padding:'10px 14px',color:'#fb923c',fontSize:11,background:'rgba(251,146,60,.08)',border:'1px solid rgba(251,146,60,.18)',borderRadius:8,marginBottom:8}}>⚠ {errors.heatmap}</div>}
+                    {loading.heatmap?<Spinner/>:svgChart(heatmapSVG(filteredHm,1100,totalWks,hmMetric2,futureSvgCols,weekStartDates))}
+                  </div>
+                );
+              })()}
+            </>}
 
             {/* ── Sales Overview KPIs ── */}
             <div style={{display:'flex',gap:8,marginBottom:10,overflowX:'auto',paddingBottom:2}}>
@@ -1764,7 +1874,7 @@ export default function Sales({ filters = {} }) {
       )}
 
       {/* HOURLY SALES HEATMAP — 30 days × 24 hours */}
-      {(viewTab === 'Sales Summary' || viewTab === 'Daily' || viewTab === 'Executive') && (() => {
+      {(viewTab === 'Sales Summary' || viewTab === 'Daily') && (() => {
         // ── Color scale (same as 26-week heatmap) ──
         const hmStops = [
           [21,37,62],[15,82,115],[13,115,119],[34,139,34],
@@ -2013,7 +2123,7 @@ export default function Sales({ filters = {} }) {
       </ChartCard>}
 
       {/* Weekly Sales Heatmap — 4 × 13-week window toggles (max 2 open = 26 weeks shown) */}
-      {(() => {
+      {viewTab !== 'Executive' && (() => {
         // Toggle a window in/out; enforce max 2 active
         const toggleWindow = (w) => {
           setHmWindows(prev => {
