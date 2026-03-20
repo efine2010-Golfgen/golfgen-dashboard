@@ -1056,17 +1056,22 @@ def sales_period_comparison(
                 if ly_same_time_sales > 0 and ly_sales > 0:
                     ty_forecast = round(sales * (ly_sales / ly_same_time_sales), 2)
 
-                # ── Unit forecast: time-fraction extrapolation ────────────────────
-                # Do NOT use the LY pacing ratio for units — SP-API getOrderMetrics
-                # returns net unit counts that include cancellations/adjustments.
-                # ly_same_time_units can easily EXCEED ly_units (full day) if
-                # cancellations hit after the same-time snapshot, making ratio < 1
-                # and forecasting FEWER units than are already confirmed sold.
-                # Time-fraction is simpler, robust, and always self-consistent:
-                # "I've sold N units in X% of the day → pace to N/X by EOD"
-                _day_frac_u = (now_ct.hour * 60 + now_ct.minute) / (24 * 60)
-                if _day_frac_u >= 0.04 and units > 0:  # require >=~1hr elapsed
-                    ty_units_forecast = max(units, round(units / _day_frac_u))
+                # ── Unit forecast: LY pacing ratio ───────────────────────────────
+                # Formula: TY_EOD = TY_NOW / (LY_NOW / LY_EOD)
+                # i.e. if LY had sold 90% of its units by this same time of day,
+                # and TY has 26 units so far, forecast = 26 / 0.90 ≈ 29 units.
+                # Guard: result is always >= max(0, units) so it never goes below
+                # what's already sold, and never negative.
+                _safe_units = max(0, units)
+                if ly_same_time_units > 0 and ly_units > 0:
+                    _ly_ratio = float(ly_same_time_units) / float(ly_units)
+                    _raw = round(_safe_units / _ly_ratio)
+                    ty_units_forecast = max(_safe_units, _raw)
+                elif _safe_units > 0:
+                    # Fallback: time-fraction if no LY unit data
+                    _day_frac_u = (now_ct.hour * 60 + now_ct.minute) / (24 * 60)
+                    if _day_frac_u >= 0.04:
+                        ty_units_forecast = max(_safe_units, round(_safe_units / _day_frac_u))
 
             result[label] = {
                 "sales": round(sales, 2), "units": units, "aur": aur,
