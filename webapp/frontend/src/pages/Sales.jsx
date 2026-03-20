@@ -1421,7 +1421,7 @@ export default function Sales({ filters = {} }) {
                 const start2 = new Date(end2); start2.setDate(start2.getDate()-(days2-1));
                 const fmt2 = d => d.toLocaleDateString('en-US',{month:'short',day:'numeric'});
                 return (
-                  <span style={{fontSize:10,color:'var(--b3)',background:'rgba(46,111,187,.1)',border:'1px solid rgba(46,111,187,.2)',borderRadius:6,padding:'4px 10px',fontWeight:600,whiteSpace:'nowrap',marginLeft:4}}>
+                  <span style={{fontSize:10,color:B.b3,background:'rgba(46,111,187,.1)',border:'1px solid rgba(46,111,187,.2)',borderRadius:6,padding:'4px 10px',fontWeight:600,whiteSpace:'nowrap',marginLeft:4}}>
                     {fmt2(start2)} – {fmt2(end2)}, {end2.getFullYear()} &nbsp;·&nbsp; {days2} days
                   </span>
                 );
@@ -1858,6 +1858,49 @@ export default function Sales({ filters = {} }) {
                     <div style={{fontSize:28,fontWeight:800,color:col.color,lineHeight:1,marginBottom:3}}>{col.val}</div>
                     <div style={{fontSize:10,color:'var(--txt3)',marginBottom:10}}>{col.sub}</div>
                     {heroRows(col.rows)}
+                    {/* sparkline */}
+                    {(() => {
+                      const tArr = toArr(trend);
+                      if (!tArr || tArr.length < 3) return null;
+                      const last7 = tArr.slice(-7);
+                      const isLY = col.lbl.includes('LY');
+                      const vals = last7.map(d => isLY ? (d.ly_sales||0) : (d.ty_sales||0));
+                      const maxV = Math.max(...vals, 1);
+                      if (vals.every(v=>v===0)) return null;
+                      const W=200, H=32, n=vals.length;
+                      const pts=vals.map((v,idx2)=>`${(idx2/(n-1))*W},${H-(v/maxV)*(H-6)-3}`).join(' ');
+                      const sparkCol=isLY?'rgba(91,159,212,.5)':col.color;
+                      return (
+                        <div style={{height:32,margin:'8px 0 2px',opacity:.85}}>
+                          <svg width='100%' height='32' viewBox={`0 0 ${W} ${H}`} preserveAspectRatio='none' style={{display:'block'}}>
+                            <polyline points={pts} fill='none' stroke={sparkCol} strokeWidth='2' strokeLinejoin='round' strokeLinecap='round'/>
+                            <circle cx={W} cy={H-(vals[n-1]/maxV)*(H-6)-3} r='3' fill={sparkCol}/>
+                          </svg>
+                        </div>
+                      );
+                    })()}
+                    {/* pace bar — TY NOW only */}
+                    {col.lbl.includes('TY') && !col.lbl.includes('EOD') && periodCols?.['MTD'] && (() => {
+                      const mtdD = periodCols['MTD'];
+                      const nowD = new Date();
+                      const daysInMo = new Date(nowD.getFullYear(), nowD.getMonth()+1, 0).getDate();
+                      const dom = nowD.getDate();
+                      const pctMo = Math.round((dom / daysInMo) * 100);
+                      const mtdSales = mtdD.sales || 0;
+                      const projMo = dom > 0 ? (mtdSales / dom) * daysInMo : 0;
+                      return (
+                        <div style={{marginTop:8,paddingTop:8,borderTop:'1px solid var(--brd)'}}>
+                          <div style={{display:'flex',justifyContent:'space-between',fontSize:9,color:'var(--txt3)',marginBottom:4}}>
+                            <span>MTD Progress</span>
+                            <strong style={{color:'var(--txt)'}}>{dom}d / {daysInMo}d</strong>
+                          </div>
+                          <div style={{height:5,background:'rgba(255,255,255,.06)',borderRadius:3,overflow:'hidden'}}>
+                            <div style={{height:'100%',width:`${pctMo}%`,background:`linear-gradient(90deg,${B.t1},${B.t2})`,borderRadius:3}}/>
+                          </div>
+                          <div style={{fontSize:9,marginTop:3,color:B.t3}}>{pctMo}% elapsed · proj {f$(projMo)}/mo</div>
+                        </div>
+                      );
+                    })()}
                   </div>
                 ))}
               </div>
@@ -2042,6 +2085,20 @@ export default function Sales({ filters = {} }) {
                   transition:'all .15s',
                 }}>{p}</button>
               ))}
+              {/* date range badge */}
+              {(() => {
+                const now2 = new Date();
+                const activeP2 = EXEC_PERIODS_LIST.find(p => EXEC_PERIOD_MAP[p] === cpSales) || 'L30';
+                const days2 = parseInt(activeP2.replace('L','')) || 30;
+                const end2 = new Date(now2); end2.setDate(end2.getDate()-1);
+                const start2 = new Date(end2); start2.setDate(start2.getDate()-(days2-1));
+                const fmt2 = d => d.toLocaleDateString('en-US',{month:'short',day:'numeric'});
+                return (
+                  <span style={{fontSize:10,color:B.b3,background:'rgba(46,111,187,.1)',border:'1px solid rgba(46,111,187,.2)',borderRadius:6,padding:'4px 10px',fontWeight:600,whiteSpace:'nowrap',marginLeft:4}}>
+                    {fmt2(start2)} – {fmt2(end2)}, {end2.getFullYear()} &nbsp;·&nbsp; {days2} days
+                  </span>
+                );
+              })()}
             </div>
 
             {/* ── Revenue & AUR Trend + Units ── */}
@@ -2296,7 +2353,7 @@ export default function Sales({ filters = {} }) {
                     <div style={{flex:1,height:1,background:'var(--brd)'}}/>
                   </div>
                   <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:10}}>
-                    <div style={{background:'var(--card)',border:'1px solid rgba(232,130,30,.3)',background:'rgba(232,130,30,.04)',borderRadius:10,padding:'12px 14px',display:'flex',alignItems:'center',gap:14}}>
+                    <div style={{background:'rgba(232,130,30,.04)',border:'1px solid rgba(232,130,30,.3)',borderRadius:10,padding:'12px 14px',display:'flex',alignItems:'center',gap:14}}>
                       <span style={{fontSize:32,flexShrink:0}}>🥇</span>
                       <div style={{flex:1}}>
                         <div style={{fontSize:9,fontWeight:700,textTransform:'uppercase',letterSpacing:'.09em',color:'var(--txt3)',marginBottom:3}}>This Period's Best Day</div>

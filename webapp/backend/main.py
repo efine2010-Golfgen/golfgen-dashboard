@@ -199,6 +199,20 @@ async def lifespan(app: FastAPI):
     except Exception as e:
         logger.error(f"Failed to start background sync: {e}")
 
+    # Startup: backfill hourly sales history for last 30 days (runs in background thread)
+    try:
+        import threading
+        from core.scheduler import _backfill_hourly_history
+        threading.Thread(
+            target=_backfill_hourly_history,
+            kwargs={"max_days": 30, "max_fills_per_run": 5},
+            daemon=True,
+            name="hourly-history-startup-backfill",
+        ).start()
+        logger.info("Hourly sales history backfill started in background")
+    except Exception as e:
+        logger.error(f"Failed to start hourly history backfill: {e}")
+
     yield
 
     # Shutdown

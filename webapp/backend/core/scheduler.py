@@ -269,6 +269,75 @@ def _run_scheduled_hourly_sales_save():
         _scheduler_locks["hourly_sales"].release()
 
 
+def _backfill_hourly_history(max_days: int = 30, max_fills_per_run: int = 5):
+    """Backfill hourly_sales for the last `max_days` days.
+
+    Checks which dates are missing or have fewer than 12 recorded hours,
+    then fetches from SP-API (via save_hourly_to_db) for up to
+    `max_fills_per_run` dates per invocation to avoid API overload.
+
+    Called: at startup + daily at 4:30am CT.
+    """
+    try:
+        from routers.sales import save_hourly_to_db
+        from .database import get_db
+        today_ct = datetime.now(ZoneInfo("America/Chicago")).date()
+
+        # Build list of past dates to check (exclude today — hourly save handles today)
+        dates_to_check = [today_ct - timedelta(days=i) for i in range(1, max_days + 1)]
+
+        # Query which dates already have >= 12 hours of data
+        con = get_db()
+        try:
+            rows = con.execute("""
+                SELECT sale_date, COUNT(*) as hour_count
+                FROM hourly_sales
+                WHERE sale_date >= %s AND sale_date < %s
+                  AND division = 'all' AND customer = 'amazon'
+                GROUP BY sale_date
+            """, [str(dates_to_check[-1]), str(today_ct)]).fetchall()
+        except Exception:
+            rows = []
+        con.close()
+
+        # Build set of dates with adequate data (>= 12 hours)
+        covered = {str(r[0]) for r in rows if int(r[1]) >= 12}
+
+        # Find missing dates (oldest first so we fill in chronological order)
+        missing = [d for d in reversed(dates_to_check) if str(d) not in covered]
+
+        if not missing:
+            logger.info(f"_backfill_hourly_history: all {max_days} days have data — nothing to backfill")
+            return
+
+        logger.info(f"_backfill_hourly_history: {len(missing)} dates need backfill (will process up to {max_fills_per_run})")
+        filled = 0
+        for d in missing[:max_fills_per_run]:
+            try:
+                saved = save_hourly_to_db(d)
+                logger.info(f"  backfill {d}: {saved} hours saved")
+                filled += 1
+            except Exception as ex:
+                logger.warning(f"  backfill {d} failed: {ex}")
+
+        logger.info(f"_backfill_hourly_history: filled {filled} dates, {len(missing) - filled} still pending")
+    except Exception as ex:
+        logger.warning(f"_backfill_hourly_history error: {ex}")
+
+
+def _run_scheduled_hourly_backfill():
+    """Daily job: backfill any missing hourly sales history for the past 30 days."""
+    if not _scheduler_locks["hourly_sales"].acquire(blocking=False):
+        logger.warning("Skipping hourly backfill — hourly_sales lock held")
+        return
+    try:
+        _backfill_hourly_history(max_days=30, max_fills_per_run=7)
+    except Exception as e:
+        logger.error(f"Hourly backfill job failed: {e}")
+    finally:
+        _scheduler_locks["hourly_sales"].release()
+
+
 def _run_scheduled_backup_verification():
     """Weekly backup verification — downloads latest backup and compares to live DB."""
     if not _scheduler_locks["backup"].acquire(blocking=False):
@@ -472,6 +541,9 @@ async def _sync_loop():
 
         # Schedule hourly sales save at :05 past every hour (accumulates heatmap data)
         scheduler.add_job(_run_scheduled_hourly_sales_save, CronTrigger(minute=5, second=0, timezone=_tz), id="hourly_sales_save", misfire_grace_time=1800)
+
+        # Schedule 30-day hourly history backfill at 4:30am Central daily
+        scheduler.add_job(_run_scheduled_hourly_backfill, CronTrigger(hour=4, minute=30, timezone=_tz), id="hourly_backfill_430am", misfire_grace_time=3600)
 
         # Schedule daily FBA inventory snapshot at 11pm Central (after all syncs, before backup)
         scheduler.add_job(_run_scheduled_inventory_snapshot, CronTrigger(hour=23, minute=0, timezone=_tz), id="fba_inventory_snapshot_11pm", misfire_grace_time=3600)
