@@ -1962,20 +1962,12 @@ export default function Sales({ filters = {} }) {
       </div>
 
       {/* Sales $ + AUR Trend — dual Y-axis: Sales (left, blue) + AUR (right, green) */}
-      <ChartCard title="Sales $ & AUR Trend" badge={cpSales} error={errors.trend}>
+      {viewTab !== 'Executive' && <ChartCard title="Sales $ & AUR Trend" badge={cpSales} error={errors.trend}>
         {loading.trend ? <Spinner/> : <>
           {svgChart(salesAurSVG(toArr(trend)))}
           <Legend items={[['Sales TY','#2E6FBB'],['Sales LY','#5B9FD4',true],['AUR TY','#22c55e'],['AUR LY','#16a34a',true]]}/>
         </>}
-      </ChartCard>
-
-      {/* Rolling 4-Week */}
-      <ChartCard title="Rolling 4-Week Revenue vs LY" badge={cpSales} error={errors.rolling}>
-        {loading.rolling ? <Spinner/> : <>
-          {svgChart(dualLineSVG(toArr(rolling),'ty_rolling','ly_rolling',B.b3,B.sub,f$))}
-          <Legend items={[['This Year',B.b3],['Last Year',B.sub,true]]}/>
-        </>}
-      </ChartCard>
+      </ChartCard>}
 
       {/* Weekly Sales Heatmap — 4 × 13-week window toggles (max 2 open = 26 weeks shown) */}
       {(() => {
@@ -2093,42 +2085,47 @@ export default function Sales({ filters = {} }) {
               <div style={{marginTop:12,padding:'12px 14px',background:'var(--card)',borderRadius:10,border:'1px solid var(--brd)'}}>
                 <div style={{display:'flex',justifyContent:'space-between',alignItems:'flex-start',gap:16,flexWrap:'wrap'}}>
                   {/* Left: bar chart of day averages */}
-                  <div style={{flex:'1 1 380px'}}>
-                    <div style={{fontSize:10,fontWeight:700,color:'var(--txt3)',textTransform:'uppercase',letterSpacing:'.08em',marginBottom:8}}>
-                      Day Strength — Avg {metricLabel} / Week
+                  <div style={{flex:'1 1 420px'}}>
+                    <div style={{fontSize:10,fontWeight:700,color:'var(--txt3)',textTransform:'uppercase',letterSpacing:'.08em',marginBottom:10}}>
+                      Day Strength — Avg {metricLabel} per Week
                     </div>
-                    <div style={{display:'flex',flexDirection:'column',gap:4}}>
+                    <div style={{display:'flex',flexDirection:'column',gap:6}}>
                       {dayRanks.map(({d, v}) => {
                         const rank = dayRanks.findIndex(r=>r.d===d);
                         const barPct = combinedMax > 0 ? (v/combinedMax)*100 : 0;
                         const vsAvg = overallAvg > 0 ? ((v-overallAvg)/overallAvg*100) : 0;
                         const isBest = rank === 0;
+                        const isTop3 = rank <= 2;
                         const isWeakest = rank === 6;
-                        const barColor = isBest ? B.o2 : isWeakest ? B.dim : (d >= 5 ? B.t2 : B.b2);
-                        // If 2 windows, show both bars side by side
+                        const isWeekend = d >= 5;
+                        const barColor = isBest ? B.o2 : isWeakest ? '#64748b' : isWeekend ? B.t2 : B.b2;
+                        const rankBadge = isBest ? '🥇' : rank === 1 ? '🥈' : rank === 2 ? '🥉' : isWeakest ? '·' : '';
                         const w0avg = winProfiles[0]?.dayAvgs[d] ?? 0;
                         const w1avg = winProfiles[1]?.dayAvgs[d] ?? null;
                         const w0pct = combinedMax > 0 ? (w0avg/combinedMax)*100 : 0;
                         const w1pct = w1avg != null && combinedMax > 0 ? (w1avg/combinedMax)*100 : 0;
                         return (
-                          <div key={d} style={{display:'grid',gridTemplateColumns:'32px 1fr 54px 54px',gap:6,alignItems:'center'}}>
-                            <div style={{fontSize:10,fontWeight:700,color: d>=5 ? B.t3 : 'var(--txt2)',textAlign:'right'}}>{DAY_NAMES[d]}</div>
-                            <div style={{position:'relative',height:14,borderRadius:3,background:'rgba(255,255,255,.04)'}}>
+                          <div key={d} style={{display:'grid',gridTemplateColumns:'44px 1fr 72px 68px',gap:8,alignItems:'center'}}>
+                            <div style={{display:'flex',alignItems:'center',gap:4}}>
+                              <span style={{fontSize:9,lineHeight:1}}>{rankBadge}</span>
+                              <span style={{fontSize:11,fontWeight:700,color: isWeekend ? B.t3 : isBest ? B.o2 : 'var(--txt2)'}}>{DAY_NAMES[d]}</span>
+                            </div>
+                            <div style={{position:'relative',height:18,borderRadius:4,background:'rgba(255,255,255,.05)'}}>
                               {winProfiles.length === 2 ? (
                                 <>
-                                  <div style={{position:'absolute',left:0,top:1,height:5,borderRadius:2,width:`${w0pct.toFixed(1)}%`,background:winProfiles[0].range==='future'?'#22c55e':B.b2,opacity:.9}}/>
-                                  <div style={{position:'absolute',left:0,top:8,height:5,borderRadius:2,width:`${w1pct.toFixed(1)}%`,background:winProfiles[1].range==='future'?'#22c55e':B.b3,opacity:.75}}/>
+                                  <div style={{position:'absolute',left:0,top:2,height:6,borderRadius:3,width:`${w0pct.toFixed(1)}%`,background:winProfiles[0].range==='future'?'#22c55e':B.b2,opacity:.9}}/>
+                                  <div style={{position:'absolute',left:0,top:10,height:6,borderRadius:3,width:`${w1pct.toFixed(1)}%`,background:winProfiles[1].range==='future'?'#22c55e':B.b3,opacity:.8}}/>
                                 </>
                               ) : (
-                                <div style={{position:'absolute',left:0,top:2,height:10,borderRadius:3,width:`${barPct.toFixed(1)}%`,background:barColor,opacity:.85}}/>
+                                <div style={{position:'absolute',left:0,top:3,height:12,borderRadius:4,width:`${barPct.toFixed(1)}%`,background:barColor,opacity:.88,transition:'width .3s'}}/>
                               )}
                             </div>
-                            <div style={{fontSize:10,fontWeight:700,color:'var(--txt2)',textAlign:'right'}}>{metricFmt(v)}</div>
-                            <div style={{fontSize:9,textAlign:'right',
+                            <div style={{fontSize:11,fontWeight:700,color: isBest ? B.o2 : 'var(--txt)',textAlign:'right'}}>{metricFmt(v)}</div>
+                            <div style={{
+                              fontSize:10,textAlign:'right',fontWeight: Math.abs(vsAvg) > 10 ? 700 : 500,
                               color: vsAvg > 10 ? '#4ade80' : vsAvg < -10 ? '#fb923c' : 'var(--txt3)',
-                              fontWeight: Math.abs(vsAvg) > 10 ? 700 : 400,
                             }}>
-                              {vsAvg >= 0 ? '+' : ''}{vsAvg.toFixed(0)}% vs avg
+                              {vsAvg >= 0 ? '+' : ''}{vsAvg.toFixed(0)}% avg
                             </div>
                           </div>
                         );
@@ -2136,10 +2133,10 @@ export default function Sales({ filters = {} }) {
                     </div>
                     {/* Legend for 2-window comparison */}
                     {winProfiles.length === 2 && (
-                      <div style={{display:'flex',gap:12,marginTop:8,flexWrap:'wrap'}}>
+                      <div style={{display:'flex',gap:14,marginTop:10,flexWrap:'wrap'}}>
                         {winProfiles.map((wp, i) => (
                           <div key={wp.key} style={{display:'flex',alignItems:'center',gap:5,fontSize:9,color:'var(--txt3)'}}>
-                            <div style={{width:14,height:4,borderRadius:2,background:wp.range==='future'?'#22c55e':(i===0?B.b2:B.b3)}}/>
+                            <div style={{width:16,height:5,borderRadius:2,background:wp.range==='future'?'#22c55e':(i===0?B.b2:B.b3)}}/>
                             {wp.label}
                           </div>
                         ))}
@@ -2200,6 +2197,7 @@ export default function Sales({ filters = {} }) {
       })()}
 
       {/* ══ TRAFFIC & CONVERSION ════════════════════════════════════ */}
+      {viewTab !== 'Executive' && <>
       <SectionDivider label="Traffic & Conversion"/>
       <div style={{display:'flex',gap:8,marginBottom:14,overflowX:'auto',paddingBottom:2}}>
         {loading.metricsTraffic ? <Spinner/> : (() => {
@@ -2277,6 +2275,7 @@ export default function Sales({ filters = {} }) {
       <ChartCard title="Conversion Funnel vs LY" noMargin error={errors.funnel}>
         {loading.funnel ? <Spinner/> : svgChart(funnelSVG(toArr(funnel)))}
       </ChartCard>
+      </>}
 
       {/* ══ ADVERTISING ═════════════════════════════════════════════ */}
       <SectionDivider label="Advertising"/>
