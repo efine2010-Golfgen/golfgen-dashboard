@@ -532,19 +532,21 @@ def sales_summary(
         ty_conv = round(ty_units / ty_sessions, 4) if ty_sessions else 0
         ly_conv = round(ly_units / ly_sessions, 4) if ly_sessions else 0
         # CTR from advertising table (clicks / impressions); 0 when ads data absent
-        def _ads_ctr(s, e, extra_params):
+        def _ads_metrics(s, e, extra_params):
+            """Returns (clicks, impressions, ctr)."""
             try:
                 r = con.execute(f"""
                     SELECT COALESCE(SUM(clicks), 0), COALESCE(SUM(impressions), 0)
                     FROM advertising
                     WHERE date BETWEEN ? AND ? {hw}
-                """, [s, e] + extra_params).fetchone()
+                """, [str(s), str(e)] + extra_params).fetchone()
                 clicks, imps = int(r[0]), int(r[1])
-                return round(clicks / imps, 4) if imps else 0
+                ctr = round(clicks / imps, 4) if imps else 0
+                return clicks, imps, ctr
             except Exception:
-                return 0
-        ty_ctr = _ads_ctr(sd, ed, hp)
-        ly_ctr = _ads_ctr(ly_sd, ly_ed, hp)
+                return 0, 0, 0
+        ty_clicks, ty_impressions, ty_ctr = _ads_metrics(sd, ed, hp)
+        ly_clicks, ly_impressions, ly_ctr = _ads_metrics(ly_sd, ly_ed, hp)
 
         # Amazon fees from financial_events — exclude refund events to avoid
         # double-counting fee reversals (refund rows have positive fba_fees/commission
@@ -671,6 +673,7 @@ def sales_summary(
             "cogs": ty_cogs, "amazon_fees": round(ty_fees, 2),
             "gross_margin": ty_gm, "gross_margin_pct": ty_gm_pct,
             "sessions": ty_sessions, "glance_views": ty_gv,
+            "impressions": ty_impressions, "clicks": ty_clicks,
             "ctr": ty_ctr, "conversion": ty_conv,
             "orders": ty_orders, "aov": ty_aov,
             "ad_spend": round(ty_ad_spend, 2), "roas": ty_roas, "tacos": ty_tacos,
@@ -678,6 +681,7 @@ def sales_summary(
             "ly_cogs": ly_cogs, "ly_amazon_fees": round(ly_fees, 2),
             "ly_gross_margin": ly_gm, "ly_gross_margin_pct": ly_gm_pct,
             "ly_sessions": ly_sessions, "ly_glance_views": ly_gv,
+            "ly_impressions": ly_impressions, "ly_clicks": ly_clicks,
             "ly_ctr": ly_ctr, "ly_conversion": ly_conv,
             "ly_orders": ly_orders, "ly_aov": ly_aov,
             "ly_ad_spend": round(ly_ad_spend, 2), "ly_roas": ly_roas, "ly_tacos": ly_tacos,
@@ -2800,17 +2804,16 @@ def hourly_heatmap(
             "orders": int(row[4] or 0),
         }
 
-    # ── Populate today's data synchronously if missing, recent gaps in background ──
+    # ── Populate today's data synchronously if missing OR all-zero (stale bad data) ──
     today_str = str(today_ct)
-    if today_str not in db_map or not db_map[today_str]:
-        # Fetch synchronously so the response includes real data on first load
+    today_total = sum(v.get('sales', 0) for v in db_map.get(today_str, {}).values())
+    if today_str not in db_map or not db_map[today_str] or today_total == 0:
         try:
             from services.sp_api import get_hourly_sales
             live_rows = get_hourly_sales(today_ct)
             if live_rows:
                 db_map[today_str] = {r['hour']: r for r in live_rows}
                 logger.info(f"hourly_heatmap: live-fetched today ({today_str}) — {len(live_rows)} hours")
-                # Persist to DB in background
                 import threading
                 threading.Thread(target=save_hourly_to_db, args=(today_ct,), daemon=True).start()
             else:
@@ -2818,17 +2821,19 @@ def hourly_heatmap(
         except Exception as _hm_ex:
             logger.warning(f"hourly_heatmap: live fetch failed: {_hm_ex}")
 
-    # Back-fill recent days that are missing (last 3 days, 1 per request max)
+    # Back-fill recent days that are missing OR have all-zero sales (bad cached data)
     recent_cutoff = today_ct - timedelta(days=7)
     for _past_d in sorted(dates, reverse=True):
         if _past_d >= today_ct:
             continue
         if _past_d < recent_cutoff:
             break
-        if str(_past_d) not in db_map or not db_map.get(str(_past_d)):
+        _past_str = str(_past_d)
+        _day_total = sum(v.get('sales', 0) for v in db_map.get(_past_str, {}).values())
+        if _past_str not in db_map or not db_map.get(_past_str) or _day_total == 0:
             import threading
             threading.Thread(target=save_hourly_to_db, args=(_past_d,), daemon=True).start()
-            logger.info(f"hourly_heatmap: kicked off background fill for {_past_d}")
+            logger.info(f"hourly_heatmap: kicked off background fill for {_past_d} (total was ${_day_total:.2f})")
             break  # one background fill per request
 
     # ── Build response ──

@@ -1844,8 +1844,21 @@ def get_hourly_sales(target_date) -> list:
                     for h in range(24)}
 
         for m in metrics:
-            interval  = m.get('interval') or {}
-            start_str = interval.get('startTime', '') if isinstance(interval, dict) else ''
+            # SP-API returns interval as a string "2026-03-20T08:00:00Z--2026-03-20T09:00:00Z"
+            # NOT a dict — parse the start portion directly from the string.
+            interval  = m.get('interval') or ''
+            start_str = ''
+            if isinstance(interval, dict):
+                start_str = interval.get('startTime', '') or interval.get('start', '')
+            elif isinstance(interval, str):
+                # Format: "startISO--endISO"  or "startISO/endISO"
+                if '--' in interval:
+                    start_str = interval.split('--')[0].strip()
+                elif '/' in interval:
+                    start_str = interval.split('/')[0].strip()
+                else:
+                    start_str = interval.strip()
+
             if start_str:
                 try:
                     start_dt = datetime.fromisoformat(start_str.replace('Z', '+00:00'))
@@ -1859,7 +1872,11 @@ def get_hourly_sales(target_date) -> list:
                 continue
 
             ts     = m.get('totalSales') or {}
-            sales_ = float(ts.get('amount', 0) or 0) if isinstance(ts, dict) else float(ts or 0)
+            # totalSales can be a dict with lowercase 'amount' or uppercase 'Amount'
+            if isinstance(ts, dict):
+                sales_ = float(ts.get('amount', 0) or ts.get('Amount', 0) or 0)
+            else:
+                sales_ = float(ts or 0)
             units_ = int(m.get('unitCount', 0) or 0)
             ords_  = int(m.get('orderCount', 0) or 0)
             hour_map[h_ct] = {'hour': h_ct, 'sales': round(sales_, 2),
