@@ -1818,9 +1818,9 @@ export default function Sales({ filters = {} }) {
         );
 
         // New layout: days = rows (last 7), hours = columns, labels at bottom
-        const HCOL_W = 34;  // px per hour column
+        const HCOL_W = 26;  // px per hour column (24 cols × 26 = 624 + 72 label = ~700px)
         const DLW    = 72;  // px for day-label column
-        const DRH    = 30;  // px row height
+        const DRH    = 28;  // px row height
         const last7  = hmDays.slice(-7);
 
         return (
@@ -1850,7 +1850,7 @@ export default function Sales({ filters = {} }) {
                     <div style={{
                       width:DLW, flexShrink:0, paddingRight:8, textAlign:'right',
                     }}>
-                      <div style={{fontSize:9,fontWeight:d.isToday?700:500,color:d.isToday?B.b3:B.txt,lineHeight:'1.2',whiteSpace:'nowrap'}}>
+                      <div style={{fontSize:9,fontWeight:d.isToday?700:500,color:d.isToday?B.b3:'var(--txt2)',lineHeight:'1.2',whiteSpace:'nowrap'}}>
                         {d.dayOfWeek}
                       </div>
                       <div style={{fontSize:8,color:d.isToday?B.b2:B.sub,lineHeight:'1.2',whiteSpace:'nowrap'}}>
@@ -2138,34 +2138,46 @@ export default function Sales({ filters = {} }) {
                         const barPct = combinedMax > 0 ? (v/combinedMax)*100 : 0;
                         const vsAvg = overallAvg > 0 ? ((v-overallAvg)/overallAvg*100) : 0;
                         const isBest = rank === 0;
-                        const isTop3 = rank <= 2;
                         const isWeakest = rank === 6;
                         const isWeekend = d >= 5;
-                        const barColor = isBest ? B.o2 : isWeakest ? '#64748b' : isWeekend ? B.t2 : B.b2;
-                        const rankBadge = isBest ? '🥇' : rank === 1 ? '🥈' : rank === 2 ? '🥉' : isWeakest ? '·' : '';
+                        const barColor = isBest ? B.o2 : isWeakest ? '#475569' : isWeekend ? B.t2 : B.b2;
+                        const rankEmoji = isBest ? '🥇' : rank === 1 ? '🥈' : rank === 2 ? '🥉' : null;
                         const w0avg = winProfiles[0]?.dayAvgs[d] ?? 0;
                         const w1avg = winProfiles[1]?.dayAvgs[d] ?? null;
                         const w0pct = combinedMax > 0 ? (w0avg/combinedMax)*100 : 0;
                         const w1pct = w1avg != null && combinedMax > 0 ? (w1avg/combinedMax)*100 : 0;
                         return (
-                          <div key={d} style={{display:'grid',gridTemplateColumns:'44px 1fr 72px 68px',gap:8,alignItems:'center'}}>
-                            <div style={{display:'flex',alignItems:'center',gap:4}}>
-                              <span style={{fontSize:9,lineHeight:1}}>{rankBadge}</span>
-                              <span style={{fontSize:11,fontWeight:700,color: isWeekend ? B.t3 : isBest ? B.o2 : 'var(--txt2)'}}>{DAY_NAMES[d]}</span>
+                          <div key={d} style={{display:'grid',gridTemplateColumns:'52px 1fr 76px 70px',gap:8,alignItems:'center',padding:'3px 0'}}>
+                            {/* Day label + medal */}
+                            <div style={{display:'flex',alignItems:'center',gap:5}}>
+                              {rankEmoji
+                                ? <span style={{fontSize:16,lineHeight:1,flexShrink:0}}>{rankEmoji}</span>
+                                : <span style={{
+                                    width:18,height:18,borderRadius:'50%',flexShrink:0,
+                                    display:'inline-flex',alignItems:'center',justifyContent:'center',
+                                    fontSize:9,fontWeight:700,
+                                    background: isWeakest ? 'rgba(71,85,105,.25)' : 'rgba(91,159,212,.12)',
+                                    color: isWeakest ? '#64748b' : B.sub,
+                                  }}>{rank+1}</span>
+                              }
+                              <span style={{fontSize:13,fontWeight:700,color: isWeekend ? B.t3 : isBest ? B.o2 : 'var(--txt)'}}>{DAY_NAMES[d]}</span>
                             </div>
-                            <div style={{position:'relative',height:18,borderRadius:4,background:'rgba(255,255,255,.05)'}}>
+                            {/* Bar track */}
+                            <div style={{position:'relative',height:22,borderRadius:5,background:'rgba(255,255,255,.04)'}}>
                               {winProfiles.length === 2 ? (
                                 <>
-                                  <div style={{position:'absolute',left:0,top:2,height:6,borderRadius:3,width:`${w0pct.toFixed(1)}%`,background:winProfiles[0].range==='future'?'#22c55e':B.b2,opacity:.9}}/>
-                                  <div style={{position:'absolute',left:0,top:10,height:6,borderRadius:3,width:`${w1pct.toFixed(1)}%`,background:winProfiles[1].range==='future'?'#22c55e':B.b3,opacity:.8}}/>
+                                  <div style={{position:'absolute',left:0,top:2,height:8,borderRadius:3,width:`${w0pct.toFixed(1)}%`,background:winProfiles[0].range==='future'?'#22c55e':B.b2,opacity:.9}}/>
+                                  <div style={{position:'absolute',left:0,top:12,height:8,borderRadius:3,width:`${w1pct.toFixed(1)}%`,background:winProfiles[1].range==='future'?'#22c55e':B.b3,opacity:.8}}/>
                                 </>
                               ) : (
-                                <div style={{position:'absolute',left:0,top:3,height:12,borderRadius:4,width:`${barPct.toFixed(1)}%`,background:barColor,opacity:.88,transition:'width .3s'}}/>
+                                <div style={{position:'absolute',left:0,top:3,height:16,borderRadius:4,width:`${barPct.toFixed(1)}%`,background:barColor,opacity:.85,transition:'width .3s'}}/>
                               )}
                             </div>
-                            <div style={{fontSize:11,fontWeight:700,color: isBest ? B.o2 : 'var(--txt)',textAlign:'right'}}>{metricFmt(v)}</div>
+                            {/* Value */}
+                            <div style={{fontSize:13,fontWeight:700,color: isBest ? B.o2 : 'var(--txt)',textAlign:'right'}}>{metricFmt(v)}</div>
+                            {/* vs avg */}
                             <div style={{
-                              fontSize:10,textAlign:'right',fontWeight: Math.abs(vsAvg) > 10 ? 700 : 500,
+                              fontSize:11,textAlign:'right',fontWeight: Math.abs(vsAvg) > 10 ? 700 : 500,
                               color: vsAvg > 10 ? '#4ade80' : vsAvg < -10 ? '#fb923c' : 'var(--txt3)',
                             }}>
                               {vsAvg >= 0 ? '+' : ''}{vsAvg.toFixed(0)}% avg
@@ -2322,6 +2334,11 @@ export default function Sales({ filters = {} }) {
 
       {/* ══ ADVERTISING ═════════════════════════════════════════════ */}
       <SectionDivider label="Advertising"/>
+      <div style={{display:'flex',alignItems:'center',gap:8,marginBottom:10}}>
+        <span style={{fontSize:9,color:B.sub,fontWeight:600,textTransform:'uppercase',letterSpacing:'.08em'}}>Period:</span>
+        <span style={{fontSize:10,color:B.b3,fontWeight:700,background:`${B.b1}33`,border:`1px solid ${B.b2}44`,borderRadius:5,padding:'2px 8px'}}>{activePeriod}</span>
+        <span style={{fontSize:9,color:B.sub}}>— same as KPI period above</span>
+      </div>
       <div style={{display:'flex',gap:8,marginBottom:14,overflowX:'auto',paddingBottom:2}}>
         {loading.metrics ? <Spinner/> : <>
           <MetricCard label="Ad Spend $" value={f$(m.ad_spend)} ly={f$(ly('ad_spend'))} delta={dp(m.ad_spend,ly('ad_spend'))} invert
@@ -2330,7 +2347,7 @@ export default function Sales({ filters = {} }) {
           <MetricCard label="TACOS" value={fP(m.tacos)} ly={fP(ly('tacos'))} delta={dp(m.tacos,ly('tacos'))} invert/>
         </>}
       </div>
-      <ChartCard title="Ad Efficiency — ACOS vs ROAS Quadrant" badge="TY vs LY" noMargin error={errors.adEff}>
+      <ChartCard title="Ad Efficiency — ACOS vs ROAS Quadrant" badge={`${activePeriod} · TY vs LY`} noMargin error={errors.adEff}>
         {loading.adEff ? <Spinner/> : svgChart(adQuadrantSVG(adEff))}
       </ChartCard>
 
