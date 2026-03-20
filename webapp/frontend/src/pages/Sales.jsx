@@ -847,7 +847,7 @@ function Legend({ items }) {
   );
 }
 
-function MetricCard({ label, value, ly, delta, expandContent, invert }) {
+function MetricCard({ label, value, ly, delta, expandContent, invert, goal, goalLabel }) {
   const [expanded, setExpanded] = useState(false);
   const isPos = invert ? delta < 0 : delta > 0;
   const deltaEl = delta != null ? (
@@ -871,6 +871,13 @@ function MetricCard({ label, value, ly, delta, expandContent, invert }) {
         )}
         {deltaEl}
       </div>
+      {/* Goal row — shown if goal prop provided */}
+      {goal != null && (
+        <div style={{marginTop:5,fontSize:9,color:'var(--txt3)'}}>
+          <span style={{marginRight:3}}>{goalLabel||'Proj EOM:'}</span>
+          <span style={{fontWeight:700,color:'#7ac2e0'}}>{goal}</span>
+        </div>
+      )}
       {expandContent && (
         <div style={{marginTop:7}}>
           <button onClick={() => setExpanded(e => !e)}
@@ -991,7 +998,9 @@ export default function Sales({ filters = {} }) {
       params.period = 'custom'; params.start = customStart; params.end = customEnd;
     }
     load('metrics', setMetrics, 'summary', params);
-    load('periodCols', setPeriodCols, 'period-comparison', {...baseParams, view: viewTab.toLowerCase()});
+    // Daily tab uses same exec-style periods (Today/Yesterday/WTD/MTD/YTD)
+    const pcView = viewTab === 'Daily' ? 'exec' : viewTab.toLowerCase();
+    load('periodCols', setPeriodCols, 'period-comparison', {...baseParams, view: pcView});
     load('feeBreak', setFeeBreak, 'fee-breakdown', params);
     load('adBreak',  setAdBreak,  'ad-breakdown',  params);
     load('funnel',   setFunnel,   'funnel',         params);
@@ -1817,7 +1826,7 @@ export default function Sales({ filters = {} }) {
                 ? `Today tracking ${Math.abs(pctVsLY).toFixed(0)}% below same time last year`
                 : `Today tracking ${pctVsLY.toFixed(0)}% above same time last year`;
               const sub = isBelow
-                ? `LY same-time: ${f$(lyNow)} · Current: ${f$(tyNow)} · ${tod2b.snapshot_time||''} CT`
+                ? `LY same-time: ${f$(lyNow)} · Current: ${f$(tyNow)} · ${tod2b.snapshot_time||''}`
                 : `LY same-time: ${f$(lyNow)} · Current: ${f$(tyNow)} — strong day in progress`;
               return (
                 <div style={{margin:'0 0 12px',background:bgCol,border:`1px solid ${bdCol}`,borderRadius:10,padding:'10px 14px',display:'flex',alignItems:'center',justifyContent:'space-between',gap:12}}>
@@ -1834,7 +1843,7 @@ export default function Sales({ filters = {} }) {
             })()}
 
             {/* ── TODAY SNAPSHOT ── */}
-            <EpochLabel type="today" label="📍 Today Snapshot" right={tod.snapshot_time ? `thru ${tod.snapshot_time} CT` : 'live data'}/>
+            <EpochLabel type="today" label="📍 Today Snapshot" right={tod.snapshot_time ? `thru ${tod.snapshot_time}` : 'live data'}/>
             {loading.periodCols
               ? <div style={{height:180,display:'flex',alignItems:'center',justifyContent:'center'}}><Spinner/></div>
               : (
@@ -1879,7 +1888,7 @@ export default function Sales({ filters = {} }) {
                         </div>
                       );
                     })()}
-                    {/* pace bar — TY NOW only */}
+                    {/* pace bar — TY NOW only: MTD vs LY pace */}
                     {col.lbl.includes('TY') && !col.lbl.includes('EOD') && periodCols?.['MTD'] && (() => {
                       const mtdD = periodCols['MTD'];
                       const nowD = new Date();
@@ -1887,17 +1896,28 @@ export default function Sales({ filters = {} }) {
                       const dom = nowD.getDate();
                       const pctMo = Math.round((dom / daysInMo) * 100);
                       const mtdSales = mtdD.sales || 0;
+                      const mtdLySales = mtdD.ly_sales || 0;
                       const projMo = dom > 0 ? (mtdSales / dom) * daysInMo : 0;
+                      // Pace vs LY: if TY MTD > LY MTD same period → on pace
+                      const vsLyPct = mtdLySales > 0 ? ((mtdSales - mtdLySales) / mtdLySales * 100) : null;
+                      const onPace = vsLyPct == null ? null : vsLyPct >= 0;
+                      const paceColor = onPace === null ? `linear-gradient(90deg,${B.t1},${B.t2})` : onPace ? `linear-gradient(90deg,${B.t1},${B.t2})` : `linear-gradient(90deg,${B.o1},${B.o2})`;
+                      const paceNote = onPace === null
+                        ? `${pctMo}% of month elapsed · proj ${f$(projMo)}/mo`
+                        : onPace
+                          ? `✓ ${vsLyPct.toFixed(1)}% vs LY MTD · proj ${f$(projMo)}/mo`
+                          : `⚠ ${Math.abs(vsLyPct).toFixed(1)}% behind LY MTD · proj ${f$(projMo)}/mo`;
+                      const paceNoteColor = onPace === null ? B.t3 : onPace ? B.t3 : B.o3;
                       return (
                         <div style={{marginTop:8,paddingTop:8,borderTop:'1px solid var(--brd)'}}>
                           <div style={{display:'flex',justifyContent:'space-between',fontSize:9,color:'var(--txt3)',marginBottom:4}}>
-                            <span>MTD Progress</span>
-                            <strong style={{color:'var(--txt)'}}>{dom}d / {daysInMo}d</strong>
+                            <span>MTD vs LY Pace</span>
+                            <strong style={{color:'var(--txt)'}}>{f$(mtdSales)} / {f$(mtdLySales||projMo)}</strong>
                           </div>
                           <div style={{height:5,background:'rgba(255,255,255,.06)',borderRadius:3,overflow:'hidden'}}>
-                            <div style={{height:'100%',width:`${pctMo}%`,background:`linear-gradient(90deg,${B.t1},${B.t2})`,borderRadius:3}}/>
+                            <div style={{height:'100%',width:`${Math.min(pctMo,100)}%`,background:paceColor,borderRadius:3}}/>
                           </div>
-                          <div style={{fontSize:9,marginTop:3,color:B.t3}}>{pctMo}% elapsed · proj {f$(projMo)}/mo</div>
+                          <div style={{fontSize:9,marginTop:3,color:paceNoteColor}}>{paceNote}</div>
                         </div>
                       );
                     })()}
@@ -1905,6 +1925,48 @@ export default function Sales({ filters = {} }) {
                 ))}
               </div>
             )}
+
+            {/* ── PERFORMANCE TO PLAN ── */}
+            {periodCols?.['MTD'] && (() => {
+              const mtd = periodCols['MTD'] || {};
+              const wtd = periodCols['WTD'] || {};
+              const ytd = periodCols['YTD'] || {};
+              const nowD = new Date();
+              const dom = nowD.getDate();
+              const daysInMo = new Date(nowD.getFullYear(), nowD.getMonth()+1, 0).getDate();
+              const pctMo = Math.round((dom / daysInMo) * 100);
+              const projMo = dom > 0 && mtd.sales > 0 ? (mtd.sales / dom) * daysInMo : 0;
+              const rows3 = [
+                { label: 'MTD Revenue', ty: mtd.sales, ly: mtd.ly_sales, proj: projMo, fmt: f$ },
+                { label: 'MTD Units',   ty: mtd.units, ly: mtd.ly_units, proj: dom>0&&mtd.units>0?(mtd.units/dom)*daysInMo:0, fmt: fN },
+                { label: 'WTD Revenue', ty: wtd.sales, ly: wtd.ly_sales, proj: null, fmt: f$ },
+                { label: 'YTD Revenue', ty: ytd.sales, ly: ytd.ly_sales, proj: null, fmt: f$ },
+              ];
+              return (
+                <div style={{background:'var(--card2)',border:'1px solid var(--brd)',borderRadius:12,padding:'12px 14px',marginBottom:14}}>
+                  <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:10}}>
+                    <span style={{fontSize:11,fontWeight:700,color:'var(--txt)'}}>📋 Performance to Plan</span>
+                    <span style={{fontSize:9,color:B.sub}}>Month {pctMo}% elapsed ({dom}d / {daysInMo}d)</span>
+                  </div>
+                  <div style={{display:'grid',gridTemplateColumns:'repeat(4,1fr)',gap:8}}>
+                    {rows3.map(r => {
+                      const chg = (r.ly||0) > 0 ? ((r.ty||0)-(r.ly||0))/(r.ly) : null;
+                      const onPace = chg == null ? null : chg >= 0;
+                      return (
+                        <div key={r.label} style={{background:'var(--surf)',borderRadius:8,padding:'8px 10px',border:`1px solid ${onPace===false?B.o1+'44':'var(--brd)'}`}}>
+                          <div style={{fontSize:9,color:'var(--txt3)',marginBottom:3}}>{r.label}</div>
+                          <div style={{fontSize:15,fontWeight:800,color:'var(--txt)',lineHeight:1,marginBottom:2}}>{r.ty != null ? r.fmt(r.ty) : '—'}</div>
+                          <div style={{fontSize:9,color:'var(--txt3)'}}>LY: <span style={{color:'var(--txt2)'}}>{r.ly != null ? r.fmt(r.ly) : '—'}</span>
+                            {chg != null && <span style={{marginLeft:5,fontWeight:700,color:onPace?'#4ade80':'#fb923c'}}>{chg>=0?'▲':'▼'}{Math.abs(chg*100).toFixed(1)}%</span>}
+                          </div>
+                          {r.proj > 0 && <div style={{fontSize:9,marginTop:3,color:B.sub}}>Proj EOM: <span style={{fontWeight:600,color:B.b3}}>{r.fmt(r.proj)}</span></div>}
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              );
+            })()}
 
             {/* ── PERIOD SUMMARY ── */}
             <EpochLabel type="period" label="📅 Period Summary" right="5 comparison windows"/>
@@ -2060,18 +2122,29 @@ export default function Sales({ filters = {} }) {
             <EpochLabel type="trend" label="📊 Trends & Patterns" right="Period-controlled"/>
 
             {/* ── Sales Overview KPIs ── */}
-            <div style={{display:'flex',gap:8,marginBottom:10,overflowX:'auto',paddingBottom:2}}>
-              {loading.metrics ? <Spinner/> : <>
-                <MetricCard label="Sales $"       value={f$(m.sales)}         ly={f$(ly('sales'))}         delta={dp(m.sales,ly('sales'))}/>
-                <MetricCard label="Unit Sales"    value={fN(m.unit_sales)}     ly={fN(ly('unit_sales'))}    delta={dp(m.unit_sales,ly('unit_sales'))}/>
-                <MetricCard label="AUR"           value={f$(m.aur)}            ly={f$(ly('aur'))}           delta={dp(m.aur,ly('aur'))}/>
-                <MetricCard label="COGS"          value={f$(m.cogs)}           ly={f$(ly('cogs'))}          delta={dp(m.cogs,ly('cogs'))}/>
-                <MetricCard label="Amazon Fees"   value={f$(m.amazon_fees)}    ly={f$(ly('amazon_fees'))}   delta={dp(m.amazon_fees,ly('amazon_fees'))}/>
-                <MetricCard label="Returns" value={`${fN(m.returns)} · ${f$(m.returns_amount)}`} ly={`${fN(ly('returns'))} · ${f$(ly('returns_amount'))}`} delta={dp(m.returns,ly('returns'))} invert/>
-                <MetricCard label="Gross Margin $"  value={f$(m.gross_margin)}     ly={f$(ly('gross_margin'))}     delta={dp(m.gross_margin,ly('gross_margin'))}/>
-                <MetricCard label="Gross Margin %"  value={fP(m.gross_margin_pct)} ly={fP(ly('gross_margin_pct'))} delta={dp(m.gross_margin_pct,ly('gross_margin_pct'))}/>
-              </>}
-            </div>
+            {(() => {
+              // Compute projected EOM from MTD data for goal context on each card
+              const mtdKpi = periodCols?.['MTD'] || {};
+              const nowKpi = new Date();
+              const domKpi = nowKpi.getDate();
+              const daysInMoKpi = new Date(nowKpi.getFullYear(), nowKpi.getMonth()+1, 0).getDate();
+              const projSales = domKpi > 0 && mtdKpi.sales  > 0 ? f$((mtdKpi.sales  / domKpi) * daysInMoKpi) : null;
+              const projUnits = domKpi > 0 && mtdKpi.units  > 0 ? fN((mtdKpi.units  / domKpi) * daysInMoKpi) : null;
+              return (
+                <div style={{display:'flex',gap:8,marginBottom:10,overflowX:'auto',paddingBottom:2}}>
+                  {loading.metrics ? <Spinner/> : <>
+                    <MetricCard label="Sales $"       value={f$(m.sales)}         ly={f$(ly('sales'))}         delta={dp(m.sales,ly('sales'))}         goal={projSales}  goalLabel="Proj EOM:"/>
+                    <MetricCard label="Unit Sales"    value={fN(m.unit_sales)}     ly={fN(ly('unit_sales'))}    delta={dp(m.unit_sales,ly('unit_sales'))} goal={projUnits}  goalLabel="Proj EOM:"/>
+                    <MetricCard label="AUR"           value={f$(m.aur)}            ly={f$(ly('aur'))}           delta={dp(m.aur,ly('aur'))}/>
+                    <MetricCard label="COGS"          value={f$(m.cogs)}           ly={f$(ly('cogs'))}          delta={dp(m.cogs,ly('cogs'))}/>
+                    <MetricCard label="Amazon Fees"   value={f$(m.amazon_fees)}    ly={f$(ly('amazon_fees'))}   delta={dp(m.amazon_fees,ly('amazon_fees'))}/>
+                    <MetricCard label="Returns" value={`${fN(m.returns)} · ${f$(m.returns_amount)}`} ly={`${fN(ly('returns'))} · ${f$(ly('returns_amount'))}`} delta={dp(m.returns,ly('returns'))} invert/>
+                    <MetricCard label="Gross Margin $"  value={f$(m.gross_margin)}     ly={f$(ly('gross_margin'))}     delta={dp(m.gross_margin,ly('gross_margin'))}/>
+                    <MetricCard label="Gross Margin %"  value={fP(m.gross_margin_pct)} ly={fP(ly('gross_margin_pct'))} delta={dp(m.gross_margin_pct,ly('gross_margin_pct'))}/>
+                  </>}
+                </div>
+              );
+            })()}
 
             {/* ── Period selector ── */}
             <div style={{display:'flex',alignItems:'center',gap:8,marginBottom:14,paddingBottom:10,borderBottom:'1px solid var(--brd)'}}>
