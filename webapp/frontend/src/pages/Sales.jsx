@@ -943,7 +943,9 @@ export default function Sales({ filters = {} }) {
   const [showDailyCharts, setShowDailyCharts] = useState(false); // daily tab heatmap toggle
   const [expandedPeriods, setExpandedPeriods] = useState({}); // period card row expand
   const [dismissedDailyInsights, setDismissedDailyInsights] = useState([]); // dismissed insight keys
+  const [snoozedDailyInsights,  setSnoozedDailyInsights]  = useState({}); // {key: snoozeUntilMs}
   const [dailyAnomalyDismissed, setDailyAnomalyDismissed] = useState(false); // anomaly banner
+  const [pricingCache,          setPricingCache]          = useState(null); // amazon pricing data
 
   // Data state
   const [metrics,     setMetrics]     = useState(null);
@@ -1040,6 +1042,15 @@ export default function Sales({ filters = {} }) {
   useEffect(() => {
     load('hmData', setHmData, 'hourly-heatmap', {...baseParams, days: 30});
   }, [divRaw, custRaw]);
+
+  // Fetch pricing cache for Competitor Price Watch (Daily tab)
+  useEffect(() => {
+    if (viewTab !== 'Daily') return;
+    fetch('/api/profitability/amazon-pricing')
+      .then(r => r.ok ? r.json() : null)
+      .then(d => { if (d && !d.error) setPricingCache(d); })
+      .catch(() => {});
+  }, [viewTab]);
 
   const handleViewTab = v => { setViewTab(v); setActivePeriod(PERIODS[v]?.[0] || ''); };
 
@@ -2118,8 +2129,8 @@ export default function Sales({ filters = {} }) {
               })()}
             </>}
 
-            {/* ── TRENDS & PATTERNS ── */}
-            <EpochLabel type="trend" label="📊 Trends & Patterns" right="Period-controlled"/>
+            {/* ── PERIOD METRICS ── */}
+            <EpochLabel type="period" label="📊 Period Metrics"/>
 
             {/* ── Sales Overview KPIs ── */}
             {(() => {
@@ -2130,34 +2141,42 @@ export default function Sales({ filters = {} }) {
               const daysInMoKpi = new Date(nowKpi.getFullYear(), nowKpi.getMonth()+1, 0).getDate();
               const projSales = domKpi > 0 && mtdKpi.sales  > 0 ? f$((mtdKpi.sales  / domKpi) * daysInMoKpi) : null;
               const projUnits = domKpi > 0 && mtdKpi.units  > 0 ? fN((mtdKpi.units  / domKpi) * daysInMoKpi) : null;
+              const estBadge = <span style={{fontSize:8,background:'rgba(245,158,11,.15)',color:B.o3,border:'1px solid rgba(245,158,11,.2)',borderRadius:3,padding:'1px 4px',marginLeft:4,verticalAlign:'middle'}}>⚠ Est.</span>;
+              const retRatePct = (mtdKpi.sales||0) > 0 ? ((mtdKpi.returns_amount||0)/(mtdKpi.sales||1)*100).toFixed(1) : null;
+              const feesPct = (mtdKpi.sales||0) > 0 ? ((Math.abs(mtdKpi.amazon_fees||0))/(mtdKpi.sales||1)*100).toFixed(1) : null;
               return (
                 <div style={{display:'flex',gap:8,marginBottom:10,overflowX:'auto',paddingBottom:2}}>
                   {loading.metrics ? <Spinner/> : <>
                     <MetricCard label="Sales $"       value={f$(m.sales)}         ly={f$(ly('sales'))}         delta={dp(m.sales,ly('sales'))}         goal={projSales}  goalLabel="Proj EOM:"/>
                     <MetricCard label="Unit Sales"    value={fN(m.unit_sales)}     ly={fN(ly('unit_sales'))}    delta={dp(m.unit_sales,ly('unit_sales'))} goal={projUnits}  goalLabel="Proj EOM:"/>
                     <MetricCard label="AUR"           value={f$(m.aur)}            ly={f$(ly('aur'))}           delta={dp(m.aur,ly('aur'))}/>
-                    <MetricCard label="COGS"          value={f$(m.cogs)}           ly={f$(ly('cogs'))}          delta={dp(m.cogs,ly('cogs'))}/>
-                    <MetricCard label="Amazon Fees"   value={f$(m.amazon_fees)}    ly={f$(ly('amazon_fees'))}   delta={dp(m.amazon_fees,ly('amazon_fees'))}/>
-                    <MetricCard label="Returns" value={`${fN(m.returns)} · ${f$(m.returns_amount)}`} ly={`${fN(ly('returns'))} · ${f$(ly('returns_amount'))}`} delta={dp(m.returns,ly('returns'))} invert/>
-                    <MetricCard label="Gross Margin $"  value={f$(m.gross_margin)}     ly={f$(ly('gross_margin'))}     delta={dp(m.gross_margin,ly('gross_margin'))}/>
-                    <MetricCard label="Gross Margin %"  value={fP(m.gross_margin_pct)} ly={fP(ly('gross_margin_pct'))} delta={dp(m.gross_margin_pct,ly('gross_margin_pct'))}/>
+                    <MetricCard label={<>COGS{estBadge}</>}          value={f$(m.cogs)}           ly={f$(ly('cogs'))}          delta={dp(m.cogs,ly('cogs'))}          goal="35% fallback" goalLabel="Rate:"/>
+                    <MetricCard label="Amazon Fees"   value={f$(m.amazon_fees)}    ly={f$(ly('amazon_fees'))}   delta={dp(m.amazon_fees,ly('amazon_fees'))} goal={feesPct ? `${feesPct}% of rev` : null} goalLabel=""/>
+                    <MetricCard label="Returns" value={`${fN(m.returns)} · ${f$(m.returns_amount)}`} ly={`${fN(ly('returns'))} · ${f$(ly('returns_amount'))}`} delta={dp(m.returns,ly('returns'))} invert goal={retRatePct ? `${retRatePct}%` : null} goalLabel="Return rate:"/>
+                    <MetricCard label={<>Gross Margin ${estBadge}</>}  value={f$(m.gross_margin)}     ly={f$(ly('gross_margin'))}     delta={dp(m.gross_margin,ly('gross_margin'))}/>
+                    <MetricCard label={<>GM %{estBadge}</>}            value={fP(m.gross_margin_pct)} ly={fP(ly('gross_margin_pct'))} delta={dp(m.gross_margin_pct,ly('gross_margin_pct'))} goal="35% COGS est." goalLabel="Based on:"/>
                   </>}
                 </div>
               );
             })()}
 
-            {/* ── Period selector ── */}
-            <div style={{display:'flex',alignItems:'center',gap:8,marginBottom:14,paddingBottom:10,borderBottom:'1px solid var(--brd)'}}>
-              <span style={{fontSize:9,fontWeight:700,textTransform:'uppercase',letterSpacing:'.08em',color:'var(--txt3)',whiteSpace:'nowrap'}}>Period</span>
-              {EXEC_PERIODS_LIST.map(p => (
-                <button key={p} onClick={() => { const cp = EXEC_PERIOD_MAP[p]; setCpSales(cp); setActivePeriod(cp); }} style={{
-                  fontSize:9,fontWeight:700,padding:'3px 9px',borderRadius:5,cursor:'pointer',
-                  border:`1px solid ${cpSales===EXEC_PERIOD_MAP[p] ? B.b2 : 'var(--brd)'}`,
-                  background: cpSales===EXEC_PERIOD_MAP[p] ? `${B.b2}22` : 'transparent',
-                  color: cpSales===EXEC_PERIOD_MAP[p] ? B.b2 : 'var(--txt3)',
-                  transition:'all .15s',
-                }}>{p}</button>
-              ))}
+            {/* ── TRENDS ── */}
+            <EpochLabel type="trend" label="📈 Trends" right="Period-controlled"/>
+
+            {/* ── Period selector (card-wrapped, matches period-bar-wrap) ── */}
+            <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',gap:8,padding:'10px 14px',background:'var(--card)',border:'1px solid var(--brd)',borderRadius:9,marginBottom:12}}>
+              <div style={{display:'flex',alignItems:'center',gap:6,flexWrap:'wrap'}}>
+                <span style={{fontSize:9,fontWeight:700,textTransform:'uppercase',letterSpacing:'.08em',color:'var(--txt3)',whiteSpace:'nowrap'}}>Period</span>
+                {EXEC_PERIODS_LIST.map(p => (
+                  <button key={p} onClick={() => { const cp = EXEC_PERIOD_MAP[p]; setCpSales(cp); setActivePeriod(cp); }} style={{
+                    fontSize:10,fontWeight:700,padding:'4px 10px',borderRadius:5,cursor:'pointer',
+                    border:`1px solid ${cpSales===EXEC_PERIOD_MAP[p] ? B.b2 : 'var(--brd)'}`,
+                    background: cpSales===EXEC_PERIOD_MAP[p] ? 'rgba(46,111,187,.15)' : 'transparent',
+                    color: cpSales===EXEC_PERIOD_MAP[p] ? B.b3 : 'var(--txt3)',
+                    transition:'all .15s',
+                  }}>{p}</button>
+                ))}
+              </div>
               {/* date range badge */}
               {(() => {
                 const now2 = new Date();
@@ -2167,7 +2186,7 @@ export default function Sales({ filters = {} }) {
                 const start2 = new Date(end2); start2.setDate(start2.getDate()-(days2-1));
                 const fmt2 = d => d.toLocaleDateString('en-US',{month:'short',day:'numeric'});
                 return (
-                  <span style={{fontSize:10,color:B.b3,background:'rgba(46,111,187,.1)',border:'1px solid rgba(46,111,187,.2)',borderRadius:6,padding:'4px 10px',fontWeight:600,whiteSpace:'nowrap',marginLeft:4}}>
+                  <span style={{fontSize:10,color:B.b3,background:'rgba(46,111,187,.1)',border:'1px solid rgba(46,111,187,.2)',borderRadius:6,padding:'4px 10px',fontWeight:600,whiteSpace:'nowrap',flexShrink:0}}>
                     {fmt2(start2)} – {fmt2(end2)}, {end2.getFullYear()} &nbsp;·&nbsp; {days2} days
                   </span>
                 );
@@ -2237,32 +2256,108 @@ export default function Sales({ filters = {} }) {
               );
             })()}
 
+            {/* ── P&L Waterfall ── */}
+            {(() => {
+              const mtdW = periodCols?.['MTD'] || {};
+              const rev = mtdW.sales || 0;
+              if (rev <= 0) return null;
+              const ret  = Math.abs(mtdW.returns_amount || 0);
+              const fees = Math.abs(mtdW.amazon_fees || 0);
+              const adSp = m.ad_spend || 0;
+              const cogs = rev * 0.35;
+              const netM = rev - cogs - fees - adSp - ret;
+              const netPct = (netM / rev * 100);
+              const wBar = val => Math.max(1, (val / rev) * 100);
+              const wfRows = [
+                {lbl:'Gross Revenue', val:rev,  col:B.b3,      bg:`linear-gradient(90deg,${B.b1},${B.b2})`, neg:false},
+                {lbl:'− COGS (est.)', val:cogs, col:'#f87171', bg:'rgba(239,68,68,.35)',                    neg:true},
+                {lbl:'− Amazon Fees', val:fees, col:'#fb923c', bg:'rgba(251,146,60,.35)',                   neg:true},
+                {lbl:'− Ad Spend',    val:adSp, col:'#fbbf24', bg:'rgba(251,191,36,.3)',                    neg:true},
+                {lbl:'− Returns',     val:ret,  col:'#94a3b8', bg:'rgba(148,163,184,.25)',                  neg:true},
+              ];
+              return (
+                <div style={{background:'var(--card)',border:'1px solid var(--brd)',borderRadius:12,padding:16,marginBottom:12}}>
+                  <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',marginBottom:12}}>
+                    <span style={{fontSize:10,fontWeight:700,color:'var(--txt2)'}}>P&L Waterfall — MTD</span>
+                    <span style={{fontSize:9,fontWeight:700,color:'var(--txt3)',background:'var(--card2)',border:'1px solid var(--brd)',borderRadius:5,padding:'2px 7px'}}>Estimated COGS</span>
+                  </div>
+                  <div style={{display:'flex',flexDirection:'column',gap:6,padding:'4px 0'}}>
+                    {wfRows.map(({lbl,val,col,bg,neg})=>{
+                      const w = wBar(val);
+                      const ml = neg ? (100-w) : 0;
+                      return (
+                        <div key={lbl} style={{display:'grid',gridTemplateColumns:'130px 1fr 80px',gap:8,alignItems:'center'}}>
+                          <div style={{fontSize:11,color:col,textAlign:'right',fontWeight:neg?500:700}}>{lbl}</div>
+                          <div style={{position:'relative',height:22,borderRadius:4,background:'rgba(255,255,255,.03)'}}>
+                            <div style={{position:'absolute',left:`${ml}%`,width:`${w}%`,height:'100%',borderRadius:4,background:bg,display:'flex',alignItems:'center',paddingLeft:8,fontSize:10,fontWeight:700,color:'rgba(255,255,255,.9)',whiteSpace:'nowrap',overflow:'hidden',transition:'width .5s ease'}}>
+                              {neg?'−':''}{f$(Math.abs(val))}
+                            </div>
+                          </div>
+                          <div style={{fontSize:12,fontWeight:700,textAlign:'right',color:col}}>{neg?'−':''}{f$(Math.abs(val))}</div>
+                        </div>
+                      );
+                    })}
+                    <div style={{height:1,background:'var(--brd)',margin:'4px 0'}}/>
+                    <div style={{background:'var(--card2)',borderRadius:8,padding:'8px 12px',display:'grid',gridTemplateColumns:'130px 1fr 80px',gap:8,alignItems:'center'}}>
+                      <div style={{fontSize:13,fontWeight:800,color:B.t3,textAlign:'right'}}>= Net Margin</div>
+                      <div style={{background:'linear-gradient(90deg,rgba(26,163,146,.25),rgba(26,163,146,.08))',height:28,borderRadius:6,display:'flex',alignItems:'center',paddingLeft:12,fontSize:13,fontWeight:800,color:B.t3}}>
+                        {f$(netM)}
+                      </div>
+                      <div style={{fontSize:15,fontWeight:800,textAlign:'right',color:B.t3}}>{netPct.toFixed(1)}<span style={{fontSize:10,color:'var(--txt3)'}}>%</span></div>
+                    </div>
+                  </div>
+                  <div style={{fontSize:9,color:'var(--txt3)',marginTop:8}}>⚠ COGS estimated at 35% — upload actual COGS CSV for accurate net margin</div>
+                </div>
+              );
+            })()}
+
             {/* ── Traffic & Conversion Pipeline ── */}
             <div style={{background:'var(--card)',border:'1px solid var(--brd)',borderRadius:12,padding:16,marginBottom:12}}>
-              <div style={{display:'flex',alignItems:'center',gap:10,marginBottom:12}}>
-                <div style={{flex:1,height:1,background:'var(--brd)'}}/>
-                <span style={{fontSize:10,fontWeight:700,textTransform:'uppercase',letterSpacing:'.1em',color:'var(--txt3)',whiteSpace:'nowrap'}}>Traffic & Conversion Pipeline</span>
-                <div style={{flex:1,height:1,background:'var(--brd)'}}/>
-              </div>
-              {Array.isArray(funnel) && funnel.length > 0 && (() => {
-                const maxV=Math.max(...funnel.map(s2=>s2.ty||0),1);
-                const sColors=[B.b3,B.b2,B.o2,B.t2];
-                const rates=funnel.map((s2,i)=>i===0?null:funnel[i-1].ty>0?((s2.ty||0)/funnel[i-1].ty*100).toFixed(1)+'%':null);
+              <SectionDivider label="Traffic & Conversion"/>
+              {(() => {
+                // Build 5-stage pipeline: Impressions, Clicks, Sessions, Add-to-Cart, Orders
+                const adsImpressions = m?.impressions || 0;
+                const adsClicks      = m?.clicks || 0;
+                const ctr = adsImpressions > 0 ? (adsClicks / adsImpressions * 100).toFixed(1) + '%' : null;
+                const isToday = activePeriod === 'Today';
+                const synth = [
+                  {label:'Impressions', ty:adsImpressions, ly:0, col:B.b3, step:null},
+                  {label:'Clicks',      ty:adsClicks,      ly:0, col:B.b2, step: ctr ? `CTR: ${ctr}` : null},
+                ];
+                const funnelStages = Array.isArray(funnel) ? funnel : [];
+                const allStages = [...synth, ...funnelStages];
+                const maxV = Math.max(...allStages.map(s2=>s2.ty||0), 1);
+                const sColors = [B.b3, B.b2, B.o2, B.t2, B.t3];
                 return (
-                  <div style={{display:'grid',gridTemplateColumns:`repeat(${funnel.length},1fr)`,gap:0,border:'1px solid var(--brd)',borderRadius:8,overflow:'hidden',marginBottom:12}}>
-                    {funnel.map((s2,i)=>{
-                      const lyDelta=s2.ly>0?((s2.ty-s2.ly)/s2.ly*100):null;
-                      const col=sColors[i%sColors.length];
+                  <div style={{display:'grid',gridTemplateColumns:`repeat(${allStages.length},1fr)`,gap:0,border:'1px solid var(--brd)',borderRadius:8,overflow:'hidden',marginBottom:12}}>
+                    {allStages.map((s2,i)=>{
+                      const lyDelta = s2.ly>0 ? ((s2.ty-s2.ly)/s2.ly*100) : null;
+                      const col = sColors[i % sColors.length];
+                      const isSessions = s2.label?.toLowerCase().includes('sess');
+                      const prevTy = i>0 ? allStages[i-1].ty : 0;
+                      const stepPct = i>0 && prevTy>0 && !isSessions ? ((s2.ty||0)/prevTy*100).toFixed(1)+'%' : null;
                       return (
-                        <div key={s2.label} style={{padding:'10px 14px',borderRight:i<funnel.length-1?'1px solid var(--brd)':'none',position:'relative'}}>
+                        <div key={s2.label} style={{padding:'10px 14px',borderRight:i<allStages.length-1?'1px solid var(--brd)':'none',position:'relative'}}>
                           <div style={{fontSize:10,color:'var(--txt3)',fontWeight:600,marginBottom:4,whiteSpace:'nowrap',overflow:'hidden',textOverflow:'ellipsis'}}>{s2.label}</div>
-                          <div style={{fontSize:20,fontWeight:800,color:col}}>{(s2.ty||0).toLocaleString()}</div>
-                          <div style={{height:4,background:'var(--brd)',borderRadius:2,overflow:'hidden',margin:'6px 0 4px'}}>
-                            <div style={{height:'100%',width:`${Math.max(4,(s2.ty/maxV)*100)}%`,background:col,borderRadius:2}}/>
-                          </div>
-                          {rates[i] && <div style={{fontSize:9,color:'var(--txt3)'}}>{rates[i]} step-through</div>}
-                          {lyDelta!==null && <div style={{fontSize:10,fontWeight:700,color:lyDelta>=0?'#4ade80':'#fb923c'}}>{lyDelta>=0?'▲':'▼'}{Math.abs(lyDelta).toFixed(1)}% vs LY</div>}
-                          {i<funnel.length-1 && <div style={{position:'absolute',right:-9,top:'50%',transform:'translateY(-50%)',fontSize:14,color:'var(--brd2)',zIndex:1}}>›</div>}
+                          {isSessions && isToday ? (
+                            <>
+                              <div style={{fontSize:20,fontWeight:800,color:'var(--txt3)'}}>—</div>
+                              <div style={{fontSize:9,color:B.sub,marginTop:4,display:'flex',alignItems:'center',gap:3}} title="Sessions data has a 24-hour processing lag from Amazon — will populate tomorrow">
+                                <span style={{fontSize:10}}>ℹ</span> 24hr lag
+                              </div>
+                              {funnelStages[0]?.ly>0 && <div style={{fontSize:9,color:'var(--txt3)',fontStyle:'italic',marginTop:2}}>L30: {fN(funnelStages[0]?.ly||0)}</div>}
+                            </>
+                          ) : (
+                            <>
+                              <div style={{fontSize:20,fontWeight:800,color:col}}>{(s2.ty||0).toLocaleString()}</div>
+                              <div style={{height:4,background:'var(--brd)',borderRadius:2,overflow:'hidden',margin:'6px 0 4px'}}>
+                                <div style={{height:'100%',width:`${Math.max(4,(s2.ty/maxV)*100)}%`,background:col,borderRadius:2}}/>
+                              </div>
+                              {(s2.step||stepPct) && <div style={{fontSize:9,color:'var(--txt3)'}}>{s2.step || (stepPct+' step-through')}</div>}
+                              {lyDelta!==null && <div style={{fontSize:10,fontWeight:700,color:lyDelta>=0?'#4ade80':'#fb923c'}}>{lyDelta>=0?'▲':'▼'}{Math.abs(lyDelta).toFixed(1)}% vs LY</div>}
+                            </>
+                          )}
+                          {i<allStages.length-1 && <div style={{position:'absolute',right:-9,top:'50%',transform:'translateY(-50%)',fontSize:14,color:'var(--brd2)',zIndex:1}}>›</div>}
                         </div>
                       );
                     })}
@@ -2522,16 +2617,18 @@ export default function Sales({ filters = {} }) {
               if (retRBI>0 && retRBI<0.04) allInsights.push({key:'ret',type:'ok',title:`✅ Return rate ${(retRBI*100).toFixed(1)}% — below 4% target`,desc:'Returns are well-controlled. Maintain current listing accuracy and A+ content.'});
               else if (retRBI>0.07) allInsights.push({key:'rethigh',type:'alert',title:`⚠ Return rate ${(retRBI*100).toFixed(1)}% — above 7% threshold`,desc:'High returns may indicate listing inaccuracy or product issues. Review top return reasons in Seller Central.'});
               if ((m.roas||0)>0 && (m.roas||0)<2.5) allInsights.push({key:'roas',type:'warn',title:`📊 ROAS at ${fX(m.roas)} — below 2.5× floor`,desc:'Ad return on spend is low. Review campaign structure, negative keywords, and bid strategy.'});
-              const visible = allInsights.filter(ins => !dismissedDailyInsights.includes(ins.key));
+              const now = Date.now();
+              const visible = allInsights.filter(ins =>
+                !dismissedDailyInsights.includes(ins.key) &&
+                !(snoozedDailyInsights[ins.key] && snoozedDailyInsights[ins.key] > now)
+              );
               if (visible.length === 0) return null;
               const tStyle2 = {alert:{border:'rgba(239,68,68,.2)',bg:'rgba(239,68,68,.05)',dot:'#ef4444'},warn:{border:'rgba(245,158,11,.2)',bg:'rgba(245,158,11,.05)',dot:'#f59e0b'},ok:{border:'rgba(34,197,94,.2)',bg:'rgba(34,197,94,.05)',dot:'#22c55e'}};
+              const snoozeIns = key => setSnoozedDailyInsights(p=>({...p,[key]: now + 7*24*60*60*1000}));
+              const dismissIns = key => setDismissedDailyInsights(p=>[...p,key]);
               return (
                 <div style={{marginBottom:12}}>
-                  <div style={{display:'flex',alignItems:'center',gap:10,margin:'4px 0 10px'}}>
-                    <div style={{flex:1,height:1,background:'var(--brd)'}}/>
-                    <span style={{fontSize:9,fontWeight:700,textTransform:'uppercase',letterSpacing:'.12em',color:'var(--txt3)',whiteSpace:'nowrap'}}>Business Insights</span>
-                    <div style={{flex:1,height:1,background:'var(--brd)'}}/>
-                  </div>
+                  <SectionDivider label="Business Insights"/>
                   <div style={{display:'flex',flexDirection:'column',gap:8}}>
                     {visible.map(ins => {
                       const st2 = tStyle2[ins.type] || tStyle2.ok;
@@ -2543,10 +2640,11 @@ export default function Sales({ filters = {} }) {
                             <div style={{fontSize:10,color:'var(--txt3)',lineHeight:1.5}}>{ins.desc}</div>
                             <div style={{display:'flex',gap:6,marginTop:6,alignItems:'center'}}>
                               {ins.action && <button style={{fontSize:9,padding:'2px 8px',borderRadius:5,border:'1px solid var(--brd)',color:'var(--txt3)',background:'transparent',cursor:'pointer',fontWeight:600}}>{ins.action} →</button>}
-                              <button onClick={()=>setDismissedDailyInsights(p=>[...p,ins.key])} style={{fontSize:9,color:'var(--txt3)',background:'transparent',border:'none',cursor:'pointer',padding:'2px 6px',borderRadius:4}}>✕ Dismiss</button>
+                              <button onClick={()=>snoozeIns(ins.key)} style={{fontSize:9,padding:'2px 8px',borderRadius:5,border:'1px solid var(--brd)',color:'var(--txt3)',background:'transparent',cursor:'pointer',fontWeight:600}}>⏰ Snooze 7 days</button>
+                              <button onClick={()=>dismissIns(ins.key)} style={{fontSize:9,color:B.sub,background:'transparent',border:'none',cursor:'pointer',padding:'2px 6px',borderRadius:4}}>✕ Dismiss</button>
                             </div>
                           </div>
-                          <button onClick={()=>setDismissedDailyInsights(p=>[...p,ins.key])} style={{background:'none',border:'none',color:'var(--txt3)',cursor:'pointer',fontSize:14,padding:'2px 5px',borderRadius:4,lineHeight:1,flexShrink:0}}>✕</button>
+                          <button onClick={()=>dismissIns(ins.key)} style={{background:'none',border:'none',color:'var(--txt3)',cursor:'pointer',fontSize:14,padding:'2px 5px',borderRadius:4,lineHeight:1,flexShrink:0}}>✕</button>
                         </div>
                       );
                     })}
@@ -2554,6 +2652,95 @@ export default function Sales({ filters = {} }) {
                 </div>
               );
             })()}
+
+            {/* ── ADVERTISING ── */}
+            <SectionDivider label="Advertising"/>
+            <div style={{display:'flex',alignItems:'center',gap:8,marginBottom:10}}>
+              <span style={{fontSize:9,color:B.sub,fontWeight:700,textTransform:'uppercase',letterSpacing:'.07em'}}>Period:</span>
+              <span style={{fontSize:10,color:B.b3,fontWeight:700,background:'rgba(46,111,187,.12)',border:'1px solid rgba(46,111,187,.25)',borderRadius:5,padding:'2px 8px'}}>{activePeriod}</span>
+              <span style={{fontSize:9,color:B.sub}}>— same as period selector above</span>
+            </div>
+            {loading.metrics ? <Spinner/> : (
+              <div style={{display:'flex',gap:8,marginBottom:12,overflowX:'auto',paddingBottom:4}}>
+                {/* Ad Spend */}
+                <div style={{background:'var(--card)',border:'1px solid var(--brd)',borderRadius:10,padding:'10px 12px',minWidth:130,flex:1}}>
+                  <div style={{fontSize:9,textTransform:'uppercase',letterSpacing:'.07em',color:'var(--txt3)',marginBottom:6}}>Ad Spend $</div>
+                  <div style={{fontSize:18,fontWeight:800,lineHeight:1.1,color:'var(--txt)'}}>{f$(m.ad_spend||0)}</div>
+                  {ly('ad_spend')>0 && <div style={{fontSize:10,color:'var(--txt3)',marginTop:2}}>LY: {f$(ly('ad_spend'))} &nbsp;<span style={{color:(m.ad_spend||0)>(ly('ad_spend')||0)?'#f87171':'#4ade80',fontWeight:700}}>{(m.ad_spend||0)>(ly('ad_spend')||0)?'▲':'▼'}{Math.abs(dp(m.ad_spend,ly('ad_spend'))||0).toFixed(1)}%</span></div>}
+                  <div style={{fontSize:10,marginTop:3,color:B.sub}}>{(m.tacos||0)>0?(m.tacos*100).toFixed(1)+'% TACOS':null}</div>
+                </div>
+                {/* ROAS */}
+                <div style={{background:'var(--card)',border:'1px solid var(--brd)',borderRadius:10,padding:'10px 12px',minWidth:130,flex:1}}>
+                  <div style={{fontSize:9,textTransform:'uppercase',letterSpacing:'.07em',color:'var(--txt3)',marginBottom:6}}>ROAS</div>
+                  <div style={{fontSize:18,fontWeight:800,lineHeight:1.1,color:(m.roas||0)>=2.5?'#4ade80':'#f87171'}}>{fX(m.roas||0)}</div>
+                  {ly('roas')>0 && <div style={{fontSize:10,color:'var(--txt3)',marginTop:2}}>LY: {fX(ly('roas'))} &nbsp;<span style={{color:(m.roas||0)>=(ly('roas')||0)?'#4ade80':'#f87171',fontWeight:700}}>{(m.roas||0)>=(ly('roas')||0)?'▲':'▼'}{Math.abs(dp(m.roas,ly('roas'))||0).toFixed(0)}%</span></div>}
+                  <div style={{fontSize:10,marginTop:3}}>{(m.roas||0)>=2.5?<span style={{color:'#4ade80'}}>✓ Above 2.5× floor</span>:<span style={{color:'#f87171'}}>⚠ Below 2.5× floor</span>}</div>
+                </div>
+                {/* TACOS */}
+                <div style={{background:'var(--card)',border:'1px solid var(--brd)',borderRadius:10,padding:'10px 12px',minWidth:130,flex:1}}>
+                  <div style={{fontSize:9,textTransform:'uppercase',letterSpacing:'.07em',color:'var(--txt3)',marginBottom:6}}>TACOS</div>
+                  <div style={{fontSize:18,fontWeight:800,lineHeight:1.1,color:(m.tacos||0)>0.14?B.o3:'var(--txt)'}}>{fP(m.tacos||0)}</div>
+                  {ly('tacos')>0 && <div style={{fontSize:10,color:'var(--txt3)',marginTop:2}}>LY: {fP(ly('tacos'))} &nbsp;<span style={{color:(m.tacos||0)<=(ly('tacos')||0)?'#4ade80':'#f87171',fontWeight:700}}>{(m.tacos||0)<=(ly('tacos')||0)?'▼':'▲'}{Math.abs(dp(m.tacos,ly('tacos'))||0).toFixed(0)}%</span></div>}
+                  <div style={{fontSize:10,marginTop:3}}>{(m.tacos||0)>0.16?<span style={{color:'#f87171'}}>⚠ Near 16% ceiling</span>:<span style={{color:'#4ade80'}}>✓ Under 16% ceiling</span>}</div>
+                </div>
+              </div>
+            )}
+            <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:12,marginBottom:12}}>
+              <ChartCard title="Ad Efficiency — ACOS vs ROAS" badge={`${activePeriod} · TY vs LY`} error={errors.adEff}>
+                {loading.adEff ? <Spinner/> : svgChart(adQuadrantSVG(adEff))}
+              </ChartCard>
+              <ChartCard title="Competitor Price Watch" badge="Live · SP-API">
+                {(() => {
+                  const pricing = pricingCache?.amazonPricing;
+                  if (!pricing || Object.keys(pricing).length === 0) {
+                    return <div style={{color:'var(--txt3)',fontSize:11,textAlign:'center',padding:20}}>No pricing data — sync pending</div>;
+                  }
+                  const rows = Object.entries(pricing).slice(0, 6).map(([asin, p]) => {
+                    const yourPrice = p.listPrice || p.landedPrice || 0;
+                    const bbPrice   = p.buyBoxPrice || yourPrice;
+                    const delta     = bbPrice - yourPrice;
+                    const wonBB     = Math.abs(delta) < 0.05 || bbPrice >= yourPrice * 0.99;
+                    return {asin, name: p.name || asin.slice(-8), yourPrice, bbPrice, delta, wonBB};
+                  });
+                  return (
+                    <>
+                      <table style={{width:'100%',borderCollapse:'collapse',fontSize:11}}>
+                        <thead>
+                          <tr>{['ASIN / SKU','Your Price','Buy Box','Δ','Status'].map(h=>(
+                            <th key={h} style={{fontSize:9,fontWeight:700,textTransform:'uppercase',letterSpacing:'.07em',color:'var(--txt3)',padding:'4px 8px',borderBottom:'1px solid var(--brd)',textAlign:'left'}}>{h}</th>
+                          ))}</tr>
+                        </thead>
+                        <tbody>
+                          {rows.map(r=>(
+                            <tr key={r.asin}>
+                              <td style={{padding:'6px 8px',borderBottom:'1px solid rgba(26,47,74,.4)'}}>
+                                <div style={{fontWeight:600,color:'var(--txt)'}}>{r.name}</div>
+                                <div style={{fontSize:9,color:B.sub}}>{r.asin}</div>
+                              </td>
+                              <td style={{padding:'6px 8px',borderBottom:'1px solid rgba(26,47,74,.4)',color:B.b3,fontWeight:600}}>{f$(r.yourPrice)}</td>
+                              <td style={{padding:'6px 8px',borderBottom:'1px solid rgba(26,47,74,.4)',color:'var(--txt2)'}}>{f$(r.bbPrice)}</td>
+                              <td style={{padding:'6px 8px',borderBottom:'1px solid rgba(26,47,74,.4)',fontWeight:700,
+                                color:Math.abs(r.delta)<0.05?B.o3:r.wonBB?'#4ade80':'#f87171'}}>
+                                {Math.abs(r.delta)<0.05?'= Tied':r.wonBB?`▲ ${f$(r.delta)}`:`▼ ${f$(Math.abs(r.delta))}`}
+                              </td>
+                              <td style={{padding:'6px 8px',borderBottom:'1px solid rgba(26,47,74,.4)'}}>
+                                <span style={{fontSize:9,padding:'1px 5px',borderRadius:3,fontWeight:700,
+                                  background:r.wonBB?'rgba(34,197,94,.15)':'rgba(239,68,68,.15)',
+                                  color:r.wonBB?'#4ade80':'#f87171',
+                                  border:`1px solid ${r.wonBB?'rgba(34,197,94,.3)':'rgba(239,68,68,.3)'}`}}>
+                                  {r.wonBB?'Won ✓':'Lost'}
+                                </span>
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                      {pricingCache?.lastSync && <div style={{fontSize:9,color:B.sub,marginTop:8}}>Last sync: {new Date(pricingCache.lastSync).toLocaleTimeString('en-US',{hour:'2-digit',minute:'2-digit',hour12:true})} CT · From pricing_sync.json cache</div>}
+                    </>
+                  );
+                })()}
+              </ChartCard>
+            </div>
 
             {/* ── PROFITABILITY ── */}
             <EpochLabel type="period" label="💰 Profitability" right="MTD"/>
