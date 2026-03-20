@@ -1382,7 +1382,7 @@ export default function Sales({ filters = {} }) {
               {(()=>{
                 const toggleWindow=(w)=>{setHmWindows(prev=>{if(prev.includes(w)){return prev.length>1?prev.filter(x=>x!==w):prev;}const next=[...prev,w];return next.length>2?[next[1],next[2]]:next;});};
                 const pillBtn2=(key,label,_range)=>(<button key={key} onClick={e=>{e.stopPropagation();toggleWindow(key);}} style={{padding:'3px 10px',borderRadius:6,fontSize:10,fontWeight:600,cursor:'pointer',transition:'all .15s',border:`1px solid ${hmWindows.includes(key)?B.b2:'var(--brd)'}`,background:hmWindows.includes(key)?`${B.b1}33`:'transparent',color:hmWindows.includes(key)?B.b3:'var(--txt3)'}}>{label}</button>);
-                const filteredHm=toArr(heatmap).filter(r=>hmWindows.some(w=>HM_WINDOWS_DEF[w].indices.has(r.week)));
+                const filteredHm=toArr(heatmap).filter(r=>hmWindows.some(w=>HM_WINDOWS_DEF[w].indices.includes(r.week)));
                 const totalWks=hmWindows.reduce((s,w)=>s+HM_WINDOWS_DEF[w].count,0);
                 const futureSvgCols=new Set();
                 const weekStartDates=[];
@@ -2106,7 +2106,7 @@ export default function Sales({ filters = {} }) {
               {(()=>{
                 const toggleWindow=(w)=>{setHmWindows(prev=>{if(prev.includes(w)){return prev.length>1?prev.filter(x=>x!==w):prev;}const next=[...prev,w];return next.length>2?[next[1],next[2]]:next;});};
                 const pillBtn2=(key,label)=>(<button key={key} onClick={e=>{e.stopPropagation();toggleWindow(key);}} style={{padding:'3px 10px',borderRadius:6,fontSize:10,fontWeight:600,cursor:'pointer',transition:'all .15s',border:`1px solid ${hmWindows.includes(key)?B.b2:'var(--brd)'}`,background:hmWindows.includes(key)?`${B.b1}33`:'transparent',color:hmWindows.includes(key)?B.b3:'var(--txt3)'}}>{label}</button>);
-                const filteredHm=toArr(heatmap).filter(r=>hmWindows.some(w=>HM_WINDOWS_DEF[w].indices.has(r.week)));
+                const filteredHm=toArr(heatmap).filter(r=>hmWindows.some(w=>HM_WINDOWS_DEF[w].indices.includes(r.week)));
                 const totalWks=hmWindows.reduce((s,w)=>s+HM_WINDOWS_DEF[w].count,0);
                 const futureSvgCols=new Set();
                 const weekStartDates=[];
