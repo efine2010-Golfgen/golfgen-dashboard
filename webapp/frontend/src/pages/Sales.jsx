@@ -27,6 +27,9 @@ const PERIOD_API_MAP = {
   'Last 12 Months':'last_12m',
   '2026 YTD':'2026_ytd','2025 YTD (Same Period)':'2025_ytd',
   '2025 Full Year':'2025_full','2024 Full Year':'2024_full',
+  // Chart-period keys (used by Executive tab period buttons → also drive 8 KPI boxes)
+  '7D':'last_7d','30D':'last_30d','60D':'last_60d','90D':'last_90d',
+  '120D':'last_120d','180D':'last_180d','1Y':'last_1y',
 };
 const GOLF_CUSTOMERS    = ['All Channels','Amazon','Walmart','Shopify','First Tee'];
 const HW_CUSTOMERS      = ['All Channels','Belk',"Albertson's",'Family Dollar','Hobby Lobby'];
@@ -1241,7 +1244,7 @@ export default function Sales({ filters = {} }) {
             <div style={{display:'flex',alignItems:'center',gap:8,marginBottom:14,paddingBottom:10,borderBottom:'1px solid var(--brd)'}}>
               <span style={{fontSize:9,fontWeight:700,textTransform:'uppercase',letterSpacing:'.08em',color:'var(--txt3)',whiteSpace:'nowrap'}}>Period</span>
               {EXEC_PERIODS_LIST.map(p => (
-                <button key={p} onClick={() => setCpSales(EXEC_PERIOD_MAP[p])} style={{
+                <button key={p} onClick={() => { const cp = EXEC_PERIOD_MAP[p]; setCpSales(cp); setActivePeriod(cp); }} style={{
                   fontSize:9,fontWeight:700,padding:'3px 9px',borderRadius:5,cursor:'pointer',
                   border:`1px solid ${cpSales===EXEC_PERIOD_MAP[p] ? B.b2 : 'var(--brd)'}`,
                   background: cpSales===EXEC_PERIOD_MAP[p] ? `${B.b2}22` : 'transparent',
