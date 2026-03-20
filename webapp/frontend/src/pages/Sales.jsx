@@ -777,12 +777,15 @@ function Spinner() {
   );
 }
 
-function ChartCard({ title, badge, children, noMargin, error }) {
+function ChartCard({ title, badge, children, noMargin, error, headerRight }) {
   return (
     <div style={{background:'var(--surf)',border:'1px solid var(--brd)',borderRadius:14,padding:16,marginBottom:noMargin?0:12,transition:'background .3s'}}>
       <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:14}}>
         <span style={{fontSize:13,fontWeight:700,color:'var(--txt)'}}>{title}</span>
-        {badge && <span style={{fontSize:10,padding:'2px 9px',borderRadius:99,background:'rgba(46,111,187,.15)',color:B.b3,border:'1px solid rgba(46,111,187,.2)'}}>{badge}</span>}
+        <div style={{display:'flex',alignItems:'center',gap:6}}>
+          {headerRight}
+          {badge && <span style={{fontSize:10,padding:'2px 9px',borderRadius:99,background:'rgba(46,111,187,.15)',color:B.b3,border:'1px solid rgba(46,111,187,.2)'}}>{badge}</span>}
+        </div>
       </div>
       {error
         ? <div style={{padding:'12px 14px',color:'#fb923c',fontSize:11,background:'rgba(251,146,60,.08)',border:'1px solid rgba(251,146,60,.18)',borderRadius:8}}>⚠ {error}</div>
@@ -971,15 +974,14 @@ export default function Sales({ filters = {} }) {
     load('metricsTraffic', setMetricsTraffic, 'summary', params);
   }, [divRaw, custRaw, cpTraffic]);
 
-  // Fetch executive tab chart data when execPeriod changes or exec tab is active
+  // Fetch executive tab chart data — tied to cpSales (same period as Sales Summary)
   useEffect(() => {
     if (viewTab !== 'Executive') return;
-    const api = CHART_PERIOD_API[EXEC_PERIOD_MAP[execPeriod]];
-    const params = {...baseParams, period: api};
+    const params = {...baseParams, period: chartSalesApi};
     load('execTrend',        setExecTrend,        'trend',  params);
     load('execTrendTraffic', setExecTrendTraffic, 'trend',  params);
     load('execFunnel',       setExecFunnel,       'funnel', params);
-  }, [divRaw, custRaw, execPeriod, viewTab]);
+  }, [divRaw, custRaw, cpSales, viewTab]);
 
   // Fetch 30-day hourly heatmap data — reload on filter changes only
   useEffect(() => {
@@ -1185,30 +1187,30 @@ export default function Sales({ filters = {} }) {
               </div>
             )}
 
-            {/* ── Exec Chart Period Selector ── */}
-            <div style={{display:'flex',alignItems:'center',gap:8,marginBottom:12,flexWrap:'wrap'}}>
-              <span style={{fontSize:10,fontWeight:700,textTransform:'uppercase',letterSpacing:'.08em',color:'var(--txt3)',whiteSpace:'nowrap'}}>Chart Period</span>
-              {EXEC_PERIODS_LIST.map(p => (
-                <button key={p} onClick={() => setExecPeriod(p)} style={{
-                  fontSize:11,fontWeight:700,padding:'4px 12px',borderRadius:7,cursor:'pointer',
-                  border:`1px solid ${execPeriod===p ? B.b2 : 'var(--brd)'}`,
-                  background: execPeriod===p ? `${B.b2}22` : 'var(--card2)',
-                  color: execPeriod===p ? B.b2 : 'var(--txt3)',
-                  transition:'all .15s',
-                }}>{p}</button>
-              ))}
-            </div>
-
             {/* ── Revenue & AUR Trend + Units Sold ── */}
-            {execPeriod === 'L7' ? (
+            {(() => {
+              const execPeriodBtns = (
+                <div style={{display:'flex',gap:3}}>
+                  {EXEC_PERIODS_LIST.map(p => (
+                    <button key={p} onClick={() => setCpSales(EXEC_PERIOD_MAP[p])} style={{
+                      fontSize:9,fontWeight:700,padding:'2px 7px',borderRadius:5,cursor:'pointer',
+                      border:`1px solid ${cpSales===EXEC_PERIOD_MAP[p] ? B.b2 : 'var(--brd)'}`,
+                      background: cpSales===EXEC_PERIOD_MAP[p] ? `${B.b2}22` : 'transparent',
+                      color: cpSales===EXEC_PERIOD_MAP[p] ? B.b2 : 'var(--txt3)',
+                      transition:'all .15s',
+                    }}>{p}</button>
+                  ))}
+                </div>
+              );
+              return cpSales === '7D' ? (
               <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:12,marginBottom:12}}>
-                <ChartCard title="Revenue & AUR Trend" badge={execPeriod} error={errors.execTrend}>
+                <ChartCard title="Revenue & AUR Trend" headerRight={execPeriodBtns} error={errors.execTrend}>
                   {loading.execTrend ? <Spinner/> : <>
                     {svgChart(salesAurSVG(toArr(execTrend)))}
                     <Legend items={[['Sales TY','#2E6FBB'],['Sales LY','#5B9FD4',true],['AUR TY','#22c55e'],['AUR LY','#16a34a',true]]}/>
                   </>}
                 </ChartCard>
-                <ChartCard title="Units Sold — TY vs LY" badge={execPeriod} error={errors.execTrend}>
+                <ChartCard title="Units Sold — TY vs LY" error={errors.execTrend}>
                   {loading.execTrend ? <Spinner/> : (() => {
                     const tArr = toArr(execTrend);
                     if (!tArr || tArr.length < 2) return <div style={{color:'var(--txt3)',padding:20,textAlign:'center',fontSize:12}}>No data</div>;
@@ -1231,13 +1233,13 @@ export default function Sales({ filters = {} }) {
               </div>
             ) : (
               <div style={{display:'flex',flexDirection:'column',gap:12,marginBottom:12}}>
-                <ChartCard title="Revenue & AUR Trend" badge={execPeriod} error={errors.execTrend}>
+                <ChartCard title="Revenue & AUR Trend" headerRight={execPeriodBtns} error={errors.execTrend}>
                   {loading.execTrend ? <Spinner/> : <>
                     {svgChart(salesAurSVG(toArr(execTrend)))}
                     <Legend items={[['Sales TY','#2E6FBB'],['Sales LY','#5B9FD4',true],['AUR TY','#22c55e'],['AUR LY','#16a34a',true]]}/>
                   </>}
                 </ChartCard>
-                <ChartCard title="Units Sold — TY vs LY" badge={execPeriod} error={errors.execTrend}>
+                <ChartCard title="Units Sold — TY vs LY" error={errors.execTrend}>
                   {loading.execTrend ? <Spinner/> : (() => {
                     const tArr = toArr(execTrend);
                     if (!tArr || tArr.length < 2) return <div style={{color:'var(--txt3)',padding:20,textAlign:'center',fontSize:12}}>No data</div>;
@@ -1258,7 +1260,7 @@ export default function Sales({ filters = {} }) {
                   })()}
                 </ChartCard>
               </div>
-            )}
+            );})()}
 
             {/* ── Traffic & Conversion Pipeline (exec period-controlled) ── */}
             <div style={{background:'var(--card)',border:'1px solid var(--brd)',borderRadius:12,padding:16,marginBottom:12}}>
@@ -1323,51 +1325,6 @@ export default function Sales({ filters = {} }) {
                 </div>{/* closes right-side flex col */}
               </div>{/* closes 3fr/1fr grid */}
             </div>{/* closes Traffic & Conversion outer card */}
-
-            {/* 3-Year Monthly Revenue + Year Totals */}
-            <div style={{background:'var(--surf)',border:'1px solid var(--brd)',borderRadius:14,padding:16,marginBottom:12}}>
-              <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:12,flexWrap:'wrap',gap:8}}>
-                <div style={{display:'flex',gap:6,alignItems:'center',flexWrap:'wrap'}}>
-                  <span style={{fontSize:12,fontWeight:700,color:'var(--txt)',marginRight:4}}>Monthly Revenue — 3 Year View</span>
-                  <div style={{width:1,height:14,background:'var(--brd)',margin:'0 2px'}}/>
-                  {[['2024','y2024',B.dim],['2025','y2025',B.b2],['2026','y2026',B.o2]].map(([lbl,key,col])=>(
-                    <button key={key} onClick={()=>setYearVis(v=>({...v,[key]:!v[key]}))} style={{
-                      fontSize:10,fontWeight:600,padding:'3px 10px',borderRadius:6,cursor:'pointer',
-                      border:`1px solid ${yearVis[key]?col:'var(--brd)'}`,
-                      background:yearVis[key]?`${col}22`:'transparent',
-                      color:yearVis[key]?col:'var(--txt3)',transition:'all .15s',
-                    }}>{lbl}</button>
-                  ))}
-                </div>
-                <div style={{display:'flex',gap:5,alignItems:'center',flexWrap:'wrap'}}>
-                  {yearVis.y2024 && fy24Total>0 && <div style={{background:'#0b1829',border:`1px solid ${B.dim}55`,borderRadius:7,padding:'3px 11px',textAlign:'center',minWidth:58}}><div style={{fontSize:7,color:B.sub,lineHeight:'1.4'}}>FY 24</div><div style={{fontSize:12,fontWeight:700,color:B.dim}}>{f$(fy24Total)}</div></div>}
-                  {yearVis.y2025 && fy25Total>0 && <div style={{background:'#0b1829',border:`1px solid ${B.b2}55`,borderRadius:7,padding:'3px 11px',textAlign:'center',minWidth:58}}><div style={{fontSize:7,color:B.sub,lineHeight:'1.4'}}>FY 25</div><div style={{fontSize:12,fontWeight:700,color:B.b2}}>{f$(fy25Total)}</div></div>}
-                  {yearVis.y2026 && ytd26>0    && <div style={{background:'#0b1829',border:`1px solid ${B.o2}55`,borderRadius:7,padding:'3px 11px',textAlign:'center',minWidth:58}}><div style={{fontSize:7,color:B.sub,lineHeight:'1.4'}}>'26 YTD</div><div style={{fontSize:12,fontWeight:700,color:B.o2}}>{f$(ytd26)}</div></div>}
-                  {yearVis.y2026 && proj26>ytd26 && <div style={{background:'#0b1829',border:'1px solid #f59e0b55',borderRadius:7,padding:'3px 11px',textAlign:'center',minWidth:58}}><div style={{fontSize:7,color:B.sub,lineHeight:'1.4'}}>'26 Proj</div><div style={{fontSize:12,fontWeight:700,color:'#f59e0b'}}>{f$(proj26)}</div></div>}
-                </div>
-              </div>
-              {errors.yoy && <div style={{padding:'8px 12px',color:'#fb923c',fontSize:11,background:'rgba(251,146,60,.08)',border:'1px solid rgba(251,146,60,.18)',borderRadius:8,marginBottom:8}}>⚠ {errors.yoy}</div>}
-              {loading.yoy ? <Spinner/> : <SVGTip html={yoyBarSVG(yoyMonths, forecastMap, yearVis, 1100, 195, yoyMeta?.current_month)}/>}
-              {/* Year Totals row */}
-              {(fy24Total > 0 || fy25Total > 0 || ytd26 > 0) && (
-                <div style={{display:'grid',gridTemplateColumns:'repeat(4,1fr)',gap:0,border:'1px solid var(--brd)',borderRadius:8,overflow:'hidden',background:'#0b1829',marginTop:12}}>
-                  {[
-                    { lbl:'2024 Full Year', val:f$(fy24Total), sub:'Actual',          color:B.dim, chg:null },
-                    { lbl:'2025 Full Year', val:f$(fy25Total), sub:'Actual',          color:B.b2,  chg: fy24Total > 0 ? `▲ ${((fy25Total-fy24Total)/fy24Total*100).toFixed(1)}% vs 2024` : null },
-                    { lbl:'2026 YTD',       val:f$(ytd26),     sub:'Jan–Mar Actual',  color:B.o2,  chg:null },
-                    { lbl:'2026 Full Year', val:f$(proj26),    sub:'YTD + Projected', color:'#f59e0b', chg: fy25Total > 0 ? `▲ ${((proj26-fy25Total)/fy25Total*100).toFixed(1)}% vs 2025` : null },
-                  ].map((t, i) => (
-                    <div key={t.lbl} style={{padding:'10px 14px',borderRight:i<3?'1px solid var(--brd)':'none'}}>
-                      <div style={{fontSize:9,fontWeight:700,textTransform:'uppercase',letterSpacing:'.08em',color:'var(--txt3)',marginBottom:3}}>{t.lbl}</div>
-                      <div style={{fontSize:18,fontWeight:800,color:t.color,lineHeight:1}}>{t.val}</div>
-                      <div style={{fontSize:9,color:'var(--txt3)',marginTop:2}}>
-                        {t.sub}{t.chg && <span style={{color:'#4ade80',fontWeight:700}}> · {t.chg}</span>}
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              )}
-            </div>
 
             {/* ── Section 6: Business Health + Actions ── */}
             <div style={{display:'grid',gridTemplateColumns:'1fr 2fr',gap:12,marginBottom:12}}>
