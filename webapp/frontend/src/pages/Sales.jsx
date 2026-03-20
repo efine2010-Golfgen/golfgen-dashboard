@@ -1188,7 +1188,7 @@ export default function Sales({ filters = {} }) {
             )}
 
             {/* ── Sales Overview KPIs ── */}
-            <div style={{display:'flex',gap:8,marginBottom:14,overflowX:'auto',paddingBottom:2}}>
+            <div style={{display:'flex',gap:8,marginBottom:10,overflowX:'auto',paddingBottom:2}}>
               {loading.metrics ? <Spinner/> : <>
                 <MetricCard label="Sales $"       value={f$(m.sales)}         ly={f$(ly('sales'))}         delta={dp(m.sales,ly('sales'))}/>
                 <MetricCard label="Unit Sales"    value={fN(m.unit_sales)}     ly={fN(ly('unit_sales'))}    delta={dp(m.unit_sales,ly('unit_sales'))}/>
@@ -1201,24 +1201,25 @@ export default function Sales({ filters = {} }) {
               </>}
             </div>
 
+            {/* ── Period selector — controls KPIs, charts, and pipeline below ── */}
+            <div style={{display:'flex',alignItems:'center',gap:8,marginBottom:14,paddingBottom:10,borderBottom:'1px solid var(--brd)'}}>
+              <span style={{fontSize:9,fontWeight:700,textTransform:'uppercase',letterSpacing:'.08em',color:'var(--txt3)',whiteSpace:'nowrap'}}>Period</span>
+              {EXEC_PERIODS_LIST.map(p => (
+                <button key={p} onClick={() => setCpSales(EXEC_PERIOD_MAP[p])} style={{
+                  fontSize:9,fontWeight:700,padding:'3px 9px',borderRadius:5,cursor:'pointer',
+                  border:`1px solid ${cpSales===EXEC_PERIOD_MAP[p] ? B.b2 : 'var(--brd)'}`,
+                  background: cpSales===EXEC_PERIOD_MAP[p] ? `${B.b2}22` : 'transparent',
+                  color: cpSales===EXEC_PERIOD_MAP[p] ? B.b2 : 'var(--txt3)',
+                  transition:'all .15s',
+                }}>{p}</button>
+              ))}
+            </div>
+
             {/* ── Revenue & AUR Trend + Units Sold ── */}
             {(() => {
-              const execPeriodBtns = (
-                <div style={{display:'flex',gap:3}}>
-                  {EXEC_PERIODS_LIST.map(p => (
-                    <button key={p} onClick={() => setCpSales(EXEC_PERIOD_MAP[p])} style={{
-                      fontSize:9,fontWeight:700,padding:'2px 7px',borderRadius:5,cursor:'pointer',
-                      border:`1px solid ${cpSales===EXEC_PERIOD_MAP[p] ? B.b2 : 'var(--brd)'}`,
-                      background: cpSales===EXEC_PERIOD_MAP[p] ? `${B.b2}22` : 'transparent',
-                      color: cpSales===EXEC_PERIOD_MAP[p] ? B.b2 : 'var(--txt3)',
-                      transition:'all .15s',
-                    }}>{p}</button>
-                  ))}
-                </div>
-              );
               return cpSales === '7D' ? (
               <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:12,marginBottom:12}}>
-                <ChartCard title="Revenue & AUR Trend" headerRight={execPeriodBtns} error={errors.execTrend}>
+                <ChartCard title="Revenue & AUR Trend" error={errors.execTrend}>
                   {loading.execTrend ? <Spinner/> : <>
                     {svgChart(salesAurSVG(toArr(execTrend)))}
                     <Legend items={[['Sales TY','#2E6FBB'],['Sales LY','#5B9FD4',true],['AUR TY','#22c55e'],['AUR LY','#16a34a',true]]}/>
@@ -1247,7 +1248,7 @@ export default function Sales({ filters = {} }) {
               </div>
             ) : (
               <div style={{display:'flex',flexDirection:'column',gap:12,marginBottom:12}}>
-                <ChartCard title="Revenue & AUR Trend" headerRight={execPeriodBtns} error={errors.execTrend}>
+                <ChartCard title="Revenue & AUR Trend" error={errors.execTrend}>
                   {loading.execTrend ? <Spinner/> : <>
                     {svgChart(salesAurSVG(toArr(execTrend)))}
                     <Legend items={[['Sales TY','#2E6FBB'],['Sales LY','#5B9FD4',true],['AUR TY','#22c55e'],['AUR LY','#16a34a',true]]}/>
