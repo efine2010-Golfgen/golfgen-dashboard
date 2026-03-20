@@ -934,6 +934,9 @@ export default function Sales({ filters = {} }) {
   const [hmMetric2,   setHmMetric2]   = useState('units');     // 'units'|'sales'|'returns' (weekly heatmap)
   const [execPeriod,  setExecPeriod]  = useState('L30');       // executive tab chart period
   const [showDailyCharts, setShowDailyCharts] = useState(false); // daily tab heatmap toggle
+  const [expandedPeriods, setExpandedPeriods] = useState({}); // period card row expand
+  const [dismissedDailyInsights, setDismissedDailyInsights] = useState([]); // dismissed insight keys
+  const [dailyAnomalyDismissed, setDailyAnomalyDismissed] = useState(false); // anomaly banner
 
   // Data state
   const [metrics,     setMetrics]     = useState(null);
@@ -1188,6 +1191,52 @@ export default function Sales({ filters = {} }) {
                     <div style={{fontSize:28,fontWeight:800,color:col.color,lineHeight:1,marginBottom:3}}>{col.val}</div>
                     <div style={{fontSize:10,color:'var(--txt3)',marginBottom:10}}>{col.sub}</div>
                     {heroRows(col.rows)}
+                    {/* sparkline from trend data */}
+                    {(() => {
+                      const tArr = toArr(trend);
+                      if (!tArr || tArr.length < 3) return null;
+                      const last7 = tArr.slice(-7);
+                      const isLY = col.lbl.includes('LY');
+                      const vals = last7.map(d => isLY ? (d.ly_sales||0) : (d.ty_sales||0));
+                      const maxV = Math.max(...vals, 1);
+                      if (vals.every(v=>v===0)) return null;
+                      const W=200, H=32, n=vals.length;
+                      const pts=vals.map((v,i)=>`${(i/(n-1))*W},${H-(v/maxV)*(H-6)-3}`).join(' ');
+                      const col2=isLY?'rgba(91,159,212,.5)':col.color;
+                      return (
+                        <div style={{height:32,margin:'8px 0 2px',position:'relative',opacity:.85}}>
+                          <svg width="100%" height="32" viewBox={`0 0 ${W} ${H}`} preserveAspectRatio="none" style={{display:'block'}}>
+                            <polyline points={pts} fill="none" stroke={col2} strokeWidth="2" strokeLinejoin="round" strokeLinecap="round"/>
+                            <circle cx={(n-1)/(n-1)*W} cy={H-(vals[n-1]/maxV)*(H-6)-3} r="3" fill={col2}/>
+                          </svg>
+                        </div>
+                      );
+                    })()}
+                    {/* pace bar for TY NOW col only */}
+                    {col.lbl.includes('TY') && !col.lbl.includes('EOD') && periodCols?.['MTD'] && (() => {
+                      const mtdD = periodCols['MTD'];
+                      const now = new Date();
+                      const daysInMonth = new Date(now.getFullYear(), now.getMonth()+1, 0).getDate();
+                      const dom = now.getDate();
+                      const pct = Math.round((dom / daysInMonth) * 100);
+                      const mtdSales = mtdD.sales || 0;
+                      const projMo = dom > 0 ? (mtdSales / dom) * daysInMonth : 0;
+                      const onPaceColor = mtdSales > 0 ? `linear-gradient(90deg,${B.t1},${B.t2})` : `linear-gradient(90deg,${B.o1},${B.o2})`;
+                      return (
+                        <div style={{marginTop:8,paddingTop:8,borderTop:'1px solid var(--brd)'}}>
+                          <div style={{display:'flex',justifyContent:'space-between',fontSize:9,color:'var(--txt3)',marginBottom:4}}>
+                            <span>MTD Progress</span>
+                            <strong style={{color:'var(--txt)'}}>{dom}d / {daysInMonth}d</strong>
+                          </div>
+                          <div style={{height:5,background:'rgba(255,255,255,.06)',borderRadius:3,overflow:'hidden'}}>
+                            <div style={{height:'100%',width:`${pct}%`,background:onPaceColor,borderRadius:3,transition:'width .6s ease'}}/>
+                          </div>
+                          <div style={{fontSize:9,marginTop:3,color:B.t3}}>
+                            {pct}% elapsed · proj {f$(projMo)}/mo
+                          </div>
+                        </div>
+                      );
+                    })()}
                   </div>
                 ))}
               </div>
@@ -1363,6 +1412,20 @@ export default function Sales({ filters = {} }) {
                   transition:'all .15s',
                 }}>{p}</button>
               ))}
+              {/* date range badge */}
+              {(() => {
+                const now2 = new Date();
+                const activeP = EXEC_PERIODS_LIST.find(p => EXEC_PERIOD_MAP[p] === cpSales) || 'L30';
+                const days2 = parseInt(activeP.replace('L','')) || 30;
+                const end2 = new Date(now2); end2.setDate(end2.getDate()-1);
+                const start2 = new Date(end2); start2.setDate(start2.getDate()-(days2-1));
+                const fmt2 = d => d.toLocaleDateString('en-US',{month:'short',day:'numeric'});
+                return (
+                  <span style={{fontSize:10,color:'var(--b3)',background:'rgba(46,111,187,.1)',border:'1px solid rgba(46,111,187,.2)',borderRadius:6,padding:'4px 10px',fontWeight:600,whiteSpace:'nowrap',marginLeft:4}}>
+                    {fmt2(start2)} – {fmt2(end2)}, {end2.getFullYear()} &nbsp;·&nbsp; {days2} days
+                  </span>
+                );
+              })()}
             </div>
 
             {/* ── Revenue & AUR Trend + Units Sold ── */}
@@ -1734,6 +1797,42 @@ export default function Sales({ filters = {} }) {
 
         return (
           <>
+            {/* ── ANOMALY BANNER ── */}
+            {!dailyAnomalyDismissed && periodCols?.['Today'] && (() => {
+              const tod2b = periodCols['Today'];
+              const tyNow = tod2b.sales || 0;
+              const lyNow = tod2b.ly_same_time_sales || 0;
+              if (!tyNow || !lyNow) return null;
+              const pctVsLY = (tyNow - lyNow) / lyNow * 100;
+              const dayName = new Date().toLocaleDateString('en-US',{weekday:'long'});
+              const isBelow = pctVsLY < -8;
+              const isAbove = pctVsLY > 15;
+              if (!isBelow && !isAbove) return null;
+              const bgCol = isBelow ? 'rgba(239,68,68,.08)' : 'rgba(34,197,94,.07)';
+              const bdCol = isBelow ? 'rgba(239,68,68,.25)' : 'rgba(34,197,94,.2)';
+              const txtCol = isBelow ? '#fca5a5' : '#86efac';
+              const subCol = isBelow ? '#ef4444' : '#22c55e';
+              const icon = isBelow ? '⚠️' : '🚀';
+              const msg = isBelow
+                ? `Today tracking ${Math.abs(pctVsLY).toFixed(0)}% below same time last year`
+                : `Today tracking ${pctVsLY.toFixed(0)}% above same time last year`;
+              const sub = isBelow
+                ? `LY same-time: ${f$(lyNow)} · Current: ${f$(tyNow)} · ${tod2b.snapshot_time||''} CT`
+                : `LY same-time: ${f$(lyNow)} · Current: ${f$(tyNow)} — strong day in progress`;
+              return (
+                <div style={{margin:'0 0 12px',background:bgCol,border:`1px solid ${bdCol}`,borderRadius:10,padding:'10px 14px',display:'flex',alignItems:'center',justifyContent:'space-between',gap:12}}>
+                  <div style={{display:'flex',alignItems:'flex-start',gap:10,flex:1}}>
+                    <span style={{fontSize:16,flexShrink:0}}>{icon}</span>
+                    <div>
+                      <div style={{fontSize:11,fontWeight:700,color:txtCol}}>{msg}</div>
+                      <div style={{fontSize:10,color:subCol,marginTop:2}}>{sub}</div>
+                    </div>
+                  </div>
+                  <button onClick={()=>setDailyAnomalyDismissed(true)} style={{background:'none',border:'none',color:'var(--txt3)',cursor:'pointer',fontSize:15,padding:'2px 6px',borderRadius:4,flexShrink:0,lineHeight:1}}>✕</button>
+                </div>
+              );
+            })()}
+
             {/* ── TODAY SNAPSHOT ── */}
             <EpochLabel type="today" label="📍 Today Snapshot" right={tod.snapshot_time ? `thru ${tod.snapshot_time} CT` : 'live data'}/>
             {loading.periodCols
@@ -1780,20 +1879,29 @@ export default function Sales({ filters = {} }) {
                     { k:'Returns', ty: d.returns_amount||0,                 ly: d.ly_returns_amount||0,            fmt:f$,  inv:true  },
                     { k:'Conv %',  ty: d.conversion,                        ly: isToday ? tod.ly_conversion : d.ly_conversion, fmt:fP, inv:false },
                   ];
+                  const isExpPeriod = !!expandedPeriods[lbl];
+                  const alwaysRows2 = rows2.slice(0,3);
+                  const extraRows2  = rows2.slice(3);
+                  const pRow2 = (r) => (
+                    <div key={r.k} style={{display:'grid',gridTemplateColumns:'1.1fr 1fr 1fr 0.6fr',gap:2,alignItems:'center',padding:'3px 0',borderBottom:'1px solid rgba(26,47,74,.4)',fontSize:11}}>
+                      <span style={{fontSize:10,color:'var(--txt3)',overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>{r.k}</span>
+                      <span style={{fontWeight:600,color:'var(--txt)'}}>{r.ty != null ? r.fmt(r.ty) : '—'}</span>
+                      <span style={{color:'var(--txt3)',fontSize:10}}>{r.ly != null ? r.fmt(r.ly) : '—'}</span>
+                      {chgSpan(dp2(r.ty, r.ly), r.inv)}
+                    </div>
+                  );
                   return (
                     <div key={lbl} style={{background:'var(--card2)',border:'1px solid var(--brd)',borderTop:`2px solid ${ACCENTS[idx]}`,borderRadius:10,padding:'10px 12px'}}>
                       <div style={{fontSize:9,fontWeight:700,textTransform:'uppercase',letterSpacing:'.1em',color:ACCENTS[idx],paddingBottom:5,marginBottom:6,borderBottom:'1px solid var(--brd)',display:'flex',justifyContent:'space-between',alignItems:'center'}}>
                         <span>{lbl}</span>
                         {isToday && tod.snapshot_time && <span style={{fontSize:8,color:'var(--txt3)',fontWeight:400,textTransform:'none'}}>thru {tod.snapshot_time}</span>}
                       </div>
-                      {rows2.map(r => (
-                        <div key={r.k} style={{display:'grid',gridTemplateColumns:'1.1fr 1fr 1fr 0.6fr',gap:2,alignItems:'center',padding:'3px 0',borderBottom:'1px solid rgba(26,47,74,.4)',fontSize:11}}>
-                          <span style={{fontSize:10,color:'var(--txt3)',overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>{r.k}</span>
-                          <span style={{fontWeight:600,color:'var(--txt)'}}>{r.ty != null ? r.fmt(r.ty) : '—'}</span>
-                          <span style={{color:'var(--txt3)',fontSize:10}}>{r.ly != null ? r.fmt(r.ly) : '—'}</span>
-                          {chgSpan(dp2(r.ty, r.ly), r.inv)}
-                        </div>
-                      ))}
+                      {alwaysRows2.map(pRow2)}
+                      {isExpPeriod && extraRows2.map(pRow2)}
+                      <button onClick={()=>setExpandedPeriods(p=>({...p,[lbl]:!p[lbl]}))}
+                        style={{fontSize:9,color:'var(--b3)',background:'none',border:'none',cursor:'pointer',padding:'4px 0 0',width:'100%',textAlign:'left'}}>
+                        {isExpPeriod ? '− Show less' : `+ ${extraRows2.length} more rows`}
+                      </button>
                     </div>
                   );
                 })}
@@ -2153,6 +2261,169 @@ export default function Sales({ filters = {} }) {
                 );
               })()}
             </div>
+
+            {/* ── DAY-OF-WEEK INTELLIGENCE ── */}
+            {(() => {
+              const tArr = toArr(trend);
+              if (!tArr || tArr.length < 7) return null;
+              // group by DOW
+              const dowMap = {};
+              tArr.forEach(d => {
+                if (!d.date || !d.ty_sales) return;
+                const dow = new Date(d.date+'T12:00:00').getDay(); // 0=Sun..6=Sat
+                if (!dowMap[dow]) dowMap[dow] = {sales:[],units:[]};
+                dowMap[dow].sales.push(d.ty_sales||0);
+                dowMap[dow].units.push(d.ty_units||0);
+              });
+              const DOW_NAMES = ['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday'];
+              const avgs = Object.entries(dowMap).map(([dow,v]) => ({
+                dow: parseInt(dow),
+                name: DOW_NAMES[parseInt(dow)],
+                avgSales: v.sales.reduce((a,b)=>a+b,0)/v.sales.length,
+                avgUnits: v.units.reduce((a,b)=>a+b,0)/v.units.length,
+              })).filter(d => d.avgSales > 0);
+              if (avgs.length < 3) return null;
+              const overallAvg = avgs.reduce((a,b)=>a+b.avgSales,0)/avgs.length;
+              const best = avgs.reduce((a,b)=>a.avgSales>b.avgSales?a:b);
+              const worst = avgs.reduce((a,b)=>a.avgSales<b.avgSales?a:b);
+              const bestVsAvg = overallAvg > 0 ? ((best.avgSales - overallAvg)/overallAvg*100).toFixed(0) : 0;
+              const worstVsAvg = overallAvg > 0 ? ((overallAvg - worst.avgSales)/overallAvg*100).toFixed(0) : 0;
+              return (
+                <div style={{marginBottom:12}}>
+                  <div style={{display:'flex',alignItems:'center',gap:10,margin:'4px 0 10px'}}>
+                    <div style={{flex:1,height:1,background:'var(--brd)'}}/>
+                    <span style={{fontSize:9,fontWeight:700,textTransform:'uppercase',letterSpacing:'.12em',color:'var(--txt3)',whiteSpace:'nowrap'}}>Day-of-Week Intelligence</span>
+                    <div style={{flex:1,height:1,background:'var(--brd)'}}/>
+                  </div>
+                  <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:10}}>
+                    <div style={{background:'var(--card)',border:'1px solid rgba(232,130,30,.3)',background:'rgba(232,130,30,.04)',borderRadius:10,padding:'12px 14px',display:'flex',alignItems:'center',gap:14}}>
+                      <span style={{fontSize:32,flexShrink:0}}>🥇</span>
+                      <div style={{flex:1}}>
+                        <div style={{fontSize:9,fontWeight:700,textTransform:'uppercase',letterSpacing:'.09em',color:'var(--txt3)',marginBottom:3}}>This Period's Best Day</div>
+                        <div style={{fontSize:20,fontWeight:800,color:B.o3}}>{best.name}</div>
+                        <div style={{fontSize:11,color:'var(--txt3)',marginTop:2}}>{f$(best.avgSales)} avg · {Math.round(best.avgUnits)} units avg</div>
+                        <div style={{fontSize:11,fontWeight:700,color:'#4ade80',marginTop:3}}>▲ {bestVsAvg}% above daily avg &nbsp;·&nbsp; Weekend premium {parseInt(bestVsAvg)>30?'confirmed':'noted'}</div>
+                      </div>
+                    </div>
+                    <div style={{background:'var(--card)',border:'1px solid rgba(100,116,139,.25)',borderRadius:10,padding:'12px 14px',display:'flex',alignItems:'center',gap:14}}>
+                      <span style={{fontSize:32,flexShrink:0}}>📉</span>
+                      <div style={{flex:1}}>
+                        <div style={{fontSize:9,fontWeight:700,textTransform:'uppercase',letterSpacing:'.09em',color:'var(--txt3)',marginBottom:3}}>Softest Day</div>
+                        <div style={{fontSize:20,fontWeight:800,color:'var(--txt3)'}}>{worst.name}</div>
+                        <div style={{fontSize:11,color:'var(--txt3)',marginTop:2}}>{f$(worst.avgSales)} avg · {Math.round(worst.avgUnits)} units avg</div>
+                        <div style={{fontSize:11,fontWeight:700,color:'#fb923c',marginTop:3}}>▼ {worstVsAvg}% below daily avg &nbsp;·&nbsp; Consider {worst.name.slice(0,3)} ad boost</div>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              );
+            })()}
+
+            {/* ── DAYS OF SUPPLY GAUGE ── */}
+            {m.dos > 0 && (() => {
+              const dos = m.dos;
+              const unitsOH = m.fba_units || 0;
+              const maxDos = 90;
+              const pctPos = Math.min(100, (dos / maxDos) * 100);
+              const dosColor = dos < 14 ? '#ef4444' : dos < 30 ? '#f59e0b' : dos < 60 ? '#22c55e' : '#3b82f6';
+              const dosLabel = dos < 14 ? '🔴 Critical' : dos < 30 ? '🟡 Reorder Soon' : dos < 60 ? '🟢 Healthy' : '🔵 Surplus';
+              const reorderDate = new Date(); reorderDate.setDate(reorderDate.getDate() + Math.max(0, dos - 30));
+              return (
+                <div style={{marginBottom:12}}>
+                  <div style={{display:'flex',alignItems:'center',gap:10,margin:'4px 0 10px'}}>
+                    <div style={{flex:1,height:1,background:'var(--brd)'}}/>
+                    <span style={{fontSize:9,fontWeight:700,textTransform:'uppercase',letterSpacing:'.12em',color:'var(--txt3)',whiteSpace:'nowrap'}}>Inventory Health</span>
+                    <div style={{flex:1,height:1,background:'var(--brd)'}}/>
+                  </div>
+                  <div style={{background:'var(--card)',border:'1px solid var(--brd)',borderRadius:12,padding:16}}>
+                    <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',marginBottom:12,flexWrap:'wrap',gap:10}}>
+                      <div>
+                        <div style={{fontSize:9,textTransform:'uppercase',letterSpacing:'.07em',color:'var(--txt3)',marginBottom:4}}>Current DOS</div>
+                        <div style={{fontSize:24,fontWeight:800,lineHeight:1,color:dosColor,display:'flex',alignItems:'center',gap:10}}>
+                          {dos} <span style={{fontSize:14,fontWeight:600}}>days</span>
+                          <span style={{fontSize:11,fontWeight:700,padding:'3px 10px',borderRadius:10,background:`${dosColor}22`,color:dosColor,border:`1px solid ${dosColor}44`}}>{dosLabel}</span>
+                        </div>
+                      </div>
+                      {unitsOH > 0 && <div style={{borderLeft:'1px solid var(--brd)',paddingLeft:16}}>
+                        <div style={{fontSize:9,textTransform:'uppercase',letterSpacing:'.07em',color:'var(--txt3)',marginBottom:4}}>Units on Hand</div>
+                        <div style={{fontSize:20,fontWeight:800,color:B.b3}}>{fN(unitsOH)}</div>
+                      </div>}
+                      <div style={{borderLeft:'1px solid var(--brd)',paddingLeft:16}}>
+                        <div style={{fontSize:9,textTransform:'uppercase',letterSpacing:'.07em',color:'var(--txt3)',marginBottom:4}}>Reorder By</div>
+                        <div style={{fontSize:18,fontWeight:800,color:B.o2}}>{reorderDate.toLocaleDateString('en-US',{month:'short',day:'numeric'})}</div>
+                      </div>
+                    </div>
+                    {/* DoS zone bar */}
+                    <div style={{display:'flex',height:14,borderRadius:7,overflow:'hidden',marginBottom:5,position:'relative'}}>
+                      <div style={{flex:'0 0 15.5%',background:'rgba(239,68,68,.4)'}}/>
+                      <div style={{flex:'0 0 17.8%',background:'rgba(245,158,11,.4)'}}/>
+                      <div style={{flex:'0 0 33.3%',background:'rgba(34,197,94,.4)'}}/>
+                      <div style={{flex:1,background:'rgba(59,130,246,.4)'}}/>
+                      <div style={{position:'absolute',top:'50%',left:`${pctPos}%`,transform:'translate(-50%,-50%)',width:4,height:20,background:dosColor,borderRadius:2,boxShadow:`0 0 6px ${dosColor}`}}/>
+                    </div>
+                    <div style={{display:'flex',justifyContent:'space-between',fontSize:8,marginBottom:10}}>
+                      <span style={{color:'#ef4444',fontWeight:600}}>0–14d Critical</span>
+                      <span style={{color:'#f59e0b',fontWeight:600}}>15–30d Reorder</span>
+                      <span style={{color:'#22c55e',fontWeight:600}}>31–60d Healthy</span>
+                      <span style={{color:'#3b82f6',fontWeight:600}}>61d+ Surplus</span>
+                    </div>
+                    <div style={{display:'flex',alignItems:'center',gap:7,background:`${dosColor}12`,border:`1px solid ${dosColor}30`,borderRadius:7,padding:'6px 10px',fontSize:10,color:dos<30?'#fca5a5':'#86efac',fontWeight:600}}>
+                      {dos<14?'🔴 Critical stock level — create FBA shipment immediately':dos<30?`⚠ Reorder soon — target shipment by ${reorderDate.toLocaleDateString('en-US',{month:'short',day:'numeric'})}`:dos<60?`✅ Inventory healthy — monitor weekly · Next reorder ~${reorderDate.toLocaleDateString('en-US',{month:'short',day:'numeric'})}`:'📦 Surplus inventory — consider pausing replenishment'}
+                    </div>
+                  </div>
+                </div>
+              );
+            })()}
+
+            {/* ── BUSINESS INSIGHTS ── */}
+            {(() => {
+              const mtdBI = periodCols?.['MTD'] || {};
+              const allInsights = [];
+              const atcIdxBI = Array.isArray(funnel) ? funnel.findIndex(s=>s.label?.toLowerCase().includes('cart')) : -1;
+              const sessIdxBI = Array.isArray(funnel) ? funnel.findIndex(s=>s.label?.toLowerCase().includes('sess')) : -1;
+              const atcRateBI = atcIdxBI>=0 && sessIdxBI>=0 && (funnel[sessIdxBI]?.ty||0)>0 ? (funnel[atcIdxBI].ty/funnel[sessIdxBI].ty) : 0;
+              if (atcRateBI>0 && atcRateBI<0.18) allInsights.push({key:'atc',type:'alert',title:`🛒 ATC Rate at ${(atcRateBI*100).toFixed(1)}% — below 22% benchmark`,desc:'Add-to-cart rate is below the benchmark. Review top ASINs for pricing gaps, competitor undercutting, or missing A+ content.',action:'Review Listings'});
+              if ((m.tacos||0)>0.16) allInsights.push({key:'tacos',type:'warn',title:`📣 TACOS at ${fP(m.tacos)} — near 16% threshold`,desc:'Ad spend as a % of revenue is elevated. Consider pausing underperforming campaigns or reducing bids on low-ROAS keywords.',action:'Review Campaigns'});
+              if ((m.dos||0)>0 && (m.dos||0)<30) allInsights.push({key:'dos',type:'alert',title:`📦 Days of Supply at ${m.dos}d — reorder needed`,desc:`Stock is running low. Create a shipment plan now to avoid stockouts and BSR drop.`,action:'Create Shipment'});
+              const mtdChgBI = (mtdBI.ly_sales||0)>0 ? ((mtdBI.sales||0)-(mtdBI.ly_sales||0))/(mtdBI.ly_sales||1) : null;
+              if (mtdChgBI!==null && mtdChgBI>=0.05) allInsights.push({key:'mtdup',type:'ok',title:`✅ MTD pacing ▲${(mtdChgBI*100).toFixed(1)}% vs LY — strong month`,desc:'Revenue is tracking well above last year. Consider increasing ad budget while TACOS is still healthy.'});
+              else if (mtdChgBI!==null && mtdChgBI<-0.03) allInsights.push({key:'mtddn',type:'warn',title:`📉 MTD revenue ▼${(Math.abs(mtdChgBI)*100).toFixed(1)}% vs LY`,desc:'Revenue trailing last year. Check for suppressed listings, lost Buy Box, or gaps in ad coverage.'});
+              const retRBI = (mtdBI.returns_amount||0)/(mtdBI.sales||1);
+              if (retRBI>0 && retRBI<0.04) allInsights.push({key:'ret',type:'ok',title:`✅ Return rate ${(retRBI*100).toFixed(1)}% — below 4% target`,desc:'Returns are well-controlled. Maintain current listing accuracy and A+ content.'});
+              else if (retRBI>0.07) allInsights.push({key:'rethigh',type:'alert',title:`⚠ Return rate ${(retRBI*100).toFixed(1)}% — above 7% threshold`,desc:'High returns may indicate listing inaccuracy or product issues. Review top return reasons in Seller Central.'});
+              if ((m.roas||0)>0 && (m.roas||0)<2.5) allInsights.push({key:'roas',type:'warn',title:`📊 ROAS at ${fX(m.roas)} — below 2.5× floor`,desc:'Ad return on spend is low. Review campaign structure, negative keywords, and bid strategy.'});
+              const visible = allInsights.filter(ins => !dismissedDailyInsights.includes(ins.key));
+              if (visible.length === 0) return null;
+              const tStyle2 = {alert:{border:'rgba(239,68,68,.2)',bg:'rgba(239,68,68,.05)',dot:'#ef4444'},warn:{border:'rgba(245,158,11,.2)',bg:'rgba(245,158,11,.05)',dot:'#f59e0b'},ok:{border:'rgba(34,197,94,.2)',bg:'rgba(34,197,94,.05)',dot:'#22c55e'}};
+              return (
+                <div style={{marginBottom:12}}>
+                  <div style={{display:'flex',alignItems:'center',gap:10,margin:'4px 0 10px'}}>
+                    <div style={{flex:1,height:1,background:'var(--brd)'}}/>
+                    <span style={{fontSize:9,fontWeight:700,textTransform:'uppercase',letterSpacing:'.12em',color:'var(--txt3)',whiteSpace:'nowrap'}}>Business Insights</span>
+                    <div style={{flex:1,height:1,background:'var(--brd)'}}/>
+                  </div>
+                  <div style={{display:'flex',flexDirection:'column',gap:8}}>
+                    {visible.map(ins => {
+                      const st2 = tStyle2[ins.type] || tStyle2.ok;
+                      return (
+                        <div key={ins.key} style={{display:'flex',alignItems:'flex-start',gap:10,padding:'10px 12px',borderRadius:9,border:`1px solid ${st2.border}`,background:st2.bg}}>
+                          <div style={{width:8,height:8,borderRadius:'50%',background:st2.dot,flexShrink:0,marginTop:4}}/>
+                          <div style={{flex:1}}>
+                            <div style={{fontSize:11,fontWeight:700,color:'var(--txt)',marginBottom:3}}>{ins.title}</div>
+                            <div style={{fontSize:10,color:'var(--txt3)',lineHeight:1.5}}>{ins.desc}</div>
+                            <div style={{display:'flex',gap:6,marginTop:6,alignItems:'center'}}>
+                              {ins.action && <button style={{fontSize:9,padding:'2px 8px',borderRadius:5,border:'1px solid var(--brd)',color:'var(--txt3)',background:'transparent',cursor:'pointer',fontWeight:600}}>{ins.action} →</button>}
+                              <button onClick={()=>setDismissedDailyInsights(p=>[...p,ins.key])} style={{fontSize:9,color:'var(--txt3)',background:'transparent',border:'none',cursor:'pointer',padding:'2px 6px',borderRadius:4}}>✕ Dismiss</button>
+                            </div>
+                          </div>
+                          <button onClick={()=>setDismissedDailyInsights(p=>[...p,ins.key])} style={{background:'none',border:'none',color:'var(--txt3)',cursor:'pointer',fontSize:14,padding:'2px 5px',borderRadius:4,lineHeight:1,flexShrink:0}}>✕</button>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              );
+            })()}
 
             {/* ── PROFITABILITY ── */}
             <EpochLabel type="period" label="💰 Profitability" right="MTD"/>
