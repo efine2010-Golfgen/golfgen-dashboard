@@ -156,6 +156,9 @@ function NavSystem({ permissions, mfaProtected, userMfaEnabled, division, custom
           );
         })}
 
+        <div style={{ position: 'absolute', left: '50%', top: '50%', transform: 'translate(-50%, -50%)', zIndex: 2 }}>
+          <AskClaude activeTab={activeTab} division={division} customer={customer} />
+        </div>
         <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', paddingRight: 12, flexShrink: 0 }}>
           <ThemeSelector />
         </div>
@@ -219,9 +222,7 @@ function AppShell({ user, isAdmin, allowed, mfaProtected, userMfaEnabled, filter
                   {isAdmin && <span className="admin-pill">ADMIN</span>}
                 </div>
               )}
-              <div style={{marginTop:4}}>
-                <AskClaude activeTab={activeTab} division={division} customer={customer} />
-              </div>
+
             </div>
 
             {/* RIGHT: 2×3 button grid only */}
