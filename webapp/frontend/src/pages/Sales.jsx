@@ -2526,13 +2526,11 @@ export default function Sales({ filters = {} }) {
 
               // ── Compact period pills (shared by both charts) ──
               const pSelector = (
-                <div style={{display:'flex',flexDirection:'column',gap:3,alignItems:'center'}}>
-                  <div style={{display:'flex',alignItems:'center',gap:2,flexWrap:'wrap',justifyContent:'center'}}>
-                    {cpPills(effPeriod, v=>setCpTrendChart(v), salesCustom, setSalesCustom, true)}
-                    {cpTrendChart && cpTrendChart !== cpSales && (
-                      <button onClick={()=>setCpTrendChart(null)} title="Sync to global period" style={{fontSize:8,fontWeight:600,padding:'1px 5px',borderRadius:3,cursor:'pointer',border:'1px solid var(--brd)',background:'transparent',color:'var(--txt3)'}}>↩</button>
-                    )}
-                  </div>
+                <div style={{display:'flex',alignItems:'center',gap:2,flexWrap:'wrap',justifyContent:'center'}}>
+                  {cpPills(effPeriod, v=>setCpTrendChart(v), salesCustom, setSalesCustom, true)}
+                  {cpTrendChart && cpTrendChart !== cpSales && (
+                    <button onClick={()=>setCpTrendChart(null)} title="Sync to global period" style={{fontSize:8,fontWeight:600,padding:'1px 5px',borderRadius:3,cursor:'pointer',border:'1px solid var(--brd)',background:'transparent',color:'var(--txt3)'}}>↩</button>
+                  )}
                 </div>
               );
 
@@ -2757,11 +2755,9 @@ export default function Sales({ filters = {} }) {
               <div style={{display:'grid',gridTemplateColumns:'3fr 1fr',gap:12}}>
                 <ChartCard title="Sessions & Conversion Rate" error={errors.trendTraffic} noMargin
                   titleAddon={
-                    <div style={{display:'flex',flexDirection:'column',gap:3,alignItems:'center'}}>
-                      <div style={{display:'flex',alignItems:'center',gap:2,flexWrap:'wrap',justifyContent:'center'}}>
-                        {cpPills(cpTrafficChart||cpSales, v=>setCpTrafficChart(v), trafficCustom, setTrafficCustom, true)}
-                        {cpTrafficChart && cpTrafficChart !== cpSales && (<button onClick={()=>setCpTrafficChart(null)} style={{fontSize:8,fontWeight:600,padding:'1px 5px',borderRadius:3,cursor:'pointer',border:'1px solid var(--brd)',background:'transparent',color:'var(--txt3)'}}>↩</button>)}
-                      </div>
+                    <div style={{display:'flex',alignItems:'center',gap:2,flexWrap:'wrap',justifyContent:'center'}}>
+                      {cpPills(cpTrafficChart||cpSales, v=>setCpTrafficChart(v), trafficCustom, setTrafficCustom, true)}
+                      {cpTrafficChart && cpTrafficChart !== cpSales && (<button onClick={()=>setCpTrafficChart(null)} style={{fontSize:8,fontWeight:600,padding:'1px 5px',borderRadius:3,cursor:'pointer',border:'1px solid var(--brd)',background:'transparent',color:'var(--txt3)'}}>↩</button>)}
                     </div>
                   }>
                   {(loading.trendTrafficChart || loading.trendTraffic) ? <Spinner/> : <>
@@ -3527,9 +3523,13 @@ export default function Sales({ filters = {} }) {
       </div>
 
       {/* Sales Charts period bar — controls trend/rolling charts only, NOT the monthly revenue chart above */}
-      <div style={{display:'flex',alignItems:'center',gap:10,flexWrap:'wrap',margin:'6px 0 10px'}}>
+      <div style={{display:'grid',gridTemplateColumns:'1fr auto 1fr',alignItems:'center',gap:10,margin:'6px 0 10px'}}>
+        <div style={{display:'flex',alignItems:'center',gap:10}}>
+          <span style={{fontSize:9,fontWeight:700,textTransform:'uppercase',letterSpacing:'.08em',color:'var(--txt3)',whiteSpace:'nowrap'}}>Trend Charts</span>
+          <div style={{flex:1,height:1,background:'var(--brd)'}}/>
+        </div>
         <PeriodBar value={cpSales} onChange={setCpSales}/>
-        <div style={{fontSize:10,color:'var(--txt3)',fontWeight:600,textTransform:'uppercase',letterSpacing:'.08em'}}>Trend Charts</div>
+        <div style={{height:1,background:'var(--brd)'}}/>
       </div>
 
       {/* Sales $ + AUR Trend — dual Y-axis: Sales (left, blue) + AUR (right, green) */}
@@ -3556,9 +3556,13 @@ export default function Sales({ filters = {} }) {
           </>;
         })()}
       </div>
-      <div style={{display:'flex',alignItems:'center',gap:10,flexWrap:'wrap',margin:'6px 0 10px'}}>
+      <div style={{display:'grid',gridTemplateColumns:'1fr auto 1fr',alignItems:'center',gap:10,margin:'6px 0 10px'}}>
+        <div style={{display:'flex',alignItems:'center',gap:10}}>
+          <span style={{fontSize:9,fontWeight:700,textTransform:'uppercase',letterSpacing:'.08em',color:'var(--txt3)',whiteSpace:'nowrap'}}>Traffic Charts</span>
+          <div style={{flex:1,height:1,background:'var(--brd)'}}/>
+        </div>
         <PeriodBar value={cpTraffic} onChange={setCpTraffic}/>
-        <div style={{fontSize:10,color:'var(--txt3)',fontWeight:600,textTransform:'uppercase',letterSpacing:'.08em'}}>Traffic Charts</div>
+        <div style={{height:1,background:'var(--brd)'}}/>
       </div>
       {/* Sessions trend + Conversion rate — dual Y-axis (sessions lines left, conv% bars right) */}
       <ChartCard title="Sessions & Conversion Rate" badge={cpTraffic} error={errors.trendTraffic}>
