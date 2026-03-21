@@ -836,17 +836,17 @@ function Spinner() {
 function ChartCard({ title, badge, children, noMargin, error, headerRight, titleAddon }) {
   return (
     <div style={{background:'var(--surf)',border:'1px solid var(--brd)',borderRadius:14,padding:16,marginBottom:noMargin?0:12,transition:'background .3s'}}>
-      <div style={{marginBottom:titleAddon?8:14}}>
-        <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',gap:8}}>
-          <div style={{display:'flex',alignItems:'center',gap:6,minWidth:0}}>
-            <span style={{fontSize:13,fontWeight:700,color:'var(--txt)',whiteSpace:'nowrap'}}>{title}</span>
-          </div>
-          <div style={{display:'flex',alignItems:'center',gap:6,flexShrink:0}}>
-            {headerRight}
-            {badge && <span style={{fontSize:10,padding:'2px 9px',borderRadius:99,background:'rgba(46,111,187,.15)',color:B.b3,border:'1px solid rgba(46,111,187,.2)'}}>{badge}</span>}
-          </div>
+      <div style={{display:'grid',gridTemplateColumns:'1fr auto 1fr',alignItems:'center',marginBottom:14,gap:8}}>
+        <div style={{display:'flex',alignItems:'center',gap:6,minWidth:0}}>
+          <span style={{fontSize:13,fontWeight:700,color:'var(--txt)',whiteSpace:'nowrap'}}>{title}</span>
         </div>
-        {titleAddon && <div style={{display:'flex',justifyContent:'center',alignItems:'center',marginTop:8,marginBottom:6}}>{titleAddon}</div>}
+        <div style={{display:'flex',justifyContent:'center',alignItems:'center'}}>
+          {titleAddon||null}
+        </div>
+        <div style={{display:'flex',alignItems:'center',gap:6,justifyContent:'flex-end'}}>
+          {headerRight}
+          {badge && <span style={{fontSize:10,padding:'2px 9px',borderRadius:99,background:'rgba(46,111,187,.15)',color:B.b3,border:'1px solid rgba(46,111,187,.2)'}}>{badge}</span>}
+        </div>
       </div>
       {error
         ? <div style={{padding:'12px 14px',color:'#fb923c',fontSize:11,background:'rgba(251,146,60,.08)',border:'1px solid rgba(251,146,60,.18)',borderRadius:8}}>⚠ {error}</div>
@@ -2651,10 +2651,12 @@ export default function Sales({ filters = {} }) {
               ];
               return (
                 <div style={{background:'var(--card)',border:'1px solid var(--brd)',borderRadius:12,padding:16,marginBottom:12}}>
-                  <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',marginBottom:12,flexWrap:'wrap',gap:4}}>
+                  <div style={{display:'grid',gridTemplateColumns:'1fr auto 1fr',alignItems:'center',marginBottom:12,gap:8}}>
                     <span style={{fontSize:10,fontWeight:700,color:'var(--txt2)'}}>P&L Waterfall</span>
-                    <div style={{display:'flex',alignItems:'center',gap:6,flexWrap:'wrap'}}>
+                    <div style={{display:'flex',justifyContent:'center',alignItems:'center'}}>
                       {cpPills(cpWaterfall, setCpWaterfall, waterfallCustom, setWaterfallCustom, true)}
+                    </div>
+                    <div style={{display:'flex',alignItems:'center',justifyContent:'flex-end'}}>
                       <span style={{fontSize:9,fontWeight:700,color:'var(--txt3)',background:'var(--card2)',border:'1px solid var(--brd)',borderRadius:4,padding:'1px 5px'}}>Est. COGS</span>
                     </div>
                   </div>
