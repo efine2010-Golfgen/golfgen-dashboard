@@ -101,38 +101,47 @@ function dualLineSVG(data, k1, k2, c1, c2, fmtFn, W=1100, H=130) {
   return s + '</svg>';
 }
 
-// ── Dual-axis Sales $ + AUR chart (Sales on left blue axis, AUR on right green axis) ──
-function salesAurSVG(data, W=1100, H=165) {
+// ── Dual-axis chart: Revenue $ (or Conv %) on left Y-axis, AUR on right Y-axis ──
+function salesAurSVG(data, W=1100, H=165, leftMetric='revenue') {
   if (!data || data.length < 2) return '<div style="color:#374f66;padding:20px;text-align:center;font-size:12px">No data for this period</div>';
-  const pad = {t:14, r:68, b:24, l:58};
+  const pad = {t:22, r:68, b:24, l:58};
   const iw = W-pad.l-pad.r, ih = H-pad.t-pad.b;
   const n = data.length;
   const x = i => pad.l + (i/(n-1||1))*iw;
-  // Sales axis (left) — zero-based
-  const sv = data.flatMap(d => [d.ty_sales, d.ly_sales]).filter(v => v != null && v >= 0);
-  const smx = Math.max(...sv, 1);
-  const yS = v => pad.t + ih - Math.min(1, Math.max(0, (v||0)/smx)) * ih;
-  // AUR axis (right) — natural range with 10% padding
+  const leftIsConv = leftMetric === 'conversion';
+  // Left axis — Revenue $ or Conversion %
+  const lv = leftIsConv
+    ? data.flatMap(d => [d.conversion, d.ly_conversion]).filter(v => v != null && v > 0)
+    : data.flatMap(d => [d.ty_sales, d.ly_sales]).filter(v => v != null && v >= 0);
+  const lmx = lv.length ? (leftIsConv ? Math.max(...lv)*1.2 : Math.max(...lv)) : 1;
+  const yL  = v => pad.t + ih - Math.min(1, Math.max(0, (v||0)/(lmx||1))) * ih;
+  const leftFmt     = leftIsConv ? fP : f$;
+  const leftColor   = leftIsConv ? '#f97316' : '#2E6FBB';
+  const leftColorLY = leftIsConv ? '#fb923c' : '#5B9FD4';
+  const leftLabel   = leftIsConv ? '\u2190 Conv %' : '\u2190 Rev $';
+  const leftTickFill= leftIsConv ? '#fb923c88' : '#5b7fa0';
+  // AUR axis (right) — natural range with padding
   const av = data.flatMap(d => [d.ty_aur, d.ly_aur]).filter(v => v != null && v > 0);
   const amn = av.length ? Math.max(0, Math.min(...av)*0.88) : 0;
   const amx = av.length ? Math.max(...av)*1.12 : 1;
   const yA = v => pad.t + ih - Math.min(1, Math.max(0, (v-amn)/(amx-amn||1))) * ih;
   const uid = `sa${Math.random().toString(36).slice(2,6)}`;
   let s = `<svg width="100%" viewBox="0 0 ${W} ${H}" style="overflow:visible;display:block">`;
-  s += `<defs><linearGradient id="${uid}" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stop-color="#2E6FBB" stop-opacity=".18"/><stop offset="100%" stop-color="#2E6FBB" stop-opacity="0"/></linearGradient></defs>`;
-  // Grid lines + left (Sales $) labels
+  s += `<defs><linearGradient id="${uid}" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stop-color="${leftColor}" stop-opacity=".18"/><stop offset="100%" stop-color="${leftColor}" stop-opacity="0"/></linearGradient></defs>`;
+  // Axis labels — clear of the value ticks
+  s += `<text x="${pad.l-5}" y="${pad.t-7}" text-anchor="end" font-size="8" fill="${leftIsConv?'#f9731699':'#5b7fa099'}" font-weight="600">${leftLabel}</text>`;
+  s += `<text x="${W-pad.r+5}" y="${pad.t-7}" text-anchor="start" font-size="8" fill="#22c55e99" font-weight="600">AUR \u2192</text>`;
+  // Grid lines + left axis tick labels
   for (let i=0; i<=4; i++) {
-    const sv2 = smx/4*i, ya = yS(sv2);
+    const lval = lmx/4*i, ya = yL(lval);
     s += `<line x1="${pad.l}" y1="${ya.toFixed(1)}" x2="${W-pad.r}" y2="${ya.toFixed(1)}" stroke="#1a2f4a" stroke-width="0.5"/>`;
-    s += `<text x="${pad.l-5}" y="${(ya+4).toFixed(1)}" text-anchor="end" font-size="9" fill="#5b7fa0">${f$(sv2)}</text>`;
+    s += `<text x="${pad.l-5}" y="${(ya+4).toFixed(1)}" text-anchor="end" font-size="9" fill="${leftTickFill}">${leftFmt(lval)}</text>`;
   }
-  // Right (AUR $) labels
+  // Right (AUR) tick labels
   for (let i=0; i<=4; i++) {
     const av2 = amn+(amx-amn)/4*i, ya = yA(av2);
     s += `<text x="${W-pad.r+5}" y="${(ya+4).toFixed(1)}" text-anchor="start" font-size="9" fill="#22c55e88">${f$(av2)}</text>`;
   }
-  // Right axis label
-  s += `<text x="${W-pad.r+5}" y="${pad.t-2}" text-anchor="start" font-size="8" fill="#22c55e99" font-weight="600">AUR →</text>`;
   // X axis labels
   const step = Math.max(1, Math.floor(n/7));
   data.forEach((d,i) => {
@@ -141,21 +150,23 @@ function salesAurSVG(data, W=1100, H=165) {
       s += `<text x="${x(i).toFixed(1)}" y="${H-4}" text-anchor="middle" font-size="8" fill="#374f66">${lbl}</text>`;
     }
   });
-  // Sales TY area fill
-  const area = `M${x(0)},${yS(data[0].ty_sales||0)} ${data.map((d,i)=>`L${x(i)},${yS(d.ty_sales||0)}`).join(' ')} L${x(n-1)},${pad.t+ih} L${x(0)},${pad.t+ih} Z`;
-  s += `<path d="${area}" fill="url(#${uid})"/>`;
-  // Sales TY line (solid blue)
-  const ptsSty = data.map((d,i) => d.ty_sales!=null?`${x(i).toFixed(1)},${yS(d.ty_sales).toFixed(1)}`:null).filter(Boolean).join(' ');
-  if (ptsSty) s += `<polyline points="${ptsSty}" fill="none" stroke="#2E6FBB" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/>`;
-  // Sales LY line (dashed lighter blue)
-  const ptsSly = data.map((d,i) => d.ly_sales!=null?`${x(i).toFixed(1)},${yS(d.ly_sales).toFixed(1)}`:null).filter(Boolean).join(' ');
-  if (ptsSly) s += `<polyline points="${ptsSly}" fill="none" stroke="#5B9FD4" stroke-width="1.5" stroke-dasharray="4 3" stroke-linecap="round" stroke-linejoin="round"/>`;
-  // AUR TY line (solid green, right axis)
-  const ptsAty = data.map((d,i) => d.ty_aur!=null&&d.ty_aur>0?`${x(i).toFixed(1)},${yA(d.ty_aur).toFixed(1)}`:null).filter(Boolean).join(' ');
+  // Left metric — area fill (revenue only) + TY/LY lines
+  const tyKey = leftIsConv ? 'conversion' : 'ty_sales';
+  const lyKey = leftIsConv ? 'ly_conversion' : 'ly_sales';
+  if (!leftIsConv) {
+    const area = `M${x(0)},${yL(data[0].ty_sales||0)} ${data.map((d,i)=>`L${x(i)},${yL(d.ty_sales||0)}`).join(' ')} L${x(n-1)},${pad.t+ih} L${x(0)},${pad.t+ih} Z`;
+    s += `<path d="${area}" fill="url(#${uid})"/>`;
+  }
+  const ptsTY = data.map((d,i)=>d[tyKey]!=null?`${x(i).toFixed(1)},${yL(d[tyKey]||0).toFixed(1)}`:null).filter(Boolean).join(' ');
+  if (ptsTY) s += `<polyline points="${ptsTY}" fill="none" stroke="${leftColor}" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/>`;
+  const ptsLY = data.map((d,i)=>d[lyKey]!=null?`${x(i).toFixed(1)},${yL(d[lyKey]||0).toFixed(1)}`:null).filter(Boolean).join(' ');
+  if (ptsLY) s += `<polyline points="${ptsLY}" fill="none" stroke="${leftColorLY}" stroke-width="1.5" stroke-dasharray="4 3" stroke-linecap="round" stroke-linejoin="round"/>`;
+  // AUR TY (solid green, right axis)
+  const ptsAty = data.map((d,i)=>d.ty_aur!=null&&d.ty_aur>0?`${x(i).toFixed(1)},${yA(d.ty_aur).toFixed(1)}`:null).filter(Boolean).join(' ');
   if (ptsAty) s += `<polyline points="${ptsAty}" fill="none" stroke="#22c55e" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>`;
-  // AUR LY line (dashed darker green, right axis)
-  const ptsAly = data.map((d,i) => d.ly_aur!=null&&d.ly_aur>0?`${x(i).toFixed(1)},${yA(d.ly_aur).toFixed(1)}`:null).filter(Boolean).join(' ');
-  if (ptsAly) s += `<polyline points="${ptsAly}" fill="none" stroke="#16a34a" stroke-width="1.5" stroke-dasharray="4 3" stroke-linecap="round" stroke-linejoin="round"/>`;
+  // AUR LY (dashed darker green, right axis)
+  const ptsAly = data.map((d,i)=>d.ly_aur!=null&&d.ly_aur>0?`${x(i).toFixed(1)},${yA(d.ly_aur).toFixed(1)}`:null).filter(Boolean).join(' ');
+  if (ptsAly) s += `<polyline points="${ptsAly}" fill="none" stroke="#16a34a" stroke-width="1.5" stroke-dasharray="4 3" stroke-linecap="round" stroke-linejoin="round"/>`
   return s + '</svg>';
 }
 
@@ -953,6 +964,7 @@ export default function Sales({ filters = {} }) {
   const [cpTrafficChart,    setCpTrafficChart]   = useState(null); // null = follow cpTraffic
   const [trendTrafficChart, setTrendTrafficChart]= useState(null);
   const [unitsChartMetric,  setUnitsChartMetric]  = useState('units'); // 'units'|'sales'|'returns'
+  const [revChartMetric,    setRevChartMetric]    = useState('revenue'); // 'revenue'|'conversion'
 
   // Data state
   const [metrics,     setMetrics]     = useState(null);
@@ -2430,6 +2442,25 @@ export default function Sales({ filters = {} }) {
                 </div>
               );
 
+              // ── Revenue chart: metric toggle (Revenue/Conversion) + period pills ──
+              const revRight = (
+                <div style={{display:'flex',alignItems:'center',gap:4}}>
+                  <div style={{display:'flex',alignItems:'center',gap:2}}>
+                    {[['Revenue','revenue'],['Conversion','conversion']].map(([lbl,key]) => (
+                      <button key={key} onClick={()=>setRevChartMetric(key)} style={{
+                        fontSize:8,fontWeight:700,padding:'1px 5px',borderRadius:3,cursor:'pointer',
+                        transition:'all .12s',
+                        border:`1px solid ${revChartMetric===key?(key==='conversion'?'#f97316':B.b2):'var(--brd)'}`,
+                        background:revChartMetric===key?(key==='conversion'?'rgba(249,115,22,.15)':`${B.b2}22`):'transparent',
+                        color:revChartMetric===key?(key==='conversion'?'#f97316':B.b2):'var(--txt3)',
+                      }}>{lbl}</button>
+                    ))}
+                  </div>
+                  <div style={{width:1,height:12,background:'var(--brd)'}}/>
+                  {pSelector}
+                </div>
+              );
+
               // ── Metric toggle + period pills for Units chart ──
               const unitsRight = (
                 <div style={{display:'flex',alignItems:'center',gap:4}}>
@@ -2489,10 +2520,12 @@ export default function Sales({ filters = {} }) {
 
               return effPeriod === '7D' ? (
                 <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:12,marginBottom:12}}>
-                  <ChartCard title="Revenue & AUR Trend" error={errors.trend} headerRight={pSelector}>
+                  <ChartCard title={revChartMetric==='conversion'?'Conversion & AUR Trend':'Revenue & AUR Trend'} error={errors.trend} headerRight={revRight}>
                     {(loading.trendChart || loading.trend) ? <Spinner/> : <>
-                      {svgChart(salesAurSVG(toArr(effTrend)))}
-                      <Legend items={[['Sales TY','#2E6FBB'],['Sales LY','#5B9FD4',true],['AUR TY','#22c55e'],['AUR LY','#16a34a',true]]}/>
+                      {svgChart(salesAurSVG(toArr(effTrend), 1100, 165, revChartMetric))}
+                      <Legend items={revChartMetric==='conversion'
+                        ? [['Conv TY','#f97316'],['Conv LY','#fb923c',true],['AUR TY','#22c55e'],['AUR LY','#16a34a',true]]
+                        : [['Sales TY','#2E6FBB'],['Sales LY','#5B9FD4',true],['AUR TY','#22c55e'],['AUR LY','#16a34a',true]]}/>
                     </>}
                   </ChartCard>
                   <ChartCard title={unitsTitle} error={errors.trend} headerRight={unitsRight}>
@@ -2501,10 +2534,12 @@ export default function Sales({ filters = {} }) {
                 </div>
               ) : (
                 <div style={{display:'flex',flexDirection:'column',gap:12,marginBottom:12}}>
-                  <ChartCard title="Revenue & AUR Trend" error={errors.trend} headerRight={pSelector}>
+                  <ChartCard title={revChartMetric==='conversion'?'Conversion & AUR Trend':'Revenue & AUR Trend'} error={errors.trend} headerRight={revRight}>
                     {(loading.trendChart || loading.trend) ? <Spinner/> : <>
-                      {svgChart(salesAurSVG(toArr(effTrend)))}
-                      <Legend items={[['Sales TY','#2E6FBB'],['Sales LY','#5B9FD4',true],['AUR TY','#22c55e'],['AUR LY','#16a34a',true]]}/>
+                      {svgChart(salesAurSVG(toArr(effTrend), 1100, 165, revChartMetric))}
+                      <Legend items={revChartMetric==='conversion'
+                        ? [['Conv TY','#f97316'],['Conv LY','#fb923c',true],['AUR TY','#22c55e'],['AUR LY','#16a34a',true]]
+                        : [['Sales TY','#2E6FBB'],['Sales LY','#5B9FD4',true],['AUR TY','#22c55e'],['AUR LY','#16a34a',true]]}/>
                     </>}
                   </ChartCard>
                   <ChartCard title={unitsTitle} error={errors.trend} headerRight={unitsRight}>
