@@ -47,7 +47,7 @@ const HM_WINDOWS_DEF = {
   D: { label: '+14-26w LY',  range: 'future', indices: Array.from({length:13},(_,i)=>26+i) },   // 26-38: LY proxy 14-26w ahead
   C: { label: '+1-13w LY',   range: 'future', indices: Array.from({length:13},(_,i)=>39+i) },   // 39-51: LY proxy 1-13w ahead
 };
-const VIEW_TABS         = ['Sales Summary','Daily'];
+const VIEW_TABS         = ['Bob','Daily'];
 const MONTHS = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
 
 // ── FORMATTERS ─────────────────────────────────────────────────────
@@ -946,7 +946,7 @@ export default function Sales({ filters = {} }) {
   const custRaw = filters.customer  || '';   // 'amazon' | '' etc.
   const mpRaw   = filters.marketplace || 'US'; // 'US' | 'CA'
 
-  const [viewTab,     setViewTab]     = useState('Sales Summary');
+  const [viewTab,     setViewTab]     = useState('Bob');
   const [activePeriod,setActivePeriod]= useState('MTD');
   const [yearVis,     setYearVis]     = useState({y2024:true,y2025:true,y2026:true});
   const [cpSales,     setCpSales]     = useState('30D');
@@ -1200,7 +1200,7 @@ export default function Sales({ filters = {} }) {
 
       {/* HEADER */}
       <div style={{marginBottom:20}}>
-        <h2 style={{fontFamily:"'DM Serif Display',Georgia,serif",fontSize:22,fontWeight:400,margin:0,color:'var(--txt)'}}>{viewTab === 'Daily' ? 'Daily Sales' : 'Sales Summary'}</h2>
+        <h2 style={{fontFamily:"'DM Serif Display',Georgia,serif",fontSize:22,fontWeight:400,margin:0,color:'var(--txt)'}}>{viewTab === 'Daily' ? 'Daily Sales' : 'Bob'}</h2>
         <div style={{fontSize:12,color:'var(--txt3)',marginTop:3,fontFamily:"'Space Grotesk',monospace"}}>
           {mpRaw === 'CA' ? 'Amazon.ca (Canada)' : 'Amazon.com (US)'}
           {' \u00B7 '}
@@ -3454,7 +3454,7 @@ export default function Sales({ filters = {} }) {
       )}
 
       {/* HOURLY SALES HEATMAP — 30 days × 24 hours */}
-      {viewTab === 'Sales Summary' && (() => {
+      {viewTab === 'Bob' && (() => {
         // ── Color scale (same as 26-week heatmap) ──
         const hmStops = [
           [21,37,62],[15,82,115],[13,115,119],[34,139,34],
