@@ -362,6 +362,19 @@ def update_item_master(asin: str, body: dict = Body(...)):
     if not found:
         raise HTTPException(status_code=404, detail=f"ASIN {asin} not found")
     save_item_master(items)
+    # Sync product_name to DB item_master table so _build_product_list picks it up immediately
+    try:
+        from core.database import get_db_rw
+        updated_item = next((i for i in items if i["asin"] == asin), None)
+        if updated_item and "productName" in body:
+            con_rw = get_db_rw()
+            con_rw.execute(
+                "UPDATE item_master SET product_name = ? WHERE asin = ?",
+                [updated_item.get("productName", ""), asin]
+            )
+            con_rw.close()
+    except Exception as _e:
+        logger.warning(f"item_master PUT: DB sync warning: {_e}")
     return {"status": "ok", "asin": asin}
 
 

@@ -13,6 +13,27 @@ logger = logging.getLogger("golfgen")
 ITEM_MASTER_PATH = DB_DIR / "item_master.csv"
 
 
+def load_item_master_names() -> dict:
+    """Load clean product names from Item Master CSV (user-edited, highest priority).
+
+    Returns {asin: product_name} for all ASINs that have a non-empty name
+    that isn't just the ASIN itself.
+    """
+    names = {}
+    if not ITEM_MASTER_PATH.exists():
+        return names
+    try:
+        with open(ITEM_MASTER_PATH, newline="", encoding="utf-8-sig") as f:
+            for row in csv.DictReader(f):
+                asin = (row.get("asin") or "").strip()
+                name = (row.get("product_name") or "").strip()
+                if asin and name and name.upper() != asin.upper():
+                    names[asin] = name
+    except Exception as e:
+        logger.warning(f"load_item_master_names: CSV read error: {e}")
+    return names
+
+
 def load_unit_costs() -> dict:
     """Load per-ASIN unit cost.
 

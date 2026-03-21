@@ -13,7 +13,7 @@ from fastapi import APIRouter, Query
 from core.config import DB_PATH, DB_DIR, COGS_PATH
 from core.database import get_db
 from core.hierarchy import hierarchy_filter as _hierarchy_filter
-from routers._cogs_helper import compute_cogs_for_range, load_unit_costs
+from routers._cogs_helper import compute_cogs_for_range, load_unit_costs, load_item_master_names
 
 logger = logging.getLogger("golfgen")
 router = APIRouter()
@@ -162,6 +162,8 @@ def get_today(con) -> datetime:
 def _build_product_list(con, cutoff: str) -> list:
     """Build product-level P&L. Core business logic."""
     cogs_data = load_cogs()
+    # Item Master CSV names — user-edited clean descriptions (highest priority)
+    im_names = load_item_master_names()
     # Prefer item_master unit_cost over cogs.csv values
     _unit_costs = load_unit_costs()
     inv_names = {}
@@ -246,10 +248,12 @@ def _build_product_list(con, cutoff: str) -> list:
             cogs_per_unit = round(aur * 0.35, 2)
 
         inv_info = inv_names.get(asin, {})
+        im_name = im_names.get(asin, "")
         cogs_name = cogs_info.get("product_name", "")
         if cogs_name and cogs_name.strip().upper() == asin.upper():
             cogs_name = ""
-        name = (cogs_name
+        name = (im_name
+                or cogs_name
                 or api_name
                 or inv_info.get("product_name")
                 or asin)
@@ -2309,7 +2313,7 @@ def product_detail(asin: str, days: int = Query(365)):
 
     return {
         "asin": asin,
-        "name": cogs_info.get("product_name", asin),
+        "name": load_item_master_names().get(asin) or cogs_info.get("product_name") or asin,
         "sku": cogs_info.get("sku", ""),
         "cogs": cogs_info.get("cogs", 0),
         "totalRevenue": round(total_rev, 2),
