@@ -110,8 +110,10 @@ function salesAurSVG(data, W=1100, H=165, leftMetric='revenue') {
   const x = i => pad.l + (i/(n-1||1))*iw;
   const leftIsConv = leftMetric === 'conversion';
   // Left axis — Revenue $ or Conversion %
+  const getConvTY = d => d.conversion ?? d.ty_conv ?? 0;
+  const getConvLY = d => d.ly_conversion ?? d.ly_conv ?? 0;
   const lv = leftIsConv
-    ? data.flatMap(d => [d.conversion, d.ly_conversion]).filter(v => v != null && v > 0)
+    ? data.flatMap(d => [getConvTY(d), getConvLY(d)]).filter(v => v != null && v > 0)
     : data.flatMap(d => [d.ty_sales, d.ly_sales]).filter(v => v != null && v >= 0);
   const lmx = lv.length ? (leftIsConv ? Math.max(...lv)*1.2 : Math.max(...lv)) : 1;
   const yL  = v => pad.t + ih - Math.min(1, Math.max(0, (v||0)/(lmx||1))) * ih;
@@ -151,15 +153,15 @@ function salesAurSVG(data, W=1100, H=165, leftMetric='revenue') {
     }
   });
   // Left metric — area fill (revenue only) + TY/LY lines
-  const tyKey = leftIsConv ? 'conversion' : 'ty_sales';
-  const lyKey = leftIsConv ? 'ly_conversion' : 'ly_sales';
+  const getTY = d => leftIsConv ? getConvTY(d) : (d.ty_sales ?? 0);
+  const getLY = d => leftIsConv ? getConvLY(d) : (d.ly_sales ?? 0);
   if (!leftIsConv) {
     const area = `M${x(0)},${yL(data[0].ty_sales||0)} ${data.map((d,i)=>`L${x(i)},${yL(d.ty_sales||0)}`).join(' ')} L${x(n-1)},${pad.t+ih} L${x(0)},${pad.t+ih} Z`;
     s += `<path d="${area}" fill="url(#${uid})"/>`;
   }
-  const ptsTY = data.map((d,i)=>d[tyKey]!=null?`${x(i).toFixed(1)},${yL(d[tyKey]||0).toFixed(1)}`:null).filter(Boolean).join(' ');
+  const ptsTY = data.map((d,i)=>{const v=getTY(d);return v>0?`${x(i).toFixed(1)},${yL(v).toFixed(1)}`:null;}).filter(Boolean).join(' ');
   if (ptsTY) s += `<polyline points="${ptsTY}" fill="none" stroke="${leftColor}" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/>`;
-  const ptsLY = data.map((d,i)=>d[lyKey]!=null?`${x(i).toFixed(1)},${yL(d[lyKey]||0).toFixed(1)}`:null).filter(Boolean).join(' ');
+  const ptsLY = data.map((d,i)=>{const v=getLY(d);return v>0?`${x(i).toFixed(1)},${yL(v).toFixed(1)}`:null;}).filter(Boolean).join(' ');
   if (ptsLY) s += `<polyline points="${ptsLY}" fill="none" stroke="${leftColorLY}" stroke-width="1.5" stroke-dasharray="4 3" stroke-linecap="round" stroke-linejoin="round"/>`;
   // AUR TY (solid green, right axis)
   const ptsAty = data.map((d,i)=>d.ty_aur!=null&&d.ty_aur>0?`${x(i).toFixed(1)},${yA(d.ty_aur).toFixed(1)}`:null).filter(Boolean).join(' ');
@@ -725,11 +727,15 @@ function sessionsConvSVG(data, W=1100, H=165) {
   const xB = i => pad.l + ((i+0.5)/n)*iw;
   const xL = i => pad.l + (i/(n-1||1))*iw;
   // Sessions axis (left)
-  const sessVals = data.flatMap(d => [d.ty_sessions, d.ly_sessions]).filter(v => v != null && v >= 0);
+  const getSess = d => d.ty_sessions ?? d.sessions ?? 0;
+  const getLySess = d => d.ly_sessions ?? 0;
+  const getConv2 = d => d.ty_conv ?? d.conversion ?? 0;
+  const getLyConv2 = d => d.ly_conv ?? d.ly_conversion ?? 0;
+  const sessVals = data.flatMap(d => [getSess(d), getLySess(d)]).filter(v => v != null && v >= 0);
   const smx = Math.max(...sessVals, 1);
   const yS = v => pad.t + ih - Math.min(1,Math.max(0,(v||0)/smx))*ih;
   // Conversion axis (right) — use natural max with 20% headroom
-  const convVals = data.flatMap(d => [d.ty_conv, d.ly_conv]).filter(v => v != null && v > 0);
+  const convVals = data.flatMap(d => [getConv2(d), getLyConv2(d)]).filter(v => v != null && v > 0);
   const cmx = convVals.length ? Math.max(...convVals)*1.25 : 0.08;
   const yC = v => pad.t + ih - Math.min(1,Math.max(0,(v||0)/cmx))*ih;
   const bw = Math.max(3, Math.floor((iw/n)*0.28)); // half-bar width
@@ -758,23 +764,23 @@ function sessionsConvSVG(data, W=1100, H=165) {
   });
   // Conversion bars (drawn first, behind lines)
   data.forEach((d,i) => {
-    const cx = xB(i);
-    if ((d.ty_conv||0) > 0) {
-      const bh = Math.max(2, ((d.ty_conv||0)/cmx)*ih);
-      s += `<rect x="${(cx-bw*1.15).toFixed(1)}" y="${yC(d.ty_conv).toFixed(1)}" width="${bw.toFixed(1)}" height="${bh.toFixed(1)}" fill="#1AA392" opacity="0.62" rx="2"/>`;
+    const cx=xB(i); const cv2=getConv2(d); const lyc=getLyConv2(d);
+    if (cv2 > 0) {
+      const bh = Math.max(2, (cv2/cmx)*ih);
+      s += `<rect x="${(cx-bw*1.15).toFixed(1)}" y="${yC(cv2).toFixed(1)}" width="${bw.toFixed(1)}" height="${bh.toFixed(1)}" fill="#1AA392" opacity="0.62" rx="2"/>`;
     }
-    if ((d.ly_conv||0) > 0) {
-      const bh = Math.max(2, ((d.ly_conv||0)/cmx)*ih);
-      s += `<rect x="${(cx+0.15).toFixed(1)}" y="${yC(d.ly_conv).toFixed(1)}" width="${bw.toFixed(1)}" height="${bh.toFixed(1)}" fill="none" stroke="#1AA392" stroke-width="1" stroke-dasharray="3 2" opacity="0.55" rx="2"/>`;
+    if (lyc > 0) {
+      const bh = Math.max(2, (lyc/cmx)*ih);
+      s += `<rect x="${(cx+0.15).toFixed(1)}" y="${yC(lyc).toFixed(1)}" width="${bw.toFixed(1)}" height="${bh.toFixed(1)}" fill="none" stroke="#1AA392" stroke-width="1" stroke-dasharray="3 2" opacity="0.55" rx="2"/>`;
     }
   });
   // Sessions TY area fill + line
-  const area = `M${xL(0)},${yS(data[0].ty_sessions||0)} ${data.map((d,i)=>`L${xL(i)},${yS(d.ty_sessions||0)}`).join(' ')} L${xL(n-1)},${pad.t+ih} L${xL(0)},${pad.t+ih} Z`;
+  const area = `M${xL(0)},${yS(getSess(data[0]))} ${data.map((d,i)=>`L${xL(i)},${yS(getSess(d))}`).join(' ')} L${xL(n-1)},${pad.t+ih} L${xL(0)},${pad.t+ih} Z`;
   s += `<path d="${area}" fill="url(#${uid})"/>`;
-  const ptsTy = data.map((d,i)=>d.ty_sessions!=null?`${xL(i).toFixed(1)},${yS(d.ty_sessions).toFixed(1)}`:null).filter(Boolean).join(' ');
+  const ptsTy = data.map((d,i)=>{const sv=getSess(d);return sv>0?`${xL(i).toFixed(1)},${yS(sv).toFixed(1)}`:null;}).filter(Boolean).join(' ');
   if (ptsTy) s += `<polyline points="${ptsTy}" fill="none" stroke="${B.o2}" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/>`;
   // Sessions LY dashed line
-  const ptsLy = data.map((d,i)=>d.ly_sessions!=null?`${xL(i).toFixed(1)},${yS(d.ly_sessions).toFixed(1)}`:null).filter(Boolean).join(' ');
+  const ptsLy = data.map((d,i)=>{const sv=getLySess(d);return sv>0?`${xL(i).toFixed(1)},${yS(sv).toFixed(1)}`:null;}).filter(Boolean).join(' ');
   if (ptsLy) s += `<polyline points="${ptsLy}" fill="none" stroke="${B.sub}" stroke-width="1.5" stroke-dasharray="4 3" stroke-linecap="round" stroke-linejoin="round"/>`;
   return s + '</svg>';
 }
@@ -827,12 +833,15 @@ function Spinner() {
   );
 }
 
-function ChartCard({ title, badge, children, noMargin, error, headerRight }) {
+function ChartCard({ title, badge, children, noMargin, error, headerRight, titleAddon }) {
   return (
     <div style={{background:'var(--surf)',border:'1px solid var(--brd)',borderRadius:14,padding:16,marginBottom:noMargin?0:12,transition:'background .3s'}}>
-      <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:14}}>
-        <span style={{fontSize:13,fontWeight:700,color:'var(--txt)'}}>{title}</span>
-        <div style={{display:'flex',alignItems:'center',gap:6}}>
+      <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:14,gap:8}}>
+        <div style={{display:'flex',alignItems:'center',gap:6,flex:1,minWidth:0,flexWrap:'wrap'}}>
+          <span style={{fontSize:13,fontWeight:700,color:'var(--txt)',whiteSpace:'nowrap'}}>{title}</span>
+          {titleAddon && <div style={{display:'flex',alignItems:'center',gap:2,flexShrink:0}}>{titleAddon}</div>}
+        </div>
+        <div style={{display:'flex',alignItems:'center',gap:6,flexShrink:0}}>
           {headerRight}
           {badge && <span style={{fontSize:10,padding:'2px 9px',borderRadius:99,background:'rgba(46,111,187,.15)',color:B.b3,border:'1px solid rgba(46,111,187,.2)'}}>{badge}</span>}
         </div>
@@ -965,6 +974,8 @@ export default function Sales({ filters = {} }) {
   const [trendTrafficChart, setTrendTrafficChart]= useState(null);
   const [unitsChartMetric,  setUnitsChartMetric]  = useState('units'); // 'units'|'sales'|'returns'
   const [revChartMetric,    setRevChartMetric]    = useState('revenue'); // 'revenue'|'conversion'
+  const [cpWaterfall,       setCpWaterfall]       = useState('30D');
+  const [waterfallMetrics,  setWaterfallMetrics]  = useState(null);
 
   // Data state
   const [metrics,     setMetrics]     = useState(null);
@@ -1070,6 +1081,12 @@ export default function Sales({ filters = {} }) {
       .then(d => { if (d && !d.error) setPricingCache(d); })
       .catch(() => {});
   }, [viewTab]);
+
+  // Fetch waterfall/profitability metrics for P&L chart period
+  useEffect(() => {
+    const api = CHART_PERIOD_API[cpWaterfall] || 'last_30d';
+    load('waterfallMetrics', setWaterfallMetrics, 'summary', {...baseParams, period: api});
+  }, [divRaw, custRaw, cpWaterfall]); // eslint-disable-line
 
 
   // ── Per-chart overrides: reset when global period changes ──
@@ -1352,7 +1369,7 @@ export default function Sales({ filters = {} }) {
                 const hmStops=[[21,37,62],[15,82,115],[13,115,119],[34,139,34],[218,165,32],[230,101,30],[214,40,57]];
                 const hmColor=(t)=>{if(t<=0)return 'rgb(21,37,62)';if(t>=1)return 'rgb(214,40,57)';const seg=t*(hmStops.length-1);const i=Math.floor(seg),f=seg-i;const a=hmStops[i],b2=hmStops[Math.min(i+1,hmStops.length-1)];return `rgb(${Math.round(a[0]+(b2[0]-a[0])*f)},${Math.round(a[1]+(b2[1]-a[1])*f)},${Math.round(a[2]+(b2[2]-a[2])*f)})`};
                 const HOUR_LABELS=['12am','1am','2am','3am','4am','5am','6am','7am','8am','9am','10am','11am','12pm','1pm','2pm','3pm','4pm','5pm','6pm','7pm','8pm','9pm','10pm','11pm'];
-                const HCOL_W=34,DLW=72,DRH=28;
+                const HCOL_W=42,DLW=72,DRH=28;
                 const hmDays=hmData?.days||[];
                 const maxVal=hmMetric==='$'?(hmData?.maxSales||0):(hmData?.maxUnits||0);
                 const sqrtMax=Math.sqrt(maxVal||1);
@@ -2035,7 +2052,16 @@ export default function Sales({ filters = {} }) {
             })()}
 
             {/* ── PERIOD SUMMARY ── */}
-            <EpochLabel type="period" label="📅 Period Summary" right="5 comparison windows"/>
+            <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',marginBottom:4,flexWrap:'wrap',gap:6}}>
+              <span style={{fontSize:13,fontWeight:700,color:'var(--txt)'}}>📅 Period Summary</span>
+              <div style={{display:'flex',alignItems:'center',gap:3,flexWrap:'wrap'}}>
+                {EXEC_PERIODS_LIST.map(p => {
+                  const pv = EXEC_PERIOD_MAP[p];
+                  const isAct = cpSales === pv;
+                  return (<button key={p} onClick={()=>{setCpSales(pv);setActivePeriod(pv);}} style={{fontSize:9,fontWeight:700,padding:'2px 7px',borderRadius:4,cursor:'pointer',transition:'all .12s',border:`1px solid ${isAct?B.b2:'var(--brd)'}`,background:isAct?`${B.b2}22`:'transparent',color:isAct?B.b2:'var(--txt3)'}}>{p}</button>);
+                })}
+              </div>
+            </div>
             {periodCols && (
               <div style={{display:'grid',gridTemplateColumns:'repeat(5,1fr)',gap:10,marginBottom:20}}>
                 {DAILY_PERIODS.map((lbl, idx) => {
@@ -2099,7 +2125,7 @@ export default function Sales({ filters = {} }) {
                 const hmStops=[[21,37,62],[15,82,115],[13,115,119],[34,139,34],[218,165,32],[230,101,30],[214,40,57]];
                 const hmColor=(t)=>{if(t<=0)return 'rgb(21,37,62)';if(t>=1)return 'rgb(214,40,57)';const seg=t*(hmStops.length-1);const i=Math.floor(seg),f=seg-i;const a=hmStops[i],b2=hmStops[Math.min(i+1,hmStops.length-1)];return `rgb(${Math.round(a[0]+(b2[0]-a[0])*f)},${Math.round(a[1]+(b2[1]-a[1])*f)},${Math.round(a[2]+(b2[2]-a[2])*f)})`};
                 const HOUR_LABELS=['12am','1am','2am','3am','4am','5am','6am','7am','8am','9am','10am','11am','12pm','1pm','2pm','3pm','4pm','5pm','6pm','7pm','8pm','9pm','10pm','11pm'];
-                const HCOL_W=34,DLW=72,DRH=28;
+                const HCOL_W=42,DLW=72,DRH=28;
                 const hmDays=hmData?.days||[];
                 const maxVal=hmMetric==='$'?(hmData?.maxSales||0):(hmData?.maxUnits||0);
                 const sqrtMax=Math.sqrt(maxVal||1);
@@ -2446,36 +2472,24 @@ export default function Sales({ filters = {} }) {
 </>}
 
             {/* ── TRENDS ── */}
-            <EpochLabel type="trend" label="📈 Trends" right="Period-controlled"/>
-
-            {/* ── Period selector (card-wrapped, matches period-bar-wrap) ── */}
-            <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',gap:8,padding:'10px 14px',background:'var(--card)',border:'1px solid var(--brd)',borderRadius:9,marginBottom:12}}>
-              <div style={{display:'flex',alignItems:'center',gap:6,flexWrap:'wrap'}}>
-                <span style={{fontSize:9,fontWeight:700,textTransform:'uppercase',letterSpacing:'.08em',color:'var(--txt3)',whiteSpace:'nowrap'}}>Period</span>
-                {EXEC_PERIODS_LIST.map(p => (
-                  <button key={p} onClick={() => { const cp = EXEC_PERIOD_MAP[p]; setCpSales(cp); setActivePeriod(cp); }} style={{
-                    fontSize:10,fontWeight:700,padding:'4px 10px',borderRadius:5,cursor:'pointer',
-                    border:`1px solid ${cpSales===EXEC_PERIOD_MAP[p] ? B.b2 : 'var(--brd)'}`,
-                    background: cpSales===EXEC_PERIOD_MAP[p] ? 'rgba(46,111,187,.15)' : 'transparent',
-                    color: cpSales===EXEC_PERIOD_MAP[p] ? B.b3 : 'var(--txt3)',
-                    transition:'all .15s',
-                  }}>{p}</button>
-                ))}
+            <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',marginBottom:10,flexWrap:'wrap',gap:6}}>
+              <span style={{fontSize:13,fontWeight:700,color:'var(--txt)'}}>📈 Trends</span>
+              <div style={{display:'flex',alignItems:'center',gap:3,flexWrap:'wrap'}}>
+                {EXEC_PERIODS_LIST.map(p => {
+                  const pv = EXEC_PERIOD_MAP[p];
+                  const isAct = cpSales === pv;
+                  return (<button key={p} onClick={()=>{setCpSales(pv);setActivePeriod(pv);}} style={{fontSize:9,fontWeight:700,padding:'2px 7px',borderRadius:4,cursor:'pointer',transition:'all .12s',border:`1px solid ${isAct?B.b2:'var(--brd)'}`,background:isAct?`${B.b2}22`:'transparent',color:isAct?B.b2:'var(--txt3)'}}>{p}</button>);
+                })}
+                {(() => {
+                  const now2 = new Date();
+                  const activeP2 = EXEC_PERIODS_LIST.find(p => EXEC_PERIOD_MAP[p] === cpSales) || 'L30';
+                  const days2 = parseInt(activeP2.replace('L','')) || 30;
+                  const end2 = new Date(now2); end2.setDate(end2.getDate()-1);
+                  const start2 = new Date(end2); start2.setDate(start2.getDate()-(days2-1));
+                  const fmt2 = d => d.toLocaleDateString('en-US',{month:'short',day:'numeric'});
+                  return (<span style={{fontSize:9,color:B.b3,background:'rgba(46,111,187,.1)',border:'1px solid rgba(46,111,187,.2)',borderRadius:4,padding:'2px 7px',fontWeight:600,whiteSpace:'nowrap'}}>{fmt2(start2)} – {fmt2(end2)} · {days2}d</span>);
+                })()}
               </div>
-              {/* date range badge */}
-              {(() => {
-                const now2 = new Date();
-                const activeP2 = EXEC_PERIODS_LIST.find(p => EXEC_PERIOD_MAP[p] === cpSales) || 'L30';
-                const days2 = parseInt(activeP2.replace('L','')) || 30;
-                const end2 = new Date(now2); end2.setDate(end2.getDate()-1);
-                const start2 = new Date(end2); start2.setDate(start2.getDate()-(days2-1));
-                const fmt2 = d => d.toLocaleDateString('en-US',{month:'short',day:'numeric'});
-                return (
-                  <span style={{fontSize:10,color:B.b3,background:'rgba(46,111,187,.1)',border:'1px solid rgba(46,111,187,.2)',borderRadius:6,padding:'4px 10px',fontWeight:600,whiteSpace:'nowrap',flexShrink:0}}>
-                    {fmt2(start2)} – {fmt2(end2)}, {end2.getFullYear()} &nbsp;·&nbsp; {days2} days
-                  </span>
-                );
-              })()}
             </div>
 
             {/* ── Sales Overview KPIs ── */}
@@ -2538,39 +2552,31 @@ export default function Sales({ filters = {} }) {
 
               // ── Revenue chart: metric toggle (Revenue/Conversion) + period pills ──
               const revRight = (
-                <div style={{display:'flex',alignItems:'center',gap:4}}>
-                  <div style={{display:'flex',alignItems:'center',gap:2}}>
-                    {[['Revenue','revenue'],['Conversion','conversion']].map(([lbl,key]) => (
-                      <button key={key} onClick={()=>setRevChartMetric(key)} style={{
-                        fontSize:8,fontWeight:700,padding:'1px 5px',borderRadius:3,cursor:'pointer',
-                        transition:'all .12s',
-                        border:`1px solid ${revChartMetric===key?(key==='conversion'?'#f97316':B.b2):'var(--brd)'}`,
-                        background:revChartMetric===key?(key==='conversion'?'rgba(249,115,22,.15)':`${B.b2}22`):'transparent',
-                        color:revChartMetric===key?(key==='conversion'?'#f97316':B.b2):'var(--txt3)',
-                      }}>{lbl}</button>
-                    ))}
-                  </div>
-                  <div style={{width:1,height:12,background:'var(--brd)'}}/>
-                  {pSelector}
+                <div style={{display:'flex',alignItems:'center',gap:2}}>
+                  {[['Revenue','revenue'],['Conversion','conversion']].map(([lbl,key]) => (
+                    <button key={key} onClick={()=>setRevChartMetric(key)} style={{
+                      fontSize:8,fontWeight:700,padding:'1px 5px',borderRadius:3,cursor:'pointer',
+                      transition:'all .12s',
+                      border:`1px solid ${revChartMetric===key?(key==='conversion'?'#f97316':B.b2):'var(--brd)'}`,
+                      background:revChartMetric===key?(key==='conversion'?'rgba(249,115,22,.15)':`${B.b2}22`):'transparent',
+                      color:revChartMetric===key?(key==='conversion'?'#f97316':B.b2):'var(--txt3)',
+                    }}>{lbl}</button>
+                  ))}
                 </div>
               );
 
               // ── Metric toggle + period pills for Units chart ──
               const unitsRight = (
-                <div style={{display:'flex',alignItems:'center',gap:4}}>
-                  <div style={{display:'flex',alignItems:'center',gap:2}}>
-                    {[['Units','units'],['$ Sold','sales'],['Return U','returns']].map(([lbl,key]) => (
-                      <button key={key} onClick={()=>setUnitsChartMetric(key)} style={{
-                        fontSize:8,fontWeight:700,padding:'1px 5px',borderRadius:3,cursor:'pointer',
-                        transition:'all .12s',
-                        border:`1px solid ${unitsChartMetric===key?B.b2:'var(--brd)'}`,
-                        background:unitsChartMetric===key?`${B.b2}22`:'transparent',
-                        color:unitsChartMetric===key?B.b2:'var(--txt3)',
-                      }}>{lbl}</button>
-                    ))}
-                  </div>
-                  <div style={{width:1,height:12,background:'var(--brd)'}}/>
-                  {pSelector}
+                <div style={{display:'flex',alignItems:'center',gap:2}}>
+                  {[['Units','units'],['$ Sold','sales'],['Return U','returns']].map(([lbl,key]) => (
+                    <button key={key} onClick={()=>setUnitsChartMetric(key)} style={{
+                      fontSize:8,fontWeight:700,padding:'1px 5px',borderRadius:3,cursor:'pointer',
+                      transition:'all .12s',
+                      border:`1px solid ${unitsChartMetric===key?B.b2:'var(--brd)'}`,
+                      background:unitsChartMetric===key?`${B.b2}22`:'transparent',
+                      color:unitsChartMetric===key?B.b2:'var(--txt3)',
+                    }}>{lbl}</button>
+                  ))}
                 </div>
               );
 
@@ -2614,7 +2620,7 @@ export default function Sales({ filters = {} }) {
 
               return effPeriod === '7D' ? (
                 <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:12,marginBottom:12}}>
-                  <ChartCard title={revChartMetric==='conversion'?'Conversion & AUR Trend':'Revenue & AUR Trend'} error={errors.trend} headerRight={revRight}>
+                  <ChartCard title={revChartMetric==='conversion'?'Conversion, AUR & Trend':'Revenue, AUR, & Conversion'} error={errors.trend} headerRight={revRight} titleAddon={pSelector}>
                     {(loading.trendChart || loading.trend) ? <Spinner/> : <>
                       {svgChart(salesAurSVG(toArr(effTrend), 1100, 165, revChartMetric))}
                       <Legend items={revChartMetric==='conversion'
@@ -2622,13 +2628,13 @@ export default function Sales({ filters = {} }) {
                         : [['Sales TY','#2E6FBB'],['Sales LY','#5B9FD4',true],['AUR TY','#22c55e'],['AUR LY','#16a34a',true]]}/>
                     </>}
                   </ChartCard>
-                  <ChartCard title={unitsTitle} error={errors.trend} headerRight={unitsRight}>
+                  <ChartCard title={unitsTitle} error={errors.trend} headerRight={unitsRight} titleAddon={pSelector}>
                     {(loading.trendChart || loading.trend) ? <Spinner/> : unitsBars(165)}
                   </ChartCard>
                 </div>
               ) : (
                 <div style={{display:'flex',flexDirection:'column',gap:12,marginBottom:12}}>
-                  <ChartCard title={revChartMetric==='conversion'?'Conversion & AUR Trend':'Revenue & AUR Trend'} error={errors.trend} headerRight={revRight}>
+                  <ChartCard title={revChartMetric==='conversion'?'Conversion, AUR & Trend':'Revenue, AUR, & Conversion'} error={errors.trend} headerRight={revRight} titleAddon={pSelector}>
                     {(loading.trendChart || loading.trend) ? <Spinner/> : <>
                       {svgChart(salesAurSVG(toArr(effTrend), 1100, 165, revChartMetric))}
                       <Legend items={revChartMetric==='conversion'
@@ -2636,7 +2642,7 @@ export default function Sales({ filters = {} }) {
                         : [['Sales TY','#2E6FBB'],['Sales LY','#5B9FD4',true],['AUR TY','#22c55e'],['AUR LY','#16a34a',true]]}/>
                     </>}
                   </ChartCard>
-                  <ChartCard title={unitsTitle} error={errors.trend} headerRight={unitsRight}>
+                  <ChartCard title={unitsTitle} error={errors.trend} headerRight={unitsRight} titleAddon={pSelector}>
                     {(loading.trendChart || loading.trend) ? <Spinner/> : unitsBars(190)}
                   </ChartCard>
                 </div>
@@ -2644,12 +2650,12 @@ export default function Sales({ filters = {} }) {
             })()}
             {/* ── P&L Waterfall ── */}
             {(() => {
-              const mtdW = periodCols?.['MTD'] || {};
-              const rev = mtdW.sales || 0;
+              const wfData = waterfallMetrics || periodCols?.['MTD'] || {};
+              const rev = wfData.sales || 0;
               if (rev <= 0) return null;
-              const ret  = Math.abs(mtdW.returns_amount || 0);
-              const fees = Math.abs(mtdW.amazon_fees || 0);
-              const adSp = m.ad_spend || 0;
+              const ret  = Math.abs(wfData.returns_amount || 0);
+              const fees = Math.abs(wfData.amazon_fees || 0);
+              const adSp = (wfData.ad_spend || m.ad_spend) || 0;
               const cogs = rev * 0.35;
               const netM = rev - cogs - fees - adSp - ret;
               const netPct = (netM / rev * 100);
@@ -2663,9 +2669,16 @@ export default function Sales({ filters = {} }) {
               ];
               return (
                 <div style={{background:'var(--card)',border:'1px solid var(--brd)',borderRadius:12,padding:16,marginBottom:12}}>
-                  <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',marginBottom:12}}>
-                    <span style={{fontSize:10,fontWeight:700,color:'var(--txt2)'}}>P&L Waterfall — MTD</span>
-                    <span style={{fontSize:9,fontWeight:700,color:'var(--txt3)',background:'var(--card2)',border:'1px solid var(--brd)',borderRadius:5,padding:'2px 7px'}}>Estimated COGS</span>
+                  <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',marginBottom:12,flexWrap:'wrap',gap:4}}>
+                    <span style={{fontSize:10,fontWeight:700,color:'var(--txt2)'}}>P&L Waterfall</span>
+                    <div style={{display:'flex',alignItems:'center',gap:3,flexWrap:'wrap'}}>
+                      {EXEC_PERIODS_LIST.map(p => {
+                        const pv = EXEC_PERIOD_MAP[p];
+                        const isAct = cpWaterfall === pv;
+                        return (<button key={p} onClick={()=>setCpWaterfall(pv)} style={{fontSize:8,fontWeight:700,padding:'1px 5px',borderRadius:3,cursor:'pointer',transition:'all .12s',border:`1px solid ${isAct?B.b2:'var(--brd)'}`,background:isAct?`${B.b2}22`:'transparent',color:isAct?B.b2:'var(--txt3)'}}>{p}</button>);
+                      })}
+                      <span style={{fontSize:9,fontWeight:700,color:'var(--txt3)',background:'var(--card2)',border:'1px solid var(--brd)',borderRadius:4,padding:'1px 5px',marginLeft:4}}>Est. COGS</span>
+                    </div>
                   </div>
                   <div style={{display:'flex',flexDirection:'column',gap:6,padding:'4px 0'}}>
                     {wfRows.map(({lbl,val,col,bg,neg})=>{
@@ -2699,7 +2712,18 @@ export default function Sales({ filters = {} }) {
 
             {/* ── Traffic & Conversion Pipeline ── */}
             <div style={{background:'var(--card)',border:'1px solid var(--brd)',borderRadius:12,padding:16,marginBottom:12}}>
-              <SectionDivider label="Traffic & Conversion"/>
+              <div style={{display:'flex',alignItems:'center',gap:10,marginBottom:14}}>
+                <div style={{width:12,height:1,background:'var(--brd)'}}/>
+                <span style={{fontSize:9,fontWeight:700,textTransform:'uppercase',letterSpacing:'.14em',color:'var(--txt3)',whiteSpace:'nowrap'}}>Traffic &amp; Conversion</span>
+                <div style={{flex:1,height:1,background:'var(--brd)'}}/>
+                <div style={{display:'flex',alignItems:'center',gap:3,flexShrink:0}}>
+                  {EXEC_PERIODS_LIST.map(p => {
+                    const pv = EXEC_PERIOD_MAP[p];
+                    const isAct = cpSales === pv;
+                    return (<button key={p} onClick={()=>{setCpSales(pv);setActivePeriod(pv);}} style={{fontSize:8,fontWeight:700,padding:'1px 5px',borderRadius:3,cursor:'pointer',transition:'all .12s',border:`1px solid ${isAct?B.b2:'var(--brd)'}`,background:isAct?`${B.b2}22`:'transparent',color:isAct?B.b2:'var(--txt3)'}}>{p}</button>);
+                  })}
+                </div>
+              </div>
               {(() => {
                 // Build 5-stage pipeline: Impressions, Clicks, Sessions, Add-to-Cart, Orders
                 const adsImpressions = m?.impressions || 0;
@@ -2751,30 +2775,23 @@ export default function Sales({ filters = {} }) {
                 );
               })()}
               <div style={{display:'grid',gridTemplateColumns:'3fr 1fr',gap:12}}>
-                <ChartCard title="Sessions & Conversion Rate" badge={cpSales} error={errors.trendTraffic} noMargin>
+                <ChartCard title="Sessions & Conversion Rate" error={errors.trendTraffic} noMargin
+                  titleAddon={
+                    <div style={{display:'flex',alignItems:'center',gap:2}}>
+                      {EXEC_PERIODS_LIST.map(p => {
+                        const pv = EXEC_PERIOD_MAP[p];
+                        const effTP = cpTrafficChart || cpSales;
+                        const isActive = effTP === pv;
+                        return (<button key={p} onClick={()=>setCpTrafficChart(pv)} style={{fontSize:8,fontWeight:700,padding:'1px 5px',borderRadius:3,cursor:'pointer',transition:'all .12s',border:`1px solid ${isActive?B.b2:'var(--brd)'}`,background:isActive?`${B.b2}22`:'transparent',color:isActive?B.b2:'var(--txt3)'}}>{p}</button>);
+                      })}
+                      {cpTrafficChart && cpTrafficChart !== cpSales && (<button onClick={()=>setCpTrafficChart(null)} style={{fontSize:8,fontWeight:600,padding:'1px 5px',borderRadius:3,cursor:'pointer',border:'1px solid var(--brd)',background:'transparent',color:'var(--txt3)'}}>↩</button>)}
+                    </div>
+                  }>
                   {(loading.trendTrafficChart || loading.trendTraffic) ? <Spinner/> : <>
                     {svgChart(sessionsConvSVG(toArr(trendTrafficChart || trendTraffic)))}
                     <Legend items={[['Sessions TY',B.o2],['Sessions LY',B.sub,true],['Conv% TY',B.t2]]}/>
                   </>}
                 </ChartCard>
-
-                {/* ── Per-chart traffic period override ── */}
-                {(()=>{
-                  const effTP = cpTrafficChart || cpSales;
-                  return (
-                    <div style={{display:'flex',alignItems:'center',gap:4,marginBottom:10,padding:'4px 12px',background:'var(--card)',border:'1px solid var(--brd)',borderRadius:8,flexWrap:'wrap'}}>
-                      <span style={{fontSize:9,fontWeight:700,color:'var(--txt3)',textTransform:'uppercase',letterSpacing:'.06em',marginRight:2,whiteSpace:'nowrap',flexShrink:0}}>Chart Period:</span>
-                      {EXEC_PERIODS_LIST.map(p => {
-                        const pv = EXEC_PERIOD_MAP[p];
-                        const isActive = effTP === pv;
-                        return (<button key={p} onClick={()=>setCpTrafficChart(pv)} style={{fontSize:9,fontWeight:700,padding:'2px 8px',borderRadius:4,cursor:'pointer',transition:'all .12s',border:`1px solid ${isActive?B.b2:'var(--brd)'}`,background:isActive?`${B.b2}22`:'transparent',color:isActive?B.b2:'var(--txt3)'}}>{p}</button>);
-                      })}
-                      {cpTrafficChart && cpTrafficChart !== cpSales && (
-                        <button onClick={()=>setCpTrafficChart(null)} style={{fontSize:9,fontWeight:600,padding:'2px 8px',borderRadius:4,cursor:'pointer',border:'1px solid var(--brd)',background:'transparent',color:'var(--txt3)',marginLeft:4}}>↩ sync</button>
-                      )}
-                    </div>
-                  );
-                })()}
                 <div style={{display:'flex',flexDirection:'column',gap:10}}>
                   <div style={{background:'var(--card2)',border:'1px solid var(--brd)',borderRadius:10,padding:'12px 14px'}}>
                     <div style={{fontSize:9,fontWeight:700,textTransform:'uppercase',letterSpacing:'.08em',color:'var(--txt3)',marginBottom:8}}>Traffic KPIs · MTD</div>
@@ -3090,7 +3107,16 @@ export default function Sales({ filters = {} }) {
               </div>
             )}
             <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:12,marginBottom:12}}>
-              <ChartCard title="Ad Efficiency — ACOS vs ROAS" badge={`${activePeriod} · TY vs LY`} error={errors.adEff}>
+              <ChartCard title="Ad Efficiency — ACOS vs ROAS" error={errors.adEff}
+                titleAddon={
+                  <div style={{display:'flex',alignItems:'center',gap:2}}>
+                    {EXEC_PERIODS_LIST.map(p => {
+                      const pv = EXEC_PERIOD_MAP[p];
+                      const isAct = activePeriod === pv;
+                      return (<button key={p} onClick={()=>setActivePeriod(pv)} style={{fontSize:8,fontWeight:700,padding:'1px 5px',borderRadius:3,cursor:'pointer',transition:'all .12s',border:`1px solid ${isAct?B.b2:'var(--brd)'}`,background:isAct?`${B.b2}22`:'transparent',color:isAct?B.b2:'var(--txt3)'}}>{p}</button>);
+                    })}
+                  </div>
+                }>
                 {loading.adEff ? <Spinner/> : svgChart(adQuadrantSVG(adEff))}
               </ChartCard>
               <ChartCard title="Competitor Price Watch" badge="Live · SP-API">
@@ -3147,7 +3173,16 @@ export default function Sales({ filters = {} }) {
             </div>
 
             {/* ── PROFITABILITY ── */}
-            <EpochLabel type="period" label="💰 Profitability" right="MTD"/>
+            <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',marginBottom:8,flexWrap:'wrap',gap:6}}>
+              <span style={{fontSize:13,fontWeight:700,color:'var(--txt)'}}>💰 Profitability</span>
+              <div style={{display:'flex',alignItems:'center',gap:3,flexWrap:'wrap'}}>
+                {EXEC_PERIODS_LIST.map(p => {
+                  const pv = EXEC_PERIOD_MAP[p];
+                  const isAct = activePeriod === pv;
+                  return (<button key={p} onClick={()=>setActivePeriod(pv)} style={{fontSize:9,fontWeight:700,padding:'2px 7px',borderRadius:4,cursor:'pointer',transition:'all .12s',border:`1px solid ${isAct?B.b2:'var(--brd)'}`,background:isAct?`${B.b2}22`:'transparent',color:isAct?B.b2:'var(--txt3)'}}>{p}</button>);
+                })}
+              </div>
+            </div>
             <div style={{display:'grid',gridTemplateColumns:'1fr 1fr 1fr',gap:12,marginBottom:12}}>
               {(() => {
                 const mtdP=periodCols?.['MTD']||{};
