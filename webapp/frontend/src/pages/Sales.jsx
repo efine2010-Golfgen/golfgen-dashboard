@@ -833,9 +833,9 @@ function Spinner() {
   );
 }
 
-function ChartCard({ title, badge, children, noMargin, error, headerRight, titleAddon }) {
+function ChartCard({ title, badge, children, noMargin, error, headerRight, titleAddon, accent }) {
   return (
-    <div style={{background:'var(--surf)',border:'1px solid var(--brd)',borderRadius:14,padding:16,marginBottom:noMargin?0:12,transition:'background .3s'}}>
+    <div style={{background:'var(--surf)',border:'1px solid var(--brd)',borderRadius:14,padding:16,marginBottom:noMargin?0:12,transition:'background .3s',...(accent&&{borderTop:`3px solid ${accent}`})}}>
       <div style={{display:'grid',gridTemplateColumns:'1fr auto 1fr',alignItems:'center',marginBottom:14,gap:8}}>
         <div style={{display:'flex',alignItems:'center',gap:6,minWidth:0}}>
           <span style={{fontSize:13,fontWeight:700,color:'var(--txt)',whiteSpace:'nowrap'}}>{title}</span>
@@ -1236,7 +1236,7 @@ export default function Sales({ filters = {} }) {
         ));
 
         const EXEC_PERIODS = ['Today','Yesterday','WTD','MTD','YTD'];
-        const ACCENTS      = [B.o2, 'var(--brd2)', 'var(--brd2)', B.b2, B.t2];
+        const ACCENTS      = [B.o2, '#F5B731', B.t2, B.b2, B.b3];
 
         return (
           <>
@@ -1244,7 +1244,7 @@ export default function Sales({ filters = {} }) {
             {loading.periodCols
               ? <div style={{height:180,display:'flex',alignItems:'center',justifyContent:'center'}}><Spinner/></div>
               : (
-              <div style={{display:'flex',background:'var(--card2)',border:'1px solid var(--brd)',borderRadius:12,overflow:'hidden',marginBottom:14}}>
+              <div style={{display:'flex',background:'var(--card2)',border:'1px solid var(--brd)',borderTop:'3px solid #E8821E',borderRadius:12,overflow:'hidden',marginBottom:14}}>
                 {[
                   { lbl:'🟠 TY NOW', sub:`thru ${tod.snapshot_time||'today'} · ${fN(tyO)} orders`, val:f$(tyS), color:B.o2,
                     rows:[['Units', fN(tyU)], ['AUR', f$(tyAur)], ['Fees', f$(tod.amazon_fees||0)], ['Returns', f$(tod.returns_amount||0)], ['Conv %', fP(tod.conversion)]] },
@@ -1526,13 +1526,13 @@ export default function Sales({ filters = {} }) {
             {(() => {
               return cpSales === '7D' ? (
               <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:12,marginBottom:12}}>
-                <ChartCard title="Revenue & AUR Trend" error={errors.execTrend}>
+                <ChartCard title="Revenue & AUR Trend" error={errors.execTrend} accent={B.o2}>
                   {loading.execTrend ? <Spinner/> : <>
                     {svgChart(salesAurSVG(toArr(execTrend)))}
                     <Legend items={[['Sales TY','#2E6FBB'],['Sales LY','#5B9FD4',true],['AUR TY','#22c55e'],['AUR LY','#16a34a',true]]}/>
                   </>}
                 </ChartCard>
-                <ChartCard title="Units Sold — TY vs LY" error={errors.execTrend}>
+                <ChartCard title="Units Sold — TY vs LY" error={errors.execTrend} accent={B.b2}>
                   {loading.execTrend ? <Spinner/> : (() => {
                     const tArr = toArr(execTrend);
                     if (!tArr || tArr.length < 2) return <div style={{color:'var(--txt3)',padding:20,textAlign:'center',fontSize:12}}>No data</div>;
@@ -1555,13 +1555,13 @@ export default function Sales({ filters = {} }) {
               </div>
             ) : (
               <div style={{display:'flex',flexDirection:'column',gap:12,marginBottom:12}}>
-                <ChartCard title="Revenue & AUR Trend" error={errors.execTrend}>
+                <ChartCard title="Revenue & AUR Trend" error={errors.execTrend} accent={B.o2}>
                   {loading.execTrend ? <Spinner/> : <>
                     {svgChart(salesAurSVG(toArr(execTrend)))}
                     <Legend items={[['Sales TY','#2E6FBB'],['Sales LY','#5B9FD4',true],['AUR TY','#22c55e'],['AUR LY','#16a34a',true]]}/>
                   </>}
                 </ChartCard>
-                <ChartCard title="Units Sold — TY vs LY" error={errors.execTrend}>
+                <ChartCard title="Units Sold — TY vs LY" error={errors.execTrend} accent={B.b2}>
                   {loading.execTrend ? <Spinner/> : (() => {
                     const tArr = toArr(execTrend);
                     if (!tArr || tArr.length < 2) return <div style={{color:'var(--txt3)',padding:20,textAlign:'center',fontSize:12}}>No data</div>;
@@ -1617,7 +1617,7 @@ export default function Sales({ filters = {} }) {
                 );
               })()}
               <div style={{display:'grid',gridTemplateColumns:'3fr 1fr',gap:12}}>
-                <ChartCard title="Sessions & Conversion Rate" badge={execPeriod} error={errors.execTrendTraffic} noMargin>
+                <ChartCard title="Sessions & Conversion Rate" badge={execPeriod} error={errors.execTrendTraffic} noMargin accent={B.t2}>
                   {loading.execTrendTraffic ? <Spinner/> : <>
                     {svgChart(sessionsConvSVG(toArr(execTrendTraffic)))}
                     <Legend items={[['Sessions TY',B.o2],['Sessions LY',B.sub,true],['Conv% TY',B.t2]]}/>
@@ -1752,7 +1752,7 @@ export default function Sales({ filters = {} }) {
                 const cm=netRev-fees-adSpend-cogs;
                 const cmPct=netRev>0?cm/netRev*100:0;
                 return (
-                  <div style={{background:'var(--card)',border:'1px solid var(--brd)',borderRadius:12,padding:16}}>
+                  <div style={{background:'var(--card)',border:'1px solid var(--brd)',borderTop:'3px solid #F5B731',borderRadius:12,padding:16}}>
                     <div style={{fontSize:9,fontWeight:700,textTransform:'uppercase',letterSpacing:'.08em',color:'var(--txt3)',marginBottom:10}}>P&amp;L Summary · MTD</div>
                     {[['Gross Revenue',rev,B.t2,false],['− Returns &amp; Refunds',-ret,'#ef4444',true],['= Net Revenue',netRev,'var(--txt)',false],['− Amazon Fees',-fees,'#ef4444',true],['− Ad Spend',-adSpend,'#ef4444',true],['− COGS est. 35%',-cogs,'#ef4444',true]].map(([lbl,val,col,neg],idx)=>(
                       <div key={idx} style={{display:'flex',justifyContent:'space-between',padding:'6px 0',borderBottom:lbl.startsWith('=')?'1px solid var(--brd)':'1px solid rgba(26,47,74,.4)',alignItems:'center'}}>
@@ -1771,7 +1771,7 @@ export default function Sales({ filters = {} }) {
                   </div>
                 );
               })()}
-              <div style={{background:'var(--card)',border:'1px solid var(--brd)',borderRadius:12,padding:16}}>
+              <div style={{background:'var(--card)',border:'1px solid var(--brd)',borderTop:'3px solid #2E6FBB',borderRadius:12,padding:16}}>
                 <div style={{fontSize:9,fontWeight:700,textTransform:'uppercase',letterSpacing:'.08em',color:'var(--txt3)',marginBottom:10}}>Amazon Fee Breakdown · MTD</div>
                 {feeBreak && (feeBreak.items||Array.isArray(feeBreak)) ? (() => {
                   const items=feeBreak.items||feeBreak;
@@ -1811,7 +1811,7 @@ export default function Sales({ filters = {} }) {
                 const cmPct5=rev5>0?cm5/rev5*100:0, lyCmPct5=lyRev5>0?lyCm5/lyRev5*100:0;
                 const cmChg=lyCmPct5>0?cmPct5-lyCmPct5:null;
                 return (
-                  <div style={{background:'var(--card)',border:'1px solid var(--brd)',borderTop:`2px solid ${B.t2}`,borderRadius:12,padding:16}}>
+                  <div style={{background:'var(--card)',border:'1px solid var(--brd)',borderTop:`3px solid ${B.t2}`,borderRadius:12,padding:16}}>
                     <div style={{fontSize:9,fontWeight:700,textTransform:'uppercase',letterSpacing:'.08em',color:'var(--txt3)',marginBottom:10}}>Margin &amp; AUR · MTD</div>
                     <div style={{display:'flex',gap:14,alignItems:'flex-end',marginBottom:12,flexWrap:'wrap'}}>
                       <div><div style={{fontSize:9,color:'var(--txt3)',marginBottom:2}}>TY CM%</div><div style={{fontSize:26,fontWeight:800,color:B.t2,lineHeight:1}}>{cmPct5.toFixed(1)}%</div></div>
@@ -1887,7 +1887,7 @@ export default function Sales({ filters = {} }) {
         };
 
         const DAILY_PERIODS = ['Today','Yesterday','WTD','MTD','YTD'];
-        const ACCENTS = [B.o2, 'var(--brd2)', 'var(--brd2)', B.b2, B.t2];
+        const ACCENTS = [B.o2, '#F5B731', B.t2, B.b2, B.b3];
 
         return (
           <>
@@ -1932,7 +1932,7 @@ export default function Sales({ filters = {} }) {
             {loading.periodCols
               ? <div style={{height:180,display:'flex',alignItems:'center',justifyContent:'center'}}><Spinner/></div>
               : (
-              <div style={{display:'flex',background:'var(--card2)',border:'1px solid var(--brd)',borderRadius:12,overflow:'hidden',marginBottom:14}}>
+              <div style={{display:'flex',background:'var(--card2)',border:'1px solid var(--brd)',borderTop:'3px solid #E8821E',borderRadius:12,overflow:'hidden',marginBottom:14}}>
                 {[
                   { lbl:'🟠 TY NOW', sub:`thru ${tod.snapshot_time||'today'} · ${fN(tyO)} orders`, val:f$(tyS), color:B.o2,
                     rows:[['Units', fN(tyU)], ['AUR', f$(tyAur)], ['Fees', f$(tod.amazon_fees||0)], ['Returns', f$(tod.returns_amount||0)], ['Conv %', fP(tod.conversion)]] },
@@ -2594,7 +2594,7 @@ export default function Sales({ filters = {} }) {
 
               return effPeriod === '7D' ? (
                 <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:12,marginBottom:12}}>
-                  <ChartCard title={revChartMetric==='conversion'?'Conversion, AUR & Trend':'Revenue, AUR, & Conversion'} error={errors.trend} headerRight={revRight} titleAddon={pSelector}>
+                  <ChartCard title={revChartMetric==='conversion'?'Conversion, AUR & Trend':'Revenue, AUR, & Conversion'} error={errors.trend} headerRight={revRight} titleAddon={pSelector} accent={B.o2}>
                     {(loading.trendChart || loading.trend) ? <Spinner/> : <>
                       {svgChart(salesAurSVG(toArr(effTrend), 1100, 165, revChartMetric))}
                       <Legend items={revChartMetric==='conversion'
@@ -2602,13 +2602,13 @@ export default function Sales({ filters = {} }) {
                         : [['Sales TY','#2E6FBB'],['Sales LY','#5B9FD4',true],['AUR TY','#22c55e'],['AUR LY','#16a34a',true]]}/>
                     </>}
                   </ChartCard>
-                  <ChartCard title={unitsTitle} error={errors.trend} headerRight={unitsRight} titleAddon={pSelector}>
+                  <ChartCard title={unitsTitle} error={errors.trend} headerRight={unitsRight} titleAddon={pSelector} accent={B.b2}>
                     {(loading.trendChart || loading.trend) ? <Spinner/> : unitsBars(165)}
                   </ChartCard>
                 </div>
               ) : (
                 <div style={{display:'flex',flexDirection:'column',gap:12,marginBottom:12}}>
-                  <ChartCard title={revChartMetric==='conversion'?'Conversion, AUR & Trend':'Revenue, AUR, & Conversion'} error={errors.trend} headerRight={revRight} titleAddon={pSelector}>
+                  <ChartCard title={revChartMetric==='conversion'?'Conversion, AUR & Trend':'Revenue, AUR, & Conversion'} error={errors.trend} headerRight={revRight} titleAddon={pSelector} accent={B.o2}>
                     {(loading.trendChart || loading.trend) ? <Spinner/> : <>
                       {svgChart(salesAurSVG(toArr(effTrend), 1100, 165, revChartMetric))}
                       <Legend items={revChartMetric==='conversion'
@@ -2616,7 +2616,7 @@ export default function Sales({ filters = {} }) {
                         : [['Sales TY','#2E6FBB'],['Sales LY','#5B9FD4',true],['AUR TY','#22c55e'],['AUR LY','#16a34a',true]]}/>
                     </>}
                   </ChartCard>
-                  <ChartCard title={unitsTitle} error={errors.trend} headerRight={unitsRight} titleAddon={pSelector}>
+                  <ChartCard title={unitsTitle} error={errors.trend} headerRight={unitsRight} titleAddon={pSelector} accent={B.b2}>
                     {(loading.trendChart || loading.trend) ? <Spinner/> : unitsBars(190)}
                   </ChartCard>
                 </div>
@@ -2743,7 +2743,7 @@ export default function Sales({ filters = {} }) {
                 );
               })()}
               <div style={{display:'grid',gridTemplateColumns:'3fr 1fr',gap:12}}>
-                <ChartCard title="Sessions & Conversion Rate" error={errors.trendTraffic} noMargin
+                <ChartCard title="Sessions & Conversion Rate" error={errors.trendTraffic} noMargin accent={B.t2}
                   titleAddon={
                     <div style={{display:'flex',alignItems:'center',gap:2,flexWrap:'wrap',justifyContent:'center'}}>
                       {cpPills(cpTrafficChart||cpSales, v=>setCpTrafficChart(v), trafficCustom, setTrafficCustom, true)}
@@ -3069,7 +3069,7 @@ export default function Sales({ filters = {} }) {
                 </div>
               </div>
             )}
-            <ChartCard title="Ad Efficiency — ACOS vs ROAS" error={errors.adEff}
+            <ChartCard title="Ad Efficiency — ACOS vs ROAS" error={errors.adEff} accent={'#F5B731'}
               titleAddon={cpPills(activePeriod, setActivePeriod, null, null, true)}>
               {loading.adEff ? <Spinner/> : svgChart(adQuadrantSVG(adEff))}
             </ChartCard>
@@ -3121,7 +3121,7 @@ export default function Sales({ filters = {} }) {
                   </div>
                 );
               })()}
-              <div style={{background:'var(--card)',border:'1px solid var(--brd)',borderRadius:12,padding:16}}>
+              <div style={{background:'var(--card)',border:'1px solid var(--brd)',borderTop:'3px solid #2E6FBB',borderRadius:12,padding:16}}>
                 <div style={{fontSize:9,fontWeight:700,textTransform:'uppercase',letterSpacing:'.08em',color:'var(--txt3)',marginBottom:10}}>Amazon Fee Breakdown · MTD</div>
                 {feeBreak && (feeBreak.items||Array.isArray(feeBreak)) ? (() => {
                   const items=feeBreak.items||feeBreak;
@@ -3161,7 +3161,7 @@ export default function Sales({ filters = {} }) {
                 const cmPct5=rev5>0?cm5/rev5*100:0, lyCmPct5=lyRev5>0?lyCm5/lyRev5*100:0;
                 const cmChg=lyCmPct5>0?cmPct5-lyCmPct5:null;
                 return (
-                  <div style={{background:'var(--card)',border:'1px solid var(--brd)',borderTop:`2px solid ${B.t2}`,borderRadius:12,padding:16}}>
+                  <div style={{background:'var(--card)',border:'1px solid var(--brd)',borderTop:`3px solid ${B.t2}`,borderRadius:12,padding:16}}>
                     <div style={{fontSize:9,fontWeight:700,textTransform:'uppercase',letterSpacing:'.08em',color:'var(--txt3)',marginBottom:10}}>Margin & AUR · MTD</div>
                     <div style={{display:'flex',gap:14,alignItems:'flex-end',marginBottom:12,flexWrap:'wrap'}}>
                       <div><div style={{fontSize:9,color:'var(--txt3)',marginBottom:2}}>TY CM%</div><div style={{fontSize:26,fontWeight:800,color:B.t2,lineHeight:1}}>{cmPct5.toFixed(1)}%</div></div>
@@ -3469,7 +3469,7 @@ export default function Sales({ filters = {} }) {
       </div>
 
       {/* Sales $ + AUR Trend — dual Y-axis: Sales (left, blue) + AUR (right, green) */}
-      {viewTab !== 'Executive' && <ChartCard title="Sales $ & AUR Trend" badge={cpSales} error={errors.trend}>
+      {viewTab !== 'Executive' && <ChartCard title="Sales $ & AUR Trend" badge={cpSales} error={errors.trend} accent={B.o2}>
         {loading.trend ? <Spinner/> : <>
           {svgChart(salesAurSVG(toArr(trend)))}
           <Legend items={[['Sales TY','#2E6FBB'],['Sales LY','#5B9FD4',true],['AUR TY','#22c55e'],['AUR LY','#16a34a',true]]}/>
@@ -3501,7 +3501,7 @@ export default function Sales({ filters = {} }) {
         <div style={{height:1,background:'var(--brd)'}}/>
       </div>
       {/* Sessions trend + Conversion rate — dual Y-axis (sessions lines left, conv% bars right) */}
-      <ChartCard title="Sessions & Conversion Rate" badge={cpTraffic} error={errors.trendTraffic}>
+      <ChartCard title="Sessions & Conversion Rate" badge={cpTraffic} error={errors.trendTraffic} accent={B.t2}>
         {loading.trendTraffic ? <Spinner/> : <>
           {svgChart(sessionsConvSVG(toArr(trendTraffic)))}
           <Legend items={[['Sessions TY',B.o2],['Sessions LY',B.sub,true],['Conv% TY','#1AA392'],['Conv% LY','#1AA392',true]]}/>
@@ -3557,7 +3557,7 @@ export default function Sales({ filters = {} }) {
         );
       })()}
 
-      <ChartCard title="Conversion Funnel vs LY" noMargin error={errors.funnel}>
+      <ChartCard title="Conversion Funnel vs LY" noMargin error={errors.funnel} accent={B.t2}>
         {loading.funnel ? <Spinner/> : svgChart(funnelSVG(toArr(funnel)))}
       </ChartCard>
       </>}
@@ -3577,13 +3577,13 @@ export default function Sales({ filters = {} }) {
           <MetricCard label="TACOS" value={fP(m.tacos)} ly={fP(ly('tacos'))} delta={dp(m.tacos,ly('tacos'))} invert/>
         </>}
       </div>
-      <ChartCard title="Ad Efficiency — ACOS vs ROAS Quadrant" badge={`${activePeriod} · TY vs LY`} noMargin error={errors.adEff}>
+      <ChartCard title="Ad Efficiency — ACOS vs ROAS Quadrant" badge={`${activePeriod} · TY vs LY`} noMargin error={errors.adEff} accent={'#F5B731'}>
         {loading.adEff ? <Spinner/> : svgChart(adQuadrantSVG(adEff))}
       </ChartCard>
 
       {/* ══ INVENTORY HEALTH ════════════════════════════════════════ */}
       <SectionDivider label="Inventory Health"/>
-      <ChartCard title="Days of Supply" noMargin>
+      <ChartCard title="Days of Supply" noMargin accent={B.b3}>
         {(() => {
           const dos = m.dos || 0;
           const stockUnits = m.stock_units || 0;

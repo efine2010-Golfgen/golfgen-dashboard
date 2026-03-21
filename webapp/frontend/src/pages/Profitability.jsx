@@ -929,7 +929,7 @@ function PricingCoupons({ filters, showToast }) {
 function KpiCard({ label, value, color, sub, delta }) {
   return (
     <div className="kpi-card" style={{ position: "relative", overflow: "hidden" }}>
-      <div style={{ position: "absolute", top: 0, left: 0, right: 0, height: 2, background: color }} />
+      <div style={{ position: "absolute", top: 0, left: 0, right: 0, height: 3, background: color }} />
       <div style={SG(7, 700, "var(--txt3)")}>{label.toUpperCase()}</div>
       <div style={{ ...DM(20), color, lineHeight: 1, margin: "4px 0 2px" }}>{value}</div>
       {delta && <span style={SG(8, 700, delta.startsWith("▲") ? "#2ECFAA" : "#f87171")}>{delta}</span>}
@@ -944,7 +944,7 @@ function WfRow({ label, amount, pct, color, maxVal, isTotal, isSub }) {
     <div style={{
       display: "flex", alignItems: "center", gap: 10, padding: "6px 18px",
       borderBottom: "1px solid var(--brd)",
-      ...(isTotal ? { background: "rgba(14,31,45,0.04)", borderTop: "2px solid #2ECFAA" } : {}),
+      ...(isTotal ? { background: "rgba(14,31,45,0.04)", borderTop: "3px solid #2ECFAA" } : {}),
     }}>
       <span style={{ ...SG(isSub ? 8 : 9, isTotal ? 700 : 600), color: isSub ? "var(--txt3)" : undefined, width: 200, flexShrink: 0, paddingLeft: isSub ? 12 : 0 }}>{label}</span>
       <div style={{ flex: 1, height: 8, background: "var(--brd)", borderRadius: 4, overflow: "hidden" }}>

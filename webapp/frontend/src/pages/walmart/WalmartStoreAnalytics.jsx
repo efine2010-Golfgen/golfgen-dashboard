@@ -1158,7 +1158,7 @@ export function WalmartStoreAnalytics({ filters = {} }) {
               ].map((kpi) => (
                 <div key={kpi.label} style={{
                   padding: "10px", borderRadius: 8,
-                  background: "rgba(20,35,55,.4)", borderTop: `2px solid ${kpi.color}`,
+                  background: "rgba(20,35,55,.4)", borderTop: `3px solid ${kpi.color}`,
                 }}>
                   <div style={{ ...SG(8, 600), color: "var(--txt3)", textTransform: "uppercase", letterSpacing: ".06em" }}>{kpi.label}</div>
                   <div style={{ ...DM(16), color: "var(--txt)", marginTop: 4 }}>{kpi.value}</div>
@@ -1199,7 +1199,7 @@ export function WalmartStoreAnalytics({ filters = {} }) {
               ].map((kpi) => (
                 <div key={kpi.label} style={{
                   padding: "10px", borderRadius: 8,
-                  background: "rgba(20,35,55,.4)", borderTop: `2px solid ${kpi.color}`,
+                  background: "rgba(20,35,55,.4)", borderTop: `3px solid ${kpi.color}`,
                 }}>
                   <div style={{ ...SG(8, 600), color: "var(--txt3)", textTransform: "uppercase", letterSpacing: ".06em" }}>{kpi.label}</div>
                   <div style={{ ...DM(16), color: "var(--txt)", marginTop: 4 }}>{kpi.value}</div>

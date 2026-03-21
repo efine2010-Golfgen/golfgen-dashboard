@@ -392,7 +392,7 @@ export default function Products({ filters = {} }) {
           const accent = i === 0 ? "#2ECFAA" : i === 1 ? "#E87830" : i === 2 ? "#F5B731" : i === 3 ? "#5B9FD4" : "#a78bfa";
           const rank = i === 0 ? "🏆 #1 by Score" : i === 1 ? "🥈 #2 by Score" : i === 2 ? "🥉 #3 by Score" : `#${i+1} by Score`;
           return (
-            <div key={p.asin} style={{ background: "linear-gradient(145deg,var(--card),var(--card2))", borderRadius: 11, padding: "12px 14px", border: "1px solid var(--brd)", position: "relative", overflow: "hidden", cursor: "pointer", borderTop: `2px solid ${accent}` }}>
+            <div key={p.asin} style={{ background: "linear-gradient(145deg,var(--card),var(--card2))", borderRadius: 11, padding: "12px 14px", border: "1px solid var(--brd)", position: "relative", overflow: "hidden", cursor: "pointer", borderTop: `3px solid ${accent}` }}>
               <div style={{ ...SG(), fontSize: 7, fontWeight: 700, textTransform: "uppercase", letterSpacing: ".1em", color: "var(--txt3)", marginBottom: 5, display: "flex", alignItems: "center", justifyContent: "space-between" }}>
                 <span>{rank}</span><Badge color="teal">{p.grade}</Badge>
               </div>

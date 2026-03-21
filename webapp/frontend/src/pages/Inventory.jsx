@@ -183,8 +183,8 @@ function InvTrendChart({ data, velTrend }) {
 }
 
 /* ── Card shells ── */
-const Card = ({ children, style }) => (
-  <div style={{ background: "var(--surf)", border: "1px solid var(--brd)", borderRadius: 13, overflow: "hidden", marginBottom: 14, ...style }}>{children}</div>
+const Card = ({ children, style, accent }) => (
+  <div style={{ background: "var(--surf)", border: "1px solid var(--brd)", borderRadius: 13, overflow: "hidden", marginBottom: 14, ...(accent && { borderTop: `3px solid ${accent}` }), ...style }}>{children}</div>
 );
 const CardHdr = ({ title, children }) => (
   <div style={{ padding: "11px 16px", display: "flex", justifyContent: "space-between", alignItems: "center", borderBottom: "1px solid var(--brd)", flexWrap: "wrap", gap: 6 }}>
@@ -720,7 +720,7 @@ export default function Inventory({ filters = {} }) {
       {/* ══ 30-DAY TRENDS ══ */}
       <SecDiv label="30-Day Trends — Full Portfolio" />
       <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14, marginBottom: 14 }}>
-        <Card style={{ marginBottom: 0 }}>
+        <Card style={{ marginBottom: 0 }} accent="#E8821E">
           <CardHdr title="Daily Sales Velocity — Units Sold (30 Days)">
             <div style={{ display: "flex", gap: 14, alignItems: "center" }}>
               <LegItem color="#2ECFAA" label="Units/day" />
@@ -730,7 +730,7 @@ export default function Inventory({ filters = {} }) {
           </CardHdr>
           <VelChart data={data.velTrend} />
         </Card>
-        <Card style={{ marginBottom: 0 }}>
+        <Card style={{ marginBottom: 0 }} accent="#1AA392">
           <CardHdr title="Portfolio Buy Box % Trend (30 Days)">
             <div style={{ display: "flex", gap: 14, alignItems: "center" }}>
               <LegItem color="#2ECFAA" label="Weighted BB%" />
@@ -760,7 +760,7 @@ export default function Inventory({ filters = {} }) {
       <SecDiv label="Inventory Pipeline & Aging" />
       <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14, marginBottom: 14 }}>
         {/* Pipeline */}
-        <Card style={{ marginBottom: 0 }}>
+        <Card style={{ marginBottom: 0 }} accent="#2E6FBB">
           <CardHdr title="Inventory Pipeline — All Locations">
             <span style={{ ...SG({ fontSize: 10, color: "var(--txt3)" }) }}>Total tracked: <span style={{ color: "var(--txt)", fontWeight: 600 }}>{fmtNum(pipeTotal)}</span> units</span>
             <Badge type="ok">Healthy</Badge>
@@ -825,7 +825,7 @@ export default function Inventory({ filters = {} }) {
         </Card>
 
         {/* Aging */}
-        <Card style={{ marginBottom: 0 }}>
+        <Card style={{ marginBottom: 0 }} accent="#5B9FD4">
           <CardHdr title="Inventory Aging Distribution">
             {aging.total_ltsf > 0 && <span style={{ ...SG({ fontSize: 10, color: "var(--txt3)" }) }}>LTSF: <span style={{ color: "#f87171", fontWeight: 700 }}>${fmtNum(Math.round(aging.total_ltsf))}/mo</span></span>}
             {aging.aged_180_plus > 0 ? <Badge type="warn">Action recommended</Badge> : <Badge type="ok">Healthy</Badge>}
@@ -878,7 +878,7 @@ export default function Inventory({ filters = {} }) {
       <SecDiv label="FC Distribution & Health" />
       <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 14, marginBottom: 14 }}>
         {/* FC Distribution */}
-        <Card style={{ marginBottom: 0 }}>
+        <Card style={{ marginBottom: 0 }} accent="#5B9FD4">
           <div style={{ padding: "9px 14px", borderBottom: "1px solid var(--brd)", background: "var(--card2)", display: "flex", alignItems: "center", justifyContent: "space-between" }}>
             <span style={{ fontSize: 11, fontWeight: 700, color: "var(--txt)" }}>Amazon FC Distribution</span>
             <Badge type="ok">{data.fcDistribution?.length || 0} FCs</Badge>
@@ -902,7 +902,7 @@ export default function Inventory({ filters = {} }) {
         </Card>
 
         {/* Return Rate by SKU */}
-        <Card style={{ marginBottom: 0 }}>
+        <Card style={{ marginBottom: 0 }} accent="#1AA392">
           <div style={{ padding: "9px 14px", borderBottom: "1px solid var(--brd)", background: "var(--card2)", display: "flex", alignItems: "center", justifyContent: "space-between" }}>
             <span style={{ fontSize: 11, fontWeight: 700, color: "var(--txt)" }}>Return Rate by SKU (90 Days)</span>
             {data.returnRateTable?.length > 0 && <Badge type="ok">Avg {(data.returnRateTable.reduce((s, r) => s + r.rate, 0) / data.returnRateTable.length).toFixed(1)}%</Badge>}
@@ -930,7 +930,7 @@ export default function Inventory({ filters = {} }) {
         </Card>
 
         {/* Portfolio Health Metrics */}
-        <Card style={{ marginBottom: 0 }}>
+        <Card style={{ marginBottom: 0 }} accent="#2E6FBB">
           <div style={{ padding: "9px 14px", borderBottom: "1px solid var(--brd)", background: "var(--card2)", display: "flex", alignItems: "center", justifyContent: "space-between" }}>
             <span style={{ fontSize: 11, fontWeight: 700, color: "var(--txt)" }}>Portfolio Health Metrics</span>
             <div>
@@ -963,7 +963,7 @@ export default function Inventory({ filters = {} }) {
 
       {/* ══ REPLENISHMENT FORECAST ══ */}
       <SecDiv label="Replenishment Forecast & Risk Radar" />
-      <Card>
+      <Card accent="#F5B731">
         <CardHdr title="Reorder Planning — All SKUs by Risk">
           <span style={{ ...SG({ fontSize: 10, color: "var(--txt3)" }) }}>
             <span style={{ color: "#f87171" }}>{data.skus?.filter(s => s.risk === "critical").length || 0}</span> Critical ·{" "}
@@ -1006,7 +1006,7 @@ export default function Inventory({ filters = {} }) {
 
       {/* ══ REORDER TIMELINE ══ */}
       <SecDiv label="Reorder Timeline — When Each SKU Hits Reorder Point" />
-      <Card>
+      <Card accent="#F5B731">
         <CardHdr title="Days Until Reorder Point — Portfolio Timeline View">
           <div style={{ display: "flex", gap: 14, alignItems: "center" }}>
             <LegItem color="#2ECFAA" label="Days of cover remaining" />
