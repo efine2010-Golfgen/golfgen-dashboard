@@ -967,7 +967,6 @@ export default function Sales({ filters = {} }) {
   const [dismissedDailyInsights, setDismissedDailyInsights] = useState([]); // dismissed insight keys
   const [snoozedDailyInsights,  setSnoozedDailyInsights]  = useState({}); // {key: snoozeUntilMs}
   const [dailyAnomalyDismissed, setDailyAnomalyDismissed] = useState(false); // anomaly banner
-  const [pricingCache,          setPricingCache]          = useState(null); // amazon pricing data
 
   // ── Per-chart period overrides (Daily tab) ──
   const [cpTrendChart,      setCpTrendChart]     = useState(null); // null = follow cpSales
@@ -1084,15 +1083,6 @@ export default function Sales({ filters = {} }) {
   useEffect(() => {
     load('hmData', setHmData, 'hourly-heatmap', {...baseParams, days: 30});
   }, [divRaw, custRaw]);
-
-  // Fetch pricing cache for Competitor Price Watch (Daily tab)
-  useEffect(() => {
-    if (viewTab !== 'Daily') return;
-    fetch('/api/profitability/amazon-pricing')
-      .then(r => r.ok ? r.json() : null)
-      .then(d => { if (d && !d.error) setPricingCache(d); })
-      .catch(() => {});
-  }, [viewTab]);
 
   // Fetch waterfall/profitability metrics for P&L chart period
   useEffect(() => {
@@ -3083,60 +3073,6 @@ export default function Sales({ filters = {} }) {
               titleAddon={cpPills(activePeriod, setActivePeriod, null, null, true)}>
               {loading.adEff ? <Spinner/> : svgChart(adQuadrantSVG(adEff))}
             </ChartCard>
-            <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:12,marginBottom:12}}>
-              <ChartCard title="Competitor Price Watch" badge="Live · SP-API" noMargin>
-                {(() => {
-                  const pricing = pricingCache?.amazonPricing;
-                  if (!pricing || Object.keys(pricing).length === 0) {
-                    return <div style={{color:'var(--txt3)',fontSize:11,textAlign:'center',padding:20}}>No pricing data — sync pending</div>;
-                  }
-                  const rows = Object.entries(pricing).slice(0, 6).map(([asin, p]) => {
-                    const yourPrice = p.listPrice || p.landedPrice || 0;
-                    const bbPrice   = p.buyBoxPrice || yourPrice;
-                    const delta     = bbPrice - yourPrice;
-                    const wonBB     = Math.abs(delta) < 0.05 || bbPrice >= yourPrice * 0.99;
-                    return {asin, name: p.name || asin.slice(-8), yourPrice, bbPrice, delta, wonBB};
-                  });
-                  return (
-                    <>
-                      <table style={{width:'100%',borderCollapse:'collapse',fontSize:11}}>
-                        <thead>
-                          <tr>{['ASIN / SKU','Your Price','Buy Box','Δ','Status'].map(h=>(
-                            <th key={h} style={{fontSize:9,fontWeight:700,textTransform:'uppercase',letterSpacing:'.07em',color:'var(--txt3)',padding:'4px 8px',borderBottom:'1px solid var(--brd)',textAlign:'left'}}>{h}</th>
-                          ))}</tr>
-                        </thead>
-                        <tbody>
-                          {rows.map(r=>(
-                            <tr key={r.asin}>
-                              <td style={{padding:'6px 8px',borderBottom:'1px solid rgba(26,47,74,.4)'}}>
-                                <div style={{fontWeight:600,color:'var(--txt)'}}>{r.name}</div>
-                                <div style={{fontSize:9,color:B.sub}}>{r.asin}</div>
-                              </td>
-                              <td style={{padding:'6px 8px',borderBottom:'1px solid rgba(26,47,74,.4)',color:B.b3,fontWeight:600}}>{f$(r.yourPrice)}</td>
-                              <td style={{padding:'6px 8px',borderBottom:'1px solid rgba(26,47,74,.4)',color:'var(--txt2)'}}>{f$(r.bbPrice)}</td>
-                              <td style={{padding:'6px 8px',borderBottom:'1px solid rgba(26,47,74,.4)',fontWeight:700,
-                                color:Math.abs(r.delta)<0.05?B.o3:r.wonBB?'#4ade80':'#f87171'}}>
-                                {Math.abs(r.delta)<0.05?'= Tied':r.wonBB?`▲ ${f$(r.delta)}`:`▼ ${f$(Math.abs(r.delta))}`}
-                              </td>
-                              <td style={{padding:'6px 8px',borderBottom:'1px solid rgba(26,47,74,.4)'}}>
-                                <span style={{fontSize:9,padding:'1px 5px',borderRadius:3,fontWeight:700,
-                                  background:r.wonBB?'rgba(34,197,94,.15)':'rgba(239,68,68,.15)',
-                                  color:r.wonBB?'#4ade80':'#f87171',
-                                  border:`1px solid ${r.wonBB?'rgba(34,197,94,.3)':'rgba(239,68,68,.3)'}`}}>
-                                  {r.wonBB?'Won ✓':'Lost'}
-                                </span>
-                              </td>
-                            </tr>
-                          ))}
-                        </tbody>
-                      </table>
-                      {pricingCache?.lastSync && <div style={{fontSize:9,color:B.sub,marginTop:8}}>Last sync: {new Date(pricingCache.lastSync).toLocaleTimeString('en-US',{hour:'2-digit',minute:'2-digit',hour12:true})} CT · From pricing_sync.json cache</div>}
-                    </>
-                  );
-                })()}
-              </ChartCard>
-            </div>
-
             {/* ── PROFITABILITY ── */}
             <div style={{display:'grid',gridTemplateColumns:'1fr auto 1fr',alignItems:'center',gap:10,margin:'14px 0 8px'}}>
               <div style={{display:'flex',alignItems:'center',gap:10}}>

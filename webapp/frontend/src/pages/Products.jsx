@@ -225,6 +225,7 @@ export default function Products({ filters = {} }) {
   const [sortDir, setSortDir] = useState("desc");
   const [filterTag, setFilterTag] = useState("all");
   const [searchQ, setSearchQ] = useState("");
+  const [pricingCache, setPricingCache] = useState(null);
 
   const mpRaw = filters.marketplace || "US";
 
@@ -235,6 +236,13 @@ export default function Products({ filters = {} }) {
       setLoading(false);
     }).catch(() => setLoading(false));
   }, [days, filters.division, filters.customer]);
+
+  useEffect(() => {
+    fetch('/api/profitability/amazon-pricing')
+      .then(r => r.ok ? r.json() : null)
+      .then(d => { if (d && !d.error) setPricingCache(d); })
+      .catch(() => {});
+  }, []);
 
   /* ── Enrich products with computed fields ── */
   const enriched = products.map(p => {
@@ -732,6 +740,69 @@ export default function Products({ filters = {} }) {
               </tbody>
             </table>
           </div>
+        </div>
+      </Card>
+
+
+      {/* ── Competitor Price Watch ── */}
+      <Card style={{marginTop:8}}>
+        <CardHdr title="Competitor Price Watch">
+          <Badge color="teal">Live · SP-API</Badge>
+        </CardHdr>
+        <div style={{padding:'8px 16px 12px'}}>
+          {(() => {
+            const pricing = pricingCache?.amazonPricing;
+            if (!pricing || Object.keys(pricing).length === 0) {
+              return <div style={{color:'var(--txt3)',fontSize:11,textAlign:'center',padding:20}}>No pricing data — sync pending</div>;
+            }
+            const rows = Object.entries(pricing).slice(0, 12).map(([asin, p]) => {
+              const yourPrice = p.listPrice || p.landedPrice || 0;
+              const bbPrice   = p.buyBoxPrice || yourPrice;
+              const delta     = bbPrice - yourPrice;
+              const wonBB     = Math.abs(delta) < 0.05 || bbPrice >= yourPrice * 0.99;
+              return { asin, name: p.name || asin.slice(-8), yourPrice, bbPrice, delta, wonBB };
+            });
+            return (
+              <>
+                <table style={{width:'100%',borderCollapse:'collapse',fontSize:11}}>
+                  <thead>
+                    <tr>{['ASIN / SKU','Your Price','Buy Box','Δ','Status'].map(h => (
+                      <th key={h} style={{fontSize:9,fontWeight:700,textTransform:'uppercase',letterSpacing:'.07em',color:'var(--txt3)',padding:'6px 8px',borderBottom:'1px solid var(--brd)',textAlign:'left'}}>{h}</th>
+                    ))}</tr>
+                  </thead>
+                  <tbody>
+                    {rows.map(r => (
+                      <tr key={r.asin}>
+                        <td style={{padding:'7px 8px',borderBottom:'1px solid rgba(26,47,74,.4)'}}>
+                          <div style={{fontWeight:600,color:'var(--txt)'}}>{r.name}</div>
+                          <div style={{fontSize:9,color:'var(--txt3)'}}>{r.asin}</div>
+                        </td>
+                        <td style={{padding:'7px 8px',borderBottom:'1px solid rgba(26,47,74,.4)',color:'#7BAED0',fontWeight:600}}>{fmt$(r.yourPrice)}</td>
+                        <td style={{padding:'7px 8px',borderBottom:'1px solid rgba(26,47,74,.4)',color:'var(--txt2)'}}>{fmt$(r.bbPrice)}</td>
+                        <td style={{padding:'7px 8px',borderBottom:'1px solid rgba(26,47,74,.4)',fontWeight:700,
+                          color:Math.abs(r.delta)<0.05?'#F5B731':r.wonBB?'#4ade80':'#f87171'}}>
+                          {Math.abs(r.delta)<0.05?'= Tied':r.wonBB?`▲ ${fmt$(r.delta)}`:`▼ ${fmt$(Math.abs(r.delta))}`}
+                        </td>
+                        <td style={{padding:'7px 8px',borderBottom:'1px solid rgba(26,47,74,.4)'}}>
+                          <span style={{fontSize:9,padding:'2px 6px',borderRadius:4,fontWeight:700,
+                            background:r.wonBB?'rgba(34,197,94,.15)':'rgba(239,68,68,.15)',
+                            color:r.wonBB?'#4ade80':'#f87171',
+                            border:`1px solid ${r.wonBB?'rgba(34,197,94,.3)':'rgba(239,68,68,.3)'}`}}>
+                            {r.wonBB?'Won ✓':'Lost'}
+                          </span>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+                {pricingCache?.lastSync && (
+                  <div style={{fontSize:9,color:'var(--txt3)',marginTop:8}}>
+                    Last sync: {new Date(pricingCache.lastSync).toLocaleTimeString('en-US',{hour:'2-digit',minute:'2-digit',hour12:true})} CT · From pricing_sync.json cache
+                  </div>
+                )}
+              </>
+            );
+          })()}
         </div>
       </Card>
 
