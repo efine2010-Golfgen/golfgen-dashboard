@@ -736,6 +736,7 @@ def _sync_ads_data_inner():
             "report_type": "spAdvertisedProduct",
             "columns": ["date", "campaignId", "campaignName",
                         "adGroupId", "adGroupName",
+                        "advertisedAsin", "advertisedSku",
                         "impressions", "clicks", "spend",
                         "purchases7d", "unitsSoldClicks7d", "sales7d"],
             "group_by": ["advertised-product"],
@@ -1524,8 +1525,9 @@ def _handle_advertised_product_report(data):
                     continue
                 campaign_id = str(row.get("campaignId", f"ap_{idx}"))
                 campaign_name = row.get("campaignName", "")
-                asin = (row.get("asin") or row.get("advertisedAsin") or "").strip()
+                asin = (row.get("advertisedAsin") or row.get("asin") or row.get("advertised_asin") or "").strip()
                 if not asin:
+                    logger.debug(f"AdvertisedProduct: no ASIN in row keys {list(row.keys())}")
                     continue  # skip rows without ASIN
                 spend = float(row.get("spend", row.get("cost", 0)) or 0)
                 sales = float(row.get("sales7d", row.get("sales", 0)) or 0)
@@ -1756,6 +1758,7 @@ def ads_backfill_30days(days=90):
             "report_type": "spAdvertisedProduct",
             "columns": ["date", "campaignId", "campaignName",
                         "adGroupId", "adGroupName",
+                        "advertisedAsin", "advertisedSku",
                         "impressions", "clicks", "spend",
                         "purchases7d", "unitsSoldClicks7d", "sales7d"],
             "group_by": ["advertised-product"],
@@ -1986,6 +1989,7 @@ def ads_backfill_range(start_date: str, end_date: str):
             "report_type": "spAdvertisedProduct",
             "columns": ["date", "campaignId", "campaignName",
                         "adGroupId", "adGroupName",
+                        "advertisedAsin", "advertisedSku",
                         "impressions", "clicks", "spend",
                         "purchases7d", "unitsSoldClicks7d", "sales7d"],
             "group_by": ["advertised-product"],
