@@ -839,7 +839,7 @@ function ChartCard({ title, badge, children, noMargin, error, headerRight, title
       <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:14,gap:8}}>
         <div style={{display:'flex',alignItems:'center',gap:6,flex:1,minWidth:0,flexWrap:'wrap'}}>
           <span style={{fontSize:13,fontWeight:700,color:'var(--txt)',whiteSpace:'nowrap'}}>{title}</span>
-          {titleAddon && <div style={{display:'flex',flexDirection:'column',gap:3,flexShrink:0,alignItems:'flex-end'}}>{titleAddon}</div>}
+          {titleAddon && <div style={{display:'flex',flexDirection:'column',gap:3,flexShrink:0,alignItems:'center'}}>{titleAddon}</div>}
         </div>
         <div style={{display:'flex',alignItems:'center',gap:6,flexShrink:0}}>
           {headerRight}
@@ -1135,13 +1135,13 @@ export default function Sales({ filters = {} }) {
     const cb = {fontSize:compact?8:9,fontWeight:700,padding:compact?'1px 5px':'2px 7px',borderRadius:compact?3:4,cursor:'pointer',transition:'all .12s',border:`1px solid ${isC?B.o2:'var(--brd)'}`,background:isC?'rgba(249,115,22,.15)':'transparent',color:isC?B.o2:'var(--txt3)'};
     const di = (val, onChange) => <input type="date" value={val||''} onChange={onChange} style={{fontSize:9,padding:'3px 7px',borderRadius:4,border:'1px solid var(--brd)',background:'var(--surf)',color:'var(--txt)',cursor:'pointer',colorScheme:'dark'}}/>;
     return (
-      <div style={{display:'flex',flexDirection:'column',gap:3,alignItems:'flex-end'}}>
-        <div style={{display:'flex',alignItems:'center',gap:2,flexWrap:'wrap',justifyContent:'flex-end'}}>
+      <div style={{display:'flex',flexDirection:'column',gap:3,alignItems:'center'}}>
+        <div style={{display:'flex',alignItems:'center',gap:2,flexWrap:'wrap',justifyContent:'center'}}>
           {EXEC_PERIODS_LIST.map(p => { const pv=EXEC_PERIOD_MAP[p]; return (<button key={p} onClick={()=>setFn(pv)} style={pb(!isC&&activeVal===pv)}>{p}</button>); })}
           <button onClick={()=>setFn('custom')} style={cb}>Custom</button>
         </div>
         {isC && cust && setCust && (
-          <div style={{display:'flex',gap:4,alignItems:'center',flexWrap:'wrap',justifyContent:'flex-end'}}>
+          <div style={{display:'flex',gap:4,alignItems:'center',flexWrap:'wrap',justifyContent:'center'}}>
             {di(cust.start, e=>setCust(s=>({...s,start:e.target.value})))}
             <span style={{fontSize:9,color:'var(--txt3)'}}>–</span>
             {di(cust.end, e=>setCust(s=>({...s,end:e.target.value})))}
@@ -1198,17 +1198,7 @@ export default function Sales({ filters = {} }) {
   return (
     <div style={{fontFamily:"'Sora',-apple-system,BlinkMacSystemFont,sans-serif",color:'var(--txt)'}}>
 
-      {/* HEADER */}
-      <div style={{marginBottom:20}}>
-        <h2 style={{fontFamily:"'DM Serif Display',Georgia,serif",fontSize:22,fontWeight:400,margin:0,color:'var(--txt)'}}>{'Daily Sales'}</h2>
-        <div style={{fontSize:12,color:'var(--txt3)',marginTop:3,fontFamily:"'Space Grotesk',monospace"}}>
-          {mpRaw === 'CA' ? 'Amazon.ca (Canada)' : 'Amazon.com (US)'}
-          {' \u00B7 '}
-          {!divRaw ? 'All Divisions' : divRaw === 'golf' ? 'Golf (PGAT)' : 'Housewares'}
-          {custRaw ? ` \u00B7 ${custRaw.replace(/_/g,' ').replace(/\b\w/g,l=>l.toUpperCase())}` : ''}
-          {fellBack && <span style={{marginLeft:8,color:B.o3,fontStyle:'italic'}}>{m.period_label}</span>}
-        </div>
-      </div>
+
 
 
 
@@ -2072,10 +2062,14 @@ export default function Sales({ filters = {} }) {
             })()}
 
             {/* ── PERIOD SUMMARY ── */}
-            <div style={{display:'flex',alignItems:'center',gap:10,margin:'10px 0 8px'}}>
-              <div style={{fontSize:9,fontWeight:800,textTransform:'uppercase',letterSpacing:'.12em',padding:'3px 9px',borderRadius:99,background:'rgba(46,111,187,.15)',color:B.b3,border:'1px solid rgba(46,111,187,.25)',whiteSpace:'nowrap',flexShrink:0}}>📅 Period Summary</div>
-              <div style={{flex:1,height:1,background:'var(--brd)'}}/>
-              {cpPills(cpSales, v=>{setCpSales(v);setActivePeriod(v);}, salesCustom, setSalesCustom)}
+            <div style={{margin:'10px 0 8px'}}>
+              <div style={{display:'flex',alignItems:'center',gap:10,marginBottom:8}}>
+                <div style={{fontSize:9,fontWeight:800,textTransform:'uppercase',letterSpacing:'.12em',padding:'3px 9px',borderRadius:99,background:'rgba(46,111,187,.15)',color:B.b3,border:'1px solid rgba(46,111,187,.25)',whiteSpace:'nowrap',flexShrink:0}}>📅 Period Summary</div>
+                <div style={{flex:1,height:1,background:'var(--brd)'}}/>
+              </div>
+              <div style={{display:'flex',justifyContent:'center'}}>
+                {cpPills(cpSales, v=>{setCpSales(v);setActivePeriod(v);}, salesCustom, setSalesCustom)}
+              </div>
             </div>
             {periodCols && (
               <div style={{display:'grid',gridTemplateColumns:'repeat(5,1fr)',gap:10,marginBottom:20}}>
@@ -2487,10 +2481,14 @@ export default function Sales({ filters = {} }) {
 </>}
 
             {/* ── TRENDS ── */}
-            <div style={{display:'flex',alignItems:'center',gap:10,margin:'14px 0 10px'}}>
-              <div style={{fontSize:9,fontWeight:800,textTransform:'uppercase',letterSpacing:'.12em',padding:'3px 9px',borderRadius:99,background:'rgba(232,130,30,.12)',color:B.o3,border:'1px solid rgba(232,130,30,.2)',whiteSpace:'nowrap',flexShrink:0}}>📈 Trends</div>
-              <div style={{flex:1,height:1,background:'var(--brd)'}}/>
-              {cpPills(cpSales, v=>{setCpSales(v);setActivePeriod(v);}, salesCustom, setSalesCustom)}
+            <div style={{margin:'14px 0 10px'}}>
+              <div style={{display:'flex',alignItems:'center',gap:10,marginBottom:8}}>
+                <div style={{fontSize:9,fontWeight:800,textTransform:'uppercase',letterSpacing:'.12em',padding:'3px 9px',borderRadius:99,background:'rgba(232,130,30,.12)',color:B.o3,border:'1px solid rgba(232,130,30,.2)',whiteSpace:'nowrap',flexShrink:0}}>📈 Trends</div>
+                <div style={{flex:1,height:1,background:'var(--brd)'}}/>
+              </div>
+              <div style={{display:'flex',justifyContent:'center'}}>
+                {cpPills(cpSales, v=>{setCpSales(v);setActivePeriod(v);}, salesCustom, setSalesCustom)}
+              </div>
             </div>
 
             {/* ── Sales Overview KPIs ── */}
@@ -2528,8 +2526,8 @@ export default function Sales({ filters = {} }) {
 
               // ── Compact period pills (shared by both charts) ──
               const pSelector = (
-                <div style={{display:'flex',flexDirection:'column',gap:3,alignItems:'flex-end'}}>
-                  <div style={{display:'flex',alignItems:'center',gap:2,flexWrap:'wrap',justifyContent:'flex-end'}}>
+                <div style={{display:'flex',flexDirection:'column',gap:3,alignItems:'center'}}>
+                  <div style={{display:'flex',alignItems:'center',gap:2,flexWrap:'wrap',justifyContent:'center'}}>
                     {cpPills(effPeriod, v=>setCpTrendChart(v), salesCustom, setSalesCustom, true)}
                     {cpTrendChart && cpTrendChart !== cpSales && (
                       <button onClick={()=>setCpTrendChart(null)} title="Sync to global period" style={{fontSize:8,fontWeight:600,padding:'1px 5px',borderRadius:3,cursor:'pointer',border:'1px solid var(--brd)',background:'transparent',color:'var(--txt3)'}}>↩</button>
@@ -2757,8 +2755,8 @@ export default function Sales({ filters = {} }) {
               <div style={{display:'grid',gridTemplateColumns:'3fr 1fr',gap:12}}>
                 <ChartCard title="Sessions & Conversion Rate" error={errors.trendTraffic} noMargin
                   titleAddon={
-                    <div style={{display:'flex',flexDirection:'column',gap:3,alignItems:'flex-end'}}>
-                      <div style={{display:'flex',alignItems:'center',gap:2,flexWrap:'wrap',justifyContent:'flex-end'}}>
+                    <div style={{display:'flex',flexDirection:'column',gap:3,alignItems:'center'}}>
+                      <div style={{display:'flex',alignItems:'center',gap:2,flexWrap:'wrap',justifyContent:'center'}}>
                         {cpPills(cpTrafficChart||cpSales, v=>setCpTrafficChart(v), trafficCustom, setTrafficCustom, true)}
                         {cpTrafficChart && cpTrafficChart !== cpSales && (<button onClick={()=>setCpTrafficChart(null)} style={{fontSize:8,fontWeight:600,padding:'1px 5px',borderRadius:3,cursor:'pointer',border:'1px solid var(--brd)',background:'transparent',color:'var(--txt3)'}}>↩</button>)}
                       </div>
@@ -3142,10 +3140,14 @@ export default function Sales({ filters = {} }) {
             </div>
 
             {/* ── PROFITABILITY ── */}
-            <div style={{display:'flex',alignItems:'center',gap:10,margin:'14px 0 8px'}}>
-              <div style={{fontSize:9,fontWeight:800,textTransform:'uppercase',letterSpacing:'.12em',padding:'3px 9px',borderRadius:99,background:'rgba(46,111,187,.15)',color:B.b3,border:'1px solid rgba(46,111,187,.25)',whiteSpace:'nowrap',flexShrink:0}}>💰 Profitability</div>
-              <div style={{flex:1,height:1,background:'var(--brd)'}}/>
-              {cpPills(activePeriod, setActivePeriod, null, null)}
+            <div style={{margin:'14px 0 8px'}}>
+              <div style={{display:'flex',alignItems:'center',gap:10,marginBottom:8}}>
+                <div style={{fontSize:9,fontWeight:800,textTransform:'uppercase',letterSpacing:'.12em',padding:'3px 9px',borderRadius:99,background:'rgba(46,111,187,.15)',color:B.b3,border:'1px solid rgba(46,111,187,.25)',whiteSpace:'nowrap',flexShrink:0}}>💰 Profitability</div>
+                <div style={{flex:1,height:1,background:'var(--brd)'}}/>
+              </div>
+              <div style={{display:'flex',justifyContent:'center'}}>
+                {cpPills(activePeriod, setActivePeriod, null, null)}
+              </div>
             </div>
             <div style={{display:'grid',gridTemplateColumns:'1fr 1fr 1fr',gap:12,marginBottom:12}}>
               {(() => {

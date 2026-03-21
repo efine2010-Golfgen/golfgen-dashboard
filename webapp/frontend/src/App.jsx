@@ -155,9 +155,7 @@ function NavSystem({ permissions, mfaProtected, userMfaEnabled, division, custom
             </span>
           );
         })}
-        <div style={{ position: 'absolute', left: '50%', top: '50%', transform: 'translate(-50%, -50%)', zIndex: 2 }}>
-          <AskClaude activeTab={activeCategory} division={division} customer={customer} />
-        </div>
+
         <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', paddingRight: 12, flexShrink: 0 }}>
           <ThemeSelector />
         </div>
@@ -213,7 +211,7 @@ function AppShell({ user, isAdmin, allowed, mfaProtected, userMfaEnabled, filter
 
             {/* CENTER: title + subtitle + user badge */}
             <div className="hdr-mid">
-              <div className="hdr-title">GolfGen / EGB Analytics</div>
+              <div className="hdr-title" style={{textAlign:'center'}}>GolfGen / EGB Analytics</div>
               <div className="hdr-sub">Performance Dashboard</div>
               {user && (
                 <div style={{ display:'flex', alignItems:'center', justifyContent:'center', gap:4, marginTop:1 }}>
@@ -221,6 +219,9 @@ function AppShell({ user, isAdmin, allowed, mfaProtected, userMfaEnabled, filter
                   {isAdmin && <span className="admin-pill">ADMIN</span>}
                 </div>
               )}
+              <div style={{marginTop:4}}>
+                <AskClaude activeTab={activeCategory} division={division} customer={customer} />
+              </div>
             </div>
 
             {/* RIGHT: 2×3 button grid only */}
