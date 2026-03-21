@@ -114,6 +114,18 @@ function ThemeSelector() {
   );
 }
 
+/* ── Amazon Analytics sub-tabs (lifted to sticky header) ── */
+const AMAZON_TABS = [
+  { key: "exec-summary",    label: "SALES SUMMARY" },
+  { key: "item-performance",label: "ITEM PERFORMANCE" },
+  { key: "profitability",   label: "PROFITABILITY" },
+  { key: "fba-inventory",   label: "FBA INVENTORY" },
+  { key: "fba-shipments",   label: "FBA SHIPMENTS" },
+  { key: "advertising",     label: "ADVERTISING" },
+  { key: "forecasting",     label: "FORECASTING" },
+  { key: "item-master",     label: "ITEM MASTER" },
+];
+
 /* ── Navigation (subnav bar + sub-views row) ── */
 function NavSystem({ permissions, mfaProtected, userMfaEnabled }) {
   const location = useLocation();
@@ -194,6 +206,8 @@ function NavSystem({ permissions, mfaProtected, userMfaEnabled }) {
 function AppShell({ user, isAdmin, allowed, mfaProtected, userMfaEnabled, filters, division, customer, marketplace, handleFilterChange, handleMarketplaceChange, handleLogout }) {
   const location = useLocation();
   const activeTab = detectCategory(location.pathname);
+  const isAmazon = location.pathname === '/amazon-analytics';
+  const [amazonPage, setAmazonPage] = useState('exec-summary');
   return (
     <div className="app">
       {/* ── Sticky header wrapper ── */}
@@ -248,10 +262,12 @@ function AppShell({ user, isAdmin, allowed, mfaProtected, userMfaEnabled, filter
           </div>
         </div>
 
-        {/* ── Filter Bar (View filter + Ask Claude + theme selector) — Tier 2 ── */}
+        {/* ── Filter Bar (Ask Claude + theme selector) — Tier 2 ── */}
         <div className="filter-bar">
-          <span className="filter-lbl">View:</span>
-          <HierarchyFilter division={division} customer={customer} onChange={handleFilterChange} compact />
+          {!isAmazon && <>
+            <span className="filter-lbl">View:</span>
+            <HierarchyFilter division={division} customer={customer} onChange={handleFilterChange} compact />
+          </>}
           <AskClaude activeTab={activeTab} division={division} customer={customer} />
           <ThemeSelector />
         </div>
@@ -262,6 +278,50 @@ function AppShell({ user, isAdmin, allowed, mfaProtected, userMfaEnabled, filter
         {/* ── Accent stripe — below all header tiers ── */}
         <div className="stripe" />
 
+        {/* ── Amazon Analytics tab nav — sticky under stripe, only on /amazon-analytics ── */}
+        {isAmazon && (
+          <div className="amazon-tab-nav">
+            {AMAZON_TABS.map((t) => (
+              <button
+                key={t.key}
+                onClick={() => setAmazonPage(t.key)}
+                className={`amazon-tab-btn${amazonPage === t.key ? ' active' : ''}`}
+              >
+                {t.label}
+              </button>
+            ))}
+            <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 8, flexShrink: 0 }}>
+              <HierarchyFilter division={division} customer={customer} onChange={handleFilterChange} compact />
+              <div style={{ display: 'flex', alignItems: 'center' }}>
+                <button
+                  onClick={() => handleMarketplaceChange('US')}
+                  style={{
+                    height: 26, padding: '0 9px', borderRadius: '5px 0 0 5px',
+                    border: '1px solid var(--brd)', borderRight: 'none',
+                    background: marketplace === 'US' ? 'var(--acc1)' : 'var(--ibg)',
+                    color: marketplace === 'US' ? '#fff' : 'var(--txt3)',
+                    fontSize: 10, fontWeight: 700, fontFamily: "'Space Grotesk',monospace",
+                    cursor: 'pointer', transition: 'all .2s', letterSpacing: '.03em',
+                    display: 'inline-flex', alignItems: 'center', gap: 4,
+                  }}
+                >🇺🇸 US</button>
+                <button
+                  onClick={() => handleMarketplaceChange('CA')}
+                  style={{
+                    height: 26, padding: '0 9px', borderRadius: '0 5px 5px 0',
+                    border: '1px solid var(--brd)',
+                    background: marketplace === 'CA' ? 'var(--acc1)' : 'var(--ibg)',
+                    color: marketplace === 'CA' ? '#fff' : 'var(--txt3)',
+                    fontSize: 10, fontWeight: 700, fontFamily: "'Space Grotesk',monospace",
+                    cursor: 'pointer', transition: 'all .2s', letterSpacing: '.03em',
+                    display: 'inline-flex', alignItems: 'center', gap: 4,
+                  }}
+                >🇨🇦 CA</button>
+              </div>
+            </div>
+          </div>
+        )}
+
       </div>
 
       {/* ── Main Content ── */}
@@ -271,7 +331,7 @@ function AppShell({ user, isAdmin, allowed, mfaProtected, userMfaEnabled, filter
           <Route path="/exec-summary" element={<ExecSummary filters={filters} />} />
 
           {/* ── Amazon Analytics (wrapper with sub-tabs) ── */}
-          <Route path="/amazon-analytics" element={<AmazonAnalytics filters={filters} onMarketplaceChange={handleMarketplaceChange} />} />
+          <Route path="/amazon-analytics" element={<AmazonAnalytics filters={filters} onMarketplaceChange={handleMarketplaceChange} page={amazonPage} setPage={setAmazonPage} />} />
 
           {/* ── Walmart Analytics ── */}
           {allowed["retail-reporting"] !== false && <Route path="/walmart-analytics" element={<WalmartAnalytics filters={filters} />} />}

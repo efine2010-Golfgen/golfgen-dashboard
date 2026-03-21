@@ -108,6 +108,12 @@ body.fresh {
 .hnav-hidden { visibility:hidden; }
 .stripe { height:3px; background:linear-gradient(90deg,var(--s1),var(--s2),var(--s3)); transition:background .35s; }
 
+/* ── AMAZON ANALYTICS TAB NAV — sticky tier below stripe ── */
+.amazon-tab-nav { background:#0a1924; border-bottom:1px solid rgba(255,255,255,.1); padding:0 20px; display:flex; align-items:center; height:38px; overflow-x:auto; gap:2px; }
+.amazon-tab-btn { font-family:'Space Grotesk',monospace; font-size:10.5px; font-weight:600; background:none; border:none; border-bottom:2px solid transparent; cursor:pointer; padding:0 13px; height:100%; color:rgba(255,255,255,.45); white-space:nowrap; transition:all .15s; letter-spacing:.04em; text-transform:uppercase; }
+.amazon-tab-btn.active { color:var(--acc1); border-bottom-color:var(--acc1); }
+.amazon-tab-btn:hover:not(.active) { color:rgba(255,255,255,.8); }
+
 /* ── FILTER BAR — Tier 2 of unified header ────────────── */
 .filter-bar { background:#0a1924; border-top:1px solid rgba(255,255,255,.07); border-bottom:1px solid rgba(255,255,255,.07); padding:6px 20px; display:flex; align-items:center; gap:10px; }
 .filter-lbl { font-family:'Space Grotesk',monospace; font-size:10px; font-weight:600; text-transform:uppercase; letter-spacing:.08em; color:rgba(255,255,255,.45); white-space:nowrap; }
