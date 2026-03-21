@@ -46,7 +46,7 @@ def health():
     try:
         con = get_db_rw()
         # Table row counts
-        for tbl in ["orders", "daily_sales", "financial_events", "fba_inventory", "advertising", "ads_campaigns"]:
+        for tbl in ["orders", "daily_sales", "financial_events", "fba_inventory", "advertising", "ads_campaigns", "advertising_asin"]:
             try:
                 cnt = con.execute(f"SELECT COUNT(*) FROM {tbl}").fetchone()[0]
                 result["database"]["tables"][tbl] = cnt
