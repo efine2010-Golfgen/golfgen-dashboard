@@ -952,6 +952,7 @@ export default function Sales({ filters = {} }) {
   const [trendChart,        setTrendChart]       = useState(null);
   const [cpTrafficChart,    setCpTrafficChart]   = useState(null); // null = follow cpTraffic
   const [trendTrafficChart, setTrendTrafficChart]= useState(null);
+  const [unitsChartMetric,  setUnitsChartMetric]  = useState('units'); // 'units'|'sales'|'returns'
 
   // Data state
   const [metrics,     setMetrics]     = useState(null);
@@ -2220,9 +2221,8 @@ export default function Sales({ filters = {} }) {
                             Day Strength — Avg {metricLabel} per Week
                           </div>
                           <div style={{display:'flex',flexDirection:'column',gap:6}}>
-                            {dayRanks.map(({d, v}) => {
-                              const rank = dayRanks.findIndex(r=>r.d===d);
-                              const barPct = combinedMax > 0 ? (v/combinedMax)*100 : 0;
+                            {dayRanks.map(({d, v}, rank) => {
+                              const barPct = Math.min(100, combinedMax > 0 ? (v/combinedMax)*100 : 0);
                               const vsAvg = overallAvg > 0 ? ((v-overallAvg)/overallAvg*100) : 0;
                               const isBest = rank === 0;
                               const isWeakest = rank === 6;
@@ -2231,8 +2231,8 @@ export default function Sales({ filters = {} }) {
                               const rankEmoji = isBest ? '🥇' : rank === 1 ? '🥈' : rank === 2 ? '🥉' : null;
                               const w0avg = winProfiles[0]?.dayAvgs[d] ?? 0;
                               const w1avg = winProfiles[1]?.dayAvgs[d] ?? null;
-                              const w0pct = combinedMax > 0 ? (w0avg/combinedMax)*100 : 0;
-                              const w1pct = w1avg != null && combinedMax > 0 ? (w1avg/combinedMax)*100 : 0;
+                              const w0pct = Math.min(100, combinedMax > 0 ? (w0avg/combinedMax)*100 : 0);
+                              const w1pct = Math.min(100, w1avg != null && combinedMax > 0 ? (w1avg/combinedMax)*100 : 0);
                               return (
                                 <div key={d} style={{display:'grid',gridTemplateColumns:'52px 1fr 76px 70px',gap:8,alignItems:'center',padding:'3px 0'}}>
                                   {/* Day label + medal */}
@@ -2372,9 +2372,6 @@ export default function Sales({ filters = {} }) {
               })()}
             </div>
 
-            {/* ── PERIOD METRICS ── */}
-            <EpochLabel type="period" label="📊 Period Metrics"/>
-
             {/* ── Sales Overview KPIs ── */}
             {(() => {
               // Compute projected EOM from MTD data for goal context on each card
@@ -2405,84 +2402,114 @@ export default function Sales({ filters = {} }) {
 
             {/* ── Revenue & AUR Trend + Units ── */}
             {(() => {
-              const effTrend = trendChart || trend;
+              const effTrend  = trendChart || trend;
               const effPeriod = cpTrendChart || cpSales;
+
+              // ── Compact period pills (shared by both charts) ──
+              const pSelector = (
+                <div style={{display:'flex',alignItems:'center',gap:2}}>
+                  {EXEC_PERIODS_LIST.map(p => {
+                    const pv = EXEC_PERIOD_MAP[p];
+                    const isAct = effPeriod === pv;
+                    return (
+                      <button key={p} onClick={()=>setCpTrendChart(pv)} style={{
+                        fontSize:8,fontWeight:700,padding:'1px 5px',borderRadius:3,cursor:'pointer',
+                        transition:'all .12s',
+                        border:`1px solid ${isAct?B.b2:'var(--brd)'}`,
+                        background:isAct?`${B.b2}22`:'transparent',
+                        color:isAct?B.b2:'var(--txt3)',
+                      }}>{p}</button>
+                    );
+                  })}
+                  {cpTrendChart && cpTrendChart !== cpSales && (
+                    <button onClick={()=>setCpTrendChart(null)} title="Sync to global period" style={{
+                      fontSize:8,fontWeight:600,padding:'1px 5px',borderRadius:3,cursor:'pointer',
+                      border:'1px solid var(--brd)',background:'transparent',color:'var(--txt3)',
+                    }}>↩</button>
+                  )}
+                </div>
+              );
+
+              // ── Metric toggle + period pills for Units chart ──
+              const unitsRight = (
+                <div style={{display:'flex',alignItems:'center',gap:4}}>
+                  <div style={{display:'flex',alignItems:'center',gap:2}}>
+                    {[['Units','units'],['$ Sold','sales'],['Return U','returns']].map(([lbl,key]) => (
+                      <button key={key} onClick={()=>setUnitsChartMetric(key)} style={{
+                        fontSize:8,fontWeight:700,padding:'1px 5px',borderRadius:3,cursor:'pointer',
+                        transition:'all .12s',
+                        border:`1px solid ${unitsChartMetric===key?B.b2:'var(--brd)'}`,
+                        background:unitsChartMetric===key?`${B.b2}22`:'transparent',
+                        color:unitsChartMetric===key?B.b2:'var(--txt3)',
+                      }}>{lbl}</button>
+                    ))}
+                  </div>
+                  <div style={{width:1,height:12,background:'var(--brd)'}}/>
+                  {pSelector}
+                </div>
+              );
+
+              // ── Shared bar chart renderer (H adapts to layout) ──
+              const unitsBars = (H) => {
+                const tArr = toArr(effTrend);
+                if (!tArr || tArr.length < 2) return <div style={{color:'var(--txt3)',padding:20,textAlign:'center',fontSize:12}}>No data</div>;
+                const isRet   = unitsChartMetric === 'returns';
+                const isSales = unitsChartMetric === 'sales';
+                const tyK     = isSales ? 'ty_sales'  : isRet ? 'returns'    : 'ty_units';
+                const lyK     = isSales ? 'ly_sales'  : isRet ? 'ly_returns' : 'ly_units';
+                const fmt     = isSales ? f$ : fN;
+                const tyColor = isRet ? 'rgba(251,146,60,.85)'  : B.b1;
+                const lyColor = isRet ? 'rgba(251,146,60,.30)'  : 'rgba(91,159,212,.35)';
+                const tyLabel = isSales ? 'TY $'       : isRet ? 'Returns TY' : 'TY Units';
+                const lyLabel = isSales ? 'LY $'       : isRet ? 'Returns LY' : 'LY Units';
+                const lyLegColor = isRet ? '#fb923c'   : '#5B9FD4';
+                const W=1100, pad={t:14,r:20,b:24,l:54};
+                const iw=W-pad.l-pad.r, ih=H-pad.t-pad.b, n=tArr.length;
+                const xB=i=>pad.l+((i+0.5)/n)*iw;
+                const uvArr=tArr.flatMap(d=>[d[tyK],d[lyK]]).filter(v=>v!=null&&v>=0);
+                const umx=Math.max(...uvArr,1);
+                const yU=v=>pad.t+ih-Math.min(1,Math.max(0,(v||0)/umx))*ih;
+                const bw=Math.max(3,Math.floor((iw/n)*0.35));
+                let s=`<svg width="100%" viewBox="0 0 ${W} ${H}" style="overflow:visible;display:block">`;
+                for(let i=0;i<=4;i++){
+                  const uval=umx/4*i, ya=yU(uval);
+                  s+=`<line x1="${pad.l}" y1="${ya.toFixed(1)}" x2="${W-pad.r}" y2="${ya.toFixed(1)}" stroke="#1a2f4a" stroke-width="0.5"/>`;
+                  s+=`<text x="${pad.l-5}" y="${(ya+4).toFixed(1)}" text-anchor="end" font-size="9" fill="#5b7fa0">${fmt(uval)}</text>`;
+                }
+                const step=Math.max(1,Math.floor(n/7));
+                tArr.forEach((d,i)=>{if(i%step===0||i===n-1)s+=`<text x="${xB(i).toFixed(1)}" y="${H-4}" text-anchor="middle" font-size="8" fill="#374f66">${d.date?d.date.slice(5):''}</text>`;});
+                tArr.forEach((d,i)=>{if((d[lyK]||0)>0){const bh=Math.max(2,(d[lyK]/umx)*ih);s+=`<rect x="${xB(i).toFixed(1)}" y="${yU(d[lyK]).toFixed(1)}" width="${bw.toFixed(1)}" height="${bh.toFixed(1)}" fill="${lyColor}" rx="2"/>`;}});
+                tArr.forEach((d,i)=>{if((d[tyK]||0)>0){const bh=Math.max(2,(d[tyK]/umx)*ih);s+=`<rect x="${(xB(i)-bw).toFixed(1)}" y="${yU(d[tyK]).toFixed(1)}" width="${bw.toFixed(1)}" height="${bh.toFixed(1)}" fill="${tyColor}" rx="2"/>`;}});
+                return <>{svgChart(s+'</svg>')}<Legend items={[[tyLabel, isRet?'#fb923c':B.b1],[lyLabel, lyLegColor, true]]}/></>;
+              };
+
+              const unitsTitle = unitsChartMetric==='sales'   ? '$ Sales — TY vs LY'
+                               : unitsChartMetric==='returns' ? 'Return Units — TY vs LY'
+                               : 'Units Sold — TY vs LY';
+
               return effPeriod === '7D' ? (
                 <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:12,marginBottom:12}}>
-                  <ChartCard title="Revenue & AUR Trend" error={errors.trend}>
+                  <ChartCard title="Revenue & AUR Trend" error={errors.trend} headerRight={pSelector}>
                     {(loading.trendChart || loading.trend) ? <Spinner/> : <>
                       {svgChart(salesAurSVG(toArr(effTrend)))}
                       <Legend items={[['Sales TY','#2E6FBB'],['Sales LY','#5B9FD4',true],['AUR TY','#22c55e'],['AUR LY','#16a34a',true]]}/>
                     </>}
                   </ChartCard>
-                  <ChartCard title="Units Sold — TY vs LY" error={errors.trend}>
-                    {(loading.trendChart || loading.trend) ? <Spinner/> : (() => {
-                      const tArr = toArr(effTrend);
-                      if (!tArr || tArr.length < 2) return <div style={{color:'var(--txt3)',padding:20,textAlign:'center',fontSize:12}}>No data</div>;
-                      const W=1100,H=165,pad={t:14,r:20,b:24,l:54};
-                      const iw=W-pad.l-pad.r, ih=H-pad.t-pad.b, n=tArr.length;
-                      const xB=i=>pad.l+((i+0.5)/n)*iw;
-                      const uvArr=tArr.flatMap(d=>[d.ty_units,d.ly_units]).filter(v=>v!=null&&v>=0);
-                      const umx=Math.max(...uvArr,1);
-                      const yU=v=>pad.t+ih-Math.min(1,Math.max(0,(v||0)/umx))*ih;
-                      const bw=Math.max(3,Math.floor((iw/n)*0.35));
-                      let s=`<svg width="100%" viewBox="0 0 ${W} ${H}" style="overflow:visible;display:block">`;
-                      for(let i=0;i<=4;i++){const uval=umx/4*i,ya=yU(uval);s+=`<line x1="${pad.l}" y1="${ya.toFixed(1)}" x2="${W-pad.r}" y2="${ya.toFixed(1)}" stroke="#1a2f4a" stroke-width="0.5"/><text x="${pad.l-5}" y="${(ya+4).toFixed(1)}" text-anchor="end" font-size="9" fill="#5b7fa0">${fN(uval)}</text>`;}
-                      const step=Math.max(1,Math.floor(n/7));
-                      tArr.forEach((d,i)=>{if(i%step===0||i===n-1)s+=`<text x="${xB(i).toFixed(1)}" y="${H-4}" text-anchor="middle" font-size="8" fill="#374f66">${d.date?d.date.slice(5):''}</text>`;});
-                      tArr.forEach((d,i)=>{if((d.ly_units||0)>0){const bh=Math.max(2,(d.ly_units/umx)*ih);s+=`<rect x="${xB(i).toFixed(1)}" y="${yU(d.ly_units).toFixed(1)}" width="${bw.toFixed(1)}" height="${bh.toFixed(1)}" fill="rgba(91,159,212,.35)" rx="2"/>`;}});
-                      tArr.forEach((d,i)=>{if((d.ty_units||0)>0){const bh=Math.max(2,(d.ty_units/umx)*ih);s+=`<rect x="${(xB(i)-bw).toFixed(1)}" y="${yU(d.ty_units).toFixed(1)}" width="${bw.toFixed(1)}" height="${bh.toFixed(1)}" fill="${B.b1}" rx="2"/>`;}});
-                      return <>{svgChart(s+'</svg>')}<Legend items={[['TY Units',B.b1],['LY Units','#5B9FD4',true]]}/></>;
-                    })()}
+                  <ChartCard title={unitsTitle} error={errors.trend} headerRight={unitsRight}>
+                    {(loading.trendChart || loading.trend) ? <Spinner/> : unitsBars(165)}
                   </ChartCard>
                 </div>
               ) : (
                 <div style={{display:'flex',flexDirection:'column',gap:12,marginBottom:12}}>
-                  <ChartCard title="Revenue & AUR Trend" error={errors.trend}>
+                  <ChartCard title="Revenue & AUR Trend" error={errors.trend} headerRight={pSelector}>
                     {(loading.trendChart || loading.trend) ? <Spinner/> : <>
                       {svgChart(salesAurSVG(toArr(effTrend)))}
                       <Legend items={[['Sales TY','#2E6FBB'],['Sales LY','#5B9FD4',true],['AUR TY','#22c55e'],['AUR LY','#16a34a',true]]}/>
                     </>}
                   </ChartCard>
-                  <ChartCard title="Units Sold — TY vs LY" error={errors.trend}>
-                    {(loading.trendChart || loading.trend) ? <Spinner/> : (() => {
-                      const tArr = toArr(effTrend);
-                      if (!tArr || tArr.length < 2) return <div style={{color:'var(--txt3)',padding:20,textAlign:'center',fontSize:12}}>No data</div>;
-                      const W=1100,H=190,pad={t:14,r:20,b:24,l:54};
-                      const iw=W-pad.l-pad.r, ih=H-pad.t-pad.b, n=tArr.length;
-                      const xB=i=>pad.l+((i+0.5)/n)*iw;
-                      const uvArr=tArr.flatMap(d=>[d.ty_units,d.ly_units]).filter(v=>v!=null&&v>=0);
-                      const umx=Math.max(...uvArr,1);
-                      const yU=v=>pad.t+ih-Math.min(1,Math.max(0,(v||0)/umx))*ih;
-                      const bw=Math.max(3,Math.floor((iw/n)*0.35));
-                      let s=`<svg width="100%" viewBox="0 0 ${W} ${H}" style="overflow:visible;display:block">`;
-                      for(let i=0;i<=4;i++){const uval=umx/4*i,ya=yU(uval);s+=`<line x1="${pad.l}" y1="${ya.toFixed(1)}" x2="${W-pad.r}" y2="${ya.toFixed(1)}" stroke="#1a2f4a" stroke-width="0.5"/><text x="${pad.l-5}" y="${(ya+4).toFixed(1)}" text-anchor="end" font-size="9" fill="#5b7fa0">${fN(uval)}</text>`;}
-                      const step=Math.max(1,Math.floor(n/7));
-                      tArr.forEach((d,i)=>{if(i%step===0||i===n-1)s+=`<text x="${xB(i).toFixed(1)}" y="${H-4}" text-anchor="middle" font-size="8" fill="#374f66">${d.date?d.date.slice(5):''}</text>`;});
-                      tArr.forEach((d,i)=>{if((d.ly_units||0)>0){const bh=Math.max(2,(d.ly_units/umx)*ih);s+=`<rect x="${xB(i).toFixed(1)}" y="${yU(d.ly_units).toFixed(1)}" width="${bw.toFixed(1)}" height="${bh.toFixed(1)}" fill="rgba(91,159,212,.35)" rx="2"/>`;}});
-                      tArr.forEach((d,i)=>{if((d.ty_units||0)>0){const bh=Math.max(2,(d.ty_units/umx)*ih);s+=`<rect x="${(xB(i)-bw).toFixed(1)}" y="${yU(d.ty_units).toFixed(1)}" width="${bw.toFixed(1)}" height="${bh.toFixed(1)}" fill="${B.b1}" rx="2"/>`;}});
-                      return <>{svgChart(s+'</svg>')}<Legend items={[['TY Units',B.b1],['LY Units','#5B9FD4',true]]}/></>;
-                    })()}
+                  <ChartCard title={unitsTitle} error={errors.trend} headerRight={unitsRight}>
+                    {(loading.trendChart || loading.trend) ? <Spinner/> : unitsBars(190)}
                   </ChartCard>
-                </div>
-              );
-            })()}
-
-
-            {/* ── Per-chart period override ── */}
-            {(()=>{
-              const effP = cpTrendChart || cpSales;
-              return (
-                <div style={{display:'flex',alignItems:'center',gap:4,marginBottom:10,padding:'4px 12px',background:'var(--card)',border:'1px solid var(--brd)',borderRadius:8,flexWrap:'wrap'}}>
-                  <span style={{fontSize:9,fontWeight:700,color:'var(--txt3)',textTransform:'uppercase',letterSpacing:'.06em',marginRight:2,whiteSpace:'nowrap',flexShrink:0}}>Chart Period:</span>
-                  {EXEC_PERIODS_LIST.map(p => {
-                    const pv = EXEC_PERIOD_MAP[p];
-                    const isActive = effP === pv;
-                    return (<button key={p} onClick={()=>setCpTrendChart(pv)} style={{fontSize:9,fontWeight:700,padding:'2px 8px',borderRadius:4,cursor:'pointer',transition:'all .12s',border:`1px solid ${isActive?B.b2:'var(--brd)'}`,background:isActive?`${B.b2}22`:'transparent',color:isActive?B.b2:'var(--txt3)'}}>{p}</button>);
-                  })}
-                  {cpTrendChart && cpTrendChart !== cpSales && (
-                    <button onClick={()=>setCpTrendChart(null)} style={{fontSize:9,fontWeight:600,padding:'2px 8px',borderRadius:4,cursor:'pointer',border:'1px solid var(--brd)',background:'transparent',color:'var(--txt3)',marginLeft:4}}>↩ sync</button>
-                  )}
                 </div>
               );
             })()}
