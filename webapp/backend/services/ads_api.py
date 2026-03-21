@@ -538,6 +538,27 @@ def _ensure_ads_tables():
                 con.execute(f"ALTER TABLE {tbl} ADD COLUMN {col} VARCHAR DEFAULT {default}")
             except Exception:
                 pass  # column already exists
+    # Ensure ASIN-level advertising table exists
+    try:
+        con.execute("""
+            CREATE TABLE IF NOT EXISTS advertising_asin (
+                date DATE,
+                asin TEXT,
+                campaign_id TEXT,
+                campaign_name TEXT,
+                impressions INTEGER DEFAULT 0,
+                clicks INTEGER DEFAULT 0,
+                spend DOUBLE DEFAULT 0,
+                sales DOUBLE DEFAULT 0,
+                orders INTEGER DEFAULT 0,
+                units INTEGER DEFAULT 0,
+                division VARCHAR DEFAULT 'golf',
+                customer VARCHAR DEFAULT 'amazon',
+                platform VARCHAR DEFAULT 'sp_api'
+            )
+        """)
+    except Exception:
+        pass
     con.close()
     logger.info("Ads tables verified/created")
 
@@ -674,6 +695,8 @@ def _sync_ads_data_inner():
                         # Route to appropriate handler
                         if report_type == "spCampaigns":
                             _handle_campaign_report(data)
+                        elif report_type == "spAdvertisedProduct":
+                            _handle_advertised_product_report(data)
                         elif report_type == "spTargeting":
                             _handle_targeting_report(data)
                         elif report_type == "spSearchTerm":
@@ -708,6 +731,15 @@ def _sync_ads_data_inner():
                         "impressions", "clicks", "spend",
                         "purchases7d", "unitsSoldClicks7d", "sales7d"],
             "group_by": ["campaign"],
+        },
+        {
+            "report_type": "spAdvertisedProduct",
+            "columns": ["date", "campaignId", "campaignName",
+                        "adGroupId", "adGroupName",
+                        "asin", "sku",
+                        "impressions", "clicks", "spend",
+                        "purchases7d", "unitsSoldClicks7d", "sales7d"],
+            "group_by": ["advertiser"],
         },
         {
             "report_type": "spTargeting",
@@ -1473,6 +1505,62 @@ def _handle_campaign_report(data):
     logger.info(f"Campaign report handler: {inserted} inserted, {errors} errors out of {len(data)} rows")
 
 
+def _handle_advertised_product_report(data):
+    """Insert ASIN-level advertised product data into advertising table."""
+    if not isinstance(data, list):
+        logger.warning(f"AdvertisedProduct report: expected list, got {type(data)}")
+        return
+
+    con = get_db_rw()
+    con.execute("BEGIN TRANSACTION")
+    inserted = 0
+    errors = 0
+    try:
+        for idx, row in enumerate(data):
+            try:
+                date = row.get("date", "")
+                if not date:
+                    continue
+                campaign_id = str(row.get("campaignId", f"ap_{idx}"))
+                campaign_name = row.get("campaignName", "")
+                asin = (row.get("asin") or row.get("advertisedAsin") or "").strip()
+                if not asin:
+                    continue  # skip rows without ASIN
+                spend = float(row.get("spend", row.get("cost", 0)) or 0)
+                sales = float(row.get("sales7d", row.get("sales", 0)) or 0)
+                impressions = int(row.get("impressions", 0) or 0)
+                clicks = int(row.get("clicks", 0) or 0)
+                orders = int(row.get("purchases7d", row.get("purchases", 0)) or 0)
+                units = int(row.get("unitsSoldClicks7d", row.get("unitsSold", 0)) or 0)
+
+                con.execute(
+                    "DELETE FROM advertising_asin WHERE date = CAST(? AS DATE) AND asin = ? AND campaign_id = ?",
+                    [date, asin, campaign_id]
+                )
+                con.execute("""
+                    INSERT INTO advertising_asin
+                    (date, asin, campaign_id, campaign_name, impressions, clicks, spend, sales, orders, units,
+                     division, customer, platform)
+                    VALUES (CAST(? AS DATE), ?, ?, ?, ?, ?, ?, ?, ?, ?, 'golf', 'amazon', 'sp_api')
+                """, [date, asin, campaign_id, campaign_name,
+                      impressions, clicks, spend, sales, orders, units])
+                inserted += 1
+            except Exception as e:
+                errors += 1
+                if errors <= 5:
+                    logger.error(f"AdvertisedProduct insert error: {e} (row={row.get('date')})")
+        con.execute("COMMIT")
+    except Exception as e:
+        logger.error(f"AdvertisedProduct transaction error: {e}")
+        try:
+            con.execute("ROLLBACK")
+        except Exception:
+            pass
+    finally:
+        con.close()
+    logger.info(f"AdvertisedProduct handler: {inserted} inserted, {errors} errors out of {len(data)} rows")
+
+
 def _handle_targeting_report(data):
     """Insert keyword/targeting data into DuckDB with transaction wrapping."""
     if not isinstance(data, list):
@@ -1662,6 +1750,16 @@ def ads_backfill_30days(days=90):
                         "purchases7d", "unitsSoldClicks7d", "sales7d"],
             "group_by": ["campaign"],
             "handler": _handle_campaign_report,
+        },
+        {
+            "report_type": "spAdvertisedProduct",
+            "columns": ["date", "campaignId", "campaignName",
+                        "adGroupId", "adGroupName",
+                        "asin", "sku",
+                        "impressions", "clicks", "spend",
+                        "purchases7d", "unitsSoldClicks7d", "sales7d"],
+            "group_by": ["advertiser"],
+            "handler": _handle_advertised_product_report,
         },
         {
             "report_type": "spTargeting",
@@ -1883,6 +1981,16 @@ def ads_backfill_range(start_date: str, end_date: str):
                         "purchases7d", "unitsSoldClicks7d", "sales7d"],
             "group_by": ["campaign"],
             "handler": _handle_campaign_report,
+        },
+        {
+            "report_type": "spAdvertisedProduct",
+            "columns": ["date", "campaignId", "campaignName",
+                        "adGroupId", "adGroupName",
+                        "asin", "sku",
+                        "impressions", "clicks", "spend",
+                        "purchases7d", "unitsSoldClicks7d", "sales7d"],
+            "group_by": ["advertiser"],
+            "handler": _handle_advertised_product_report,
         },
         {
             "report_type": "spTargeting",

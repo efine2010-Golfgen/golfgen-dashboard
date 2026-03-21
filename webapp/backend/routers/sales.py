@@ -305,9 +305,10 @@ def _build_product_list(con, cutoff: str) -> list:
 
         ad_spend = 0
         try:
+            # advertising_asin has ASIN-level spend from spAdvertisedProduct reports
             ad_row = con.execute("""
                 SELECT COALESCE(SUM(spend), 0)
-                FROM advertising
+                FROM advertising_asin
                 WHERE asin = ? AND date >= ?
             """, [asin, cutoff]).fetchone()
             if ad_row and ad_row[0] > 0:

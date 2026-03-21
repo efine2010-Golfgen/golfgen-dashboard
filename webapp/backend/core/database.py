@@ -592,6 +592,26 @@ def _init_advertising_tables():
         )
     """)
 
+    # ASIN-level advertising data (separate from campaign-level)
+    con.execute("""
+        CREATE TABLE IF NOT EXISTS advertising_asin (
+            date DATE,
+            asin VARCHAR,
+            campaign_id VARCHAR,
+            campaign_name VARCHAR,
+            impressions BIGINT DEFAULT 0,
+            clicks BIGINT DEFAULT 0,
+            spend DOUBLE DEFAULT 0,
+            sales DOUBLE DEFAULT 0,
+            orders BIGINT DEFAULT 0,
+            units BIGINT DEFAULT 0,
+            division TEXT DEFAULT NULL,
+            customer TEXT DEFAULT NULL,
+            platform TEXT DEFAULT NULL,
+            PRIMARY KEY (date, asin, campaign_id)
+        )
+    """)
+
     con.execute("""
         CREATE TABLE IF NOT EXISTS ads_campaigns (
             date DATE,
