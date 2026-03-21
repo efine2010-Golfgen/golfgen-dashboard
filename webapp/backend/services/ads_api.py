@@ -738,7 +738,7 @@ def _sync_ads_data_inner():
                         "adGroupId", "adGroupName",
                         "impressions", "clicks", "spend",
                         "purchases7d", "unitsSoldClicks7d", "sales7d"],
-            "group_by": ["advertiser"],
+            "group_by": ["advertised-product"],
         },
         {
             "report_type": "spTargeting",
@@ -1758,7 +1758,7 @@ def ads_backfill_30days(days=90):
                         "adGroupId", "adGroupName",
                         "impressions", "clicks", "spend",
                         "purchases7d", "unitsSoldClicks7d", "sales7d"],
-            "group_by": ["advertiser"],
+            "group_by": ["advertised-product"],
             "handler": _handle_advertised_product_report,
         },
         {
@@ -1988,7 +1988,7 @@ def ads_backfill_range(start_date: str, end_date: str):
                         "adGroupId", "adGroupName",
                         "impressions", "clicks", "spend",
                         "purchases7d", "unitsSoldClicks7d", "sales7d"],
-            "group_by": ["advertiser"],
+            "group_by": ["advertised-product"],
             "handler": _handle_advertised_product_report,
         },
         {
