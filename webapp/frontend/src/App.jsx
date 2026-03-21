@@ -42,25 +42,25 @@ const CATEGORIES = [
     ],
   },
   {
-    key: "amazon-analytics", label: "Amazon Analytics",
+    key: "amazon-analytics", label: "Amazon",
     views: [
       { key: "amazon-analytics", path: "/amazon-analytics", label: "Amazon Analytics" },
     ],
   },
   {
-    key: "retail-reporting", label: "Walmart Analytics",
+    key: "retail-reporting", label: "Walmart",
     views: [
       { key: "walmart-analytics", path: "/walmart-analytics", label: "Walmart Analytics" },
     ],
   },
   {
-    key: "shopify-analytics", label: "Shopify Analytics",
+    key: "shopify-analytics", label: "Shopify",
     views: [
       { key: "shopify-analytics", path: "/shopify-analytics", label: "Shopify Analytics" },
     ],
   },
   {
-    key: "golfgen-command", label: "GolfGen Command Center",
+    key: "golfgen-command", label: "GG-EGB",
     views: [
       { key: "golfgen-command", path: "/golfgen-command-center", label: "GolfGen Command Center" },
     ],
@@ -127,7 +127,7 @@ const AMAZON_TABS = [
 ];
 
 /* ── Navigation (subnav bar + sub-views row) ── */
-function NavSystem({ permissions, mfaProtected, userMfaEnabled }) {
+function NavSystem({ permissions, mfaProtected, userMfaEnabled, division, customer }) {
   const location = useLocation();
   const navigate = useNavigate();
   const detected = detectCategory(location.pathname);
@@ -176,6 +176,9 @@ function NavSystem({ permissions, mfaProtected, userMfaEnabled }) {
             </span>
           );
         })}
+        <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', flexShrink: 0 }}>
+          <AskClaude activeTab={activeCategory} division={division} customer={customer} />
+        </div>
       </nav>
 
       {/* Secondary: sub-views for current category (only when > 1 view) */}
@@ -262,18 +265,17 @@ function AppShell({ user, isAdmin, allowed, mfaProtected, userMfaEnabled, filter
           </div>
         </div>
 
-        {/* ── Filter Bar (Ask Claude + theme selector) — Tier 2 ── */}
+        {/* ── Filter Bar (theme selector) — Tier 2 ── */}
         <div className="filter-bar">
           {!isAmazon && <>
             <span className="filter-lbl">View:</span>
             <HierarchyFilter division={division} customer={customer} onChange={handleFilterChange} compact />
           </>}
-          <AskClaude activeTab={activeTab} division={division} customer={customer} />
           <ThemeSelector />
         </div>
 
         {/* ── Sub-nav — Tier 3 ── */}
-        <NavSystem permissions={allowed} mfaProtected={mfaProtected} userMfaEnabled={userMfaEnabled} />
+        <NavSystem permissions={allowed} mfaProtected={mfaProtected} userMfaEnabled={userMfaEnabled} division={division} customer={customer} />
 
         {/* ── Accent stripe — below all header tiers ── */}
         <div className="stripe" />
