@@ -839,7 +839,7 @@ function ChartCard({ title, badge, children, noMargin, error, headerRight, title
       <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:14,gap:8}}>
         <div style={{display:'flex',alignItems:'center',gap:6,flex:1,minWidth:0,flexWrap:'wrap'}}>
           <span style={{fontSize:13,fontWeight:700,color:'var(--txt)',whiteSpace:'nowrap'}}>{title}</span>
-          {titleAddon && <div style={{display:'flex',alignItems:'center',gap:2,flexShrink:0}}>{titleAddon}</div>}
+          {titleAddon && <div style={{display:'flex',flexDirection:'column',gap:3,flexShrink:0,alignItems:'flex-end'}}>{titleAddon}</div>}
         </div>
         <div style={{display:'flex',alignItems:'center',gap:6,flexShrink:0}}>
           {headerRight}
@@ -976,6 +976,9 @@ export default function Sales({ filters = {} }) {
   const [revChartMetric,    setRevChartMetric]    = useState('revenue'); // 'revenue'|'conversion'
   const [cpWaterfall,       setCpWaterfall]       = useState('30D');
   const [waterfallMetrics,  setWaterfallMetrics]  = useState(null);
+  const [salesCustom,       setSalesCustom]       = useState({start:'',end:''});
+  const [waterfallCustom,   setWaterfallCustom]   = useState({start:'',end:''});
+  const [trafficCustom,     setTrafficCustom]     = useState({start:'',end:''});
 
   // Data state
   const [metrics,     setMetrics]     = useState(null);
@@ -999,7 +1002,7 @@ export default function Sales({ filters = {} }) {
   const [errors,      setErrors]      = useState({});
 
   const periodApiKey = PERIOD_API_MAP[activePeriod] || 'last_30d';
-  const chartSalesApi = CHART_PERIOD_API[cpSales];
+  const chartSalesApi = cpSales === 'custom' ? null : CHART_PERIOD_API[cpSales];
   const chartTrafficApi = CHART_PERIOD_API[cpTraffic];
 
   const baseParams = {
@@ -1039,13 +1042,20 @@ export default function Sales({ filters = {} }) {
     load('adEff',    setAdEff,    'ad-efficiency',  params);
   }, [divRaw, custRaw, activePeriod, viewTab, customStart, customEnd]);
 
-  // Fetch sales chart data when cpSales changes
+  // Fetch sales chart data when cpSales / custom range changes
   useEffect(() => {
-    const params = {...baseParams, period: chartSalesApi};
-    load('trend',   setTrend,   'trend',     params);
-    load('rolling', setRolling, 'rolling',   params);
-    load('yoy',     setYoy,     'monthly-yoy',baseParams);
-  }, [divRaw, custRaw, cpSales]);
+    if (cpSales === 'custom') {
+      if (!salesCustom.start || !salesCustom.end) return;
+      const p = {...baseParams, period:'custom', start:salesCustom.start, end:salesCustom.end};
+      load('trend', setTrend, 'trend', p);
+      load('rolling', setRolling, 'rolling', p);
+    } else {
+      const params = {...baseParams, period: chartSalesApi || 'last_30d'};
+      load('trend',   setTrend,   'trend',   params);
+      load('rolling', setRolling, 'rolling', params);
+    }
+    load('yoy', setYoy, 'monthly-yoy', baseParams);
+  }, [divRaw, custRaw, cpSales, salesCustom]); // eslint-disable-line
 
   // Fetch weekly heatmap — always 52W so any window selection works client-side
   useEffect(() => {
@@ -1084,9 +1094,14 @@ export default function Sales({ filters = {} }) {
 
   // Fetch waterfall/profitability metrics for P&L chart period
   useEffect(() => {
-    const api = CHART_PERIOD_API[cpWaterfall] || 'last_30d';
-    load('waterfallMetrics', setWaterfallMetrics, 'summary', {...baseParams, period: api});
-  }, [divRaw, custRaw, cpWaterfall]); // eslint-disable-line
+    if (cpWaterfall === 'custom') {
+      if (!waterfallCustom.start || !waterfallCustom.end) return;
+      load('waterfallMetrics', setWaterfallMetrics, 'summary', {...baseParams, period:'custom', start:waterfallCustom.start, end:waterfallCustom.end});
+    } else {
+      const api = CHART_PERIOD_API[cpWaterfall] || 'last_30d';
+      load('waterfallMetrics', setWaterfallMetrics, 'summary', {...baseParams, period: api});
+    }
+  }, [divRaw, custRaw, cpWaterfall, waterfallCustom]); // eslint-disable-line
 
 
   // ── Per-chart overrides: reset when global period changes ──
@@ -1094,15 +1109,47 @@ export default function Sales({ filters = {} }) {
   useEffect(() => { setCpTrafficChart(null); setTrendTrafficChart(null); }, [cpTraffic]);
   useEffect(() => {
     if (!cpTrendChart || cpTrendChart === cpSales) { setTrendChart(null); return; }
-    const api = CHART_PERIOD_API[cpTrendChart];
-    if (api) load('trendChart', setTrendChart, 'trend', {...baseParams, period: api});
-  }, [divRaw, custRaw, cpTrendChart]); // eslint-disable-line
+    if (cpTrendChart === 'custom') {
+      if (!salesCustom.start || !salesCustom.end) return;
+      load('trendChart', setTrendChart, 'trend', {...baseParams, period:'custom', start:salesCustom.start, end:salesCustom.end});
+    } else {
+      const api = CHART_PERIOD_API[cpTrendChart];
+      if (api) load('trendChart', setTrendChart, 'trend', {...baseParams, period: api});
+    }
+  }, [divRaw, custRaw, cpTrendChart, salesCustom]); // eslint-disable-line
   useEffect(() => {
-    if (!cpTrafficChart || cpTrafficChart === cpTraffic) { setTrendTrafficChart(null); return; }
-    const api = CHART_PERIOD_API[cpTrafficChart];
-    if (api) load('trendTrafficChart', setTrendTrafficChart, 'trend', {...baseParams, period: api});
-  }, [divRaw, custRaw, cpTrafficChart]); // eslint-disable-line
+    if (!cpTrafficChart || cpTrafficChart === cpSales) { setTrendTrafficChart(null); return; }
+    if (cpTrafficChart === 'custom') {
+      if (!trafficCustom.start || !trafficCustom.end) return;
+      load('trendTrafficChart', setTrendTrafficChart, 'trend', {...baseParams, period:'custom', start:trafficCustom.start, end:trafficCustom.end});
+    } else {
+      const api = CHART_PERIOD_API[cpTrafficChart];
+      if (api) load('trendTrafficChart', setTrendTrafficChart, 'trend', {...baseParams, period: api});
+    }
+  }, [divRaw, custRaw, cpTrafficChart, trafficCustom]); // eslint-disable-line
 
+  // Reusable period pills + Custom date-range picker
+  const cpPills = (activeVal, setFn, cust, setCust, compact=false) => {
+    const isC = activeVal === 'custom';
+    const pb = (a) => ({fontSize:compact?8:9,fontWeight:700,padding:compact?'1px 5px':'2px 7px',borderRadius:compact?3:4,cursor:'pointer',transition:'all .12s',border:`1px solid ${a?B.b2:'var(--brd)'}`,background:a?`${B.b2}22`:'transparent',color:a?B.b2:'var(--txt3)'});
+    const cb = {fontSize:compact?8:9,fontWeight:700,padding:compact?'1px 5px':'2px 7px',borderRadius:compact?3:4,cursor:'pointer',transition:'all .12s',border:`1px solid ${isC?B.o2:'var(--brd)'}`,background:isC?'rgba(249,115,22,.15)':'transparent',color:isC?B.o2:'var(--txt3)'};
+    const di = (val, onChange) => <input type="date" value={val||''} onChange={onChange} style={{fontSize:9,padding:'3px 7px',borderRadius:4,border:'1px solid var(--brd)',background:'var(--surf)',color:'var(--txt)',cursor:'pointer',colorScheme:'dark'}}/>;
+    return (
+      <div style={{display:'flex',flexDirection:'column',gap:3,alignItems:'flex-end'}}>
+        <div style={{display:'flex',alignItems:'center',gap:2,flexWrap:'wrap',justifyContent:'flex-end'}}>
+          {EXEC_PERIODS_LIST.map(p => { const pv=EXEC_PERIOD_MAP[p]; return (<button key={p} onClick={()=>setFn(pv)} style={pb(!isC&&activeVal===pv)}>{p}</button>); })}
+          <button onClick={()=>setFn('custom')} style={cb}>Custom</button>
+        </div>
+        {isC && cust && setCust && (
+          <div style={{display:'flex',gap:4,alignItems:'center',flexWrap:'wrap',justifyContent:'flex-end'}}>
+            {di(cust.start, e=>setCust(s=>({...s,start:e.target.value})))}
+            <span style={{fontSize:9,color:'var(--txt3)'}}>–</span>
+            {di(cust.end, e=>setCust(s=>({...s,end:e.target.value})))}
+          </div>
+        )}
+      </div>
+    );
+  };
   const handleViewTab = v => { setViewTab(v); setActivePeriod(PERIODS[v]?.[0] || ''); };
 
   const m = metrics || {};
@@ -2052,15 +2099,10 @@ export default function Sales({ filters = {} }) {
             })()}
 
             {/* ── PERIOD SUMMARY ── */}
-            <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',marginBottom:4,flexWrap:'wrap',gap:6}}>
-              <span style={{fontSize:13,fontWeight:700,color:'var(--txt)'}}>📅 Period Summary</span>
-              <div style={{display:'flex',alignItems:'center',gap:3,flexWrap:'wrap'}}>
-                {EXEC_PERIODS_LIST.map(p => {
-                  const pv = EXEC_PERIOD_MAP[p];
-                  const isAct = cpSales === pv;
-                  return (<button key={p} onClick={()=>{setCpSales(pv);setActivePeriod(pv);}} style={{fontSize:9,fontWeight:700,padding:'2px 7px',borderRadius:4,cursor:'pointer',transition:'all .12s',border:`1px solid ${isAct?B.b2:'var(--brd)'}`,background:isAct?`${B.b2}22`:'transparent',color:isAct?B.b2:'var(--txt3)'}}>{p}</button>);
-                })}
-              </div>
+            <div style={{display:'flex',alignItems:'center',gap:10,margin:'10px 0 8px'}}>
+              <div style={{fontSize:9,fontWeight:800,textTransform:'uppercase',letterSpacing:'.12em',padding:'3px 9px',borderRadius:99,background:'rgba(46,111,187,.15)',color:B.b3,border:'1px solid rgba(46,111,187,.25)',whiteSpace:'nowrap',flexShrink:0}}>📅 Period Summary</div>
+              <div style={{flex:1,height:1,background:'var(--brd)'}}/>
+              {cpPills(cpSales, v=>{setCpSales(v);setActivePeriod(v);}, salesCustom, setSalesCustom)}
             </div>
             {periodCols && (
               <div style={{display:'grid',gridTemplateColumns:'repeat(5,1fr)',gap:10,marginBottom:20}}>
@@ -2472,24 +2514,10 @@ export default function Sales({ filters = {} }) {
 </>}
 
             {/* ── TRENDS ── */}
-            <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',marginBottom:10,flexWrap:'wrap',gap:6}}>
-              <span style={{fontSize:13,fontWeight:700,color:'var(--txt)'}}>📈 Trends</span>
-              <div style={{display:'flex',alignItems:'center',gap:3,flexWrap:'wrap'}}>
-                {EXEC_PERIODS_LIST.map(p => {
-                  const pv = EXEC_PERIOD_MAP[p];
-                  const isAct = cpSales === pv;
-                  return (<button key={p} onClick={()=>{setCpSales(pv);setActivePeriod(pv);}} style={{fontSize:9,fontWeight:700,padding:'2px 7px',borderRadius:4,cursor:'pointer',transition:'all .12s',border:`1px solid ${isAct?B.b2:'var(--brd)'}`,background:isAct?`${B.b2}22`:'transparent',color:isAct?B.b2:'var(--txt3)'}}>{p}</button>);
-                })}
-                {(() => {
-                  const now2 = new Date();
-                  const activeP2 = EXEC_PERIODS_LIST.find(p => EXEC_PERIOD_MAP[p] === cpSales) || 'L30';
-                  const days2 = parseInt(activeP2.replace('L','')) || 30;
-                  const end2 = new Date(now2); end2.setDate(end2.getDate()-1);
-                  const start2 = new Date(end2); start2.setDate(start2.getDate()-(days2-1));
-                  const fmt2 = d => d.toLocaleDateString('en-US',{month:'short',day:'numeric'});
-                  return (<span style={{fontSize:9,color:B.b3,background:'rgba(46,111,187,.1)',border:'1px solid rgba(46,111,187,.2)',borderRadius:4,padding:'2px 7px',fontWeight:600,whiteSpace:'nowrap'}}>{fmt2(start2)} – {fmt2(end2)} · {days2}d</span>);
-                })()}
-              </div>
+            <div style={{display:'flex',alignItems:'center',gap:10,margin:'14px 0 10px'}}>
+              <div style={{fontSize:9,fontWeight:800,textTransform:'uppercase',letterSpacing:'.12em',padding:'3px 9px',borderRadius:99,background:'rgba(232,130,30,.12)',color:B.o3,border:'1px solid rgba(232,130,30,.2)',whiteSpace:'nowrap',flexShrink:0}}>📈 Trends</div>
+              <div style={{flex:1,height:1,background:'var(--brd)'}}/>
+              {cpPills(cpSales, v=>{setCpSales(v);setActivePeriod(v);}, salesCustom, setSalesCustom)}
             </div>
 
             {/* ── Sales Overview KPIs ── */}
@@ -2527,26 +2555,13 @@ export default function Sales({ filters = {} }) {
 
               // ── Compact period pills (shared by both charts) ──
               const pSelector = (
-                <div style={{display:'flex',alignItems:'center',gap:2}}>
-                  {EXEC_PERIODS_LIST.map(p => {
-                    const pv = EXEC_PERIOD_MAP[p];
-                    const isAct = effPeriod === pv;
-                    return (
-                      <button key={p} onClick={()=>setCpTrendChart(pv)} style={{
-                        fontSize:8,fontWeight:700,padding:'1px 5px',borderRadius:3,cursor:'pointer',
-                        transition:'all .12s',
-                        border:`1px solid ${isAct?B.b2:'var(--brd)'}`,
-                        background:isAct?`${B.b2}22`:'transparent',
-                        color:isAct?B.b2:'var(--txt3)',
-                      }}>{p}</button>
-                    );
-                  })}
-                  {cpTrendChart && cpTrendChart !== cpSales && (
-                    <button onClick={()=>setCpTrendChart(null)} title="Sync to global period" style={{
-                      fontSize:8,fontWeight:600,padding:'1px 5px',borderRadius:3,cursor:'pointer',
-                      border:'1px solid var(--brd)',background:'transparent',color:'var(--txt3)',
-                    }}>↩</button>
-                  )}
+                <div style={{display:'flex',flexDirection:'column',gap:3,alignItems:'flex-end'}}>
+                  <div style={{display:'flex',alignItems:'center',gap:2,flexWrap:'wrap',justifyContent:'flex-end'}}>
+                    {cpPills(effPeriod, v=>setCpTrendChart(v), salesCustom, setSalesCustom, true)}
+                    {cpTrendChart && cpTrendChart !== cpSales && (
+                      <button onClick={()=>setCpTrendChart(null)} title="Sync to global period" style={{fontSize:8,fontWeight:600,padding:'1px 5px',borderRadius:3,cursor:'pointer',border:'1px solid var(--brd)',background:'transparent',color:'var(--txt3)'}}>↩</button>
+                    )}
+                  </div>
                 </div>
               );
 
@@ -2671,13 +2686,9 @@ export default function Sales({ filters = {} }) {
                 <div style={{background:'var(--card)',border:'1px solid var(--brd)',borderRadius:12,padding:16,marginBottom:12}}>
                   <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',marginBottom:12,flexWrap:'wrap',gap:4}}>
                     <span style={{fontSize:10,fontWeight:700,color:'var(--txt2)'}}>P&L Waterfall</span>
-                    <div style={{display:'flex',alignItems:'center',gap:3,flexWrap:'wrap'}}>
-                      {EXEC_PERIODS_LIST.map(p => {
-                        const pv = EXEC_PERIOD_MAP[p];
-                        const isAct = cpWaterfall === pv;
-                        return (<button key={p} onClick={()=>setCpWaterfall(pv)} style={{fontSize:8,fontWeight:700,padding:'1px 5px',borderRadius:3,cursor:'pointer',transition:'all .12s',border:`1px solid ${isAct?B.b2:'var(--brd)'}`,background:isAct?`${B.b2}22`:'transparent',color:isAct?B.b2:'var(--txt3)'}}>{p}</button>);
-                      })}
-                      <span style={{fontSize:9,fontWeight:700,color:'var(--txt3)',background:'var(--card2)',border:'1px solid var(--brd)',borderRadius:4,padding:'1px 5px',marginLeft:4}}>Est. COGS</span>
+                    <div style={{display:'flex',alignItems:'center',gap:6,flexWrap:'wrap'}}>
+                      {cpPills(cpWaterfall, setCpWaterfall, waterfallCustom, setWaterfallCustom, true)}
+                      <span style={{fontSize:9,fontWeight:700,color:'var(--txt3)',background:'var(--card2)',border:'1px solid var(--brd)',borderRadius:4,padding:'1px 5px'}}>Est. COGS</span>
                     </div>
                   </div>
                   <div style={{display:'flex',flexDirection:'column',gap:6,padding:'4px 0'}}>
@@ -2716,12 +2727,8 @@ export default function Sales({ filters = {} }) {
                 <div style={{width:12,height:1,background:'var(--brd)'}}/>
                 <span style={{fontSize:9,fontWeight:700,textTransform:'uppercase',letterSpacing:'.14em',color:'var(--txt3)',whiteSpace:'nowrap'}}>Traffic &amp; Conversion</span>
                 <div style={{flex:1,height:1,background:'var(--brd)'}}/>
-                <div style={{display:'flex',alignItems:'center',gap:3,flexShrink:0}}>
-                  {EXEC_PERIODS_LIST.map(p => {
-                    const pv = EXEC_PERIOD_MAP[p];
-                    const isAct = cpSales === pv;
-                    return (<button key={p} onClick={()=>{setCpSales(pv);setActivePeriod(pv);}} style={{fontSize:8,fontWeight:700,padding:'1px 5px',borderRadius:3,cursor:'pointer',transition:'all .12s',border:`1px solid ${isAct?B.b2:'var(--brd)'}`,background:isAct?`${B.b2}22`:'transparent',color:isAct?B.b2:'var(--txt3)'}}>{p}</button>);
-                  })}
+                <div style={{flexShrink:0}}>
+                  {cpPills(cpSales, v=>{setCpSales(v);setActivePeriod(v);}, salesCustom, setSalesCustom, true)}
                 </div>
               </div>
               {(() => {
@@ -2777,14 +2784,11 @@ export default function Sales({ filters = {} }) {
               <div style={{display:'grid',gridTemplateColumns:'3fr 1fr',gap:12}}>
                 <ChartCard title="Sessions & Conversion Rate" error={errors.trendTraffic} noMargin
                   titleAddon={
-                    <div style={{display:'flex',alignItems:'center',gap:2}}>
-                      {EXEC_PERIODS_LIST.map(p => {
-                        const pv = EXEC_PERIOD_MAP[p];
-                        const effTP = cpTrafficChart || cpSales;
-                        const isActive = effTP === pv;
-                        return (<button key={p} onClick={()=>setCpTrafficChart(pv)} style={{fontSize:8,fontWeight:700,padding:'1px 5px',borderRadius:3,cursor:'pointer',transition:'all .12s',border:`1px solid ${isActive?B.b2:'var(--brd)'}`,background:isActive?`${B.b2}22`:'transparent',color:isActive?B.b2:'var(--txt3)'}}>{p}</button>);
-                      })}
-                      {cpTrafficChart && cpTrafficChart !== cpSales && (<button onClick={()=>setCpTrafficChart(null)} style={{fontSize:8,fontWeight:600,padding:'1px 5px',borderRadius:3,cursor:'pointer',border:'1px solid var(--brd)',background:'transparent',color:'var(--txt3)'}}>↩</button>)}
+                    <div style={{display:'flex',flexDirection:'column',gap:3,alignItems:'flex-end'}}>
+                      <div style={{display:'flex',alignItems:'center',gap:2,flexWrap:'wrap',justifyContent:'flex-end'}}>
+                        {cpPills(cpTrafficChart||cpSales, v=>setCpTrafficChart(v), trafficCustom, setTrafficCustom, true)}
+                        {cpTrafficChart && cpTrafficChart !== cpSales && (<button onClick={()=>setCpTrafficChart(null)} style={{fontSize:8,fontWeight:600,padding:'1px 5px',borderRadius:3,cursor:'pointer',border:'1px solid var(--brd)',background:'transparent',color:'var(--txt3)'}}>↩</button>)}
+                      </div>
                     </div>
                   }>
                   {(loading.trendTrafficChart || loading.trendTraffic) ? <Spinner/> : <>
@@ -3108,15 +3112,7 @@ export default function Sales({ filters = {} }) {
             )}
             <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:12,marginBottom:12}}>
               <ChartCard title="Ad Efficiency — ACOS vs ROAS" error={errors.adEff}
-                titleAddon={
-                  <div style={{display:'flex',alignItems:'center',gap:2}}>
-                    {EXEC_PERIODS_LIST.map(p => {
-                      const pv = EXEC_PERIOD_MAP[p];
-                      const isAct = activePeriod === pv;
-                      return (<button key={p} onClick={()=>setActivePeriod(pv)} style={{fontSize:8,fontWeight:700,padding:'1px 5px',borderRadius:3,cursor:'pointer',transition:'all .12s',border:`1px solid ${isAct?B.b2:'var(--brd)'}`,background:isAct?`${B.b2}22`:'transparent',color:isAct?B.b2:'var(--txt3)'}}>{p}</button>);
-                    })}
-                  </div>
-                }>
+                titleAddon={cpPills(activePeriod, setActivePeriod, null, null, true)}>
                 {loading.adEff ? <Spinner/> : svgChart(adQuadrantSVG(adEff))}
               </ChartCard>
               <ChartCard title="Competitor Price Watch" badge="Live · SP-API">
@@ -3173,15 +3169,10 @@ export default function Sales({ filters = {} }) {
             </div>
 
             {/* ── PROFITABILITY ── */}
-            <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',marginBottom:8,flexWrap:'wrap',gap:6}}>
-              <span style={{fontSize:13,fontWeight:700,color:'var(--txt)'}}>💰 Profitability</span>
-              <div style={{display:'flex',alignItems:'center',gap:3,flexWrap:'wrap'}}>
-                {EXEC_PERIODS_LIST.map(p => {
-                  const pv = EXEC_PERIOD_MAP[p];
-                  const isAct = activePeriod === pv;
-                  return (<button key={p} onClick={()=>setActivePeriod(pv)} style={{fontSize:9,fontWeight:700,padding:'2px 7px',borderRadius:4,cursor:'pointer',transition:'all .12s',border:`1px solid ${isAct?B.b2:'var(--brd)'}`,background:isAct?`${B.b2}22`:'transparent',color:isAct?B.b2:'var(--txt3)'}}>{p}</button>);
-                })}
-              </div>
+            <div style={{display:'flex',alignItems:'center',gap:10,margin:'14px 0 8px'}}>
+              <div style={{fontSize:9,fontWeight:800,textTransform:'uppercase',letterSpacing:'.12em',padding:'3px 9px',borderRadius:99,background:'rgba(46,111,187,.15)',color:B.b3,border:'1px solid rgba(46,111,187,.25)',whiteSpace:'nowrap',flexShrink:0}}>💰 Profitability</div>
+              <div style={{flex:1,height:1,background:'var(--brd)'}}/>
+              {cpPills(activePeriod, setActivePeriod, null, null)}
             </div>
             <div style={{display:'grid',gridTemplateColumns:'1fr 1fr 1fr',gap:12,marginBottom:12}}>
               {(() => {
