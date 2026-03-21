@@ -947,6 +947,12 @@ export default function Sales({ filters = {} }) {
   const [dailyAnomalyDismissed, setDailyAnomalyDismissed] = useState(false); // anomaly banner
   const [pricingCache,          setPricingCache]          = useState(null); // amazon pricing data
 
+  // ── Per-chart period overrides (Daily tab) ──
+  const [cpTrendChart,      setCpTrendChart]     = useState(null); // null = follow cpSales
+  const [trendChart,        setTrendChart]       = useState(null);
+  const [cpTrafficChart,    setCpTrafficChart]   = useState(null); // null = follow cpTraffic
+  const [trendTrafficChart, setTrendTrafficChart]= useState(null);
+
   // Data state
   const [metrics,     setMetrics]     = useState(null);
   const [periodCols,  setPeriodCols]  = useState(null);
@@ -1051,6 +1057,21 @@ export default function Sales({ filters = {} }) {
       .then(d => { if (d && !d.error) setPricingCache(d); })
       .catch(() => {});
   }, [viewTab]);
+
+
+  // ── Per-chart overrides: reset when global period changes ──
+  useEffect(() => { setCpTrendChart(null); setTrendChart(null); }, [cpSales]);
+  useEffect(() => { setCpTrafficChart(null); setTrendTrafficChart(null); }, [cpTraffic]);
+  useEffect(() => {
+    if (!cpTrendChart || cpTrendChart === cpSales) { setTrendChart(null); return; }
+    const api = CHART_PERIOD_API[cpTrendChart];
+    if (api) load('trendChart', setTrendChart, 'trend', {...baseParams, period: api});
+  }, [divRaw, custRaw, cpTrendChart]); // eslint-disable-line
+  useEffect(() => {
+    if (!cpTrafficChart || cpTrafficChart === cpTraffic) { setTrendTrafficChart(null); return; }
+    const api = CHART_PERIOD_API[cpTrafficChart];
+    if (api) load('trendTrafficChart', setTrendTrafficChart, 'trend', {...baseParams, period: api});
+  }, [divRaw, custRaw, cpTrafficChart]); // eslint-disable-line
 
   const handleViewTab = v => { setViewTab(v); setActivePeriod(PERIODS[v]?.[0] || ''); };
 
@@ -2078,64 +2099,245 @@ export default function Sales({ filters = {} }) {
                 );
               })()}
 
-            {/* ── Weekly 26-Week Heatmap ── */}
+            {/* ── Weekly 26-Week Heatmap (Units/Sales/Returns × Day of Week) ── */}
             {(()=>{
-              const toggleWindow=(w)=>{setHmWindows(prev=>{if(prev.includes(w)){return prev.length>1?prev.filter(x=>x!==w):prev;}const next=[...prev,w];return next.length>2?[next[1],next[2]]:next;});};
-              const pillBtn2=(key,label)=>(<button key={key} onClick={e=>{e.stopPropagation();toggleWindow(key);}} style={{padding:'3px 10px',borderRadius:6,fontSize:10,fontWeight:600,cursor:'pointer',transition:'all .15s',border:`1px solid ${hmWindows.includes(key)?B.b2:'var(--brd)'}`,background:hmWindows.includes(key)?`${B.b1}33`:'transparent',color:hmWindows.includes(key)?B.b3:'var(--txt3)'}}>{label}</button>);
-              const filteredHm=toArr(heatmap).filter(r=>hmWindows.some(w=>HM_WINDOWS_DEF[w].indices.includes(r.week)));
-              const totalWks=hmWindows.reduce((s,w)=>s+HM_WINDOWS_DEF[w].count,0);
-              const futureSvgCols=new Set();
-              const weekStartDates=[];
-              const metricFmt2=hmMetric2==='sales'?f$:fN;
-              const metricLabel2=hmMetric2==='units'?'Units':hmMetric2==='sales'?'Sales $':'Returns';
-              const windowLabel2=hmWindows.map(w=>HM_WINDOWS_DEF[w].label).join(' + ');
+              // Toggle a window in/out; enforce max 2 active
+              const toggleWindow = (w) => {
+                setHmWindows(prev => {
+                  if (prev.includes(w)) {
+                    return prev.length > 1 ? prev.filter(x => x !== w) : prev;
+                  }
+                  if (prev.length >= 2) return [prev[1], w]; // drop oldest, add new
+                  return [...prev, w];
+                });
+              };
+              const pillBtn2 = (key, label, range) => {
+                const active = hmWindows.includes(key);
+                const isFuture = range === 'future';
+                return (
+                  <button key={key} onClick={() => toggleWindow(key)} style={{
+                    padding:'3px 10px', borderRadius:6, fontSize:10, fontWeight:600, cursor:'pointer', transition:'all .15s',
+                    border:`1px solid ${active ? (isFuture ? '#22c55e' : B.b2) : 'var(--brd)'}`,
+                    background: active ? (isFuture ? 'rgba(34,197,94,.12)' : `${B.b1}33`) : 'transparent',
+                    color: active ? (isFuture ? '#4ade80' : B.b3) : 'var(--txt3)',
+                  }}>
+                    {isFuture ? '🌿 ' : ''}{label}
+                  </button>
+                );
+              };
+              // Build filtered + remapped heatmap data for selected windows
+              const allSelIdx = hmWindows.flatMap(w => HM_WINDOWS_DEF[w].indices);
+              const sortedIdx = [...allSelIdx].sort((a,b) => a-b); // ascending = oldest index first
+              const indexMap  = Object.fromEntries(sortedIdx.map((idx, pos) => [idx, pos]));
+              const filteredHm = toArr(heatmap)
+                .filter(d => allSelIdx.includes(d.week))
+                .map(d => ({...d, week: indexMap[d.week]}));
+              const totalWks = sortedIdx.length || 26;
+
+              // Compute which SVG columns are "future" (LY proxy) — SVG col w shows position TOTAL-1-w
+              const futureOrigIdx = new Set(['C','D'].flatMap(w => hmWindows.includes(w) ? HM_WINDOWS_DEF[w].indices : []));
+              const futureSvgCols = new Set(
+                sortedIdx.map((idx, pos) => futureOrigIdx.has(idx) ? (totalWks-1-pos) : -1).filter(p => p >= 0)
+              );
+
+              // Compute week-start dates for each SVG column (0=leftmost)
+              // week=N in backend means N weeks ago from today (Mon–Sun)
+              const todayJs = new Date();
+              const dow = todayJs.getDay(); // 0=Sun
+              const daysToMon = dow === 0 ? 6 : dow - 1;
+              const thisMonday = new Date(todayJs);
+              thisMonday.setDate(todayJs.getDate() - daysToMon);
+              const weekStartDates = Array.from({length:totalWks}, (_, w) => {
+                const pos = totalWks - 1 - w;           // position in sorted array (oldest first)
+                if (pos < 0 || pos >= sortedIdx.length) return '';
+                const weeksAgo = sortedIdx[pos];         // original backend index = weeks ago
+                const d = new Date(thisMonday);
+                d.setDate(thisMonday.getDate() - weeksAgo * 7);
+                return `${MONTHS[d.getMonth()]} ${d.getDate()}`;
+              });
+
+              // ── Day-of-week averages (recalculated for currently shown data) ──
+              const DAY_NAMES = ['Mon','Tue','Wed','Thu','Fri','Sat','Sun'];
+              // Per-window breakdowns for comparison
+              const winProfiles = hmWindows.map(wKey => {
+                const wIdxSet = new Set(HM_WINDOWS_DEF[wKey].indices);
+                const dayAvgs = DAY_NAMES.map((_, d) => {
+                  const rows = toArr(heatmap).filter(r => wIdxSet.has(r.week) && r.day === d);
+                  const vals = rows.map(r => r[hmMetric2] || 0);
+                  return vals.length ? vals.reduce((s,v)=>s+v,0)/vals.length : 0;
+                });
+                return { key: wKey, label: HM_WINDOWS_DEF[wKey].label, range: HM_WINDOWS_DEF[wKey].range, dayAvgs };
+              });
+              // Combined across all selected data
+              const combinedDayAvgs = DAY_NAMES.map((_, d) => {
+                const vals = filteredHm.filter(r => r.day === d).map(r => r[hmMetric2] || 0);
+                return vals.length ? vals.reduce((s,v)=>s+v,0)/vals.length : 0;
+              });
+              const combinedMax = Math.max(...combinedDayAvgs, 1);
+              const overallAvg = combinedDayAvgs.reduce((s,v)=>s+v,0) / 7;
+              // Rank days by combined avg
+              const dayRanks = combinedDayAvgs.map((v, d) => ({d, v})).sort((a,b)=>b.v-a.v);
+              const bestDay = dayRanks[0];
+              const worstDay = dayRanks[6];
+              const weekendAvg = ((combinedDayAvgs[5]||0)+(combinedDayAvgs[6]||0))/2;
+              const weekdayAvg = combinedDayAvgs.slice(0,5).reduce((s,v)=>s+v,0)/5;
+
+              const metricFmt = hmMetric2==='sales' ? f$ : fN;
+              const metricLabel = hmMetric2==='units' ? 'Units' : hmMetric2==='sales' ? 'Sales $' : 'Returns';
+              const windowLabel = hmWindows.map(w => HM_WINDOWS_DEF[w].label).join(' + ');
+
               return (
-                <div style={{background:'var(--surf)',border:'1px solid var(--brd)',borderRadius:14,padding:16,marginBottom:10}}>
+                <div style={{background:'var(--surf)',border:'1px solid var(--brd)',borderRadius:14,padding:16,marginBottom:12,transition:'background .3s'}}>
+                  {/* Controls row */}
                   <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:8,flexWrap:'wrap',gap:8}}>
-                    <span style={{fontSize:13,fontWeight:700,color:'var(--txt)'}}>{metricLabel2} — {windowLabel2} × Day of Week</span>
+                    <span style={{fontSize:13,fontWeight:700,color:'var(--txt)'}}>
+                      {metricLabel} — {windowLabel} × Day of Week
+                    </span>
                     <div style={{display:'flex',gap:4,alignItems:'center',flexWrap:'wrap'}}>
-                      {['D','C','A','B'].map(w=>pillBtn2(w,HM_WINDOWS_DEF[w].label))}
+                      {['D','C','A','B'].map(w => pillBtn2(w, HM_WINDOWS_DEF[w].label, HM_WINDOWS_DEF[w].range))}
                       <div style={{width:1,height:16,background:'var(--brd)',margin:'0 4px'}}/>
-                      {[['Units','units'],['Sales $','sales'],['Returns','returns']].map(([lbl,key])=>(<button key={key} onClick={e=>{e.stopPropagation();setHmMetric2(key);}} style={{padding:'3px 10px',borderRadius:6,fontSize:10,fontWeight:600,cursor:'pointer',transition:'all .15s',border:`1px solid ${hmMetric2===key?B.b2:'var(--brd)'}`,background:hmMetric2===key?`${B.b1}33`:'transparent',color:hmMetric2===key?B.b3:'var(--txt3)'}}>{lbl}</button>))}
+                      {[['Units','units'],['Sales $','sales'],['Returns','returns']].map(([lbl,key]) => (
+                        <button key={key} onClick={() => setHmMetric2(key)} style={{
+                          padding:'3px 10px',borderRadius:6,fontSize:10,fontWeight:600,cursor:'pointer',transition:'all .15s',
+                          border:`1px solid ${hmMetric2===key ? B.b2 : 'var(--brd)'}`,
+                          background: hmMetric2===key ? `${B.b1}33` : 'transparent',
+                          color: hmMetric2===key ? B.b3 : 'var(--txt3)',
+                        }}>{lbl}</button>
+                      ))}
                     </div>
                   </div>
-                  {errors.heatmap&&<div style={{padding:'10px 14px',color:'#fb923c',fontSize:11,background:'rgba(251,146,60,.08)',border:'1px solid rgba(251,146,60,.18)',borderRadius:8,marginBottom:8}}>⚠ {errors.heatmap}</div>}
-                  {loading.heatmap?<Spinner/>:svgChart(heatmapSVG(filteredHm,1100,totalWks,hmMetric2,futureSvgCols,weekStartDates))}
+
+                  {errors.heatmap && <div style={{padding:'10px 14px',color:'#fb923c',fontSize:11,background:'rgba(251,146,60,.08)',border:'1px solid rgba(251,146,60,.18)',borderRadius:8,marginBottom:8}}>⚠ {errors.heatmap}</div>}
+                  {loading.heatmap ? <Spinner/> : svgChart(heatmapSVG(filteredHm, 1100, totalWks, hmMetric2, futureSvgCols, weekStartDates))}
+
+                  {/* ── Day-of-Week Averages panel ── */}
+                  {!loading.heatmap && filteredHm.length > 0 && (
+                    <div style={{marginTop:12,padding:'12px 14px',background:'var(--card)',borderRadius:10,border:'1px solid var(--brd)'}}>
+                      <div style={{display:'flex',justifyContent:'space-between',alignItems:'flex-start',gap:16,flexWrap:'wrap'}}>
+                        {/* Left: bar chart of day averages */}
+                        <div style={{flex:'1 1 420px'}}>
+                          <div style={{fontSize:10,fontWeight:700,color:'var(--txt3)',textTransform:'uppercase',letterSpacing:'.08em',marginBottom:10}}>
+                            Day Strength — Avg {metricLabel} per Week
+                          </div>
+                          <div style={{display:'flex',flexDirection:'column',gap:6}}>
+                            {dayRanks.map(({d, v}) => {
+                              const rank = dayRanks.findIndex(r=>r.d===d);
+                              const barPct = combinedMax > 0 ? (v/combinedMax)*100 : 0;
+                              const vsAvg = overallAvg > 0 ? ((v-overallAvg)/overallAvg*100) : 0;
+                              const isBest = rank === 0;
+                              const isWeakest = rank === 6;
+                              const isWeekend = d >= 5;
+                              const barColor = isBest ? B.o2 : isWeakest ? '#475569' : isWeekend ? B.t2 : B.b2;
+                              const rankEmoji = isBest ? '🥇' : rank === 1 ? '🥈' : rank === 2 ? '🥉' : null;
+                              const w0avg = winProfiles[0]?.dayAvgs[d] ?? 0;
+                              const w1avg = winProfiles[1]?.dayAvgs[d] ?? null;
+                              const w0pct = combinedMax > 0 ? (w0avg/combinedMax)*100 : 0;
+                              const w1pct = w1avg != null && combinedMax > 0 ? (w1avg/combinedMax)*100 : 0;
+                              return (
+                                <div key={d} style={{display:'grid',gridTemplateColumns:'52px 1fr 76px 70px',gap:8,alignItems:'center',padding:'3px 0'}}>
+                                  {/* Day label + medal */}
+                                  <div style={{display:'flex',alignItems:'center',gap:5}}>
+                                    {rankEmoji
+                                      ? <span style={{fontSize:16,lineHeight:1,flexShrink:0}}>{rankEmoji}</span>
+                                      : <span style={{
+                                          width:18,height:18,borderRadius:'50%',flexShrink:0,
+                                          display:'inline-flex',alignItems:'center',justifyContent:'center',
+                                          fontSize:9,fontWeight:700,
+                                          background: isWeakest ? 'rgba(71,85,105,.25)' : 'rgba(91,159,212,.12)',
+                                          color: isWeakest ? '#64748b' : B.sub,
+                                        }}>{rank+1}</span>
+                                    }
+                                    <span style={{fontSize:13,fontWeight:700,color: isWeekend ? B.t3 : isBest ? B.o2 : 'var(--txt)'}}>{DAY_NAMES[d]}</span>
+                                  </div>
+                                  {/* Bar track */}
+                                  <div style={{position:'relative',height:22,borderRadius:5,background:'rgba(255,255,255,.04)'}}>
+                                    {winProfiles.length === 2 ? (
+                                      <>
+                                        <div style={{position:'absolute',left:0,top:2,height:8,borderRadius:3,width:`${w0pct.toFixed(1)}%`,background:winProfiles[0].range==='future'?'#22c55e':B.b2,opacity:.9}}/>
+                                        <div style={{position:'absolute',left:0,top:12,height:8,borderRadius:3,width:`${w1pct.toFixed(1)}%`,background:winProfiles[1].range==='future'?'#22c55e':B.b3,opacity:.8}}/>
+                                      </>
+                                    ) : (
+                                      <div style={{position:'absolute',left:0,top:3,height:16,borderRadius:4,width:`${barPct.toFixed(1)}%`,background:barColor,opacity:.85,transition:'width .3s'}}/>
+                                    )}
+                                  </div>
+                                  {/* Value */}
+                                  <div style={{fontSize:13,fontWeight:700,color: isBest ? B.o2 : 'var(--txt)',textAlign:'right'}}>{metricFmt(v)}</div>
+                                  {/* vs avg */}
+                                  <div style={{
+                                    fontSize:11,textAlign:'right',fontWeight: Math.abs(vsAvg) > 10 ? 700 : 500,
+                                    color: vsAvg > 10 ? '#4ade80' : vsAvg < -10 ? '#fb923c' : 'var(--txt3)',
+                                  }}>
+                                    {vsAvg >= 0 ? '+' : ''}{vsAvg.toFixed(0)}% avg
+                                  </div>
+                                </div>
+                              );
+                            })}
+                          </div>
+                          {/* Legend for 2-window comparison */}
+                          {winProfiles.length === 2 && (
+                            <div style={{display:'flex',gap:14,marginTop:10,flexWrap:'wrap'}}>
+                              {winProfiles.map((wp, i) => (
+                                <div key={wp.key} style={{display:'flex',alignItems:'center',gap:5,fontSize:9,color:'var(--txt3)'}}>
+                                  <div style={{width:16,height:5,borderRadius:2,background:wp.range==='future'?'#22c55e':(i===0?B.b2:B.b3)}}/>
+                                  {wp.label}
+                                </div>
+                              ))}
+                            </div>
+                          )}
+                        </div>
+
+                        {/* Right: insight callouts */}
+                        <div style={{flex:'0 0 220px',display:'flex',flexDirection:'column',gap:8}}>
+                          <div style={{fontSize:10,fontWeight:700,color:'var(--txt3)',textTransform:'uppercase',letterSpacing:'.08em',marginBottom:2}}>
+                            Key Insights
+                          </div>
+                          <div style={{background:'rgba(234,179,8,.08)',border:'1px solid rgba(234,179,8,.2)',borderRadius:8,padding:'8px 10px'}}>
+                            <div style={{fontSize:9,color:'#fbbf24',fontWeight:700,textTransform:'uppercase',marginBottom:3}}>🏆 Best Day</div>
+                            <div style={{fontSize:14,fontWeight:800,color:'var(--txt)'}}>{DAY_NAMES[bestDay.d]}</div>
+                            <div style={{fontSize:10,color:'var(--txt2)'}}>{metricFmt(bestDay.v)} avg · {bestDay.v>0&&overallAvg>0 ? `${((bestDay.v/overallAvg-1)*100).toFixed(0)}% above avg` : ''}</div>
+                          </div>
+                          <div style={{background:'rgba(100,116,139,.08)',border:'1px solid rgba(100,116,139,.2)',borderRadius:8,padding:'8px 10px'}}>
+                            <div style={{fontSize:9,color:'var(--txt3)',fontWeight:700,textTransform:'uppercase',marginBottom:3}}>Wknd vs Wkday</div>
+                            <div style={{display:'flex',gap:12,alignItems:'baseline'}}>
+                              <div>
+                                <div style={{fontSize:10,color:B.t3,fontWeight:700}}>Sa–Su</div>
+                                <div style={{fontSize:13,fontWeight:800,color:'var(--txt)'}}>{metricFmt(weekendAvg)}</div>
+                              </div>
+                              <div style={{fontSize:11,color:'var(--txt3)'}}>vs</div>
+                              <div>
+                                <div style={{fontSize:10,color:B.b3,fontWeight:700}}>M–F</div>
+                                <div style={{fontSize:13,fontWeight:800,color:'var(--txt)'}}>{metricFmt(weekdayAvg)}</div>
+                              </div>
+                            </div>
+                            {weekdayAvg > 0 && <div style={{fontSize:9,color:'var(--txt3)',marginTop:4}}>
+                              Weekend is {weekendAvg > weekdayAvg
+                                ? <span style={{color:'#4ade80',fontWeight:700}}>{((weekendAvg/weekdayAvg-1)*100).toFixed(0)}% stronger</span>
+                                : <span style={{color:'#fb923c',fontWeight:700}}>{((weekdayAvg/weekendAvg-1)*100).toFixed(0)}% weaker</span>} than weekdays
+                            </div>}
+                          </div>
+                          <div style={{background:'rgba(59,130,246,.06)',border:'1px solid rgba(59,130,246,.15)',borderRadius:8,padding:'8px 10px'}}>
+                            <div style={{fontSize:9,color:B.b3,fontWeight:700,textTransform:'uppercase',marginBottom:4}}>Day Spread</div>
+                            <div style={{display:'flex',gap:6,flexWrap:'wrap'}}>
+                              {dayRanks.slice(0,3).map(({d},i) => (
+                                <span key={d} style={{fontSize:9,padding:'2px 6px',borderRadius:99,
+                                  background: i===0?`${B.o2}22`:i===1?`${B.b2}22`:`${B.t2}22`,
+                                  color: i===0?B.o2:i===1?B.b3:B.t3,fontWeight:700}}>
+                                  #{i+1} {DAY_NAMES[d]}
+                                </span>
+                              ))}
+                            </div>
+                            <div style={{fontSize:9,color:'var(--txt3)',marginTop:5}}>
+                              Weakest: <span style={{color:'#fb923c',fontWeight:700}}>{DAY_NAMES[worstDay.d]}</span> ({metricFmt(worstDay.v)})
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  )}
                 </div>
               );
             })()}
 </>}
-
-            {/* ── PERIOD METRICS ── */}
-            <EpochLabel type="period" label="📊 Period Metrics"/>
-
-            {/* ── Sales Overview KPIs ── */}
-            {(() => {
-              // Compute projected EOM from MTD data for goal context on each card
-              const mtdKpi = periodCols?.['MTD'] || {};
-              const nowKpi = new Date();
-              const domKpi = nowKpi.getDate();
-              const daysInMoKpi = new Date(nowKpi.getFullYear(), nowKpi.getMonth()+1, 0).getDate();
-              const projSales = domKpi > 0 && mtdKpi.sales  > 0 ? f$((mtdKpi.sales  / domKpi) * daysInMoKpi) : null;
-              const projUnits = domKpi > 0 && mtdKpi.units  > 0 ? fN((mtdKpi.units  / domKpi) * daysInMoKpi) : null;
-              const estBadge = <span style={{fontSize:8,background:'rgba(245,158,11,.15)',color:B.o3,border:'1px solid rgba(245,158,11,.2)',borderRadius:3,padding:'1px 4px',marginLeft:4,verticalAlign:'middle'}}>⚠ Est.</span>;
-              const retRatePct = (mtdKpi.sales||0) > 0 ? ((mtdKpi.returns_amount||0)/(mtdKpi.sales||1)*100).toFixed(1) : null;
-              const feesPct = (mtdKpi.sales||0) > 0 ? ((Math.abs(mtdKpi.amazon_fees||0))/(mtdKpi.sales||1)*100).toFixed(1) : null;
-              return (
-                <div style={{display:'flex',gap:8,marginBottom:10,overflowX:'auto',paddingBottom:2}}>
-                  {loading.metrics ? <Spinner/> : <>
-                    <MetricCard label="Sales $"       value={f$(m.sales)}         ly={f$(ly('sales'))}         delta={dp(m.sales,ly('sales'))}         goal={projSales}  goalLabel="Proj EOM:"/>
-                    <MetricCard label="Unit Sales"    value={fN(m.unit_sales)}     ly={fN(ly('unit_sales'))}    delta={dp(m.unit_sales,ly('unit_sales'))} goal={projUnits}  goalLabel="Proj EOM:"/>
-                    <MetricCard label="AUR"           value={f$(m.aur)}            ly={f$(ly('aur'))}           delta={dp(m.aur,ly('aur'))}/>
-                    <MetricCard label={<>COGS{estBadge}</>}          value={f$(m.cogs)}           ly={f$(ly('cogs'))}          delta={dp(m.cogs,ly('cogs'))}          goal="35% fallback" goalLabel="Rate:"/>
-                    <MetricCard label="Amazon Fees"   value={f$(m.amazon_fees)}    ly={f$(ly('amazon_fees'))}   delta={dp(m.amazon_fees,ly('amazon_fees'))} goal={feesPct ? `${feesPct}% of rev` : null} goalLabel=""/>
-                    <MetricCard label="Returns" value={`${fN(m.returns)} · ${f$(m.returns_amount)}`} ly={`${fN(ly('returns'))} · ${f$(ly('returns_amount'))}`} delta={dp(m.returns,ly('returns'))} invert goal={retRatePct ? `${retRatePct}%` : null} goalLabel="Return rate:"/>
-                    <MetricCard label={<>Gross Margin ${estBadge}</>}  value={f$(m.gross_margin)}     ly={f$(ly('gross_margin'))}     delta={dp(m.gross_margin,ly('gross_margin'))}/>
-                    <MetricCard label={<>GM %{estBadge}</>}            value={fP(m.gross_margin_pct)} ly={fP(ly('gross_margin_pct'))} delta={dp(m.gross_margin_pct,ly('gross_margin_pct'))} goal="35% COGS est." goalLabel="Based on:"/>
-                  </>}
-                </div>
-              );
-            })()}
 
             {/* ── TRENDS ── */}
             <EpochLabel type="trend" label="📈 Trends" right="Period-controlled"/>
@@ -2170,19 +2372,52 @@ export default function Sales({ filters = {} }) {
               })()}
             </div>
 
+            {/* ── PERIOD METRICS ── */}
+            <EpochLabel type="period" label="📊 Period Metrics"/>
+
+            {/* ── Sales Overview KPIs ── */}
+            {(() => {
+              // Compute projected EOM from MTD data for goal context on each card
+              const mtdKpi = periodCols?.['MTD'] || {};
+              const nowKpi = new Date();
+              const domKpi = nowKpi.getDate();
+              const daysInMoKpi = new Date(nowKpi.getFullYear(), nowKpi.getMonth()+1, 0).getDate();
+              const projSales = domKpi > 0 && mtdKpi.sales  > 0 ? f$((mtdKpi.sales  / domKpi) * daysInMoKpi) : null;
+              const projUnits = domKpi > 0 && mtdKpi.units  > 0 ? fN((mtdKpi.units  / domKpi) * daysInMoKpi) : null;
+              const estBadge = <span style={{fontSize:8,background:'rgba(245,158,11,.15)',color:B.o3,border:'1px solid rgba(245,158,11,.2)',borderRadius:3,padding:'1px 4px',marginLeft:4,verticalAlign:'middle'}}>⚠ Est.</span>;
+              const retRatePct = (mtdKpi.sales||0) > 0 ? ((mtdKpi.returns_amount||0)/(mtdKpi.sales||1)*100).toFixed(1) : null;
+              const feesPct = (mtdKpi.sales||0) > 0 ? ((Math.abs(mtdKpi.amazon_fees||0))/(mtdKpi.sales||1)*100).toFixed(1) : null;
+              return (
+                <div style={{display:'flex',gap:8,marginBottom:10,overflowX:'auto',paddingBottom:2}}>
+                  {loading.metrics ? <Spinner/> : <>
+                    <MetricCard label="Sales $"       value={f$(m.sales)}         ly={f$(ly('sales'))}         delta={dp(m.sales,ly('sales'))}         goal={projSales}  goalLabel="Proj EOM:"/>
+                    <MetricCard label="Unit Sales"    value={fN(m.unit_sales)}     ly={fN(ly('unit_sales'))}    delta={dp(m.unit_sales,ly('unit_sales'))} goal={projUnits}  goalLabel="Proj EOM:"/>
+                    <MetricCard label="AUR"           value={f$(m.aur)}            ly={f$(ly('aur'))}           delta={dp(m.aur,ly('aur'))}/>
+                    <MetricCard label={<>COGS{estBadge}</>}          value={f$(m.cogs)}           ly={f$(ly('cogs'))}          delta={dp(m.cogs,ly('cogs'))}          goal="35% fallback" goalLabel="Rate:"/>
+                    <MetricCard label="Amazon Fees"   value={f$(m.amazon_fees)}    ly={f$(ly('amazon_fees'))}   delta={dp(m.amazon_fees,ly('amazon_fees'))} goal={feesPct ? `${feesPct}% of rev` : null} goalLabel=""/>
+                    <MetricCard label="Returns" value={`${fN(m.returns)} · ${f$(m.returns_amount)}`} ly={`${fN(ly('returns'))} · ${f$(ly('returns_amount'))}`} delta={dp(m.returns,ly('returns'))} invert goal={retRatePct ? `${retRatePct}%` : null} goalLabel="Return rate:"/>
+                    <MetricCard label={<>Gross Margin ${estBadge}</>}  value={f$(m.gross_margin)}     ly={f$(ly('gross_margin'))}     delta={dp(m.gross_margin,ly('gross_margin'))}/>
+                    <MetricCard label={<>GM %{estBadge}</>}            value={fP(m.gross_margin_pct)} ly={fP(ly('gross_margin_pct'))} delta={dp(m.gross_margin_pct,ly('gross_margin_pct'))} goal="35% COGS est." goalLabel="Based on:"/>
+                  </>}
+                </div>
+              );
+            })()}
+
             {/* ── Revenue & AUR Trend + Units ── */}
             {(() => {
-              return cpSales === '7D' ? (
+              const effTrend = trendChart || trend;
+              const effPeriod = cpTrendChart || cpSales;
+              return effPeriod === '7D' ? (
                 <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:12,marginBottom:12}}>
                   <ChartCard title="Revenue & AUR Trend" error={errors.trend}>
-                    {loading.trend ? <Spinner/> : <>
-                      {svgChart(salesAurSVG(toArr(trend)))}
+                    {(loading.trendChart || loading.trend) ? <Spinner/> : <>
+                      {svgChart(salesAurSVG(toArr(effTrend)))}
                       <Legend items={[['Sales TY','#2E6FBB'],['Sales LY','#5B9FD4',true],['AUR TY','#22c55e'],['AUR LY','#16a34a',true]]}/>
                     </>}
                   </ChartCard>
                   <ChartCard title="Units Sold — TY vs LY" error={errors.trend}>
-                    {loading.trend ? <Spinner/> : (() => {
-                      const tArr = toArr(trend);
+                    {(loading.trendChart || loading.trend) ? <Spinner/> : (() => {
+                      const tArr = toArr(effTrend);
                       if (!tArr || tArr.length < 2) return <div style={{color:'var(--txt3)',padding:20,textAlign:'center',fontSize:12}}>No data</div>;
                       const W=1100,H=165,pad={t:14,r:20,b:24,l:54};
                       const iw=W-pad.l-pad.r, ih=H-pad.t-pad.b, n=tArr.length;
@@ -2204,14 +2439,14 @@ export default function Sales({ filters = {} }) {
               ) : (
                 <div style={{display:'flex',flexDirection:'column',gap:12,marginBottom:12}}>
                   <ChartCard title="Revenue & AUR Trend" error={errors.trend}>
-                    {loading.trend ? <Spinner/> : <>
-                      {svgChart(salesAurSVG(toArr(trend)))}
+                    {(loading.trendChart || loading.trend) ? <Spinner/> : <>
+                      {svgChart(salesAurSVG(toArr(effTrend)))}
                       <Legend items={[['Sales TY','#2E6FBB'],['Sales LY','#5B9FD4',true],['AUR TY','#22c55e'],['AUR LY','#16a34a',true]]}/>
                     </>}
                   </ChartCard>
                   <ChartCard title="Units Sold — TY vs LY" error={errors.trend}>
-                    {loading.trend ? <Spinner/> : (() => {
-                      const tArr = toArr(trend);
+                    {(loading.trendChart || loading.trend) ? <Spinner/> : (() => {
+                      const tArr = toArr(effTrend);
                       if (!tArr || tArr.length < 2) return <div style={{color:'var(--txt3)',padding:20,textAlign:'center',fontSize:12}}>No data</div>;
                       const W=1100,H=190,pad={t:14,r:20,b:24,l:54};
                       const iw=W-pad.l-pad.r, ih=H-pad.t-pad.b, n=tArr.length;
@@ -2233,6 +2468,24 @@ export default function Sales({ filters = {} }) {
               );
             })()}
 
+
+            {/* ── Per-chart period override ── */}
+            {(()=>{
+              const effP = cpTrendChart || cpSales;
+              return (
+                <div style={{display:'flex',alignItems:'center',gap:4,marginBottom:10,padding:'4px 12px',background:'var(--card)',border:'1px solid var(--brd)',borderRadius:8,flexWrap:'wrap'}}>
+                  <span style={{fontSize:9,fontWeight:700,color:'var(--txt3)',textTransform:'uppercase',letterSpacing:'.06em',marginRight:2,whiteSpace:'nowrap',flexShrink:0}}>Chart Period:</span>
+                  {EXEC_PERIODS_LIST.map(p => {
+                    const pv = EXEC_PERIOD_MAP[p];
+                    const isActive = effP === pv;
+                    return (<button key={p} onClick={()=>setCpTrendChart(pv)} style={{fontSize:9,fontWeight:700,padding:'2px 8px',borderRadius:4,cursor:'pointer',transition:'all .12s',border:`1px solid ${isActive?B.b2:'var(--brd)'}`,background:isActive?`${B.b2}22`:'transparent',color:isActive?B.b2:'var(--txt3)'}}>{p}</button>);
+                  })}
+                  {cpTrendChart && cpTrendChart !== cpSales && (
+                    <button onClick={()=>setCpTrendChart(null)} style={{fontSize:9,fontWeight:600,padding:'2px 8px',borderRadius:4,cursor:'pointer',border:'1px solid var(--brd)',background:'transparent',color:'var(--txt3)',marginLeft:4}}>↩ sync</button>
+                  )}
+                </div>
+              );
+            })()}
             {/* ── P&L Waterfall ── */}
             {(() => {
               const mtdW = periodCols?.['MTD'] || {};
@@ -2343,11 +2596,29 @@ export default function Sales({ filters = {} }) {
               })()}
               <div style={{display:'grid',gridTemplateColumns:'3fr 1fr',gap:12}}>
                 <ChartCard title="Sessions & Conversion Rate" badge={cpSales} error={errors.trendTraffic} noMargin>
-                  {loading.trendTraffic ? <Spinner/> : <>
-                    {svgChart(sessionsConvSVG(toArr(trendTraffic)))}
+                  {(loading.trendTrafficChart || loading.trendTraffic) ? <Spinner/> : <>
+                    {svgChart(sessionsConvSVG(toArr(trendTrafficChart || trendTraffic)))}
                     <Legend items={[['Sessions TY',B.o2],['Sessions LY',B.sub,true],['Conv% TY',B.t2]]}/>
                   </>}
                 </ChartCard>
+
+                {/* ── Per-chart traffic period override ── */}
+                {(()=>{
+                  const effTP = cpTrafficChart || cpSales;
+                  return (
+                    <div style={{display:'flex',alignItems:'center',gap:4,marginBottom:10,padding:'4px 12px',background:'var(--card)',border:'1px solid var(--brd)',borderRadius:8,flexWrap:'wrap'}}>
+                      <span style={{fontSize:9,fontWeight:700,color:'var(--txt3)',textTransform:'uppercase',letterSpacing:'.06em',marginRight:2,whiteSpace:'nowrap',flexShrink:0}}>Chart Period:</span>
+                      {EXEC_PERIODS_LIST.map(p => {
+                        const pv = EXEC_PERIOD_MAP[p];
+                        const isActive = effTP === pv;
+                        return (<button key={p} onClick={()=>setCpTrafficChart(pv)} style={{fontSize:9,fontWeight:700,padding:'2px 8px',borderRadius:4,cursor:'pointer',transition:'all .12s',border:`1px solid ${isActive?B.b2:'var(--brd)'}`,background:isActive?`${B.b2}22`:'transparent',color:isActive?B.b2:'var(--txt3)'}}>{p}</button>);
+                      })}
+                      {cpTrafficChart && cpTrafficChart !== cpSales && (
+                        <button onClick={()=>setCpTrafficChart(null)} style={{fontSize:9,fontWeight:600,padding:'2px 8px',borderRadius:4,cursor:'pointer',border:'1px solid var(--brd)',background:'transparent',color:'var(--txt3)',marginLeft:4}}>↩ sync</button>
+                      )}
+                    </div>
+                  );
+                })()}
                 <div style={{display:'flex',flexDirection:'column',gap:10}}>
                   <div style={{background:'var(--card2)',border:'1px solid var(--brd)',borderRadius:10,padding:'12px 14px'}}>
                     <div style={{fontSize:9,fontWeight:700,textTransform:'uppercase',letterSpacing:'.08em',color:'var(--txt3)',marginBottom:8}}>Traffic KPIs · MTD</div>
@@ -3270,244 +3541,6 @@ export default function Sales({ filters = {} }) {
         </>}
       </ChartCard>}
 
-      {/* Weekly Sales Heatmap — 4 × 13-week window toggles (max 2 open = 26 weeks shown) */}
-      {viewTab !== 'Executive' && (() => {
-        // Toggle a window in/out; enforce max 2 active
-        const toggleWindow = (w) => {
-          setHmWindows(prev => {
-            if (prev.includes(w)) {
-              return prev.length > 1 ? prev.filter(x => x !== w) : prev;
-            }
-            if (prev.length >= 2) return [prev[1], w]; // drop oldest, add new
-            return [...prev, w];
-          });
-        };
-        const pillBtn2 = (key, label, range) => {
-          const active = hmWindows.includes(key);
-          const isFuture = range === 'future';
-          return (
-            <button key={key} onClick={() => toggleWindow(key)} style={{
-              padding:'3px 10px', borderRadius:6, fontSize:10, fontWeight:600, cursor:'pointer', transition:'all .15s',
-              border:`1px solid ${active ? (isFuture ? '#22c55e' : B.b2) : 'var(--brd)'}`,
-              background: active ? (isFuture ? 'rgba(34,197,94,.12)' : `${B.b1}33`) : 'transparent',
-              color: active ? (isFuture ? '#4ade80' : B.b3) : 'var(--txt3)',
-            }}>
-              {isFuture ? '🌿 ' : ''}{label}
-            </button>
-          );
-        };
-        // Build filtered + remapped heatmap data for selected windows
-        const allSelIdx = hmWindows.flatMap(w => HM_WINDOWS_DEF[w].indices);
-        const sortedIdx = [...allSelIdx].sort((a,b) => a-b); // ascending = oldest index first
-        const indexMap  = Object.fromEntries(sortedIdx.map((idx, pos) => [idx, pos]));
-        const filteredHm = toArr(heatmap)
-          .filter(d => allSelIdx.includes(d.week))
-          .map(d => ({...d, week: indexMap[d.week]}));
-        const totalWks = sortedIdx.length || 26;
-
-        // Compute which SVG columns are "future" (LY proxy) — SVG col w shows position TOTAL-1-w
-        const futureOrigIdx = new Set(['C','D'].flatMap(w => hmWindows.includes(w) ? HM_WINDOWS_DEF[w].indices : []));
-        const futureSvgCols = new Set(
-          sortedIdx.map((idx, pos) => futureOrigIdx.has(idx) ? (totalWks-1-pos) : -1).filter(p => p >= 0)
-        );
-
-        // Compute week-start dates for each SVG column (0=leftmost)
-        // week=N in backend means N weeks ago from today (Mon–Sun)
-        const todayJs = new Date();
-        const dow = todayJs.getDay(); // 0=Sun
-        const daysToMon = dow === 0 ? 6 : dow - 1;
-        const thisMonday = new Date(todayJs);
-        thisMonday.setDate(todayJs.getDate() - daysToMon);
-        const weekStartDates = Array.from({length:totalWks}, (_, w) => {
-          const pos = totalWks - 1 - w;           // position in sorted array (oldest first)
-          if (pos < 0 || pos >= sortedIdx.length) return '';
-          const weeksAgo = sortedIdx[pos];         // original backend index = weeks ago
-          const d = new Date(thisMonday);
-          d.setDate(thisMonday.getDate() - weeksAgo * 7);
-          return `${MONTHS[d.getMonth()]} ${d.getDate()}`;
-        });
-
-        // ── Day-of-week averages (recalculated for currently shown data) ──
-        const DAY_NAMES = ['Mon','Tue','Wed','Thu','Fri','Sat','Sun'];
-        // Per-window breakdowns for comparison
-        const winProfiles = hmWindows.map(wKey => {
-          const wIdxSet = new Set(HM_WINDOWS_DEF[wKey].indices);
-          const dayAvgs = DAY_NAMES.map((_, d) => {
-            const rows = toArr(heatmap).filter(r => wIdxSet.has(r.week) && r.day === d);
-            const vals = rows.map(r => r[hmMetric2] || 0);
-            return vals.length ? vals.reduce((s,v)=>s+v,0)/vals.length : 0;
-          });
-          return { key: wKey, label: HM_WINDOWS_DEF[wKey].label, range: HM_WINDOWS_DEF[wKey].range, dayAvgs };
-        });
-        // Combined across all selected data
-        const combinedDayAvgs = DAY_NAMES.map((_, d) => {
-          const vals = filteredHm.filter(r => r.day === d).map(r => r[hmMetric2] || 0);
-          return vals.length ? vals.reduce((s,v)=>s+v,0)/vals.length : 0;
-        });
-        const combinedMax = Math.max(...combinedDayAvgs, 1);
-        const overallAvg = combinedDayAvgs.reduce((s,v)=>s+v,0) / 7;
-        // Rank days by combined avg
-        const dayRanks = combinedDayAvgs.map((v, d) => ({d, v})).sort((a,b)=>b.v-a.v);
-        const bestDay = dayRanks[0];
-        const worstDay = dayRanks[6];
-        const weekendAvg = ((combinedDayAvgs[5]||0)+(combinedDayAvgs[6]||0))/2;
-        const weekdayAvg = combinedDayAvgs.slice(0,5).reduce((s,v)=>s+v,0)/5;
-
-        const metricFmt = hmMetric2==='sales' ? f$ : fN;
-        const metricLabel = hmMetric2==='units' ? 'Units' : hmMetric2==='sales' ? 'Sales $' : 'Returns';
-        const windowLabel = hmWindows.map(w => HM_WINDOWS_DEF[w].label).join(' + ');
-
-        return (
-          <div style={{background:'var(--surf)',border:'1px solid var(--brd)',borderRadius:14,padding:16,marginBottom:12,transition:'background .3s'}}>
-            {/* Controls row */}
-            <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:8,flexWrap:'wrap',gap:8}}>
-              <span style={{fontSize:13,fontWeight:700,color:'var(--txt)'}}>
-                {metricLabel} — {windowLabel} × Day of Week
-              </span>
-              <div style={{display:'flex',gap:4,alignItems:'center',flexWrap:'wrap'}}>
-                {['D','C','A','B'].map(w => pillBtn2(w, HM_WINDOWS_DEF[w].label, HM_WINDOWS_DEF[w].range))}
-                <div style={{width:1,height:16,background:'var(--brd)',margin:'0 4px'}}/>
-                {[['Units','units'],['Sales $','sales'],['Returns','returns']].map(([lbl,key]) => (
-                  <button key={key} onClick={() => setHmMetric2(key)} style={{
-                    padding:'3px 10px',borderRadius:6,fontSize:10,fontWeight:600,cursor:'pointer',transition:'all .15s',
-                    border:`1px solid ${hmMetric2===key ? B.b2 : 'var(--brd)'}`,
-                    background: hmMetric2===key ? `${B.b1}33` : 'transparent',
-                    color: hmMetric2===key ? B.b3 : 'var(--txt3)',
-                  }}>{lbl}</button>
-                ))}
-              </div>
-            </div>
-
-            {errors.heatmap && <div style={{padding:'10px 14px',color:'#fb923c',fontSize:11,background:'rgba(251,146,60,.08)',border:'1px solid rgba(251,146,60,.18)',borderRadius:8,marginBottom:8}}>⚠ {errors.heatmap}</div>}
-            {loading.heatmap ? <Spinner/> : svgChart(heatmapSVG(filteredHm, 1100, totalWks, hmMetric2, futureSvgCols, weekStartDates))}
-
-            {/* ── Day-of-Week Averages panel ── */}
-            {!loading.heatmap && filteredHm.length > 0 && (
-              <div style={{marginTop:12,padding:'12px 14px',background:'var(--card)',borderRadius:10,border:'1px solid var(--brd)'}}>
-                <div style={{display:'flex',justifyContent:'space-between',alignItems:'flex-start',gap:16,flexWrap:'wrap'}}>
-                  {/* Left: bar chart of day averages */}
-                  <div style={{flex:'1 1 420px'}}>
-                    <div style={{fontSize:10,fontWeight:700,color:'var(--txt3)',textTransform:'uppercase',letterSpacing:'.08em',marginBottom:10}}>
-                      Day Strength — Avg {metricLabel} per Week
-                    </div>
-                    <div style={{display:'flex',flexDirection:'column',gap:6}}>
-                      {dayRanks.map(({d, v}) => {
-                        const rank = dayRanks.findIndex(r=>r.d===d);
-                        const barPct = combinedMax > 0 ? (v/combinedMax)*100 : 0;
-                        const vsAvg = overallAvg > 0 ? ((v-overallAvg)/overallAvg*100) : 0;
-                        const isBest = rank === 0;
-                        const isWeakest = rank === 6;
-                        const isWeekend = d >= 5;
-                        const barColor = isBest ? B.o2 : isWeakest ? '#475569' : isWeekend ? B.t2 : B.b2;
-                        const rankEmoji = isBest ? '🥇' : rank === 1 ? '🥈' : rank === 2 ? '🥉' : null;
-                        const w0avg = winProfiles[0]?.dayAvgs[d] ?? 0;
-                        const w1avg = winProfiles[1]?.dayAvgs[d] ?? null;
-                        const w0pct = combinedMax > 0 ? (w0avg/combinedMax)*100 : 0;
-                        const w1pct = w1avg != null && combinedMax > 0 ? (w1avg/combinedMax)*100 : 0;
-                        return (
-                          <div key={d} style={{display:'grid',gridTemplateColumns:'52px 1fr 76px 70px',gap:8,alignItems:'center',padding:'3px 0'}}>
-                            {/* Day label + medal */}
-                            <div style={{display:'flex',alignItems:'center',gap:5}}>
-                              {rankEmoji
-                                ? <span style={{fontSize:16,lineHeight:1,flexShrink:0}}>{rankEmoji}</span>
-                                : <span style={{
-                                    width:18,height:18,borderRadius:'50%',flexShrink:0,
-                                    display:'inline-flex',alignItems:'center',justifyContent:'center',
-                                    fontSize:9,fontWeight:700,
-                                    background: isWeakest ? 'rgba(71,85,105,.25)' : 'rgba(91,159,212,.12)',
-                                    color: isWeakest ? '#64748b' : B.sub,
-                                  }}>{rank+1}</span>
-                              }
-                              <span style={{fontSize:13,fontWeight:700,color: isWeekend ? B.t3 : isBest ? B.o2 : 'var(--txt)'}}>{DAY_NAMES[d]}</span>
-                            </div>
-                            {/* Bar track */}
-                            <div style={{position:'relative',height:22,borderRadius:5,background:'rgba(255,255,255,.04)'}}>
-                              {winProfiles.length === 2 ? (
-                                <>
-                                  <div style={{position:'absolute',left:0,top:2,height:8,borderRadius:3,width:`${w0pct.toFixed(1)}%`,background:winProfiles[0].range==='future'?'#22c55e':B.b2,opacity:.9}}/>
-                                  <div style={{position:'absolute',left:0,top:12,height:8,borderRadius:3,width:`${w1pct.toFixed(1)}%`,background:winProfiles[1].range==='future'?'#22c55e':B.b3,opacity:.8}}/>
-                                </>
-                              ) : (
-                                <div style={{position:'absolute',left:0,top:3,height:16,borderRadius:4,width:`${barPct.toFixed(1)}%`,background:barColor,opacity:.85,transition:'width .3s'}}/>
-                              )}
-                            </div>
-                            {/* Value */}
-                            <div style={{fontSize:13,fontWeight:700,color: isBest ? B.o2 : 'var(--txt)',textAlign:'right'}}>{metricFmt(v)}</div>
-                            {/* vs avg */}
-                            <div style={{
-                              fontSize:11,textAlign:'right',fontWeight: Math.abs(vsAvg) > 10 ? 700 : 500,
-                              color: vsAvg > 10 ? '#4ade80' : vsAvg < -10 ? '#fb923c' : 'var(--txt3)',
-                            }}>
-                              {vsAvg >= 0 ? '+' : ''}{vsAvg.toFixed(0)}% avg
-                            </div>
-                          </div>
-                        );
-                      })}
-                    </div>
-                    {/* Legend for 2-window comparison */}
-                    {winProfiles.length === 2 && (
-                      <div style={{display:'flex',gap:14,marginTop:10,flexWrap:'wrap'}}>
-                        {winProfiles.map((wp, i) => (
-                          <div key={wp.key} style={{display:'flex',alignItems:'center',gap:5,fontSize:9,color:'var(--txt3)'}}>
-                            <div style={{width:16,height:5,borderRadius:2,background:wp.range==='future'?'#22c55e':(i===0?B.b2:B.b3)}}/>
-                            {wp.label}
-                          </div>
-                        ))}
-                      </div>
-                    )}
-                  </div>
-
-                  {/* Right: insight callouts */}
-                  <div style={{flex:'0 0 220px',display:'flex',flexDirection:'column',gap:8}}>
-                    <div style={{fontSize:10,fontWeight:700,color:'var(--txt3)',textTransform:'uppercase',letterSpacing:'.08em',marginBottom:2}}>
-                      Key Insights
-                    </div>
-                    <div style={{background:'rgba(234,179,8,.08)',border:'1px solid rgba(234,179,8,.2)',borderRadius:8,padding:'8px 10px'}}>
-                      <div style={{fontSize:9,color:'#fbbf24',fontWeight:700,textTransform:'uppercase',marginBottom:3}}>🏆 Best Day</div>
-                      <div style={{fontSize:14,fontWeight:800,color:'var(--txt)'}}>{DAY_NAMES[bestDay.d]}</div>
-                      <div style={{fontSize:10,color:'var(--txt2)'}}>{metricFmt(bestDay.v)} avg · {bestDay.v>0&&overallAvg>0 ? `${((bestDay.v/overallAvg-1)*100).toFixed(0)}% above avg` : ''}</div>
-                    </div>
-                    <div style={{background:'rgba(100,116,139,.08)',border:'1px solid rgba(100,116,139,.2)',borderRadius:8,padding:'8px 10px'}}>
-                      <div style={{fontSize:9,color:'var(--txt3)',fontWeight:700,textTransform:'uppercase',marginBottom:3}}>Wknd vs Wkday</div>
-                      <div style={{display:'flex',gap:12,alignItems:'baseline'}}>
-                        <div>
-                          <div style={{fontSize:10,color:B.t3,fontWeight:700}}>Sa–Su</div>
-                          <div style={{fontSize:13,fontWeight:800,color:'var(--txt)'}}>{metricFmt(weekendAvg)}</div>
-                        </div>
-                        <div style={{fontSize:11,color:'var(--txt3)'}}>vs</div>
-                        <div>
-                          <div style={{fontSize:10,color:B.b3,fontWeight:700}}>M–F</div>
-                          <div style={{fontSize:13,fontWeight:800,color:'var(--txt)'}}>{metricFmt(weekdayAvg)}</div>
-                        </div>
-                      </div>
-                      {weekdayAvg > 0 && <div style={{fontSize:9,color:'var(--txt3)',marginTop:4}}>
-                        Weekend is {weekendAvg > weekdayAvg
-                          ? <span style={{color:'#4ade80',fontWeight:700}}>{((weekendAvg/weekdayAvg-1)*100).toFixed(0)}% stronger</span>
-                          : <span style={{color:'#fb923c',fontWeight:700}}>{((weekdayAvg/weekendAvg-1)*100).toFixed(0)}% weaker</span>} than weekdays
-                      </div>}
-                    </div>
-                    <div style={{background:'rgba(59,130,246,.06)',border:'1px solid rgba(59,130,246,.15)',borderRadius:8,padding:'8px 10px'}}>
-                      <div style={{fontSize:9,color:B.b3,fontWeight:700,textTransform:'uppercase',marginBottom:4}}>Day Spread</div>
-                      <div style={{display:'flex',gap:6,flexWrap:'wrap'}}>
-                        {dayRanks.slice(0,3).map(({d},i) => (
-                          <span key={d} style={{fontSize:9,padding:'2px 6px',borderRadius:99,
-                            background: i===0?`${B.o2}22`:i===1?`${B.b2}22`:`${B.t2}22`,
-                            color: i===0?B.o2:i===1?B.b3:B.t3,fontWeight:700}}>
-                            #{i+1} {DAY_NAMES[d]}
-                          </span>
-                        ))}
-                      </div>
-                      <div style={{fontSize:9,color:'var(--txt3)',marginTop:5}}>
-                        Weakest: <span style={{color:'#fb923c',fontWeight:700}}>{DAY_NAMES[worstDay.d]}</span> ({metricFmt(worstDay.v)})
-                      </div>
-                    </div>
-                  </div>
-                </div>
-              </div>
-            )}
-          </div>
-        );
-      })()}
 
       {/* ══ TRAFFIC & CONVERSION ════════════════════════════════════ */}
       {viewTab !== 'Executive' && <>
