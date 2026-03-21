@@ -2077,7 +2077,6 @@ export default function Sales({ filters = {} }) {
                   </div>
                 );
               })()}
-</>}
 
             {/* ── Weekly 26-Week Heatmap ── */}
             {(()=>{
@@ -2105,6 +2104,7 @@ export default function Sales({ filters = {} }) {
                 </div>
               );
             })()}
+</>}
 
             {/* ── PERIOD METRICS ── */}
             <EpochLabel type="period" label="📊 Period Metrics"/>
