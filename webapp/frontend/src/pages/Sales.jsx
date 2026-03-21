@@ -1378,32 +1378,6 @@ export default function Sales({ filters = {} }) {
                 );
               })()}
 
-              {/* ── Weekly 26-Week Heatmap (exec) ── */}
-              {(()=>{
-                const toggleWindow=(w)=>{setHmWindows(prev=>{if(prev.includes(w)){return prev.length>1?prev.filter(x=>x!==w):prev;}const next=[...prev,w];return next.length>2?[next[1],next[2]]:next;});};
-                const pillBtn2=(key,label,_range)=>(<button key={key} onClick={e=>{e.stopPropagation();toggleWindow(key);}} style={{padding:'3px 10px',borderRadius:6,fontSize:10,fontWeight:600,cursor:'pointer',transition:'all .15s',border:`1px solid ${hmWindows.includes(key)?B.b2:'var(--brd)'}`,background:hmWindows.includes(key)?`${B.b1}33`:'transparent',color:hmWindows.includes(key)?B.b3:'var(--txt3)'}}>{label}</button>);
-                const filteredHm=toArr(heatmap).filter(r=>hmWindows.some(w=>HM_WINDOWS_DEF[w].indices.includes(r.week)));
-                const totalWks=hmWindows.reduce((s,w)=>s+HM_WINDOWS_DEF[w].count,0);
-                const futureSvgCols=new Set();
-                const weekStartDates=[];
-                const metricFmt2=hmMetric2==='sales'?f$:fN;
-                const metricLabel2=hmMetric2==='units'?'Units':hmMetric2==='sales'?'Sales $':'Returns';
-                const windowLabel2=hmWindows.map(w=>HM_WINDOWS_DEF[w].label).join(' + ');
-                return (
-                  <div style={{background:'var(--surf)',border:'1px solid var(--brd)',borderRadius:14,padding:16,marginBottom:10}}>
-                    <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:8,flexWrap:'wrap',gap:8}}>
-                      <span style={{fontSize:13,fontWeight:700,color:'var(--txt)'}}>{metricLabel2} — {windowLabel2} × Day of Week</span>
-                      <div style={{display:'flex',gap:4,alignItems:'center',flexWrap:'wrap'}}>
-                        {['D','C','A','B'].map(w=>pillBtn2(w,HM_WINDOWS_DEF[w].label,HM_WINDOWS_DEF[w].range))}
-                        <div style={{width:1,height:16,background:'var(--brd)',margin:'0 4px'}}/>
-                        {[['Units','units'],['Sales $','sales'],['Returns','returns']].map(([lbl,key])=>(<button key={key} onClick={e=>{e.stopPropagation();setHmMetric2(key);}} style={{padding:'3px 10px',borderRadius:6,fontSize:10,fontWeight:600,cursor:'pointer',transition:'all .15s',border:`1px solid ${hmMetric2===key?B.b2:'var(--brd)'}`,background:hmMetric2===key?`${B.b1}33`:'transparent',color:hmMetric2===key?B.b3:'var(--txt3)'}}>{lbl}</button>))}
-                      </div>
-                    </div>
-                    {errors.heatmap&&<div style={{padding:'10px 14px',color:'#fb923c',fontSize:11,background:'rgba(251,146,60,.08)',border:'1px solid rgba(251,146,60,.18)',borderRadius:8,marginBottom:8}}>⚠ {errors.heatmap}</div>}
-                    {loading.heatmap?<Spinner/>:svgChart(heatmapSVG(filteredHm,1100,totalWks,hmMetric2,futureSvgCols,weekStartDates))}
-                  </div>
-                );
-              })()}
             </>}
 
             {/* ── Sales Overview KPIs ── */}
@@ -2103,31 +2077,34 @@ export default function Sales({ filters = {} }) {
                   </div>
                 );
               })()}
-              {(()=>{
-                const toggleWindow=(w)=>{setHmWindows(prev=>{if(prev.includes(w)){return prev.length>1?prev.filter(x=>x!==w):prev;}const next=[...prev,w];return next.length>2?[next[1],next[2]]:next;});};
-                const pillBtn2=(key,label)=>(<button key={key} onClick={e=>{e.stopPropagation();toggleWindow(key);}} style={{padding:'3px 10px',borderRadius:6,fontSize:10,fontWeight:600,cursor:'pointer',transition:'all .15s',border:`1px solid ${hmWindows.includes(key)?B.b2:'var(--brd)'}`,background:hmWindows.includes(key)?`${B.b1}33`:'transparent',color:hmWindows.includes(key)?B.b3:'var(--txt3)'}}>{label}</button>);
-                const filteredHm=toArr(heatmap).filter(r=>hmWindows.some(w=>HM_WINDOWS_DEF[w].indices.includes(r.week)));
-                const totalWks=hmWindows.reduce((s,w)=>s+HM_WINDOWS_DEF[w].count,0);
-                const futureSvgCols=new Set();
-                const weekStartDates=[];
-                const metricLabel2=hmMetric2==='units'?'Units':hmMetric2==='sales'?'Sales $':'Returns';
-                const windowLabel2=hmWindows.map(w=>HM_WINDOWS_DEF[w].label).join(' + ');
-                return (
-                  <div style={{background:'var(--surf)',border:'1px solid var(--brd)',borderRadius:14,padding:16,marginBottom:10}}>
-                    <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:8,flexWrap:'wrap',gap:8}}>
-                      <span style={{fontSize:13,fontWeight:700,color:'var(--txt)'}}>{metricLabel2} — {windowLabel2} x Day of Week</span>
-                      <div style={{display:'flex',gap:4,alignItems:'center',flexWrap:'wrap'}}>
-                        {['D','C','A','B'].map(w=>pillBtn2(w,HM_WINDOWS_DEF[w].label))}
-                        <div style={{width:1,height:16,background:'var(--brd)',margin:'0 4px'}}/>
-                        {[['Units','units'],['Sales $','sales'],['Returns','returns']].map(([lbl,key])=>(<button key={key} onClick={e=>{e.stopPropagation();setHmMetric2(key);}} style={{padding:'3px 10px',borderRadius:6,fontSize:10,fontWeight:600,cursor:'pointer',transition:'all .15s',border:`1px solid ${hmMetric2===key?B.b2:'var(--brd)'}`,background:hmMetric2===key?`${B.b1}33`:'transparent',color:hmMetric2===key?B.b3:'var(--txt3)'}}>{lbl}</button>))}
-                      </div>
+</>}
+
+            {/* ── Weekly 26-Week Heatmap ── */}
+            {(()=>{
+              const toggleWindow=(w)=>{setHmWindows(prev=>{if(prev.includes(w)){return prev.length>1?prev.filter(x=>x!==w):prev;}const next=[...prev,w];return next.length>2?[next[1],next[2]]:next;});};
+              const pillBtn2=(key,label)=>(<button key={key} onClick={e=>{e.stopPropagation();toggleWindow(key);}} style={{padding:'3px 10px',borderRadius:6,fontSize:10,fontWeight:600,cursor:'pointer',transition:'all .15s',border:`1px solid ${hmWindows.includes(key)?B.b2:'var(--brd)'}`,background:hmWindows.includes(key)?`${B.b1}33`:'transparent',color:hmWindows.includes(key)?B.b3:'var(--txt3)'}}>{label}</button>);
+              const filteredHm=toArr(heatmap).filter(r=>hmWindows.some(w=>HM_WINDOWS_DEF[w].indices.includes(r.week)));
+              const totalWks=hmWindows.reduce((s,w)=>s+HM_WINDOWS_DEF[w].count,0);
+              const futureSvgCols=new Set();
+              const weekStartDates=[];
+              const metricFmt2=hmMetric2==='sales'?f$:fN;
+              const metricLabel2=hmMetric2==='units'?'Units':hmMetric2==='sales'?'Sales $':'Returns';
+              const windowLabel2=hmWindows.map(w=>HM_WINDOWS_DEF[w].label).join(' + ');
+              return (
+                <div style={{background:'var(--surf)',border:'1px solid var(--brd)',borderRadius:14,padding:16,marginBottom:10}}>
+                  <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:8,flexWrap:'wrap',gap:8}}>
+                    <span style={{fontSize:13,fontWeight:700,color:'var(--txt)'}}>{metricLabel2} — {windowLabel2} × Day of Week</span>
+                    <div style={{display:'flex',gap:4,alignItems:'center',flexWrap:'wrap'}}>
+                      {['D','C','A','B'].map(w=>pillBtn2(w,HM_WINDOWS_DEF[w].label))}
+                      <div style={{width:1,height:16,background:'var(--brd)',margin:'0 4px'}}/>
+                      {[['Units','units'],['Sales $','sales'],['Returns','returns']].map(([lbl,key])=>(<button key={key} onClick={e=>{e.stopPropagation();setHmMetric2(key);}} style={{padding:'3px 10px',borderRadius:6,fontSize:10,fontWeight:600,cursor:'pointer',transition:'all .15s',border:`1px solid ${hmMetric2===key?B.b2:'var(--brd)'}`,background:hmMetric2===key?`${B.b1}33`:'transparent',color:hmMetric2===key?B.b3:'var(--txt3)'}}>{lbl}</button>))}
                     </div>
-                    {errors.heatmap&&<div style={{padding:'10px 14px',color:'#fb923c',fontSize:11,background:'rgba(251,146,60,.08)',border:'1px solid rgba(251,146,60,.18)',borderRadius:8,marginBottom:8}}>⚠ {errors.heatmap}</div>}
-                    {loading.heatmap?<Spinner/>:svgChart(heatmapSVG(filteredHm,1100,totalWks,hmMetric2,futureSvgCols,weekStartDates))}
                   </div>
-                );
-              })()}
-            </>}
+                  {errors.heatmap&&<div style={{padding:'10px 14px',color:'#fb923c',fontSize:11,background:'rgba(251,146,60,.08)',border:'1px solid rgba(251,146,60,.18)',borderRadius:8,marginBottom:8}}>⚠ {errors.heatmap}</div>}
+                  {loading.heatmap?<Spinner/>:svgChart(heatmapSVG(filteredHm,1100,totalWks,hmMetric2,futureSvgCols,weekStartDates))}
+                </div>
+              );
+            })()}
 
             {/* ── PERIOD METRICS ── */}
             <EpochLabel type="period" label="📊 Period Metrics"/>
