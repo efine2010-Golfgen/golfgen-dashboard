@@ -480,7 +480,7 @@ export default function Products({ filters = {} }) {
                   const sName = shortName(p.name, 22);
                   return (
                     <div key={p.asin + "-cvrhm"} style={{ display: "flex", alignItems: "center", gap: 2, marginBottom: 2 }}>
-                      <span style={{ ...SG(), fontSize: 8, color: "var(--txt2)", width: 170, flexShrink: 0, textAlign: "right", paddingRight: 8, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{sName}</span>
+                      <span style={{ ...SG(), fontSize: 8, color: "var(--txt2)", width: 170, flexShrink: 0, textAlign: "left", paddingLeft: 0, paddingRight: 4, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{sName}</span>
                       {cd.map((v, i) => {
                         const { bg, fg } = cvrHmBgFg(v);
                         return <HmCell key={i} value={v} fmt={v => `${v.toFixed(1)}%`} bg={bg} fg={fg} />;
@@ -517,7 +517,7 @@ export default function Products({ filters = {} }) {
                   const isDeclining = vd.length >= 2 && vd[vd.length - 1] < vd[0] * 0.85;
                   return (
                     <div key={p.asin + "-unithm"} style={{ display: "flex", alignItems: "center", gap: 2, marginBottom: 2 }}>
-                      <span style={{ ...SG(), fontSize: 8, color: "var(--txt2)", width: 170, flexShrink: 0, textAlign: "right", paddingRight: 8, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{sName}</span>
+                      <span style={{ ...SG(), fontSize: 8, color: "var(--txt2)", width: 170, flexShrink: 0, textAlign: "left", paddingLeft: 0, paddingRight: 4, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{sName}</span>
                       {vd.map((v, i) => {
                         const { bg, fg } = unitsHmBgFg(v, maxUnitsAll, isDeclining && i >= vd.length - 3, p.isHW);
                         return <HmCell key={i} value={v} fmt={v => Math.round(v)} bg={bg} fg={fg} />;
@@ -589,10 +589,9 @@ export default function Products({ filters = {} }) {
 
         {/* Column group headers */}
         <div style={{ overflowX: "auto" }}>
-          <div style={{ minWidth: 1440 }}>
-            <div style={{ display: "grid", gridTemplateColumns: "200px 60px 88px 86px 64px 64px 64px 66px 60px 62px 62px 62px 72px 68px 72px 68px 66px 48px", background: "var(--card)", borderBottom: "1px solid var(--brd2)", borderTop: "1px solid var(--brd)", marginTop: 10 }}>
+          <div style={{ minWidth: 1380 }}>
+            <div style={{ display: "grid", gridTemplateColumns: "200px 88px 86px 64px 64px 64px 66px 60px 62px 62px 62px 72px 68px 72px 68px 66px 48px", background: "var(--card)", borderBottom: "1px solid var(--brd2)", borderTop: "1px solid var(--brd)", marginTop: 10 }}>
               <div style={{ padding: "4px 8px", ...SG(), fontSize: 7, fontWeight: 700, textTransform: "uppercase", letterSpacing: ".08em", color: "var(--txt3)" }}>SKU</div>
-              <div style={{ padding: "4px 8px", ...SG(), fontSize: 7, fontWeight: 700, textTransform: "uppercase", letterSpacing: ".08em", color: "var(--txt3)" }}>Div</div>
               {/* Sales group */}
               <div style={{ padding: "4px 8px", ...SG(), fontSize: 7, fontWeight: 700, textTransform: "uppercase", letterSpacing: ".08em", color: "#2ECFAA", borderLeft: "1px solid var(--brd2)", borderTop: "2px solid #2ECFAA" }}>━ Sales</div>
               <div style={{ padding: "4px 8px", ...SG(), fontSize: 7, fontWeight: 700, textTransform: "uppercase", letterSpacing: ".08em", color: "#2ECFAA" }}></div>
@@ -619,12 +618,11 @@ export default function Products({ filters = {} }) {
             </div>
 
             {/* Table */}
-            <table style={{ width: "100%", borderCollapse: "collapse", tableLayout: "fixed", minWidth: 1440 }}>
+            <table style={{ width: "100%", borderCollapse: "collapse", tableLayout: "fixed", minWidth: 1380 }}>
               <thead>
                 <tr>
                   {[
                     { key: "name", label: "Item / ASIN", w: 200, align: "left" },
-                    { key: "div", label: "Channel", w: 60, align: "left" },
                     /* Sales */
                     { key: "rev", label: `${days}D Rev`, w: 88, align: "right", borderL: true },
                     { key: "velocity", label: "Velocity", w: 86, align: "right" },
@@ -677,7 +675,9 @@ export default function Products({ filters = {} }) {
                   const lyBadge = typeof p.lyRev === "string" && p.lyRev.startsWith("+")
                     ? <Badge color="teal">{p.lyRev}</Badge>
                     : <Badge color="red">{p.lyRev}</Badge>;
-                  const wowBadge = p.wowCvr >= 0
+                  const wowBadge = p.wowCvr === 0
+                    ? <Badge color="slate">—</Badge>
+                    : p.wowCvr > 0
                     ? <Badge color="teal">▲{Math.abs(p.wowCvr).toFixed(1)}pp</Badge>
                     : <Badge color="red">▼{Math.abs(p.wowCvr).toFixed(1)}pp</Badge>;
 
@@ -686,12 +686,9 @@ export default function Products({ filters = {} }) {
                       {/* Item / ASIN */}
                       <td style={{ padding: "8px 8px", borderBottom: "1px solid var(--brd)", verticalAlign: "middle" }}>
                         <div style={{ fontSize: 11, fontWeight: 600, color: "var(--txt)", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis", maxWidth: 185 }}>{p.name}</div>
-                        <div style={{ ...SG(), fontSize: 7.5, color: "var(--acc3)", marginTop: 1 }}>{p.asin}</div>
+                        <div style={{ ...SG(), fontSize: 7.5, color: "var(--acc3)", marginTop: 1 }}>{p.asin}{p.sku ? ` · ${p.sku}` : ""}</div>
                       </td>
-                      {/* Channel */}
-                      <td style={{ padding: "8px 8px", borderBottom: "1px solid var(--brd)", verticalAlign: "middle" }}>
-                        <div style={{ display: "flex", gap: 3, flexWrap: "wrap" }}>{divBadge} {chBadge}</div>
-                      </td>
+
                       {/* 30D Rev */}
                       <td style={{ ...SG(), padding: "8px 8px", borderBottom: "1px solid var(--brd)", textAlign: "right", fontWeight: 700, color: "#2ECFAA", fontSize: 10, borderLeft: "1px solid var(--brd)" }}>{fmt$(p.rev)}</td>
                       {/* Velocity */}
@@ -816,8 +813,12 @@ export default function Products({ filters = {} }) {
 
 /* ── Bubble Chart Component (SVG-based) ── */
 function BubbleChart({ items }) {
-  const bubbleItems = items.filter(p => (p.convRate || 0) > 0).slice(0, 12);
-  if (bubbleItems.length === 0) return null;
+  const bubbleItems = items.filter(p => p.adSpend > 0 || (p.convRate || 0) > 0).slice(0, 12);
+  if (bubbleItems.length === 0) return (
+    <div style={{ fontFamily: "'Space Grotesk',monospace", color: "var(--txt3)", textAlign: "center", padding: "40px 20px", fontSize: 11 }}>
+      No ad spend or CVR data — connect SP-API Advertising or sync Business Reports
+    </div>
+  );
 
   const maxSpend = Math.max(...bubbleItems.map(p => p.adSpend || 0), 100);
   const maxSessions = Math.max(...bubbleItems.map(p => p.sessions || 0), 1);

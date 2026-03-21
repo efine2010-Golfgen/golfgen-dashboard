@@ -225,6 +225,41 @@ def _build_product_list(con, cutoff: str) -> list:
     """, [cutoff]).fetchall()
     fin_by_asin = {r[0]: {"fba_fees": r[1], "commission": r[2]} for r in fin_rows}
 
+    # ── Weekly per-ASIN data for heatmaps (always 8-week window) ──
+    today_date = datetime.utcnow().date()
+    eight_weeks_ago = (today_date - timedelta(days=56)).isoformat()
+    weekly_by_asin: dict = {}
+    try:
+        wk_rows = con.execute("""
+            SELECT asin, date,
+                   COALESCE(units_ordered, 0),
+                   COALESCE(sessions, 0),
+                   COALESCE(ordered_product_sales, 0.0)
+            FROM daily_sales
+            WHERE asin != 'ALL' AND date >= ?
+            ORDER BY asin, date
+        """, [eight_weeks_ago]).fetchall()
+        _raw: dict = defaultdict(list)
+        for _asin, _date, _u, _s, _r in wk_rows:
+            _raw[_asin].append((str(_date)[:10], int(_u or 0), int(_s or 0), float(_r or 0)))
+        for _a, _daily in _raw.items():
+            _buckets: dict = defaultdict(lambda: [0, 0, 0.0])
+            for _ds, _u2, _s2, _r2 in _daily:
+                try:
+                    _dt = date.fromisoformat(_ds)
+                except Exception:
+                    continue
+                _ws = _dt - timedelta(days=_dt.weekday())  # Monday
+                _buckets[_ws][0] += _u2
+                _buckets[_ws][1] += _s2
+                _buckets[_ws][2] += _r2
+            _sorted = sorted(_buckets.items())[-8:]
+            while len(_sorted) < 8:
+                _sorted = [(None, [0, 0, 0.0])] + _sorted
+            weekly_by_asin[_a] = _sorted
+    except Exception as _we:
+        logger.warning(f"Weekly data query failed: {_we}")
+
     products = []
     for r in rows:
         asin = r[0]
@@ -289,6 +324,13 @@ def _build_product_list(con, cutoff: str) -> list:
         ref_info = refund_map.get(asin, {})
         refund_rate = round(ref_info.get("count", 0) / units * 100, 1) if units > 0 else 0
 
+        # Per-ASIN 8-week trend arrays
+        _wk = weekly_by_asin.get(asin, [(None, [0, 0, 0.0])] * 8)
+        vel_data = [int(w[1][0]) for w in _wk]
+        cvr_data = [round(w[1][0] / w[1][1] * 100, 1) if w[1][1] > 0 else 0.0 for w in _wk]
+        aur_data = [round(w[1][2] / w[1][0], 2) if w[1][0] > 0 else 0.0 for w in _wk]
+        wow_cvr = round(cvr_data[-1] - cvr_data[-2], 1) if len(cvr_data) >= 2 else 0.0
+
         products.append({
             "asin": asin,
             "sku": resolved_sku,
@@ -309,6 +351,10 @@ def _build_product_list(con, cutoff: str) -> list:
             "refundRate": refund_rate,
             "refundCount": ref_info.get("count", 0),
             "refundAmount": round(ref_info.get("amount", 0), 2),
+            "velData": vel_data,
+            "cvrData": cvr_data,
+            "aurData": aur_data,
+            "wowCvr": wow_cvr,
         })
 
     return products
