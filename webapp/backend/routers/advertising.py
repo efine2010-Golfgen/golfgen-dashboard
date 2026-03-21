@@ -1507,27 +1507,31 @@ def ads_ingest_report(report_id: str):
 
 @router.post("/api/debug/ads-backfill")
 @router.get("/api/debug/ads-backfill")
-async def ads_backfill(
+def ads_backfill(
     days: int = Query(default=90, ge=7, le=90),
     start: Optional[str] = Query(default=None, description="Start date YYYY-MM-DD"),
     end: Optional[str] = Query(default=None, description="End date YYYY-MM-DD"),
 ):
-    """Create v3 reports and poll until complete.
-
-    Two modes:
-      1. ?days=90 — auto-compute date range from today, split into 60-day chunks
-      2. ?start=2026-01-16&end=2026-02-14 — exact date range (max 60 days)
-
-    Each chunk polls up to 60 min.
+    """Fire-and-forget ads backfill. Starts a daemon thread and returns immediately.
+    Check /api/health → advertising_asin row count to monitor progress.
+    Reports take 15-60 min to generate on Amazon's end.
     """
-    try:
-        loop = asyncio.get_event_loop()
-        if start and end:
-            result = await loop.run_in_executor(
-                None, lambda: ads_backfill_range(start_date=start, end_date=end))
-        else:
-            result = await loop.run_in_executor(
-                None, lambda: ads_backfill_30days(days=days))
-        return result
-    except Exception as e:
-        return {"error": str(e)}
+    import threading as _threading
+
+    def _run():
+        try:
+            if start and end:
+                ads_backfill_range(start_date=start, end_date=end)
+            else:
+                ads_backfill_30days(days=days)
+        except Exception as e:
+            logger.error(f"Backfill thread error: {e}")
+
+    t = _threading.Thread(target=_run, daemon=True, name="ads-backfill")
+    t.start()
+    mode = f"{start} → {end}" if start and end else f"last {days} days"
+    return {
+        "status": "backfill_started",
+        "mode": mode,
+        "message": "Running in background. Check /api/health for advertising_asin row count. Reports take 15-60 min.",
+    }
