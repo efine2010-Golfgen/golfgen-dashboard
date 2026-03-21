@@ -27,7 +27,7 @@ from core.config import DB_PATH, DB_DIR, USE_POSTGRES
 logger = logging.getLogger("golfgen")
 
 # ── Configuration ──────────────────────────────────────────
-RETENTION_DAYS = 30
+RETENTION_DAYS = 14
 BACKUP_FOLDER_ID = os.environ.get("BACKUP_DRIVE_FOLDER_ID", "")
 
 
@@ -181,9 +181,19 @@ def run_backup() -> dict:
         archive_size_mb = round(archive_size / (1024 * 1024), 2)
         logger.info(f"Backup: Archive size = {archive_size_mb} MB")
 
-        # Step 3: Upload to Google Drive
+        # Step 3: Pre-upload: authenticate, free space, then upload
         logger.info(f"Backup: Uploading {filename} to Google Drive folder {settings['folder_id']}")
         drive = _get_drive_service()
+
+        # ── Run retention cleanup BEFORE upload to free space ──
+        pre_deleted = _enforce_retention(drive)
+        if pre_deleted:
+            logger.info(f"Backup: Pre-upload retention deleted {pre_deleted} old file(s)")
+
+        # ── Quota-aware purge if Drive is still tight ──
+        purged = _free_space_for_upload(drive, archive_size)
+        if purged:
+            logger.info(f"Backup: Pre-upload purge freed space by deleting {purged} extra file(s)")
 
         from googleapiclient.http import MediaFileUpload
 
@@ -201,7 +211,7 @@ def run_backup() -> dict:
         drive_file_id = uploaded.get("id", "")
         logger.info(f"Backup: Uploaded successfully — Drive file ID: {drive_file_id}")
 
-        # Step 4: Enforce retention
+        # Step 4: Second-pass retention (catches any files created between pre-upload check and now)
         deleted_count = _enforce_retention(drive)
 
     return {
@@ -254,6 +264,78 @@ def _enforce_retention(drive) -> int:
     except Exception as e:
         logger.error(f"Backup retention check failed: {e}")
         return 0
+
+
+def _free_space_for_upload(drive, estimated_size_bytes: int = 0) -> int:
+    """Pre-upload quota check: delete oldest backups if Drive is nearly full.
+
+    Runs BEFORE uploading so we never hit the quota wall mid-upload.
+    Deletes oldest golfgen backups until at least 2× the estimated upload
+    size (or 500 MB minimum) is free.
+
+    Returns number of files deleted.
+    """
+    deleted = 0
+    folder_id = os.environ.get("BACKUP_DRIVE_FOLDER_ID", "")
+    if not folder_id:
+        return 0
+
+    headroom_needed = max(estimated_size_bytes * 2, 500 * 1024 * 1024)  # min 500 MB
+
+    try:
+        # Check current quota
+        about = drive.about().get(fields="storageQuota").execute()
+        quota = about.get("storageQuota", {})
+        total = int(quota.get("limit", 0))
+        used  = int(quota.get("usage", 0))
+        free  = total - used if total > 0 else headroom_needed + 1
+
+        logger.info(
+            f"Backup quota check: {round(used/1e9,2)} GB used / "
+            f"{round(total/1e9,2)} GB total / {round(free/1e9,2)} GB free"
+        )
+
+        if free >= headroom_needed:
+            return 0  # plenty of room
+
+        logger.warning(
+            f"Backup: Drive only has {round(free/1e6,0)} MB free — "
+            f"need {round(headroom_needed/1e6,0)} MB. Purging old backups."
+        )
+
+        # List ALL backups sorted oldest first
+        query = (
+            f"'{folder_id}' in parents "
+            f"and name contains 'golfgen_backup_' "
+            f"and trashed = false"
+        )
+        results = drive.files().list(
+            q=query,
+            fields="files(id,name,size,createdTime)",
+            orderBy="createdTime asc",
+            pageSize=200,
+        ).execute()
+        old_files = results.get("files", [])
+
+        for f in old_files:
+            if free >= headroom_needed:
+                break
+            try:
+                file_size = int(f.get("size", 0))
+                drive.files().delete(fileId=f["id"]).execute()
+                free += file_size
+                deleted += 1
+                logger.info(
+                    f"Backup pre-purge: deleted {f['name']} "
+                    f"({round(file_size/1e6,1)} MB freed)"
+                )
+            except Exception as e:
+                logger.warning(f"Backup pre-purge: failed to delete {f['name']}: {e}")
+
+    except Exception as e:
+        logger.warning(f"Backup quota check error: {e}")
+
+    return deleted
 
 
 def verify_latest_backup() -> dict:
