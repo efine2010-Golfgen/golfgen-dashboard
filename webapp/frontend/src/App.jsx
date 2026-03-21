@@ -95,14 +95,12 @@ function ThemeSelector() {
 
 /* ── Amazon Analytics sub-tabs (lifted to sticky header) ── */
 const AMAZON_TABS = [
+  { key: "insights",        label: "INSIGHTS" },
   { key: "exec-summary",    label: "SALES SUMMARY" },
   { key: "item-performance",label: "ITEM PERFORMANCE" },
-  { key: "profitability",   label: "PROFITABILITY" },
-  { key: "fba-inventory",   label: "FBA INVENTORY" },
-  { key: "fba-shipments",   label: "FBA SHIPMENTS" },
+  { key: "profitability",   label: "PRICING & PROFIT" },
+  { key: "fba-combined",    label: "FBA INV. & SHIPMENTS" },
   { key: "advertising",     label: "ADVERTISING" },
-  { key: "forecasting",     label: "FORECASTING" },
-  { key: "item-master",     label: "ITEM MASTER" },
 ];
 
 /* ── Navigation (subnav bar + sub-views row) ── */
