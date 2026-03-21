@@ -620,6 +620,8 @@ from routers.supply_chain import router as supply_chain_router
 from routers.ask_claude import router as ask_claude_router
 from routers.retail import router as retail_router
 from routers.walmart import router as walmart_router
+from routers.writes import router as writes_router
+from routers.documents import router as documents_router
 
 app.include_router(sales_router)
 app.include_router(profitability_router)
@@ -635,6 +637,8 @@ app.include_router(supply_chain_router)
 app.include_router(ask_claude_router)
 app.include_router(retail_router)
 app.include_router(walmart_router)
+app.include_router(writes_router)
+app.include_router(documents_router)
 
 
 # ── Static Frontend (React SPA) ──────────────────────────

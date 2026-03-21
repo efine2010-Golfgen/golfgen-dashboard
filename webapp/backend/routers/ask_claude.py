@@ -12,6 +12,85 @@ from core.database import get_db, get_db_rw
 from core.config import ANTHROPIC_API_KEY
 from core.hierarchy import hierarchy_filter
 
+# ── Write intent detection ───────────────────────────────────────────────────
+import re as _re
+
+_WRITE_PATTERNS = [
+    # COGS / cost
+    (_re.compile(r'\b(update|set|change|modify|fix|correct)\b.{0,40}\b(cogs|cost|unit.?cost)\b', _re.I), 'update_cogs'),
+    (_re.compile(r'\b(cogs|cost|unit.?cost)\b.{0,30}\b(update|set|change|to)\b', _re.I), 'update_cogs'),
+    # Ad budget / ACOS
+    (_re.compile(r'\b(set|change|update|adjust)\b.{0,40}\b(budget|acos|spend|target)\b', _re.I), 'set_ad_budget'),
+    (_re.compile(r'\b(budget|acos|target.?acos)\b.{0,30}\b(set|to|change|update)\b', _re.I), 'set_ad_budget'),
+    # Inventory threshold / reorder
+    (_re.compile(r'\b(set|add|create|update)\b.{0,40}\b(threshold|reorder|reorder.?point|alert|low.?stock)\b', _re.I), 'set_inventory_threshold'),
+    # Price note
+    (_re.compile(r'\b(add|create|log)\b.{0,40}\b(note|price.?note|map.?exception|price.?hold)\b', _re.I), 'add_price_note'),
+    (_re.compile(r'\bnote\b.{0,30}\b(price|asin|sku|product)\b', _re.I), 'add_price_note'),
+]
+
+
+def _detect_write_intent(question: str):
+    """Return the intent key if question looks like a write command, else None."""
+    for pattern, intent in _WRITE_PATTERNS:
+        if pattern.search(question):
+            return intent
+    return None
+
+
+def _extract_write_action(question: str, intent: str, api_key: str) -> dict | None:
+    """Use Claude to extract structured write parameters from natural-language command."""
+    prompts = {
+        'update_cogs': (
+            "Extract the ASIN/SKU and new COGS/unit-cost value from this command. "
+            "Respond ONLY with JSON: {\"asin\": \"...\", \"new_cogs\": 0.00, \"note\": \"...\"} "
+            "If you cannot extract with confidence, respond with {\"error\": \"could not parse\"}."
+        ),
+        'set_ad_budget': (
+            "Extract the ad budget target from this command. "
+            "Respond ONLY with JSON: {\"identifier\": \"...\", \"identifier_type\": \"asin|campaign|all\", "
+            "\"target_acos\": null_or_number, \"daily_budget\": null_or_number, \"note\": \"...\"} "
+            "If you cannot extract, respond with {\"error\": \"could not parse\"}."
+        ),
+        'set_inventory_threshold': (
+            "Extract the inventory reorder threshold from this command. "
+            "Respond ONLY with JSON: {\"asin\": \"...or empty\", \"sku\": \"...or empty\", "
+            "\"reorder_point\": 0, \"target_weeks_cover\": null_or_number, \"note\": \"...\"} "
+            "If you cannot extract, respond with {\"error\": \"could not parse\"}."
+        ),
+        'add_price_note': (
+            "Extract the price note details from this command. "
+            "Respond ONLY with JSON: {\"asin\": \"...or empty\", \"sku\": \"...or empty\", "
+            "\"note\": \"...\", \"note_type\": \"general|map_exception|price_hold|clearance\", "
+            "\"price_override\": null_or_number} "
+            "If you cannot extract, respond with {\"error\": \"could not parse\"}."
+        ),
+    }
+    sys_prompt = prompts.get(intent, "")
+    if not sys_prompt:
+        return None
+    try:
+        import anthropic, json
+        client = anthropic.Anthropic(api_key=api_key)
+        msg = client.messages.create(
+            model="claude-haiku-4-5-20251001",
+            max_tokens=200,
+            system=sys_prompt,
+            messages=[{"role": "user", "content": question}]
+        )
+        raw = msg.content[0].text.strip()
+        # strip markdown code fences if present
+        raw = _re.sub(r'^```[\w]*\n?', '', raw)
+        raw = _re.sub(r'\n?```$', '', raw)
+        data = json.loads(raw)
+        if "error" in data:
+            return None
+        data["_intent"] = intent
+        return data
+    except Exception as e:
+        logger.warning(f"_extract_write_action error: {e}")
+        return None
+
 logger = logging.getLogger("golfgen")
 router = APIRouter()
 
@@ -487,6 +566,29 @@ async def ask_claude(req: AskClaudeRequest, request: Request):
             "tab_context": req.active_tab,
             "data_snapshot_summary": "",
         }
+
+    # ── Write intent check ──
+    write_intent = _detect_write_intent(req.question)
+    if write_intent and ANTHROPIC_API_KEY:
+        action = _extract_write_action(req.question, write_intent, ANTHROPIC_API_KEY)
+        if action:
+            # Audit the write intent attempt
+            try:
+                con_rw = get_db_rw()
+                con_rw.execute(
+                    "INSERT INTO audit_log (timestamp, user_email, action, detail) VALUES (?, ?, ?, ?)",
+                    [datetime.now(CENTRAL).isoformat(), user_email, "write_intent_detected",
+                     req.question[:100] + " | intent: " + write_intent]
+                )
+                con_rw.close()
+            except Exception:
+                pass
+            return {
+                "answer": None,
+                "write_action": action,
+                "tab_context": req.active_tab,
+                "data_snapshot_summary": "",
+            }
 
     # ── Build data snapshot ──
     try:
