@@ -89,7 +89,7 @@ function EditableCell({ value, onSave, type = "number", prefix = "", suffix = ""
     return (
       <span
         onClick={() => { setDraft(value); setEditing(true); }}
-        style={{ cursor: "pointer", borderBottom: "1px dashed rgba(0,0,0,0.2)", padding: "2px 4px" }}
+        style={{ cursor: "pointer", borderBottom: "1px dashed rgba(100,180,170,0.55)", padding: "2px 4px", borderRadius: 2 }}
         title="Click to edit"
       >
         {prefix}{type === "number" ? (value || 0).toLocaleString(undefined, { maximumFractionDigits: 2 }) : (value || "—")}{suffix}
@@ -141,7 +141,7 @@ function SelectCell({ value, options, onSave }) {
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState(value);
   if (!editing) return (
-    <span style={{ cursor: "pointer", borderBottom: "1px dashed rgba(0,0,0,0.2)", padding: "2px 4px", fontSize: 12 }}
+    <span style={{ cursor: "pointer", borderBottom: "1px dashed rgba(100,180,170,0.55)", padding: "2px 4px", fontSize: 12, borderRadius: 2 }}
       onClick={() => { setDraft(value); setEditing(true); }} title="Click to edit">
       {value || "—"}
     </span>
