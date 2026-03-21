@@ -220,7 +220,7 @@ function AppShell({ user, isAdmin, allowed, mfaProtected, userMfaEnabled, filter
                 </div>
               )}
               <div style={{marginTop:4}}>
-                <AskClaude activeTab={activeCategory} division={division} customer={customer} />
+                <AskClaude activeTab={activeTab} division={division} customer={customer} />
               </div>
             </div>
 
