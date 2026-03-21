@@ -1509,6 +1509,8 @@ def _handle_advertised_product_report(data):
     if not isinstance(data, list):
         logger.warning(f"AdvertisedProduct report: expected list, got {type(data)}")
         return
+    if data:
+        logger.info(f"AdvertisedProduct first row keys: {list(data[0].keys())}, sample: {data[0]}")
 
     con = get_db_rw()
     con.execute("BEGIN TRANSACTION")
