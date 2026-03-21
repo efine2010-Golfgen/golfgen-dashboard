@@ -47,7 +47,7 @@ const HM_WINDOWS_DEF = {
   D: { label: '+14-26w LY',  range: 'future', indices: Array.from({length:13},(_,i)=>26+i) },   // 26-38: LY proxy 14-26w ahead
   C: { label: '+1-13w LY',   range: 'future', indices: Array.from({length:13},(_,i)=>39+i) },   // 39-51: LY proxy 1-13w ahead
 };
-const VIEW_TABS         = ['Executive','Sales Summary','Daily','Weekly','Monthly','Yearly','Custom'];
+const VIEW_TABS         = ['Sales Summary','Daily'];
 const MONTHS = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
 
 // ── FORMATTERS ─────────────────────────────────────────────────────
@@ -1200,7 +1200,7 @@ export default function Sales({ filters = {} }) {
 
       {/* HEADER */}
       <div style={{marginBottom:20}}>
-        <h2 style={{fontFamily:"'DM Serif Display',Georgia,serif",fontSize:22,fontWeight:400,margin:0,color:'var(--txt)'}}>{viewTab === 'Sales Summary' ? 'Sales Summary' : viewTab === 'Daily' ? 'Daily Sales' : viewTab === 'Weekly' ? 'Weekly Sales' : viewTab === 'Monthly' ? 'Monthly Sales' : viewTab === 'Yearly' ? 'Year-over-Year' : 'Sales Analytics'}</h2>
+        <h2 style={{fontFamily:"'DM Serif Display',Georgia,serif",fontSize:22,fontWeight:400,margin:0,color:'var(--txt)'}}>{viewTab === 'Daily' ? 'Daily Sales' : 'Sales Summary'}</h2>
         <div style={{fontSize:12,color:'var(--txt3)',marginTop:3,fontFamily:"'Space Grotesk',monospace"}}>
           {mpRaw === 'CA' ? 'Amazon.ca (Canada)' : 'Amazon.com (US)'}
           {' \u00B7 '}
@@ -1219,27 +1219,7 @@ export default function Sales({ filters = {} }) {
         ))}
       </div>
 
-      {/* CUSTOM DATE PICKER */}
-      {viewTab === 'Custom' && (
-        <div style={{background:'var(--card)',border:'1px solid var(--brd2)',borderRadius:14,padding:16,marginBottom:18,transition:'background .3s'}}>
-          <div style={{fontSize:13,fontWeight:700,marginBottom:12,color:'var(--txt)'}}>Custom Date Range</div>
-          <div style={{display:'flex',gap:10,alignItems:'flex-end',flexWrap:'wrap'}}>
-            {[['Start',customStart,setCustomStart],['End',customEnd,setCustomEnd]].map(([l,v,s]) => (
-              <div key={l}>
-                <label style={{display:'block',fontSize:10,color:'var(--txt3)',marginBottom:4}}>{l} Date</label>
-                <input type="date" value={v} onChange={e => s(e.target.value)}
-                  style={{padding:'6px 12px',borderRadius:8,border:'1px solid var(--brd2)',background:'var(--surf)',color:'var(--txt)',fontSize:12,outline:'none',colorScheme:'dark'}}/>
-              </div>
-            ))}
-            {[7,30,90].map(d => (
-              <button key={d} onClick={() => { const e=new Date(),s=new Date();s.setDate(s.getDate()-d);setCustomStart(s.toISOString().split('T')[0]);setCustomEnd(e.toISOString().split('T')[0]); }}
-                style={{padding:'5px 11px',borderRadius:8,border:'1px solid var(--brd)',background:'transparent',color:'var(--txt3)',fontSize:11,cursor:'pointer'}}>
-                Last {d}d
-              </button>
-            ))}
-          </div>
-        </div>
-      )}
+
 
       {/* ══ EXECUTIVE DASHBOARD ══════════════════════════════════ */}
       {viewTab === 'Executive' && (() => {

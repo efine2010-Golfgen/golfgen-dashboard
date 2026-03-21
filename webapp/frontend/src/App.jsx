@@ -158,6 +158,9 @@ function NavSystem({ permissions, mfaProtected, userMfaEnabled, division, custom
         <div style={{ position: 'absolute', left: '50%', top: '50%', transform: 'translate(-50%, -50%)', zIndex: 2 }}>
           <AskClaude activeTab={activeCategory} division={division} customer={customer} />
         </div>
+        <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', paddingRight: 12, flexShrink: 0 }}>
+          <ThemeSelector />
+        </div>
       </nav>
 
       {/* Secondary: sub-views for current category (only when > 1 view) */}
@@ -255,10 +258,6 @@ function AppShell({ user, isAdmin, allowed, mfaProtected, userMfaEnabled, filter
         {/* ── Sub-nav — Tier 3 ── */}
         <NavSystem permissions={allowed} mfaProtected={mfaProtected} userMfaEnabled={userMfaEnabled} division={division} customer={customer} />
 
-        {/* ── Theme Bar — Tier 4 ── */}
-        <div style={{ background:'#081520', borderBottom:'1px solid rgba(255,255,255,.05)', padding:'5px 20px', display:'flex', alignItems:'center', justifyContent:'center' }}>
-          <ThemeSelector />
-        </div>
 
         {/* ── Accent stripe — below all header tiers ── */}
         <div className="stripe" />
