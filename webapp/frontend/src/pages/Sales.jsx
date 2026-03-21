@@ -1352,7 +1352,7 @@ export default function Sales({ filters = {} }) {
                 const hmStops=[[21,37,62],[15,82,115],[13,115,119],[34,139,34],[218,165,32],[230,101,30],[214,40,57]];
                 const hmColor=(t)=>{if(t<=0)return 'rgb(21,37,62)';if(t>=1)return 'rgb(214,40,57)';const seg=t*(hmStops.length-1);const i=Math.floor(seg),f=seg-i;const a=hmStops[i],b2=hmStops[Math.min(i+1,hmStops.length-1)];return `rgb(${Math.round(a[0]+(b2[0]-a[0])*f)},${Math.round(a[1]+(b2[1]-a[1])*f)},${Math.round(a[2]+(b2[2]-a[2])*f)})`};
                 const HOUR_LABELS=['12am','1am','2am','3am','4am','5am','6am','7am','8am','9am','10am','11am','12pm','1pm','2pm','3pm','4pm','5pm','6pm','7pm','8pm','9pm','10pm','11pm'];
-                const HCOL_W=26,DLW=72,DRH=28;
+                const HCOL_W=34,DLW=72,DRH=28;
                 const hmDays=hmData?.days||[];
                 const maxVal=hmMetric==='$'?(hmData?.maxSales||0):(hmData?.maxUnits||0);
                 const sqrtMax=Math.sqrt(maxVal||1);
@@ -1374,8 +1374,24 @@ export default function Sales({ filters = {} }) {
                     </div>
                     {loading.hmData?<Spinner/>:last7.length===0?(
                       <div style={{padding:'24px',textAlign:'center',color:B.sub,fontSize:12}}>No hourly data yet</div>
-                    ):(
-                      <div style={{overflowX:'auto'}}>
+                    ):(()=>{
+                      const metricKey=hmMetric==='$'?'sales':'units';
+                      const totalFmt=hmMetric==='$'?f$:fN;
+                      const total7=last7.reduce((s,d)=>s+Object.values(d.hours||{}).reduce((ss,c)=>ss+(c[metricKey]||0),0),0);
+                      const hourTotals=Array.from({length:24},(_,h)=>({h,val:last7.reduce((s,d)=>s+((d.hours||{})[h]?.[metricKey]||0),0)}));
+                      const topHours=[...hourTotals].sort((a,b)=>b.val-a.val);
+                      const dayTots=last7.map(d=>({d,val:Object.values(d.hours||{}).reduce((s,c)=>s+(c[metricKey]||0),0)})).sort((a,b)=>b.val-a.val);
+                      const bkVals=[
+                        {label:'AM',   h:[6,7,8,9,10,11],    col:'#f59e0b'},
+                        {label:'PM',   h:[12,13,14,15,16,17], col:B.b2},
+                        {label:'Eve',  h:[18,19,20,21],       col:'#8b5cf6'},
+                        {label:'Night',h:[22,23,0,1,2,3,4,5], col:'#475569'},
+                      ].map(b=>({...b,val:b.h.reduce((s,hr)=>s+last7.reduce((ss,d)=>ss+((d.hours||{})[hr]?.[metricKey]||0),0),0)}));
+                      const bkMax=Math.max(...bkVals.map(b=>b.val),1);
+                      return (
+                      <div style={{display:'flex',gap:14,alignItems:'flex-start'}}>
+                        {/* Grid */}
+                        <div style={{flex:'1 1 auto',overflowX:'auto'}}>
                         {last7.map(d=>(
                           <div key={d.date} style={{display:'flex',alignItems:'center',marginBottom:2}}>
                             <div style={{width:DLW,flexShrink:0,paddingRight:8,textAlign:'right'}}>
@@ -1406,8 +1422,39 @@ export default function Sales({ filters = {} }) {
                           </div>
                           <span style={{fontSize:8,color:B.sub}}>{hmData?.lastUpdated?hmData.lastUpdated.replace('T',' '):'—'}</span>
                         </div>
+                        </div>
+                        {/* Summary panel */}
+                        <div style={{flex:'0 0 155px',paddingLeft:14,borderLeft:'1px solid var(--brd)',display:'flex',flexDirection:'column',gap:10}}>
+                          <div style={{fontSize:9,fontWeight:700,color:'var(--txt3)',textTransform:'uppercase',letterSpacing:'.06em'}}>Summary</div>
+                          <div>
+                            <div style={{fontSize:8,color:'var(--txt3)',marginBottom:2}}>7-Day Total</div>
+                            <div style={{fontSize:18,fontWeight:800,color:'var(--txt)',lineHeight:1}}>{totalFmt(total7)}</div>
+                          </div>
+                          <div>
+                            <div style={{fontSize:8,color:'var(--txt3)',marginBottom:2}}>Peak Hour</div>
+                            <div style={{fontSize:14,fontWeight:700,color:B.b3}}>{HOUR_LABELS[topHours[0]?.h??0]}</div>
+                            {topHours.length>1&&<div style={{fontSize:9,color:'var(--txt3)'}}>2nd: {HOUR_LABELS[topHours[1].h]}</div>}
+                          </div>
+                          <div>
+                            <div style={{fontSize:8,color:'var(--txt3)',marginBottom:2}}>Best Day</div>
+                            <div style={{fontSize:14,fontWeight:700,color:B.o3}}>{dayTots[0]?.d.dayOfWeek||'—'}</div>
+                            <div style={{fontSize:9,color:'var(--txt3)'}}>{totalFmt(dayTots[0]?.val||0)}</div>
+                          </div>
+                          <div>
+                            <div style={{fontSize:8,color:'var(--txt3)',marginBottom:5}}>By Time of Day</div>
+                            {bkVals.map(b=>(
+                              <div key={b.label} style={{display:'flex',alignItems:'center',gap:5,marginBottom:4}}>
+                                <div style={{fontSize:8,color:'var(--txt3)',width:32,flexShrink:0}}>{b.label}</div>
+                                <div style={{flex:1,height:6,borderRadius:3,background:'rgba(255,255,255,.06)'}}>
+                                  <div style={{width:`${(b.val/bkMax)*100}%`,height:'100%',borderRadius:3,background:b.col,opacity:.8,transition:'width .3s'}}/>
+                                </div>
+                              </div>
+                            ))}
+                          </div>
+                        </div>
                       </div>
-                    )}
+                      );
+                    })()}
                   </div>
                 );
               })()}
@@ -2052,7 +2099,7 @@ export default function Sales({ filters = {} }) {
                 const hmStops=[[21,37,62],[15,82,115],[13,115,119],[34,139,34],[218,165,32],[230,101,30],[214,40,57]];
                 const hmColor=(t)=>{if(t<=0)return 'rgb(21,37,62)';if(t>=1)return 'rgb(214,40,57)';const seg=t*(hmStops.length-1);const i=Math.floor(seg),f=seg-i;const a=hmStops[i],b2=hmStops[Math.min(i+1,hmStops.length-1)];return `rgb(${Math.round(a[0]+(b2[0]-a[0])*f)},${Math.round(a[1]+(b2[1]-a[1])*f)},${Math.round(a[2]+(b2[2]-a[2])*f)})`};
                 const HOUR_LABELS=['12am','1am','2am','3am','4am','5am','6am','7am','8am','9am','10am','11am','12pm','1pm','2pm','3pm','4pm','5pm','6pm','7pm','8pm','9pm','10pm','11pm'];
-                const HCOL_W=26,DLW=72,DRH=28;
+                const HCOL_W=34,DLW=72,DRH=28;
                 const hmDays=hmData?.days||[];
                 const maxVal=hmMetric==='$'?(hmData?.maxSales||0):(hmData?.maxUnits||0);
                 const sqrtMax=Math.sqrt(maxVal||1);
@@ -2074,8 +2121,24 @@ export default function Sales({ filters = {} }) {
                     </div>
                     {loading.hmData?<Spinner/>:last7.length===0?(
                       <div style={{padding:'24px',textAlign:'center',color:B.sub,fontSize:12}}>No hourly data yet</div>
-                    ):(
-                      <div style={{overflowX:'auto'}}>
+                    ):(()=>{
+                      const metricKey=hmMetric==='$'?'sales':'units';
+                      const totalFmt=hmMetric==='$'?f$:fN;
+                      const total7=last7.reduce((s,d)=>s+Object.values(d.hours||{}).reduce((ss,c)=>ss+(c[metricKey]||0),0),0);
+                      const hourTotals=Array.from({length:24},(_,h)=>({h,val:last7.reduce((s,d)=>s+((d.hours||{})[h]?.[metricKey]||0),0)}));
+                      const topHours=[...hourTotals].sort((a,b)=>b.val-a.val);
+                      const dayTots=last7.map(d=>({d,val:Object.values(d.hours||{}).reduce((s,c)=>s+(c[metricKey]||0),0)})).sort((a,b)=>b.val-a.val);
+                      const bkVals=[
+                        {label:'AM',   h:[6,7,8,9,10,11],    col:'#f59e0b'},
+                        {label:'PM',   h:[12,13,14,15,16,17], col:B.b2},
+                        {label:'Eve',  h:[18,19,20,21],       col:'#8b5cf6'},
+                        {label:'Night',h:[22,23,0,1,2,3,4,5], col:'#475569'},
+                      ].map(b=>({...b,val:b.h.reduce((s,hr)=>s+last7.reduce((ss,d)=>ss+((d.hours||{})[hr]?.[metricKey]||0),0),0)}));
+                      const bkMax=Math.max(...bkVals.map(b=>b.val),1);
+                      return (
+                      <div style={{display:'flex',gap:14,alignItems:'flex-start'}}>
+                        {/* Grid */}
+                        <div style={{flex:'1 1 auto',overflowX:'auto'}}>
                         {last7.map(d=>(
                           <div key={d.date} style={{display:'flex',alignItems:'center',marginBottom:2}}>
                             <div style={{width:DLW,flexShrink:0,paddingRight:8,textAlign:'right'}}>
@@ -2106,8 +2169,39 @@ export default function Sales({ filters = {} }) {
                           </div>
                           <span style={{fontSize:8,color:B.sub}}>{hmData?.lastUpdated?hmData.lastUpdated.replace('T',' '):'—'}</span>
                         </div>
+                        </div>
+                        {/* Summary panel */}
+                        <div style={{flex:'0 0 155px',paddingLeft:14,borderLeft:'1px solid var(--brd)',display:'flex',flexDirection:'column',gap:10}}>
+                          <div style={{fontSize:9,fontWeight:700,color:'var(--txt3)',textTransform:'uppercase',letterSpacing:'.06em'}}>Summary</div>
+                          <div>
+                            <div style={{fontSize:8,color:'var(--txt3)',marginBottom:2}}>7-Day Total</div>
+                            <div style={{fontSize:18,fontWeight:800,color:'var(--txt)',lineHeight:1}}>{totalFmt(total7)}</div>
+                          </div>
+                          <div>
+                            <div style={{fontSize:8,color:'var(--txt3)',marginBottom:2}}>Peak Hour</div>
+                            <div style={{fontSize:14,fontWeight:700,color:B.b3}}>{HOUR_LABELS[topHours[0]?.h??0]}</div>
+                            {topHours.length>1&&<div style={{fontSize:9,color:'var(--txt3)'}}>2nd: {HOUR_LABELS[topHours[1].h]}</div>}
+                          </div>
+                          <div>
+                            <div style={{fontSize:8,color:'var(--txt3)',marginBottom:2}}>Best Day</div>
+                            <div style={{fontSize:14,fontWeight:700,color:B.o3}}>{dayTots[0]?.d.dayOfWeek||'—'}</div>
+                            <div style={{fontSize:9,color:'var(--txt3)'}}>{totalFmt(dayTots[0]?.val||0)}</div>
+                          </div>
+                          <div>
+                            <div style={{fontSize:8,color:'var(--txt3)',marginBottom:5}}>By Time of Day</div>
+                            {bkVals.map(b=>(
+                              <div key={b.label} style={{display:'flex',alignItems:'center',gap:5,marginBottom:4}}>
+                                <div style={{fontSize:8,color:'var(--txt3)',width:32,flexShrink:0}}>{b.label}</div>
+                                <div style={{flex:1,height:6,borderRadius:3,background:'rgba(255,255,255,.06)'}}>
+                                  <div style={{width:`${(b.val/bkMax)*100}%`,height:'100%',borderRadius:3,background:b.col,opacity:.8,transition:'width .3s'}}/>
+                                </div>
+                              </div>
+                            ))}
+                          </div>
+                        </div>
                       </div>
-                    )}
+                      );
+                    })()}
                   </div>
                 );
               })()}

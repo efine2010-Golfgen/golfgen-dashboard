@@ -78,38 +78,17 @@ function detectCategory(pathname) {
   return "amazon-analytics";
 }
 
-/* ── Theme Selector (double-stacked: Dark row on top, Light row below, selected theme pill to the right) ── */
+/* ── Theme Selector (4 themes: Midnight, Fairway, Warm, Fresh) ── */
 function ThemeSelector() {
   const { theme, setTheme, themes } = useTheme();
-  const lblStyle = { fontFamily:"'Space Grotesk',monospace", fontSize:7, fontWeight:700, textTransform:'uppercase', letterSpacing:'.1em', color:'var(--txt3)', whiteSpace:'nowrap', minWidth:28 };
   return (
-    <div style={{ display:'flex', alignItems:'center', gap:8, marginLeft:'auto', flexShrink:0 }}>
-      {/* Two rows of theme buttons */}
-      <div style={{ display:'flex', flexDirection:'column', gap:3 }}>
-        {/* Dark row */}
-        <div style={{ display:'flex', alignItems:'center', gap:4 }}>
-          <span style={lblStyle}>Dark</span>
-          {['midnight', 'night', 'fairway'].map(t => (
-            <button key={t} className={`tbtn${theme === t ? ' active' : ''}`} onClick={() => setTheme(t)}>
-              {themes[t].name}
-            </button>
-          ))}
-        </div>
-        {/* Light row */}
-        <div style={{ display:'flex', alignItems:'center', gap:4 }}>
-          <span style={lblStyle}>Light</span>
-          {['slate', 'warm', 'fresh'].map(t => (
-            <button key={t} className={`tbtn${theme === t ? ' active' : ''}`} onClick={() => setTheme(t)}>
-              {themes[t].name}
-            </button>
-          ))}
-        </div>
-      </div>
-      {/* Current theme indicator pill */}
-      <div style={{ display:'flex', alignItems:'center', gap:5, padding:'3px 8px', borderRadius:6, border:'1px solid var(--brd2)', background:'var(--ibg)' }}>
-        <div style={{ width:10, height:10, borderRadius:3, background:themes[theme].sw, flexShrink:0 }} />
-        <span style={{ fontFamily:"'Space Grotesk',monospace", fontSize:10, fontWeight:700, color:'var(--txt2)', whiteSpace:'nowrap' }}>{themes[theme].name}</span>
-      </div>
+    <div style={{ display:'flex', alignItems:'center', gap:8 }}>
+      <span style={{ fontFamily:"'Space Grotesk',monospace", fontSize:8, fontWeight:700, textTransform:'uppercase', letterSpacing:'.1em', color:'rgba(255,255,255,.35)', whiteSpace:'nowrap' }}>Theme</span>
+      {['midnight','fairway','warm','fresh'].map(t => (
+        <button key={t} className={`tbtn${theme === t ? ' active' : ''}`} onClick={() => setTheme(t)}>
+          {themes[t].name}
+        </button>
+      ))}
     </div>
   );
 }
@@ -160,7 +139,7 @@ function NavSystem({ permissions, mfaProtected, userMfaEnabled, division, custom
   return (
     <>
       {/* Primary: category tabs */}
-      <nav className="subnav">
+      <nav className="subnav" style={{ position: 'relative' }}>
         {CATEGORIES.map((cat, i) => {
           const hasVisible = cat.views.some(v => isViewVisible(v));
           if (!hasVisible) return null;
@@ -176,7 +155,7 @@ function NavSystem({ permissions, mfaProtected, userMfaEnabled, division, custom
             </span>
           );
         })}
-        <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', flexShrink: 0 }}>
+        <div style={{ position: 'absolute', left: '50%', top: '50%', transform: 'translate(-50%, -50%)', zIndex: 2 }}>
           <AskClaude activeTab={activeCategory} division={division} customer={customer} />
         </div>
       </nav>
@@ -265,17 +244,21 @@ function AppShell({ user, isAdmin, allowed, mfaProtected, userMfaEnabled, filter
           </div>
         </div>
 
-        {/* ── Filter Bar (theme selector) — Tier 2 ── */}
-        <div className="filter-bar">
-          {!isAmazon && <>
+        {/* ── Filter Bar — Tier 2 (hierarchy filter; hidden on Amazon) ── */}
+        {!isAmazon && (
+          <div className="filter-bar">
             <span className="filter-lbl">View:</span>
             <HierarchyFilter division={division} customer={customer} onChange={handleFilterChange} compact />
-          </>}
-          <ThemeSelector />
-        </div>
+          </div>
+        )}
 
         {/* ── Sub-nav — Tier 3 ── */}
         <NavSystem permissions={allowed} mfaProtected={mfaProtected} userMfaEnabled={userMfaEnabled} division={division} customer={customer} />
+
+        {/* ── Theme Bar — Tier 4 ── */}
+        <div style={{ background:'#081520', borderBottom:'1px solid rgba(255,255,255,.05)', padding:'5px 20px', display:'flex', alignItems:'center', justifyContent:'center' }}>
+          <ThemeSelector />
+        </div>
 
         {/* ── Accent stripe — below all header tiers ── */}
         <div className="stripe" />
