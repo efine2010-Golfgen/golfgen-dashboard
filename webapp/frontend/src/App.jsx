@@ -157,7 +157,7 @@ function NavSystem({ permissions, mfaProtected, userMfaEnabled, division, custom
         })}
 
         <div style={{ position: 'absolute', left: '50%', top: '50%', transform: 'translate(-50%, -50%)', zIndex: 2 }}>
-          <AskClaude activeTab={activeTab} division={division} customer={customer} />
+          <AskClaude activeTab={activeCategory} division={division} customer={customer} />
         </div>
         <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', paddingRight: 12, flexShrink: 0 }}>
           <ThemeSelector />
