@@ -2064,11 +2064,13 @@ export default function Sales({ filters = {} }) {
             })()}
 
             {/* ── PERIOD SUMMARY ── */}
-            <div style={{display:'flex',alignItems:'center',gap:10,margin:'10px 0 8px'}}>
-              <div style={{fontSize:9,fontWeight:800,textTransform:'uppercase',letterSpacing:'.12em',padding:'3px 9px',borderRadius:99,background:'rgba(46,111,187,.15)',color:B.b3,border:'1px solid rgba(46,111,187,.25)',whiteSpace:'nowrap',flexShrink:0}}>📅 Period Summary</div>
-              <div style={{flex:1,height:1,background:'var(--brd)'}}/>
-              {cpPills(cpSales, v=>{setCpSales(v);setActivePeriod(v);}, salesCustom, setSalesCustom)}
-              <div style={{flex:1,height:1,background:'var(--brd)'}}/>
+            <div style={{display:'grid',gridTemplateColumns:'1fr auto 1fr',alignItems:'center',gap:10,margin:'10px 0 8px'}}>
+              <div style={{display:'flex',alignItems:'center',gap:10}}>
+                <div style={{fontSize:9,fontWeight:800,textTransform:'uppercase',letterSpacing:'.12em',padding:'3px 9px',borderRadius:99,background:'rgba(46,111,187,.15)',color:B.b3,border:'1px solid rgba(46,111,187,.25)',whiteSpace:'nowrap',flexShrink:0}}>📅 Period Summary</div>
+                <div style={{flex:1,height:1,background:'var(--brd)'}}/>
+              </div>
+              <div>{cpPills(cpSales, v=>{setCpSales(v);setActivePeriod(v);}, salesCustom, setSalesCustom)}</div>
+              <div style={{height:1,background:'var(--brd)'}}/>
             </div>
             {periodCols && (
               <div style={{display:'grid',gridTemplateColumns:'repeat(5,1fr)',gap:10,marginBottom:20}}>
@@ -2480,11 +2482,13 @@ export default function Sales({ filters = {} }) {
 </>}
 
             {/* ── TRENDS ── */}
-            <div style={{display:'flex',alignItems:'center',gap:10,margin:'14px 0 10px'}}>
-              <div style={{fontSize:9,fontWeight:800,textTransform:'uppercase',letterSpacing:'.12em',padding:'3px 9px',borderRadius:99,background:'rgba(232,130,30,.12)',color:B.o3,border:'1px solid rgba(232,130,30,.2)',whiteSpace:'nowrap',flexShrink:0}}>📈 Trends</div>
-              <div style={{flex:1,height:1,background:'var(--brd)'}}/>
-              {cpPills(cpSales, v=>{setCpSales(v);setActivePeriod(v);}, salesCustom, setSalesCustom)}
-              <div style={{flex:1,height:1,background:'var(--brd)'}}/>
+            <div style={{display:'grid',gridTemplateColumns:'1fr auto 1fr',alignItems:'center',gap:10,margin:'14px 0 10px'}}>
+              <div style={{display:'flex',alignItems:'center',gap:10}}>
+                <div style={{fontSize:9,fontWeight:800,textTransform:'uppercase',letterSpacing:'.12em',padding:'3px 9px',borderRadius:99,background:'rgba(232,130,30,.12)',color:B.o3,border:'1px solid rgba(232,130,30,.2)',whiteSpace:'nowrap',flexShrink:0}}>📈 Trends</div>
+                <div style={{flex:1,height:1,background:'var(--brd)'}}/>
+              </div>
+              <div>{cpPills(cpSales, v=>{setCpSales(v);setActivePeriod(v);}, salesCustom, setSalesCustom)}</div>
+              <div style={{height:1,background:'var(--brd)'}}/>
             </div>
 
             {/* ── Sales Overview KPIs ── */}
@@ -2692,11 +2696,13 @@ export default function Sales({ filters = {} }) {
 
             {/* ── Traffic & Conversion Pipeline ── */}
             <div style={{background:'var(--card)',border:'1px solid var(--brd)',borderRadius:12,padding:16,marginBottom:12}}>
-              <div style={{display:'flex',alignItems:'center',gap:10,marginBottom:14}}>
-                <span style={{fontSize:9,fontWeight:700,textTransform:'uppercase',letterSpacing:'.14em',color:'var(--txt3)',whiteSpace:'nowrap'}}>Traffic &amp; Conversion</span>
-                <div style={{flex:1,height:1,background:'var(--brd)'}}/>
-                {cpPills(cpSales, v=>{setCpSales(v);setActivePeriod(v);}, salesCustom, setSalesCustom, true)}
-                <div style={{flex:1,height:1,background:'var(--brd)'}}/>
+              <div style={{display:'grid',gridTemplateColumns:'1fr auto 1fr',alignItems:'center',gap:10,marginBottom:14}}>
+                <div style={{display:'flex',alignItems:'center',gap:10}}>
+                  <span style={{fontSize:9,fontWeight:700,textTransform:'uppercase',letterSpacing:'.14em',color:'var(--txt3)',whiteSpace:'nowrap'}}>Traffic &amp; Conversion</span>
+                  <div style={{flex:1,height:1,background:'var(--brd)'}}/>
+                </div>
+                <div>{cpPills(cpSales, v=>{setCpSales(v);setActivePeriod(v);}, salesCustom, setSalesCustom, true)}</div>
+                <div style={{height:1,background:'var(--brd)'}}/>
               </div>
               {(() => {
                 // Build 5-stage pipeline: Impressions, Clicks, Sessions, Add-to-Cart, Orders
@@ -3136,11 +3142,13 @@ export default function Sales({ filters = {} }) {
             </div>
 
             {/* ── PROFITABILITY ── */}
-            <div style={{display:'flex',alignItems:'center',gap:10,margin:'14px 0 8px'}}>
-              <div style={{fontSize:9,fontWeight:800,textTransform:'uppercase',letterSpacing:'.12em',padding:'3px 9px',borderRadius:99,background:'rgba(46,111,187,.15)',color:B.b3,border:'1px solid rgba(46,111,187,.25)',whiteSpace:'nowrap',flexShrink:0}}>💰 Profitability</div>
-              <div style={{flex:1,height:1,background:'var(--brd)'}}/>
-              {cpPills(activePeriod, setActivePeriod, null, null)}
-              <div style={{flex:1,height:1,background:'var(--brd)'}}/>
+            <div style={{display:'grid',gridTemplateColumns:'1fr auto 1fr',alignItems:'center',gap:10,margin:'14px 0 8px'}}>
+              <div style={{display:'flex',alignItems:'center',gap:10}}>
+                <div style={{fontSize:9,fontWeight:800,textTransform:'uppercase',letterSpacing:'.12em',padding:'3px 9px',borderRadius:99,background:'rgba(46,111,187,.15)',color:B.b3,border:'1px solid rgba(46,111,187,.25)',whiteSpace:'nowrap',flexShrink:0}}>💰 Profitability</div>
+                <div style={{flex:1,height:1,background:'var(--brd)'}}/>
+              </div>
+              <div>{cpPills(activePeriod, setActivePeriod, null, null)}</div>
+              <div style={{height:1,background:'var(--brd)'}}/>
             </div>
             <div style={{display:'grid',gridTemplateColumns:'1fr 1fr 1fr',gap:12,marginBottom:12}}>
               {(() => {
