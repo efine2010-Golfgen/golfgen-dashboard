@@ -27,7 +27,7 @@ from core.config import DB_PATH, DB_DIR, USE_POSTGRES
 logger = logging.getLogger("golfgen")
 
 # ── Configuration ──────────────────────────────────────────
-RETENTION_DAYS = 14
+RETENTION_DAYS = 10
 BACKUP_FOLDER_ID = os.environ.get("BACKUP_DRIVE_FOLDER_ID", "")
 
 
