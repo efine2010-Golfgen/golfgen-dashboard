@@ -733,15 +733,6 @@ def _sync_ads_data_inner():
             "group_by": ["campaign"],
         },
         {
-            "report_type": "spAdvertisedProduct",
-            "columns": ["date", "campaignId", "campaignName",
-                        "adGroupId", "adGroupName",
-                        "advertisedAsin", "advertisedSku",
-                        "impressions", "clicks", "spend",
-                        "purchases7d", "unitsSoldClicks7d", "sales7d"],
-            "group_by": ["advertised-product"],
-        },
-        {
             "report_type": "spTargeting",
             "columns": ["date", "campaignId", "campaignName",
                         "adGroupId", "adGroupName",
@@ -831,6 +822,16 @@ def _sync_ads_data_inner():
 
     # ── Phase C: Sync campaign metadata ──
     _sync_campaign_metadata(headers, today)
+
+    # ── Phase D: ASIN-level spend via v2 productAds (last 7 days) ──
+    try:
+        ads_creds_local = _load_ads_credentials()
+        if ads_creds_local:
+            pa_start = (today - timedelta(days=7)).strftime("%Y-%m-%d")
+            pa_end   = (today - timedelta(days=1)).strftime("%Y-%m-%d")
+            _sync_product_ads_v2(ads_creds_local, pa_start, pa_end)
+    except Exception as _e:
+        logger.error(f"Ads sync: productAds v2 phase error: {_e}")
 
     logger.info("Ads sync complete")
 
@@ -1505,6 +1506,138 @@ def _handle_campaign_report(data):
     logger.info(f"Campaign report handler: {inserted} inserted, {errors} errors out of {len(data)} rows")
 
 
+def _sync_product_ads_v2(creds, start_date, end_date):
+    """Pull ASIN-level ad spend using v2 SP productAds report (one per day).
+
+    v3 spAdvertisedProduct only supports groupBy=advertiser (no ASIN breakout).
+    v2 productAds report returns campaignId, adGroupId, asin, sku + spend metrics.
+    """
+    import time as _time
+    import gzip as gz
+    import requests as req
+    from datetime import datetime as _dt
+
+    access_token = _get_ads_access_token(creds)
+    if not access_token:
+        logger.error("ProductAds v2: failed to get access token")
+        return 0
+
+    headers = {
+        "Authorization": f"Bearer {access_token}",
+        "Amazon-Advertising-API-ClientId": creds["client_id"],
+        "Amazon-Advertising-API-Scope": str(creds["profile_id"]),
+        "Content-Type": "application/json",
+    }
+
+    metrics = "impressions,clicks,cost,attributedSales7d,attributedConversions7d,attributedUnitsOrdered7d"
+
+    d_start = _dt.strptime(start_date, "%Y-%m-%d")
+    d_end   = _dt.strptime(end_date,   "%Y-%m-%d")
+    current = d_start
+    total_inserted = 0
+
+    while current <= d_end:
+        report_date = current.strftime("%Y%m%d")
+        iso_date    = current.strftime("%Y-%m-%d")
+        current += timedelta(days=1)
+
+        body = {"reportDate": report_date, "metrics": metrics}
+        try:
+            cr = req.post(
+                "https://advertising-api.amazon.com/v2/sp/productAds/report",
+                headers=headers, json=body, timeout=30,
+            )
+            if cr.status_code == 429:
+                _time.sleep(30)
+                cr = req.post(
+                    "https://advertising-api.amazon.com/v2/sp/productAds/report",
+                    headers=headers, json=body, timeout=30,
+                )
+            if cr.status_code not in (200, 202):
+                logger.warning(f"ProductAds v2: create failed {report_date}: {cr.status_code} {cr.text[:200]}")
+                continue
+
+            report_id = cr.json().get("reportId")
+            if not report_id:
+                continue
+
+            # Poll — v2 productAds reports typically complete in 10-60s
+            dl_url = None
+            for _ in range(30):
+                _time.sleep(10)
+                pr = req.get(
+                    f"https://advertising-api.amazon.com/v2/reports/{report_id}",
+                    headers=headers, timeout=30,
+                )
+                pd = pr.json()
+                if pd.get("status") == "SUCCESS":
+                    dl_url = pd.get("location")
+                    break
+                elif pd.get("status") in ("FAILURE", "FAILED"):
+                    logger.warning(f"ProductAds v2: report FAILED {report_date}")
+                    break
+
+            if not dl_url:
+                logger.warning(f"ProductAds v2: no download URL for {report_date}")
+                continue
+
+            dl = req.get(dl_url, timeout=60)
+            try:
+                rows = json.loads(gz.decompress(dl.content).decode("utf-8"))
+            except Exception:
+                rows = json.loads(dl.text)
+            if isinstance(rows, str):
+                rows = json.loads(rows)
+            if not isinstance(rows, list):
+                continue
+
+            # Insert into advertising_asin
+            con = get_db_rw()
+            con.execute("BEGIN TRANSACTION")
+            inserted = 0
+            try:
+                for row in rows:
+                    asin = (row.get("asin") or row.get("advertisedAsin") or "").strip()
+                    if not asin:
+                        continue
+                    campaign_id  = str(row.get("campaignId", ""))
+                    campaign_name = row.get("campaignName", "")
+                    spend   = float(row.get("cost", 0) or 0)
+                    sales   = float(row.get("attributedSales7d", 0) or 0)
+                    impressions = int(row.get("impressions", 0) or 0)
+                    clicks  = int(row.get("clicks", 0) or 0)
+                    orders  = int(row.get("attributedConversions7d", 0) or 0)
+                    units   = int(row.get("attributedUnitsOrdered7d", 0) or 0)
+                    con.execute(
+                        "DELETE FROM advertising_asin WHERE date = CAST(? AS DATE) AND asin = ? AND campaign_id = ?",
+                        [iso_date, asin, campaign_id]
+                    )
+                    con.execute("""
+                        INSERT INTO advertising_asin
+                        (date, asin, campaign_id, campaign_name, impressions, clicks, spend, sales, orders, units,
+                         division, customer, platform)
+                        VALUES (CAST(? AS DATE), ?, ?, ?, ?, ?, ?, ?, ?, ?, 'golf', 'amazon', 'sp_api')
+                    """, [iso_date, asin, campaign_id, campaign_name,
+                          impressions, clicks, spend, sales, orders, units])
+                    inserted += 1
+                con.execute("COMMIT")
+                total_inserted += inserted
+                if inserted > 0:
+                    logger.info(f"ProductAds v2: {iso_date} → {inserted} rows inserted")
+            except Exception as e:
+                try: con.execute("ROLLBACK")
+                except: pass
+                logger.error(f"ProductAds v2: DB error for {iso_date}: {e}")
+            finally:
+                con.close()
+
+        except Exception as e:
+            logger.error(f"ProductAds v2: error for {report_date}: {e}")
+
+    logger.info(f"ProductAds v2 sync complete: {total_inserted} total rows for {start_date} to {end_date}")
+    return total_inserted
+
+
 def _handle_advertised_product_report(data):
     """Insert ASIN-level advertised product data into advertising table."""
     if not isinstance(data, list):
@@ -1755,16 +1888,6 @@ def ads_backfill_30days(days=90):
             "handler": _handle_campaign_report,
         },
         {
-            "report_type": "spAdvertisedProduct",
-            "columns": ["date", "campaignId", "campaignName",
-                        "adGroupId", "adGroupName",
-                        "advertisedAsin", "advertisedSku",
-                        "impressions", "clicks", "spend",
-                        "purchases7d", "unitsSoldClicks7d", "sales7d"],
-            "group_by": ["advertised-product"],
-            "handler": _handle_advertised_product_report,
-        },
-        {
             "report_type": "spTargeting",
             "columns": ["date", "campaignId", "campaignName",
                         "adGroupId", "adGroupName",
@@ -1934,6 +2057,15 @@ def ads_backfill_30days(days=90):
 
     full_start = chunks[0][0] if chunks else "?"
     full_end = chunks[-1][1] if chunks else "?"
+
+    # Pull ASIN-level ad spend via v2 productAds report (v3 spAdvertisedProduct has no ASIN breakout)
+    logger.info(f"Backfill: pulling ASIN-level spend via v2 productAds ({full_start} to {full_end})...")
+    try:
+        pa_rows = _sync_product_ads_v2(ads_creds, full_start, full_end)
+        total_rows += pa_rows
+    except Exception as _e:
+        logger.error(f"Backfill: productAds v2 error: {_e}")
+
     logger.info(f"Backfill complete: {days} days, {len(chunks)} chunks, {total_rows} total rows")
     return {
         "status": "backfill_complete",
@@ -1984,16 +2116,6 @@ def ads_backfill_range(start_date: str, end_date: str):
                         "purchases7d", "unitsSoldClicks7d", "sales7d"],
             "group_by": ["campaign"],
             "handler": _handle_campaign_report,
-        },
-        {
-            "report_type": "spAdvertisedProduct",
-            "columns": ["date", "campaignId", "campaignName",
-                        "adGroupId", "adGroupName",
-                        "advertisedAsin", "advertisedSku",
-                        "impressions", "clicks", "spend",
-                        "purchases7d", "unitsSoldClicks7d", "sales7d"],
-            "group_by": ["advertised-product"],
-            "handler": _handle_advertised_product_report,
         },
         {
             "report_type": "spTargeting",
