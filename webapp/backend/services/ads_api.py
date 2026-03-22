@@ -1516,17 +1516,30 @@ def _sync_asin_spend_from_mapping(headers):
 
     # ── Step 1: Fetch all product ads (entity API, not a report) ──
     try:
-        resp = req.post(
-            "https://advertising-api.amazon.com/sp/productAds/list",
-            headers={**headers, "Content-Type": "application/vnd.spProductAd.v3+json",
-                     "Accept": "application/vnd.spProductAd.v3+json"},
-            json={"stateFilter": "ENABLED,PAUSED,ARCHIVED", "maxResults": 1000},
-            timeout=30,
-        )
-        if resp.status_code not in (200, 207):
-            logger.warning(f"ASIN mapping: productAds/list failed {resp.status_code} {resp.text[:300]}")
-            return
-        items = resp.json().get("productAds", [])
+        all_items = []
+        next_token = None
+        for _page in range(20):  # max 20 pages × 100 = 2000 product ads
+            body = {"maxResults": 100,
+                    "stateFilter": {"include": ["ENABLED", "PAUSED", "ARCHIVED"]}}
+            if next_token:
+                body["nextToken"] = next_token
+            resp = req.post(
+                "https://advertising-api.amazon.com/sp/productAds/list",
+                headers={**headers, "Content-Type": "application/vnd.spProductAd.v3+json",
+                         "Accept": "application/vnd.spProductAd.v3+json"},
+                json=body,
+                timeout=30,
+            )
+            if resp.status_code not in (200, 207):
+                logger.warning(f"ASIN mapping: productAds/list failed {resp.status_code} {resp.text[:300]}")
+                break
+            rdata = resp.json()
+            page_items = rdata.get("productAds", rdata.get("items", []))
+            all_items.extend(page_items)
+            next_token = rdata.get("nextToken")
+            if not next_token or not page_items:
+                break
+        items = all_items
         if not items:
             logger.warning("ASIN mapping: productAds/list returned 0 items")
             return
