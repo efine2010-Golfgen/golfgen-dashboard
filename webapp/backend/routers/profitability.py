@@ -416,9 +416,11 @@ def _build_waterfall(con, cogs_data, start, end, division=None, customer=None, p
     if total_refunds == 0 and acct_fin["refund_amt"] > 0:
         total_refunds = acct_fin["refund_amt"]
         total_refund_units = acct_fin["refund_count"]
-    if total_fba == 0 and acct_fin["fba"] > 0:
+    # Always prefer account-level FBA and referral — they're the ground truth from financial_events
+    # (per-ASIN resolution often misses events due to SKU→ASIN mapping gaps)
+    if acct_fin["fba"] > 0:
         total_fba = acct_fin["fba"]
-    if total_referral == 0 and acct_fin["comm"] > 0:
+    if acct_fin["comm"] > 0:
         total_referral = acct_fin["comm"]
     if total_promo == 0 and acct_fin["promo"] > 0:
         total_promo = acct_fin["promo"]
@@ -448,16 +450,18 @@ def _build_waterfall(con, cogs_data, start, end, division=None, customer=None, p
     if prod_rev > 0 and total_cogs > 0:
         scale = sales / prod_rev if prod_rev > 0 else 1
         cogs = round(total_cogs * scale, 2)
-        fba_fees = round(total_fba * scale, 2)
-        referral_fees = round(total_referral * scale, 2)
+        # FBA and referral are account-level totals — no scaling needed
+        fba_fees = round(total_fba, 2)
+        referral_fees = round(total_referral, 2)
         promo = round(total_promo * scale, 2)
         shipping = round(total_shipping * scale, 2)
         refunds = round(total_refunds * scale, 2)
         other_fees = round(total_other_fees * scale, 2)
     elif sales > 0:
         cogs = round(sales * 0.35, 2)
-        fba_fees = round(sales * 0.12, 2)
-        referral_fees = round(sales * 0.15, 2)
+        # Use account-level if available, otherwise fall back to estimates
+        fba_fees = round(total_fba, 2) if total_fba > 0 else round(sales * 0.12, 2)
+        referral_fees = round(total_referral, 2) if total_referral > 0 else round(sales * 0.15, 2)
         promo = shipping = refunds = other_fees = 0
     else:
         cogs = fba_fees = referral_fees = promo = shipping = refunds = other_fees = 0
