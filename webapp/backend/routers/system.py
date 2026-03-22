@@ -247,14 +247,41 @@ def debug_financial_events():
             else:
                 summary[k] = str(v)[:100]
 
-        # Also check what's in the DB
+        # Also check what's in the DB — include other_fees and date range
         con = get_db_rw()
         db_counts = con.execute("""
             SELECT event_type, COUNT(*), SUM(ABS(product_charges)),
-                   SUM(ABS(fba_fees)), SUM(ABS(commission))
+                   SUM(ABS(fba_fees)), SUM(ABS(commission)),
+                   SUM(ABS(other_fees)), MIN(date), MAX(date)
             FROM financial_events
             GROUP BY event_type
+            ORDER BY COUNT(*) DESC
         """).fetchall()
+
+        # Also check last 35 days specifically
+        cutoff_35 = (datetime.utcnow() - timedelta(days=35)).strftime("%Y-%m-%d")
+        db_recent = con.execute("""
+            SELECT event_type, COUNT(*), SUM(ABS(other_fees))
+            FROM financial_events
+            WHERE date >= ?
+            GROUP BY event_type
+            ORDER BY COUNT(*) DESC
+        """, [cutoff_35]).fetchall()
+
+        # Check first ServiceFeeEvent raw structure from API
+        svc_fee_sample = None
+        try:
+            svc_list = events.get("ServiceFeeEventList") or []
+            if svc_list:
+                e = svc_list[0]
+                svc_fee_sample = {
+                    "type": type(e).__name__,
+                    "keys": list(e.keys()) if isinstance(e, dict) else [a for a in dir(e) if not a.startswith("_")][:20],
+                    "raw": str(e)[:500]
+                }
+        except Exception as se:
+            svc_fee_sample = {"error": str(se)}
+
         con.close()
 
         has_next = "NextToken" in payload
@@ -266,8 +293,11 @@ def debug_financial_events():
             "sample_charge_object": sample_charge,
             "type_debug": type_debug,
             "has_next_page": has_next,
+            "svc_fee_page1_sample": svc_fee_sample,
             "db_records": [{"type": r[0], "count": r[1], "total_charges": round(r[2], 2),
-                           "fba_fees": round(r[3], 2), "commission": round(r[4], 2)} for r in db_counts]
+                           "fba_fees": round(r[3], 2), "commission": round(r[4], 2),
+                           "other_fees": round(r[5], 2), "min_date": str(r[6]), "max_date": str(r[7])} for r in db_counts],
+            "db_last_35_days": [{"type": r[0], "count": r[1], "other_fees": round(r[2], 2)} for r in db_recent]
         }
     except Exception as e:
         import traceback
