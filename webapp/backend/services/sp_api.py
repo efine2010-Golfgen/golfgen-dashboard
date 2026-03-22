@@ -1148,7 +1148,21 @@ def _run_sp_api_sync_inner():
 
         # ── Service Fees ─────────────────────────────────────────────────────
         logger.info(f"  Processing {len(all_service_fee_events)} service fee events")
+        _svc_fee_logged = False
+        _svc_fee_skipped = 0
         for event in all_service_fee_events:
+            # Diagnostic: log the first event's keys to understand structure
+            if not _svc_fee_logged:
+                try:
+                    if isinstance(event, dict):
+                        logger.info(f"  ServiceFeeEvent sample keys: {list(event.keys())}")
+                        fee_list_sample = event.get("FeeList") or event.get("fee_list")
+                        logger.info(f"  ServiceFeeEvent FeeList sample: {fee_list_sample[:2] if fee_list_sample else 'EMPTY/NONE'}")
+                    else:
+                        logger.info(f"  ServiceFeeEvent type: {type(event).__name__}, attrs: {[a for a in dir(event) if not a.startswith('_')][:15]}")
+                except Exception as _diag_err:
+                    logger.info(f"  ServiceFeeEvent diag error: {_diag_err}")
+                _svc_fee_logged = True
             order_id = _safe_get(event, "AmazonOrderId", "") or ""
             posted_date = _safe_get(event, "PostedDate", "")
             date_str = _posted_date_str(posted_date)
@@ -1156,9 +1170,13 @@ def _run_sp_api_sync_inner():
                 continue
             sku = _safe_get(event, "SellerSKU", "") or ""
             asin_val = _safe_get(event, "ASIN", "") or sku or "ALL"
-            amt = sum(abs(_money(_safe_get(f, "FeeAmount")))
-                      for f in (_safe_get(event, "FeeList") or []))
+            # Try FeeList (PascalCase dict) and fee_list (snake_case model object)
+            fee_list = (_safe_get(event, "FeeList") or
+                        _safe_get(event, "fee_list") or [])
+            amt = sum(abs(_money(_safe_get(f, "FeeAmount") or _safe_get(f, "fee_amount")))
+                      for f in fee_list)
             if amt == 0:
+                _svc_fee_skipped += 1
                 continue
             try:
                 _div = _get_division_for_asin(asin_val)
@@ -1173,6 +1191,7 @@ def _run_sp_api_sync_inner():
                 fin_records += 1
             except Exception as ins_err:
                 logger.warning(f"  ServiceFee insert error: {ins_err}")
+        logger.info(f"  ServiceFee: skipped {_svc_fee_skipped} zero-amt events")
 
         # ── SAFET Reimbursements (Amazon credits back to seller) ─────────────
         # Stored as positive product_charges + net_proceeds (it's income, not a cost)
@@ -1279,19 +1298,39 @@ def _run_sp_api_sync_inner():
 
         # ── Removal / Disposal Shipment Events ───────────────────────────────
         logger.info(f"  Processing {len(all_removal_events)} removal/disposal events")
+        _removal_logged = False
+        _removal_skipped = 0
         for event in all_removal_events:
+            # Diagnostic: log the first event's keys
+            if not _removal_logged:
+                try:
+                    if isinstance(event, dict):
+                        logger.info(f"  RemovalEvent sample keys: {list(event.keys())}")
+                        item_list_sample = event.get("RemovalShipmentItemList") or event.get("removal_shipment_item_list")
+                        if item_list_sample:
+                            logger.info(f"  RemovalEvent item[0] keys: {list(item_list_sample[0].keys()) if item_list_sample else 'EMPTY'}")
+                    else:
+                        logger.info(f"  RemovalEvent type: {type(event).__name__}")
+                except Exception as _diag_err:
+                    logger.info(f"  RemovalEvent diag error: {_diag_err}")
+                _removal_logged = True
             posted_date = _safe_get(event, "PostedDate", "")
             date_str = _posted_date_str(posted_date)
             if not date_str:
                 continue
-            order_id = _safe_get(event, "OrderId", "") or ""
-            item_list = _safe_get(event, "RemovalShipmentItemList") or []
+            order_id = (_safe_get(event, "OrderId") or
+                        _safe_get(event, "order_id") or "") 
+            item_list = (_safe_get(event, "RemovalShipmentItemList") or
+                         _safe_get(event, "removal_shipment_item_list") or [])
             for item in item_list:
                 sku = _safe_get(item, "SellerSKU", "") or ""
                 asin_val = _safe_get(item, "ASIN", "") or sku or "ALL"
-                amt = sum(abs(_money(_safe_get(f, "FeeAmount")))
-                          for f in (_safe_get(item, "RemovalShipmentItemFeeList") or []))
+                fee_items = (_safe_get(item, "RemovalShipmentItemFeeList") or
+                             _safe_get(item, "removal_shipment_item_fee_list") or [])
+                amt = sum(abs(_money(_safe_get(f, "FeeAmount") or _safe_get(f, "fee_amount")))
+                          for f in fee_items)
                 if amt == 0:
+                    _removal_skipped += 1
                     continue
                 try:
                     _div = _get_division_for_asin(asin_val)
@@ -1306,6 +1345,7 @@ def _run_sp_api_sync_inner():
                     fin_records += 1
                 except Exception as ins_err:
                     logger.warning(f"  RemovalFee insert error: {ins_err}")
+        logger.info(f"  RemovalFee: skipped {_removal_skipped} zero-amt items")
 
         con.execute("COMMIT")
         con.close()
