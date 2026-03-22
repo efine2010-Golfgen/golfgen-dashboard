@@ -2880,12 +2880,11 @@ export default function Sales({ filters = {} }) {
                   <div style={{display:'flex',flexDirection:'column',gap:6,padding:'4px 0'}}>
                     {wfRows.map(({lbl,val,col,bg,neg})=>{
                       const w = wBar(val);
-                      const ml = neg ? (100-w) : 0;
                       return (
                         <div key={lbl} style={{display:'grid',gridTemplateColumns:'130px 1fr 80px',gap:8,alignItems:'center'}}>
                           <div style={{fontSize:11,color:col,textAlign:'right',fontWeight:neg?500:700}}>{lbl}</div>
-                          <div style={{position:'relative',height:22,borderRadius:4,background:'rgba(255,255,255,.03)'}}>
-                            <div style={{position:'absolute',left:`${ml}%`,width:`${w}%`,height:'100%',borderRadius:4,background:bg,display:'flex',alignItems:'center',paddingLeft:8,fontSize:10,fontWeight:700,color:'rgba(255,255,255,.9)',whiteSpace:'nowrap',overflow:'hidden',transition:'width .5s ease'}}>
+                          <div style={{position:'relative',height:22,borderRadius:4,background:neg?'rgba(59,130,246,0.07)':'rgba(255,255,255,.03)',borderRight:neg?'1.5px solid rgba(59,130,246,0.28)':'none'}}>
+                            <div style={{position:'absolute',left:0,width:`${w}%`,height:'100%',borderRadius:4,background:bg,display:'flex',alignItems:'center',paddingLeft:8,fontSize:10,fontWeight:700,color:'rgba(255,255,255,.9)',whiteSpace:'nowrap',overflow:'hidden',transition:'width .5s ease'}}>
                               {neg?'−':''}{f$(Math.abs(val))}
                             </div>
                           </div>
@@ -2896,8 +2895,9 @@ export default function Sales({ filters = {} }) {
                     <div style={{height:1,background:'var(--brd)',margin:'4px 0'}}/>
                     <div style={{background:'var(--card2)',borderRadius:8,padding:'8px 12px',display:'grid',gridTemplateColumns:'130px 1fr 80px',gap:8,alignItems:'center'}}>
                       <div style={{fontSize:13,fontWeight:800,color:B.t3,textAlign:'right'}}>= Net Margin</div>
-                      <div style={{background:'linear-gradient(90deg,rgba(26,163,146,.25),rgba(26,163,146,.08))',height:28,borderRadius:6,display:'flex',alignItems:'center',paddingLeft:12,fontSize:13,fontWeight:800,color:B.t3}}>
-                        {f$(netM)}
+                      <div style={{position:'relative',height:28,borderRadius:6,background:'rgba(59,130,246,0.07)',borderRight:'1.5px solid rgba(59,130,246,0.28)'}}>
+                        <div style={{position:'absolute',left:0,width:`${Math.max(0,netPct)}%`,height:'100%',borderRadius:6,background:'linear-gradient(90deg,rgba(46,207,170,0.55),rgba(46,207,170,0.88))',display:'flex',alignItems:'center',paddingLeft:12,fontSize:13,fontWeight:800,color:'#fff',whiteSpace:'nowrap',overflow:'hidden',transition:'width .5s ease'}}>{f$(netM)}</div>
+                        <div style={{position:'absolute',left:`${Math.max(0,netPct)}%`,top:0,width:2,height:'100%',background:'#2ECFAA',boxShadow:'0 0 7px 2px rgba(46,207,170,0.75)',borderRadius:1}}/>
                       </div>
                       <div style={{fontSize:15,fontWeight:800,textAlign:'right',color:B.t3}}>{netPct.toFixed(1)}<span style={{fontSize:10,color:'var(--txt3)'}}>%</span></div>
                     </div>
