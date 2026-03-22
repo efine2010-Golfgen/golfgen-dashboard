@@ -44,9 +44,12 @@ const ITEM_SORTS = [
 
 const WF_COLORS = {
   revenue: "#2ECFAA", referral: "#f87171", fba: "#f87171",
-  storage: "#F5B731", other: "#A26BE1", netRev: "#3E658C",
-  cogs: "#E87830", shipping: "#7BAED0", coupon: "#8B5CF6",
-  refund: "#D946EF", promo: "#8B5CF6", adSpend: "#F59E0B",
+  storage: "#F5B731", placement: "#FB923C", other: "#A26BE1",
+  netRev: "#3E658C", cogs: "#E87830", shipping: "#7BAED0",
+  coupon: "#8B5CF6", couponClip: "#C084FC", refund: "#D946EF",
+  promo: "#8B5CF6", adSpend: "#F59E0B", atoz: "#EF4444",
+  chargeback: "#DC2626", removal: "#92400E", serviceFee: "#78716C",
+  safet: "#2ECFAA", liquidation: "#0EA5E9",
   nop: "#2ECFAA", nopNeg: "#f87171",
 };
 
@@ -174,7 +177,15 @@ function PnlOverview({ filters, days, showToast }) {
     { label: "Referral Fees", value: -(wf.referralFees || 0) },
     { label: "FBA Fulfillment", value: -(wf.fbaFees || 0) },
     { label: "Storage Fees", value: -(wf.storageFees || 0) },
-    { label: "Other Fees", value: -((wf.otherFees || 0) - (wf.storageFees || 0)) },
+    { label: "Inbound Placement", value: -(wf.placementFees || 0) },
+    { label: "A-to-Z Claims", value: -(wf.atozFees || 0) },
+    { label: "Chargebacks", value: -(wf.chargebackFees || 0) },
+    { label: "Coupon Clip Fees", value: -(wf.couponClipFees || 0) },
+    { label: "Removal / Disposal", value: -(wf.removalFees || 0) },
+    { label: "Service Fees", value: -(wf.serviceFees || 0) },
+    { label: "Misc Order Fees", value: -(wf.otherFees || 0) },
+    { label: "SAFET Reimbursements", value: wf.safetReimbursements || 0 },
+    { label: "Liquidation Proceeds", value: (wf.liquidationProceeds || 0) - (wf.liquidationFees || 0) },
     { label: "Net Revenue", value: grossRev0 - (wf.amazonFees || 0) - (wf.refunds || 0) - (wf.promo || 0) },
     { label: "COGS", value: -(wf.cogs || 0) },
     { label: "Ad Spend", value: -(wf.adSpend || 0) },
@@ -192,12 +203,19 @@ function PnlOverview({ filters, days, showToast }) {
           w.label.includes("Referral") ? WF_COLORS.referral :
           w.label.includes("FBA") ? WF_COLORS.fba :
           w.label.includes("Storage") ? WF_COLORS.storage :
-          w.label.includes("Other") ? WF_COLORS.other :
+          w.label.includes("Placement") || w.label.includes("Inbound") ? WF_COLORS.placement :
+          w.label.includes("A-to-Z") ? WF_COLORS.atoz :
+          w.label.includes("Chargeback") ? WF_COLORS.chargeback :
+          w.label.includes("Coupon Clip") ? WF_COLORS.couponClip :
+          w.label.includes("Removal") ? WF_COLORS.removal :
+          w.label.includes("Service Fee") ? WF_COLORS.serviceFee :
+          w.label.includes("SAFET") ? WF_COLORS.safet :
+          w.label.includes("Liquidation") ? WF_COLORS.liquidation :
           w.label.includes("Net Rev") ? WF_COLORS.netRev :
           w.label.includes("COGS") ? WF_COLORS.cogs :
           w.label.includes("Ad Spend") ? WF_COLORS.adSpend :
           w.label.includes("Ship") ? WF_COLORS.shipping :
-          w.label.includes("Coupon") ? WF_COLORS.coupon :
+          w.label.includes("Misc") || w.label.includes("Other") ? WF_COLORS.other :
           (w.value >= 0 ? WF_COLORS.nop : WF_COLORS.nopNeg),
   }));
 
@@ -445,8 +463,14 @@ function ItemProfitability({ filters, days }) {
           <table style={{ width: "100%", borderCollapse: "collapse" }}>
             <thead>
               <tr style={{ background: "var(--card2)" }}>
-                {["SKU / ASIN", "30D Rev", "COGS/u", "COGS%", "Ref Fee", "FBA Fee", "Storage", "Other", "Total Fees", "Gross Margin", "Net Margin", "$/Unit Net", "Score"].map((h, i) => (
-                  <th key={i} style={{ ...SG(8, 700), padding: "8px 10px", textAlign: i === 0 ? "left" : "right", color: "rgba(255,255,255,0.6)", textTransform: "uppercase", letterSpacing: "0.06em", whiteSpace: "nowrap" }}>{h}</th>
+                {[
+                  "SKU / ASIN", "Rev", "COGS/u", "COGS%",
+                  "Ref Fee", "FBA Fee", "Storage", "Placement",
+                  "A-to-Z", "Chargeback", "Coupon Clip", "Removal",
+                  "Svc Fee", "SAFET ↩", "Misc Fees",
+                  "Total Fees", "Gross Mgn", "Net Mgn", "$/Unit", "Score"
+                ].map((h, i) => (
+                  <th key={i} style={{ ...SG(8, 700), padding: "8px 8px", textAlign: i === 0 ? "left" : "right", color: "rgba(255,255,255,0.6)", textTransform: "uppercase", letterSpacing: "0.05em", whiteSpace: "nowrap" }}>{h}</th>
                 ))}
               </tr>
             </thead>
@@ -454,20 +478,28 @@ function ItemProfitability({ filters, days }) {
               {filtered.map(item => {
                 const gm = item.grossMargin || 0;
                 const gmColor = gm >= 40 ? "#2ECFAA" : gm >= 20 ? "#F5B731" : "#f87171";
+                const totalFees = item.amazonFees || 0;
                 return (
                   <tr key={item.asin} style={{ borderBottom: "1px solid var(--brd)" }}>
-                    <td style={{ ...cellL, maxWidth: 200 }}>
+                    <td style={{ ...cellL, maxWidth: 180 }}>
                       <div style={{ fontWeight: 600, color: "var(--txt)", fontSize: 11, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{item.name || item.sku || item.asin}</div>
                       <div style={SG(7.5, 500, "var(--txt3)")}>{item.asin}{item.sku ? ` · ${item.sku}` : ""}</div>
                     </td>
                     <td style={cellR}>{fmt$2(item.rev)}</td>
                     <td style={cellR}>${round(item.cogsPerUnit || 0, 2)}</td>
                     <td style={cellR}>{fmtPct(item.cogsPct)}</td>
-                    <td style={cellR}>{fmt$2(item.referralFees)}</td>
-                    <td style={cellR}>{fmt$2(item.fbaFees)}</td>
-                    <td style={cellR}>{fmt$2(item.storageFees || 0)}</td>
-                    <td style={cellR}>{fmt$2(item.otherFees || 0)}</td>
-                    <td style={{ ...cellR, color: "#f87171", fontWeight: 700 }}>{fmt$2(item.amazonFees || (item.referralFees + item.fbaFees + (item.storageFees || 0)))}</td>
+                    <td style={cellR}>{fmt$2(item.referralFees || 0)}</td>
+                    <td style={cellR}>{fmt$2(item.fbaFees || 0)}</td>
+                    <td style={{ ...cellR, color: (item.storageFees || 0) > 0 ? "#F5B731" : "var(--txt3)" }}>{fmt$2(item.storageFees || 0)}</td>
+                    <td style={{ ...cellR, color: (item.placementFees || 0) > 0 ? "#FB923C" : "var(--txt3)" }}>{fmt$2(item.placementFees || 0)}</td>
+                    <td style={{ ...cellR, color: (item.atozFees || 0) > 0 ? "#EF4444" : "var(--txt3)" }}>{fmt$2(item.atozFees || 0)}</td>
+                    <td style={{ ...cellR, color: (item.chargebackFees || 0) > 0 ? "#DC2626" : "var(--txt3)" }}>{fmt$2(item.chargebackFees || 0)}</td>
+                    <td style={{ ...cellR, color: (item.couponClipFees || 0) > 0 ? "#C084FC" : "var(--txt3)" }}>{fmt$2(item.couponClipFees || 0)}</td>
+                    <td style={{ ...cellR, color: (item.removalFees || 0) > 0 ? "#92400E" : "var(--txt3)" }}>{fmt$2(item.removalFees || 0)}</td>
+                    <td style={{ ...cellR, color: (item.serviceFees || 0) > 0 ? "#78716C" : "var(--txt3)" }}>{fmt$2(item.serviceFees || 0)}</td>
+                    <td style={{ ...cellR, color: (item.safetReimbursements || 0) > 0 ? "#2ECFAA" : "var(--txt3)" }}>{fmt$2(item.safetReimbursements || 0)}</td>
+                    <td style={{ ...cellR, color: (item.otherFees || 0) > 0 ? "#A26BE1" : "var(--txt3)" }}>{fmt$2(item.otherFees || 0)}</td>
+                    <td style={{ ...cellR, color: "#f87171", fontWeight: 700 }}>{fmt$2(totalFees)}</td>
                     <td style={{ ...cellR, color: gmColor, fontWeight: 700 }}>{fmtPct(gm)}</td>
                     <td style={{ ...cellR, color: (item.margin || 0) >= 0 ? "#2ECFAA" : "#f87171" }}>{fmtPct(item.margin)}</td>
                     <td style={{ ...cellR, color: (item.netPerUnit || 0) >= 0 ? "#2ECFAA" : "#f87171" }}>${round(item.netPerUnit || 0, 2)}</td>
@@ -483,7 +515,7 @@ function ItemProfitability({ filters, days }) {
                 );
               })}
               {filtered.length === 0 && (
-                <tr><td colSpan={13} style={{ padding: 30, textAlign: "center", color: "var(--txt3)" }}>No items match your filters</td></tr>
+                <tr><td colSpan={20} style={{ padding: 30, textAlign: "center", color: "var(--txt3)" }}>No items match your filters</td></tr>
               )}
             </tbody>
           </table>

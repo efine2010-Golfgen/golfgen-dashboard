@@ -258,7 +258,10 @@ def _build_waterfall(con, cogs_data, start, end, division=None, customer=None, p
 
     # Account-level financial totals
     acct_fin = {"fba": 0, "comm": 0, "promo": 0, "shipping": 0, "other": 0,
-                "refund_amt": 0, "refund_count": 0}
+                "refund_amt": 0, "refund_count": 0,
+                "storage": 0, "placement": 0, "atoz": 0, "chargeback": 0,
+                "coupon_clip": 0, "removal": 0, "service_fee": 0,
+                "safet_reimb": 0, "liquidation_proceeds": 0, "liquidation_fees": 0}
     try:
         acct_row = con.execute(f"""
             SELECT SUM(ABS(fba_fees)),
@@ -269,15 +272,34 @@ def _build_waterfall(con, cogs_data, start, end, division=None, customer=None, p
                    SUM(CASE WHEN event_type ILIKE '%refund%' OR event_type ILIKE '%return%'
                        THEN ABS(product_charges) ELSE 0 END),
                    COUNT(CASE WHEN event_type ILIKE '%refund%' OR event_type ILIKE '%return%'
-                       THEN 1 END)
+                       THEN 1 END),
+                   SUM(CASE WHEN event_type = 'StorageFee' THEN ABS(other_fees) ELSE 0 END),
+                   SUM(CASE WHEN event_type = 'FeeAdjustment' THEN ABS(other_fees) ELSE 0 END),
+                   SUM(CASE WHEN event_type = 'AtoZ' THEN ABS(other_fees) ELSE 0 END),
+                   SUM(CASE WHEN event_type = 'Chargeback' THEN ABS(other_fees) ELSE 0 END),
+                   SUM(CASE WHEN event_type = 'CouponFee' THEN ABS(other_fees) ELSE 0 END),
+                   SUM(CASE WHEN event_type = 'RemovalFee' THEN ABS(other_fees) ELSE 0 END),
+                   SUM(CASE WHEN event_type = 'ServiceFee' THEN ABS(other_fees) ELSE 0 END),
+                   SUM(CASE WHEN event_type = 'SAFETReimbursement' THEN product_charges ELSE 0 END),
+                   SUM(CASE WHEN event_type = 'FBALiquidation' THEN product_charges ELSE 0 END),
+                   SUM(CASE WHEN event_type = 'FBALiquidation' THEN ABS(other_fees) ELSE 0 END)
             FROM financial_events
             WHERE date >= ? AND date < ?{fin_sql}
         """, [start, end] + fin_params).fetchone()
         if acct_row and acct_row[0] is not None:
-            acct_fin = {"fba": _n(acct_row[0]), "comm": _n(acct_row[1]),
-                        "promo": _n(acct_row[2]), "shipping": _n(acct_row[3]),
-                        "other": _n(acct_row[4]), "refund_amt": _n(acct_row[5]),
-                        "refund_count": int(acct_row[6] or 0)}
+            acct_fin = {
+                "fba": _n(acct_row[0]), "comm": _n(acct_row[1]),
+                "promo": _n(acct_row[2]), "shipping": _n(acct_row[3]),
+                "other": _n(acct_row[4]), "refund_amt": _n(acct_row[5]),
+                "refund_count": int(acct_row[6] or 0),
+                "storage": _n(acct_row[7]), "placement": _n(acct_row[8]),
+                "atoz": _n(acct_row[9]), "chargeback": _n(acct_row[10]),
+                "coupon_clip": _n(acct_row[11]), "removal": _n(acct_row[12]),
+                "service_fee": _n(acct_row[13]),
+                "safet_reimb": _n(acct_row[14]),
+                "liquidation_proceeds": _n(acct_row[15]),
+                "liquidation_fees": _n(acct_row[16]),
+            }
     except Exception:
         pass
 
@@ -297,6 +319,9 @@ def _build_waterfall(con, cogs_data, start, end, division=None, customer=None, p
     total_cogs = total_fba = total_referral = total_promo = 0
     total_shipping = total_refunds = total_other_fees = 0
     total_refund_units = 0
+    total_storage = total_placement = total_atoz = total_chargeback = 0
+    total_coupon_clip = total_removal = total_service_fee = total_safet_reimb = 0
+    total_liquidation_proceeds = total_liquidation_fees = 0
     prod_rev = 0
 
     # Per-ASIN financial data
@@ -312,7 +337,15 @@ def _build_waterfall(con, cogs_data, start, end, division=None, customer=None, p
                    SUM(CASE WHEN event_type ILIKE '%refund%' OR event_type ILIKE '%return%'
                        THEN ABS(product_charges) ELSE 0 END) AS refund_amt,
                    COUNT(CASE WHEN event_type ILIKE '%refund%' OR event_type ILIKE '%return%'
-                       THEN 1 END) AS refund_count
+                       THEN 1 END) AS refund_count,
+                   SUM(CASE WHEN event_type = 'StorageFee' THEN ABS(other_fees) ELSE 0 END),
+                   SUM(CASE WHEN event_type = 'FeeAdjustment' THEN ABS(other_fees) ELSE 0 END),
+                   SUM(CASE WHEN event_type = 'AtoZ' THEN ABS(other_fees) ELSE 0 END),
+                   SUM(CASE WHEN event_type = 'Chargeback' THEN ABS(other_fees) ELSE 0 END),
+                   SUM(CASE WHEN event_type = 'CouponFee' THEN ABS(other_fees) ELSE 0 END),
+                   SUM(CASE WHEN event_type = 'RemovalFee' THEN ABS(other_fees) ELSE 0 END),
+                   SUM(CASE WHEN event_type = 'ServiceFee' THEN ABS(other_fees) ELSE 0 END),
+                   SUM(CASE WHEN event_type = 'SAFETReimbursement' THEN product_charges ELSE 0 END)
             FROM financial_events
             WHERE date >= ? AND date < ?{fin_sql}
             GROUP BY asin
@@ -334,7 +367,11 @@ def _build_waterfall(con, cogs_data, start, end, division=None, customer=None, p
             resolved = sku_to_asin.get(raw_key, raw_key)
             entry = {"fba": _n(r[1]), "comm": _n(r[2]), "promo": _n(r[3]),
                      "shipping": _n(r[4]), "other": _n(r[5]),
-                     "refund_amt": _n(r[6]), "refund_count": int(r[7] or 0)}
+                     "refund_amt": _n(r[6]), "refund_count": int(r[7] or 0),
+                     "storage": _n(r[8]), "placement": _n(r[9]),
+                     "atoz": _n(r[10]), "chargeback": _n(r[11]),
+                     "coupon_clip": _n(r[12]), "removal": _n(r[13]),
+                     "service_fee": _n(r[14]), "safet_reimb": _n(r[15])}
             if resolved in fin_by_asin:
                 for k in entry:
                     fin_by_asin[resolved][k] = fin_by_asin[resolved].get(k, 0) + entry[k]
@@ -366,6 +403,14 @@ def _build_waterfall(con, cogs_data, start, end, division=None, customer=None, p
         total_refunds += fin.get("refund_amt", 0)
         total_other_fees += fin.get("other", 0)
         total_refund_units += fin.get("refund_count", 0)
+        total_storage += fin.get("storage", 0)
+        total_placement += fin.get("placement", 0)
+        total_atoz += fin.get("atoz", 0)
+        total_chargeback += fin.get("chargeback", 0)
+        total_coupon_clip += fin.get("coupon_clip", 0)
+        total_removal += fin.get("removal", 0)
+        total_service_fee += fin.get("service_fee", 0)
+        total_safet_reimb += fin.get("safet_reimb", 0)
 
     # Use account-level totals as fallback
     if total_refunds == 0 and acct_fin["refund_amt"] > 0:
@@ -379,8 +424,27 @@ def _build_waterfall(con, cogs_data, start, end, division=None, customer=None, p
         total_promo = acct_fin["promo"]
     if total_shipping == 0 and acct_fin["shipping"] > 0:
         total_shipping = acct_fin["shipping"]
+    # Account-level fallback for per-type fees (these don't need scaling — they're account-level)
+    if total_storage == 0 and acct_fin["storage"] > 0:
+        total_storage = acct_fin["storage"]
+    if total_placement == 0 and acct_fin["placement"] > 0:
+        total_placement = acct_fin["placement"]
+    if total_atoz == 0 and acct_fin["atoz"] > 0:
+        total_atoz = acct_fin["atoz"]
+    if total_chargeback == 0 and acct_fin["chargeback"] > 0:
+        total_chargeback = acct_fin["chargeback"]
+    if total_coupon_clip == 0 and acct_fin["coupon_clip"] > 0:
+        total_coupon_clip = acct_fin["coupon_clip"]
+    if total_removal == 0 and acct_fin["removal"] > 0:
+        total_removal = acct_fin["removal"]
+    if total_service_fee == 0 and acct_fin["service_fee"] > 0:
+        total_service_fee = acct_fin["service_fee"]
+    if total_safet_reimb == 0 and acct_fin["safet_reimb"] > 0:
+        total_safet_reimb = acct_fin["safet_reimb"]
+    total_liquidation_proceeds = acct_fin["liquidation_proceeds"]
+    total_liquidation_fees = acct_fin["liquidation_fees"]
 
-    # Scale to actual sales
+    # Scale per-order fees to actual sales; account-level fees are already totals
     if prod_rev > 0 and total_cogs > 0:
         scale = sales / prod_rev if prod_rev > 0 else 1
         cogs = round(total_cogs * scale, 2)
@@ -398,7 +462,21 @@ def _build_waterfall(con, cogs_data, start, end, division=None, customer=None, p
     else:
         cogs = fba_fees = referral_fees = promo = shipping = refunds = other_fees = 0
 
-    amazon_fees = round(fba_fees + referral_fees, 2)
+    storage_fees = round(total_storage, 2)
+    placement_fees = round(total_placement, 2)
+    atoz_fees = round(total_atoz, 2)
+    chargeback_fees = round(total_chargeback, 2)
+    coupon_clip_fees = round(total_coupon_clip, 2)
+    removal_fees = round(total_removal, 2)
+    service_fees = round(total_service_fee, 2)
+    safet_reimbursements = round(total_safet_reimb, 2)
+    liquidation_proceeds = round(total_liquidation_proceeds, 2)
+    liquidation_fees = round(total_liquidation_fees, 2)
+
+    amazon_fees = round(fba_fees + referral_fees + storage_fees + placement_fees +
+                        atoz_fees + chargeback_fees + coupon_clip_fees +
+                        removal_fees + service_fees + liquidation_fees -
+                        safet_reimbursements, 2)
     ad_spend = round(total_ad, 2)
     refund_units = total_refund_units
     return_pct = round(refund_units / units * 100, 1) if units > 0 else 0
@@ -421,8 +499,17 @@ def _build_waterfall(con, cogs_data, start, end, division=None, customer=None, p
         "amazonFees": amazon_fees,
         "fbaFees": fba_fees,
         "referralFees": referral_fees,
-        "otherFees": other_fees,
-        "storageFees": other_fees,  # All other_fees treated as storage (no finer breakdown available)
+        "storageFees": storage_fees,
+        "placementFees": placement_fees,
+        "atozFees": atoz_fees,
+        "chargebackFees": chargeback_fees,
+        "couponClipFees": coupon_clip_fees,
+        "removalFees": removal_fees,
+        "serviceFees": service_fees,
+        "safetReimbursements": safet_reimbursements,
+        "liquidationProceeds": liquidation_proceeds,
+        "liquidationFees": liquidation_fees,
+        "otherFees": round(other_fees, 2),  # misc per-order fees from ShipmentEventList
         "cogs": cogs,
         "indirect": 0,
         "grossProfit": gross_profit,
@@ -581,7 +668,15 @@ def profitability_items(days: int = Query(365), division: Optional[str] = None,
                    SUM(CASE WHEN event_type ILIKE '%refund%' OR event_type ILIKE '%return%'
                        THEN ABS(product_charges) ELSE 0 END) AS refund_amt,
                    COUNT(CASE WHEN event_type ILIKE '%refund%' OR event_type ILIKE '%return%'
-                       THEN 1 END) AS refund_count
+                       THEN 1 END) AS refund_count,
+                   SUM(CASE WHEN event_type = 'StorageFee' THEN ABS(other_fees) ELSE 0 END),
+                   SUM(CASE WHEN event_type = 'FeeAdjustment' THEN ABS(other_fees) ELSE 0 END),
+                   SUM(CASE WHEN event_type = 'AtoZ' THEN ABS(other_fees) ELSE 0 END),
+                   SUM(CASE WHEN event_type = 'Chargeback' THEN ABS(other_fees) ELSE 0 END),
+                   SUM(CASE WHEN event_type = 'CouponFee' THEN ABS(other_fees) ELSE 0 END),
+                   SUM(CASE WHEN event_type = 'RemovalFee' THEN ABS(other_fees) ELSE 0 END),
+                   SUM(CASE WHEN event_type = 'ServiceFee' THEN ABS(other_fees) ELSE 0 END),
+                   SUM(CASE WHEN event_type = 'SAFETReimbursement' THEN product_charges ELSE 0 END)
             FROM financial_events
             {fin_filter}
             GROUP BY asin
@@ -605,7 +700,11 @@ def profitability_items(days: int = Query(365), division: Optional[str] = None,
             raw_key = r[0]
             resolved = sku_to_asin.get(raw_key, raw_key)
             entry = {"promo": _n(r[1]), "shipping": _n(r[2]), "other": _n(r[3]),
-                     "refund_amt": _n(r[4]), "refund_count": int(r[5] or 0)}
+                     "refund_amt": _n(r[4]), "refund_count": int(r[5] or 0),
+                     "storage": _n(r[6]), "placement": _n(r[7]),
+                     "atoz": _n(r[8]), "chargeback": _n(r[9]),
+                     "coupon_clip": _n(r[10]), "removal": _n(r[11]),
+                     "service_fee": _n(r[12]), "safet_reimb": _n(r[13])}
             if resolved in fin_by_asin:
                 for k in entry:
                     fin_by_asin[resolved][k] = fin_by_asin[resolved].get(k, 0) + entry[k]
@@ -672,10 +771,22 @@ def profitability_items(days: int = Query(365), division: Optional[str] = None,
 
         # COGS as % of revenue
         cogs_pct = round(cogs_total / rev * 100, 1) if rev > 0 else 0
-        # Total fee % of revenue
-        total_fee_pct = round(amazon_fees / rev * 100, 1) if rev > 0 else 0
-        # Storage fees: real data from financial_events other_fees (StorageFee / FeeAdjustment rows)
-        storage = round(fin.get("other", 0), 2)
+        # Per-type fee breakdown from financial_events
+        item_storage = round(fin.get("storage", 0), 2)
+        item_placement = round(fin.get("placement", 0), 2)
+        item_atoz = round(fin.get("atoz", 0), 2)
+        item_chargeback = round(fin.get("chargeback", 0), 2)
+        item_coupon_clip = round(fin.get("coupon_clip", 0), 2)
+        item_removal = round(fin.get("removal", 0), 2)
+        item_service_fee = round(fin.get("service_fee", 0), 2)
+        item_safet_reimb = round(fin.get("safet_reimb", 0), 2)
+        item_misc_other = round(fin.get("other", 0), 2)  # misc per-order fees
+
+        all_amazon_fees = round(
+            amazon_fees + item_storage + item_placement + item_atoz + item_chargeback +
+            item_coupon_clip + item_removal + item_service_fee - item_safet_reimb, 2
+        )
+        total_fee_pct = round(all_amazon_fees / rev * 100, 1) if rev > 0 else 0
 
         items.append({
             "asin": asin,
@@ -691,11 +802,18 @@ def profitability_items(days: int = Query(365), division: Optional[str] = None,
             "refunds": round(fin.get("refund_amt", 0), 2),
             "refundUnits": refund_units,
             "returnPct": return_pct,
-            "amazonFees": round(amazon_fees, 2),
+            "amazonFees": all_amazon_fees,
             "fbaFees": round(p["fbaTotal"], 2),
             "referralFees": round(p["referralTotal"], 2),
-            "otherFees": round(fin.get("other", 0) if fin.get("other", 0) > 0 else 0, 2),
-            "storageFees": storage,
+            "storageFees": item_storage,
+            "placementFees": item_placement,
+            "atozFees": item_atoz,
+            "chargebackFees": item_chargeback,
+            "couponClipFees": item_coupon_clip,
+            "removalFees": item_removal,
+            "serviceFees": item_service_fee,
+            "safetReimbursements": item_safet_reimb,
+            "otherFees": item_misc_other,
             "cogs": round(cogs_total, 2),
             "cogsPerUnit": round(p["cogsPerUnit"], 2),
             "cogsPct": cogs_pct,
@@ -766,16 +884,23 @@ def profitability_overview(days: int = Query(30), division: Optional[str] = None
     contribution_per_unit = round(wf["netProfit"] / total_units, 2) if total_units > 0 else 0
 
     # Fee breakdown for donut
-    fee_donut = [
-        {"name": "Referral", "value": round(wf["referralFees"], 2),
-         "pct": round(wf["referralFees"] / total_fees * 100, 1) if total_fees > 0 else 0},
-        {"name": "FBA Fulfillment", "value": round(wf["fbaFees"], 2),
-         "pct": round(wf["fbaFees"] / total_fees * 100, 1) if total_fees > 0 else 0},
-        {"name": "Storage", "value": round(wf["storageFees"], 2),
-         "pct": round(wf["storageFees"] / total_fees * 100, 1) if total_fees > 0 else 0},
-        {"name": "Other", "value": round(wf["otherFees"] - wf["storageFees"], 2),
-         "pct": round((wf["otherFees"] - wf["storageFees"]) / total_fees * 100, 1) if total_fees > 0 else 0},
+    def _donut_entry(name, val):
+        return {"name": name, "value": round(val, 2),
+                "pct": round(val / total_fees * 100, 1) if total_fees > 0 else 0}
+
+    fee_donut_raw = [
+        _donut_entry("Referral", wf.get("referralFees", 0)),
+        _donut_entry("FBA Fulfillment", wf.get("fbaFees", 0)),
+        _donut_entry("Storage", wf.get("storageFees", 0)),
+        _donut_entry("Placement", wf.get("placementFees", 0)),
+        _donut_entry("A-to-Z", wf.get("atozFees", 0)),
+        _donut_entry("Chargebacks", wf.get("chargebackFees", 0)),
+        _donut_entry("Coupon Clip", wf.get("couponClipFees", 0)),
+        _donut_entry("Removal", wf.get("removalFees", 0)),
+        _donut_entry("Service Fees", wf.get("serviceFees", 0)),
+        _donut_entry("Misc Other", wf.get("otherFees", 0)),
     ]
+    fee_donut = [e for e in fee_donut_raw if e["value"] > 0]
 
     con.close()
     return {
@@ -819,10 +944,22 @@ def fee_detail(days: int = Query(30), division: Optional[str] = None,
     fin_params = [cutoff] + hp
 
     row = con.execute(f"""
-        SELECT COALESCE(SUM(ABS(commission)), 0) AS referral,
-               COALESCE(SUM(ABS(fba_fees)), 0) AS fba,
-               COALESCE(SUM(product_charges), 0) AS revenue,
-               COUNT(*) AS row_count
+        SELECT COALESCE(SUM(ABS(commission)), 0),
+               COALESCE(SUM(ABS(fba_fees)), 0),
+               COALESCE(SUM(CASE WHEN event_type NOT ILIKE '%refund%' AND event_type NOT ILIKE '%return%'
+                             THEN product_charges ELSE 0 END), 0),
+               COUNT(*),
+               COALESCE(SUM(CASE WHEN event_type='StorageFee' THEN ABS(other_fees) ELSE 0 END), 0),
+               COALESCE(SUM(CASE WHEN event_type='FeeAdjustment' THEN ABS(other_fees) ELSE 0 END), 0),
+               COALESCE(SUM(CASE WHEN event_type='AtoZ' THEN ABS(other_fees) ELSE 0 END), 0),
+               COALESCE(SUM(CASE WHEN event_type='Chargeback' THEN ABS(other_fees) ELSE 0 END), 0),
+               COALESCE(SUM(CASE WHEN event_type='CouponFee' THEN ABS(other_fees) ELSE 0 END), 0),
+               COALESCE(SUM(CASE WHEN event_type='RemovalFee' THEN ABS(other_fees) ELSE 0 END), 0),
+               COALESCE(SUM(CASE WHEN event_type='ServiceFee' THEN ABS(other_fees) ELSE 0 END), 0),
+               COALESCE(SUM(CASE WHEN event_type='SAFETReimbursement' THEN product_charges ELSE 0 END), 0),
+               COALESCE(SUM(CASE WHEN event_type='FBALiquidation' THEN product_charges ELSE 0 END), 0),
+               COALESCE(SUM(CASE WHEN event_type='FBALiquidation' THEN ABS(other_fees) ELSE 0 END), 0),
+               COALESCE(SUM(CASE WHEN event_type='Shipment' AND other_fees>0 THEN other_fees ELSE 0 END), 0)
         FROM financial_events
         {fin_filter}
     """, fin_params).fetchone()
@@ -831,8 +968,19 @@ def fee_detail(days: int = Query(30), division: Optional[str] = None,
     fba_total = _n(row[1])
     fin_revenue = _n(row[2])
     fin_row_count = int(row[3] or 0)
+    storage_total = _n(row[4])
+    placement_total = _n(row[5])
+    atoz_total = _n(row[6])
+    chargeback_total = _n(row[7])
+    coupon_clip_total = _n(row[8])
+    removal_total = _n(row[9])
+    service_fee_total = _n(row[10])
+    safet_reimb_total = _n(row[11])
+    liquidation_proceeds = _n(row[12])
+    liquidation_fees = _n(row[13])
+    misc_other_total = _n(row[14])
 
-    # Get daily_sales revenue as primary revenue source (more reliable/current)
+    # Revenue from daily_sales (most current); fallback to financial_events
     ds_revenue = 0
     try:
         ds_row = con.execute(f"""
@@ -843,94 +991,93 @@ def fee_detail(days: int = Query(30), division: Optional[str] = None,
         ds_revenue = _n(ds_row[0]) if ds_row else 0
     except Exception:
         pass
-
-    # Use daily_sales revenue as primary (it's the most current data source);
-    # fall back to financial_events revenue if daily_sales is empty
     revenue = ds_revenue if ds_revenue > 0 else fin_revenue
 
-    # If financial_events has no fee data for this period, use fee fallback rates
-    # per metrics.py: referral 15% + FBA 12% = 27% of revenue
+    # Fallback estimates only for the core per-order fees
     if referral_total == 0 and revenue > 0:
         referral_total = round(revenue * 0.15, 2)
     if fba_total == 0 and revenue > 0:
         fba_total = round(revenue * 0.12, 2)
 
-    # Storage fees — estimate from inventory
-    storage_est = 0
-    try:
-        inv_row = con.execute("""
-            SELECT COALESCE(SUM(estimated_monthly_storage_fee), 0) FROM fba_inventory
-        """).fetchone()
-        if inv_row:
-            storage_est = _n(inv_row[0]) * (days / 30.0)
-    except Exception:
-        pass
+    def _pct(amt):
+        return round(amt / revenue * 100, 1) if revenue > 0 else 0
 
-    # Other fees estimate (IPF, subscription, etc.) — 2% of revenue as fallback
-    other_est = round(revenue * 0.02, 2) if revenue > 0 else 0
-    total_fees = referral_total + fba_total + storage_est + other_est
+    total_fees = round(
+        referral_total + fba_total + storage_total + placement_total +
+        atoz_total + chargeback_total + coupon_clip_total +
+        removal_total + service_fee_total + liquidation_fees +
+        misc_other_total - safet_reimb_total, 2
+    )
 
-    # Determine data source label for frontend
-    fee_source = "financial_events" if fin_row_count > 0 and fin_revenue > 0 else "estimated"
+    fee_source = "financial_events" if fin_row_count > 0 else "estimated"
 
-    # Build categories
-    categories = [
-        {
-            "name": "Referral Fees",
-            "total": round(referral_total, 2),
-            "pct_of_rev": round(referral_total / revenue * 100, 1) if revenue > 0 else 0,
-            "items": [
-                {"name": "Standard Referral (15%)", "amount": round(referral_total * 0.85, 2),
-                 "pct_of_rev": round(referral_total * 0.85 / revenue * 100, 1) if revenue > 0 else 0},
-                {"name": "Category Adjustments", "amount": round(referral_total * 0.15, 2),
-                 "pct_of_rev": round(referral_total * 0.15 / revenue * 100, 1) if revenue > 0 else 0},
-            ],
-        },
-        {
-            "name": "FBA Fulfillment",
-            "total": round(fba_total, 2),
-            "pct_of_rev": round(fba_total / revenue * 100, 1) if revenue > 0 else 0,
-            "items": [
-                {"name": "Pick & Pack", "amount": round(fba_total * 0.65, 2),
-                 "pct_of_rev": round(fba_total * 0.65 / revenue * 100, 1) if revenue > 0 else 0},
-                {"name": "Weight Handling", "amount": round(fba_total * 0.25, 2),
-                 "pct_of_rev": round(fba_total * 0.25 / revenue * 100, 1) if revenue > 0 else 0},
-                {"name": "Inbound Placement", "amount": round(fba_total * 0.10, 2),
-                 "pct_of_rev": round(fba_total * 0.10 / revenue * 100, 1) if revenue > 0 else 0},
-            ],
-        },
-        {
-            "name": "Storage Fees",
-            "total": round(storage_est, 2),
-            "pct_of_rev": round(storage_est / revenue * 100, 1) if revenue > 0 else 0,
-            "items": [
-                {"name": "Monthly Storage", "amount": round(storage_est * 0.8, 2),
-                 "pct_of_rev": round(storage_est * 0.8 / revenue * 100, 1) if revenue > 0 else 0},
-                {"name": "Long-Term Storage (LTSF)", "amount": round(storage_est * 0.2, 2),
-                 "pct_of_rev": round(storage_est * 0.2 / revenue * 100, 1) if revenue > 0 else 0},
-            ],
-        },
-        {
-            "name": "Other Fees",
-            "total": round(other_est, 2),
-            "pct_of_rev": round(other_est / revenue * 100, 1) if revenue > 0 else 0,
-            "items": [
-                {"name": "Subscription / Professional", "amount": round(other_est * 0.4, 2),
-                 "pct_of_rev": round(other_est * 0.4 / revenue * 100, 1) if revenue > 0 else 0},
-                {"name": "Prep / Labeling", "amount": round(other_est * 0.3, 2),
-                 "pct_of_rev": round(other_est * 0.3 / revenue * 100, 1) if revenue > 0 else 0},
-                {"name": "Reimbursements (credit)", "amount": round(-other_est * 0.1, 2),
-                 "pct_of_rev": round(other_est * 0.1 / revenue * 100, 1) if revenue > 0 else 0},
-            ],
-        },
-    ]
+    # Build categories — only include non-zero ones
+    categories = []
 
-    fee_source = "financial_events" if fin_row_count > 0 and fin_revenue > 0 else "estimated"
+    def _cat(name, total, sub_items):
+        if total <= 0:
+            return
+        categories.append({
+            "name": name,
+            "total": round(total, 2),
+            "pct_of_rev": _pct(total),
+            "items": [i for i in sub_items if abs(i["amount"]) > 0],
+        })
+
+    _cat("Referral Fees", referral_total, [
+        {"name": "Referral Fee", "amount": round(referral_total, 2), "pct_of_rev": _pct(referral_total)},
+    ])
+    _cat("FBA Fulfillment", fba_total, [
+        {"name": "FBA Fulfillment Fee", "amount": round(fba_total, 2), "pct_of_rev": _pct(fba_total)},
+    ])
+    _cat("Storage Fees", storage_total, [
+        {"name": "Monthly / Renewal Storage", "amount": round(storage_total, 2), "pct_of_rev": _pct(storage_total)},
+    ])
+    _cat("Inbound Placement", placement_total, [
+        {"name": "Inbound Placement Service Fee", "amount": round(placement_total, 2), "pct_of_rev": _pct(placement_total)},
+    ])
+    _cat("A-to-Z Claims", atoz_total, [
+        {"name": "Guarantee Claim Paid", "amount": round(atoz_total, 2), "pct_of_rev": _pct(atoz_total)},
+    ])
+    _cat("Chargebacks", chargeback_total, [
+        {"name": "Chargeback Debit", "amount": round(chargeback_total, 2), "pct_of_rev": _pct(chargeback_total)},
+    ])
+    _cat("Coupon Clip Fees", coupon_clip_total, [
+        {"name": "Clip Fee ($0.60/redemption)", "amount": round(coupon_clip_total, 2), "pct_of_rev": _pct(coupon_clip_total)},
+    ])
+    _cat("Removal / Disposal", removal_total, [
+        {"name": "Removal Order Fee", "amount": round(removal_total, 2), "pct_of_rev": _pct(removal_total)},
+    ])
+    _cat("Service Fees", service_fee_total, [
+        {"name": "Amazon Service Fee", "amount": round(service_fee_total, 2), "pct_of_rev": _pct(service_fee_total)},
+    ])
+    if liquidation_proceeds > 0 or liquidation_fees > 0:
+        net_liq = round(liquidation_proceeds - liquidation_fees, 2)
+        categories.append({
+            "name": "FBA Liquidation",
+            "total": round(liquidation_fees, 2),
+            "pct_of_rev": _pct(liquidation_fees),
+            "items": [
+                {"name": "Liquidation Proceeds", "amount": round(liquidation_proceeds, 2), "pct_of_rev": _pct(liquidation_proceeds)},
+                {"name": "Liquidation Fee", "amount": -round(liquidation_fees, 2), "pct_of_rev": _pct(liquidation_fees)},
+                {"name": "Net Liquidation", "amount": net_liq, "pct_of_rev": _pct(abs(net_liq))},
+            ],
+        })
+    _cat("Misc Order Fees", misc_other_total, [
+        {"name": "Other Per-Order Fees", "amount": round(misc_other_total, 2), "pct_of_rev": _pct(misc_other_total)},
+    ])
+    if safet_reimb_total > 0:
+        categories.append({
+            "name": "SAFET Reimbursements",
+            "total": -round(safet_reimb_total, 2),
+            "pct_of_rev": _pct(safet_reimb_total),
+            "items": [{"name": "Amazon Reimbursement (credit)", "amount": round(safet_reimb_total, 2), "pct_of_rev": _pct(safet_reimb_total)}],
+        })
 
     con.close()
     return {
         "days": days,
-        "total_fees": round(total_fees, 2),
+        "total_fees": total_fees,
         "revenue": round(revenue, 2),
         "categories": categories,
         "fee_source": fee_source,

@@ -630,7 +630,14 @@ def _run_sp_api_sync_inner():
         # Manual NextToken pagination (more reliable than @load_all_pages)
         all_shipment_events = []
         all_refund_events = []
-        all_fee_adj_events = []   # storage fees, placement fees, other Amazon charges
+        all_fee_adj_events = []      # storage fees, placement fees, other AdjustmentEventList charges
+        all_guarantee_events = []    # A-to-Z Guarantee claims
+        all_chargeback_events = []   # credit card chargebacks
+        all_service_fee_events = []  # misc Amazon service fees
+        all_safet_reimb_events = []  # SAFET reimbursements (Amazon credits back to seller)
+        all_liquidation_events = []  # FBA liquidation proceeds/fees
+        all_coupon_payment_events = []  # coupon clip fees ($0.60/redemption)
+        all_removal_events = []      # removal/disposal order fees
         page = 0
         next_token = None
 
@@ -677,6 +684,14 @@ def _run_sp_api_sync_inner():
                     all_refund_events.append(adj)
                 else:
                     all_fee_adj_events.append(adj)
+            # Capture additional account-level event lists
+            all_guarantee_events.extend(events.get("GuaranteeClaimEventList", []) or [])
+            all_chargeback_events.extend(events.get("ChargebackEventList", []) or [])
+            all_service_fee_events.extend(events.get("ServiceFeeEventList", []) or [])
+            all_safet_reimb_events.extend(events.get("SAFETReimbursementEventList", []) or [])
+            all_liquidation_events.extend(events.get("FBALiquidationEventList", []) or [])
+            all_coupon_payment_events.extend(events.get("CouponPaymentEventList", []) or [])
+            all_removal_events.extend(events.get("RemovalShipmentEventList", []) or [])
             logger.info(f"  Financial events page {page}: {len(shipments)} shipments, {len(refunds)} refunds, {len(adjustments)} adjustments")
 
             # Check for next page
@@ -1039,9 +1054,263 @@ def _run_sp_api_sync_inner():
                     except Exception as ins_err:
                         logger.warning(f"  Fee adj (agg) insert error ({adj_type}): {ins_err}")
 
+        # ── A-to-Z Guarantee Claims ──────────────────────────────────────────
+        logger.info(f"  Processing {len(all_guarantee_events)} A-to-Z guarantee claim events")
+        for event in all_guarantee_events:
+            order_id = _safe_get(event, "AmazonOrderId", "") or ""
+            posted_date = _safe_get(event, "PostedDate", "")
+            date_str = _posted_date_str(posted_date)
+            if not date_str:
+                continue
+            item_list = _safe_get(event, "GuaranteeClaimItemList") or []
+            if item_list:
+                for item in item_list:
+                    sku = _safe_get(item, "SellerSKU", "") or ""
+                    asin_val = _safe_get(item, "ASIN", "") or sku
+                    amt = sum(abs(_money(_safe_get(c, "ChargeAmount")))
+                              for c in (_safe_get(item, "ItemChargeList") or []))
+                    if amt == 0:
+                        continue
+                    try:
+                        _div = _get_division_for_asin(asin_val)
+                        con.execute("""
+                            INSERT INTO financial_events
+                            (date, asin, sku, order_id, event_type,
+                             product_charges, shipping_charges, fba_fees,
+                             commission, promotion_amount, other_fees, net_proceeds,
+                             division, customer, platform)
+                            VALUES (?, ?, ?, ?, 'AtoZ', 0, 0, 0, 0, 0, ?, ?, ?, 'amazon', 'sp_api')
+                        """, [date_str, asin_val, sku, order_id, amt, -amt, _div])
+                        fin_records += 1
+                    except Exception as ins_err:
+                        logger.warning(f"  AtoZ insert error: {ins_err}")
+            else:
+                amt = abs(_money(_safe_get(event, "TotalAmount") or _safe_get(event, "GuaranteeClaimTotalAmount")))
+                if amt > 0:
+                    try:
+                        con.execute("""
+                            INSERT INTO financial_events
+                            (date, asin, sku, order_id, event_type,
+                             product_charges, shipping_charges, fba_fees,
+                             commission, promotion_amount, other_fees, net_proceeds,
+                             division, customer, platform)
+                            VALUES (?, 'ALL', '', ?, 'AtoZ', 0, 0, 0, 0, 0, ?, ?, 'unknown', 'amazon', 'sp_api')
+                        """, [date_str, order_id, amt, -amt])
+                        fin_records += 1
+                    except Exception as ins_err:
+                        logger.warning(f"  AtoZ agg insert error: {ins_err}")
+
+        # ── Chargebacks ──────────────────────────────────────────────────────
+        logger.info(f"  Processing {len(all_chargeback_events)} chargeback events")
+        for event in all_chargeback_events:
+            order_id = _safe_get(event, "AmazonOrderId", "") or ""
+            posted_date = _safe_get(event, "PostedDate", "")
+            date_str = _posted_date_str(posted_date)
+            if not date_str:
+                continue
+            item_list = _safe_get(event, "ChargebackItemList") or []
+            if item_list:
+                for item in item_list:
+                    sku = _safe_get(item, "SellerSKU", "") or ""
+                    asin_val = _safe_get(item, "ASIN", "") or sku
+                    amt = sum(abs(_money(_safe_get(c, "ChargeAmount")))
+                              for c in (_safe_get(item, "ItemChargeList") or []))
+                    if amt == 0:
+                        continue
+                    try:
+                        _div = _get_division_for_asin(asin_val)
+                        con.execute("""
+                            INSERT INTO financial_events
+                            (date, asin, sku, order_id, event_type,
+                             product_charges, shipping_charges, fba_fees,
+                             commission, promotion_amount, other_fees, net_proceeds,
+                             division, customer, platform)
+                            VALUES (?, ?, ?, ?, 'Chargeback', 0, 0, 0, 0, 0, ?, ?, ?, 'amazon', 'sp_api')
+                        """, [date_str, asin_val, sku, order_id, amt, -amt, _div])
+                        fin_records += 1
+                    except Exception as ins_err:
+                        logger.warning(f"  Chargeback insert error: {ins_err}")
+            else:
+                amt = abs(_money(_safe_get(event, "ChargebackAmount") or _safe_get(event, "TotalAmount")))
+                if amt > 0:
+                    try:
+                        con.execute("""
+                            INSERT INTO financial_events
+                            (date, asin, sku, order_id, event_type,
+                             product_charges, shipping_charges, fba_fees,
+                             commission, promotion_amount, other_fees, net_proceeds,
+                             division, customer, platform)
+                            VALUES (?, 'ALL', '', ?, 'Chargeback', 0, 0, 0, 0, 0, ?, ?, 'unknown', 'amazon', 'sp_api')
+                        """, [date_str, order_id, amt, -amt])
+                        fin_records += 1
+                    except Exception as ins_err:
+                        logger.warning(f"  Chargeback agg insert error: {ins_err}")
+
+        # ── Service Fees ─────────────────────────────────────────────────────
+        logger.info(f"  Processing {len(all_service_fee_events)} service fee events")
+        for event in all_service_fee_events:
+            order_id = _safe_get(event, "AmazonOrderId", "") or ""
+            posted_date = _safe_get(event, "PostedDate", "")
+            date_str = _posted_date_str(posted_date)
+            if not date_str:
+                continue
+            sku = _safe_get(event, "SellerSKU", "") or ""
+            asin_val = _safe_get(event, "ASIN", "") or sku or "ALL"
+            amt = sum(abs(_money(_safe_get(f, "FeeAmount")))
+                      for f in (_safe_get(event, "FeeList") or []))
+            if amt == 0:
+                continue
+            try:
+                _div = _get_division_for_asin(asin_val)
+                con.execute("""
+                    INSERT INTO financial_events
+                    (date, asin, sku, order_id, event_type,
+                     product_charges, shipping_charges, fba_fees,
+                     commission, promotion_amount, other_fees, net_proceeds,
+                     division, customer, platform)
+                    VALUES (?, ?, ?, ?, 'ServiceFee', 0, 0, 0, 0, 0, ?, ?, ?, 'amazon', 'sp_api')
+                """, [date_str, asin_val, sku, order_id, amt, -amt, _div])
+                fin_records += 1
+            except Exception as ins_err:
+                logger.warning(f"  ServiceFee insert error: {ins_err}")
+
+        # ── SAFET Reimbursements (Amazon credits back to seller) ─────────────
+        # Stored as positive product_charges + net_proceeds (it's income, not a cost)
+        logger.info(f"  Processing {len(all_safet_reimb_events)} SAFET reimbursement events")
+        for event in all_safet_reimb_events:
+            posted_date = _safe_get(event, "PostedDate", "")
+            date_str = _posted_date_str(posted_date)
+            if not date_str:
+                continue
+            item_list = _safe_get(event, "SAFETReimbursementItemList") or []
+            total_reimb = abs(_money(_safe_get(event, "ReimbursedAmount") or
+                                     _safe_get(event, "TotalAmount")))
+            if item_list:
+                for item in item_list:
+                    sku = _safe_get(item, "SellerSKU", "") or ""
+                    asin_val = _safe_get(item, "ASIN", "") or sku or "ALL"
+                    item_amt = sum(abs(_money(_safe_get(c, "ChargeAmount")))
+                                   for c in (_safe_get(item, "ItemChargeList") or []))
+                    if item_amt == 0 and total_reimb > 0:
+                        item_amt = round(total_reimb / max(len(item_list), 1), 2)
+                    if item_amt == 0:
+                        continue
+                    try:
+                        _div = _get_division_for_asin(asin_val)
+                        # Reimbursement is a credit — store as positive product_charges
+                        con.execute("""
+                            INSERT INTO financial_events
+                            (date, asin, sku, order_id, event_type,
+                             product_charges, shipping_charges, fba_fees,
+                             commission, promotion_amount, other_fees, net_proceeds,
+                             division, customer, platform)
+                            VALUES (?, ?, ?, '', 'SAFETReimbursement', ?, 0, 0, 0, 0, 0, ?, ?, 'amazon', 'sp_api')
+                        """, [date_str, asin_val, sku, item_amt, item_amt, _div])
+                        fin_records += 1
+                    except Exception as ins_err:
+                        logger.warning(f"  SAFET insert error: {ins_err}")
+            elif total_reimb > 0:
+                try:
+                    con.execute("""
+                        INSERT INTO financial_events
+                        (date, asin, sku, order_id, event_type,
+                         product_charges, shipping_charges, fba_fees,
+                         commission, promotion_amount, other_fees, net_proceeds,
+                         division, customer, platform)
+                        VALUES (?, 'ALL', '', '', 'SAFETReimbursement', ?, 0, 0, 0, 0, 0, ?, 'unknown', 'amazon', 'sp_api')
+                    """, [date_str, total_reimb, total_reimb])
+                    fin_records += 1
+                except Exception as ins_err:
+                    logger.warning(f"  SAFET agg insert error: {ins_err}")
+
+        # ── FBA Liquidation ──────────────────────────────────────────────────
+        logger.info(f"  Processing {len(all_liquidation_events)} FBA liquidation events")
+        for event in all_liquidation_events:
+            posted_date = _safe_get(event, "PostedDate", "")
+            date_str = _posted_date_str(posted_date)
+            if not date_str:
+                continue
+            order_id = _safe_get(event, "OriginalRemovalOrderId", "") or ""
+            proceeds = abs(_money(_safe_get(event, "LiquidationProceedsAmount")))
+            fee = abs(_money(_safe_get(event, "LiquidationFeeAmount")))
+            if proceeds == 0 and fee == 0:
+                continue
+            net = round(proceeds - fee, 2)
+            try:
+                con.execute("""
+                    INSERT INTO financial_events
+                    (date, asin, sku, order_id, event_type,
+                     product_charges, shipping_charges, fba_fees,
+                     commission, promotion_amount, other_fees, net_proceeds,
+                     division, customer, platform)
+                    VALUES (?, 'ALL', '', ?, 'FBALiquidation', ?, 0, 0, 0, 0, ?, ?, 'unknown', 'amazon', 'sp_api')
+                """, [date_str, order_id, proceeds, fee, net])
+                fin_records += 1
+            except Exception as ins_err:
+                logger.warning(f"  FBALiquidation insert error: {ins_err}")
+
+        # ── Coupon Payment Events (clip fee = $0.60 per redemption) ──────────
+        logger.info(f"  Processing {len(all_coupon_payment_events)} coupon payment events")
+        for event in all_coupon_payment_events:
+            posted_date = _safe_get(event, "PostedDate", "")
+            date_str = _posted_date_str(posted_date)
+            if not date_str:
+                continue
+            # FeeComponent is the clip fee charged to seller
+            fee_comp = _safe_get(event, "FeeComponent")
+            charge_comp = _safe_get(event, "ChargeComponent")
+            # Try FeeComponent first, then ChargeComponent, then TotalAmount
+            amt = abs(_money(fee_comp)) or abs(_money(charge_comp)) or abs(_money(_safe_get(event, "TotalAmount")))
+            if amt == 0:
+                continue
+            coupon_id = _safe_get(event, "CouponId", "") or ""
+            try:
+                con.execute("""
+                    INSERT INTO financial_events
+                    (date, asin, sku, order_id, event_type,
+                     product_charges, shipping_charges, fba_fees,
+                     commission, promotion_amount, other_fees, net_proceeds,
+                     division, customer, platform)
+                    VALUES (?, 'ALL', '', ?, 'CouponFee', 0, 0, 0, 0, 0, ?, ?, 'unknown', 'amazon', 'sp_api')
+                """, [date_str, coupon_id, amt, -amt])
+                fin_records += 1
+            except Exception as ins_err:
+                logger.warning(f"  CouponFee insert error: {ins_err}")
+
+        # ── Removal / Disposal Shipment Events ───────────────────────────────
+        logger.info(f"  Processing {len(all_removal_events)} removal/disposal events")
+        for event in all_removal_events:
+            posted_date = _safe_get(event, "PostedDate", "")
+            date_str = _posted_date_str(posted_date)
+            if not date_str:
+                continue
+            order_id = _safe_get(event, "OrderId", "") or ""
+            item_list = _safe_get(event, "RemovalShipmentItemList") or []
+            for item in item_list:
+                sku = _safe_get(item, "SellerSKU", "") or ""
+                asin_val = _safe_get(item, "ASIN", "") or sku or "ALL"
+                amt = sum(abs(_money(_safe_get(f, "FeeAmount")))
+                          for f in (_safe_get(item, "RemovalShipmentItemFeeList") or []))
+                if amt == 0:
+                    continue
+                try:
+                    _div = _get_division_for_asin(asin_val)
+                    con.execute("""
+                        INSERT INTO financial_events
+                        (date, asin, sku, order_id, event_type,
+                         product_charges, shipping_charges, fba_fees,
+                         commission, promotion_amount, other_fees, net_proceeds,
+                         division, customer, platform)
+                        VALUES (?, ?, ?, ?, 'RemovalFee', 0, 0, 0, 0, 0, ?, ?, ?, 'amazon', 'sp_api')
+                    """, [date_str, asin_val, sku, order_id, amt, -amt, _div])
+                    fin_records += 1
+                except Exception as ins_err:
+                    logger.warning(f"  RemovalFee insert error: {ins_err}")
+
         con.execute("COMMIT")
         con.close()
-        logger.info(f"  Financial events sync done: {fin_records} records (shipments + refunds + fee adjustments)")
+        logger.info(f"  Financial events sync done: {fin_records} records "
+                    f"(shipments + refunds + fee adjustments + claims + reimbursements)")
     except Exception as e:
         logger.error(f"  Financial events sync error: {e}")
         _section_errors.append(("financial_events", str(e)))
