@@ -2493,3 +2493,241 @@ def _sync_fc_inventory():
     except Exception as e:
         logger.error(f"  FC inventory sync error: {e}")
 
+
+
+def _fill_financial_events_gaps():
+    """Additive gap-fill for financial_events: finds completely empty calendar months
+    in the last 14 months and fetches them from the SP-API without touching existing data.
+
+    Unlike the main sync which deletes-then-reinserts, this function ONLY inserts into
+    months that have zero existing rows, so it can never overwrite or lose existing data.
+    Safe to run repeatedly.
+    """
+    import calendar
+
+    logger.info("═══ FINANCIAL EVENTS GAP FILL STARTED ═══")
+
+    credentials = _load_sp_api_credentials()
+    if not credentials:
+        logger.warning("Gap fill: no SP-API credentials, skipping")
+        return {"status": "SKIPPED", "reason": "No credentials"}
+
+    try:
+        from sp_api.api import Finances as FinancesAPI
+        from sp_api.base import Marketplaces
+    except ImportError:
+        logger.warning("Gap fill: SP-API library not installed, skipping")
+        return {"status": "SKIPPED", "reason": "SP-API not installed"}
+
+    # ── Step 1: Detect completely empty months in the last 14 months ──────────
+    today = datetime.utcnow().date()
+    con_check = get_db()
+    try:
+        rows = con_check.execute("""
+            SELECT TO_CHAR(date::date, 'YYYY-MM') as month
+            FROM financial_events
+            WHERE date >= CURRENT_DATE - INTERVAL '14 months'
+            GROUP BY 1
+        """).fetchall()
+        months_with_data = {r[0] for r in rows}
+    except Exception as e:
+        logger.error(f"Gap fill: could not query existing months: {e}")
+        con_check.close()
+        return {"status": "FAILED", "reason": str(e)}
+    finally:
+        con_check.close()
+
+    # Build list of all months in last 14 months
+    all_months = []
+    for i in range(14):
+        # Work backwards from last month (don't gap-fill current month — it's still accumulating)
+        yr = today.year
+        mo = today.month - 1 - i
+        while mo <= 0:
+            mo += 12
+            yr -= 1
+        all_months.append(f"{yr:04d}-{mo:02d}")
+
+    missing_months = sorted([m for m in all_months if m not in months_with_data])
+    logger.info(f"Gap fill: months with data={sorted(months_with_data)}, missing={missing_months}")
+
+    if not missing_months:
+        logger.info("Gap fill: no missing months, nothing to do")
+        return {"status": "SUCCESS", "missing_months": 0, "filled": 0}
+
+    # ── Step 2: For each missing month, fetch and insert financial events ──────
+    finances = FinancesAPI(credentials=credentials, marketplace=Marketplaces.US)
+    total_inserted = 0
+    months_filled = 0
+    months_failed = 0
+
+    for month_str in missing_months:
+        yr, mo = int(month_str[:4]), int(month_str[5:7])
+        last_day = calendar.monthrange(yr, mo)[1]
+        month_start = f"{yr:04d}-{mo:02d}-01T00:00:00Z"
+        month_end = f"{yr:04d}-{mo:02d}-{last_day:02d}T23:59:59Z"
+        logger.info(f"Gap fill: fetching {month_str} ({month_start} to {month_end})")
+
+        month_shipments = []
+        month_refunds = []
+        page = 0
+        next_token = None
+
+        try:
+            while page < 50:  # 50 pages max per month (~5000 events)
+                page += 1
+                kwargs = {"PostedAfter": month_start, "PostedBefore": month_end, "MaxResultsPerPage": 100}
+                if next_token:
+                    kwargs = {"NextToken": next_token, "MaxResultsPerPage": 100}
+
+                @retry_with_backoff(max_retries=3, base_delay=2.0, max_delay=30.0)
+                def _fetch_page(**kw):
+                    return finances.list_financial_events(**kw)
+
+                resp = _fetch_page(**kwargs)
+                payload = resp.payload if hasattr(resp, 'payload') else {}
+                events = payload.get("FinancialEvents", {})
+                shipments = events.get("ShipmentEventList", []) or []
+                refunds = events.get("RefundEventList", []) or []
+                month_shipments.extend(shipments)
+                month_refunds.extend(refunds)
+                logger.info(f"  {month_str} page {page}: {len(shipments)} shipments, {len(refunds)} refunds")
+
+                next_token = payload.get("NextToken")
+                if not next_token:
+                    break
+
+            logger.info(f"  {month_str}: {len(month_shipments)} total shipments, {len(month_refunds)} refunds")
+
+            if not month_shipments and not month_refunds:
+                logger.info(f"  {month_str}: no events from API — month may be genuinely empty")
+                months_filled += 1  # count as "checked"
+                continue
+
+            # Insert additively — no DELETE since month is empty
+            con = get_db_rw()
+            con.execute("BEGIN TRANSACTION")
+            inserted = 0
+
+            def _money_gf(amt_obj):
+                if amt_obj is None:
+                    return 0.0
+                if isinstance(amt_obj, dict):
+                    for key in ("CurrencyAmount", "Amount", "currency_amount", "amount"):
+                        v = amt_obj.get(key)
+                        if v is not None:
+                            try:
+                                return float(v)
+                            except (ValueError, TypeError):
+                                continue
+                try:
+                    return float(amt_obj)
+                except Exception:
+                    return 0.0
+
+            def _get_str(obj, key, default=""):
+                if isinstance(obj, dict):
+                    return obj.get(key, default) or default
+                return getattr(obj, key, default) or default
+
+            def _pd_str(pd_val):
+                if pd_val is None:
+                    return None
+                if isinstance(pd_val, str):
+                    return pd_val[:10]
+                if hasattr(pd_val, 'strftime'):
+                    return pd_val.strftime("%Y-%m-%d")
+                return str(pd_val)[:10]
+
+            for event in month_shipments:
+                order_id = _get_str(event, "AmazonOrderId")
+                date_str = _pd_str(_get_str(event, "PostedDate") or None)
+                for item in ((_get_str(event, "ShipmentItemList") if isinstance(event, dict) else getattr(event, "ShipmentItemList", [])) or []):
+                    sku = _get_str(item, "SellerSKU")
+                    asin_val = _get_str(item, "ASIN") or sku
+
+                    product_charges = shipping_ch = fba_val = comm_val = promo_val = other_val = 0.0
+                    for c in (item.get("ItemChargeList", []) if isinstance(item, dict) else []):
+                        val = _money_gf(c.get("ChargeAmount"))
+                        ct = c.get("ChargeType", "")
+                        if ct == "Principal":
+                            product_charges += val
+                        elif ct in ("ShippingCharge", "Shipping"):
+                            shipping_ch += val
+                    for f in (item.get("ItemFeeList", []) if isinstance(item, dict) else []):
+                        val = abs(_money_gf(f.get("FeeAmount")))
+                        ft = f.get("FeeType", "")
+                        if "FBA" in ft or "Fulfillment" in ft:
+                            fba_val += val
+                        elif ft in ("Commission", "ReferralFee"):
+                            comm_val += val
+                        else:
+                            other_val += val
+                    for p in (item.get("PromotionList", []) if isinstance(item, dict) else []):
+                        promo_val += _money_gf(p.get("PromotionAmount"))
+
+                    _div = _get_division_for_asin(asin_val)
+                    try:
+                        con.execute("""
+                            INSERT INTO financial_events
+                            (date, asin, sku, order_id, event_type,
+                             product_charges, shipping_charges, fba_fees,
+                             commission, promotion_amount, other_fees, net_proceeds,
+                             division, customer, platform)
+                            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'amazon', 'sp_api')
+                        """, [date_str, asin_val, sku, order_id, "Shipment",
+                              product_charges, shipping_ch, fba_val, comm_val, promo_val, other_val,
+                              product_charges + shipping_ch - fba_val - comm_val + promo_val, _div])
+                        inserted += 1
+                    except Exception as ie:
+                        logger.warning(f"  Gap fill insert error: {ie}")
+
+            for event in month_refunds:
+                order_id = _get_str(event, "AmazonOrderId")
+                date_str = _pd_str(_get_str(event, "PostedDate") or None)
+                item_list = (event.get("ShipmentItemAdjustmentList") or event.get("ShipmentItemList") or [] if isinstance(event, dict) else [])
+                for item in item_list:
+                    sku = _get_str(item, "SellerSKU")
+                    asin_val = _get_str(item, "ASIN") or sku
+                    refund_amt = 0.0
+                    for c in (item.get("ItemChargeAdjustmentList") or item.get("ItemChargeList") or [] if isinstance(item, dict) else []):
+                        val = _money_gf(c.get("ChargeAmount"))
+                        if c.get("ChargeType", "") == "Principal":
+                            refund_amt += val
+                    _div = _get_division_for_asin(asin_val)
+                    try:
+                        con.execute("""
+                            INSERT INTO financial_events
+                            (date, asin, sku, order_id, event_type,
+                             product_charges, shipping_charges, fba_fees,
+                             commission, promotion_amount, other_fees, net_proceeds,
+                             division, customer, platform)
+                            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'amazon', 'sp_api')
+                        """, [date_str, asin_val, sku, order_id, "Refund",
+                              abs(refund_amt), 0, 0, 0, 0, 0, abs(refund_amt), _div])
+                        inserted += 1
+                    except Exception as ie:
+                        logger.warning(f"  Gap fill refund insert error: {ie}")
+
+            con.execute("COMMIT")
+            con.close()
+            total_inserted += inserted
+            months_filled += 1
+            logger.info(f"  Gap fill {month_str}: inserted {inserted} events")
+
+        except Exception as e:
+            logger.error(f"Gap fill {month_str} error: {e}")
+            import traceback
+            logger.error(traceback.format_exc())
+            months_failed += 1
+            try:
+                con.execute("ROLLBACK")
+                con.close()
+            except Exception:
+                pass
+            import time as _t
+            _t.sleep(5)
+
+    status = "SUCCESS" if months_failed == 0 else ("PARTIAL" if months_filled > 0 else "FAILED")
+    logger.info(f"═══ GAP FILL {status}: {months_filled} months filled, {total_inserted} events inserted, {months_failed} failed ═══")
+    return {"status": status, "months_filled": months_filled, "inserted": total_inserted, "failed": months_failed}
