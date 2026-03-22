@@ -788,7 +788,7 @@ def profitability_items(days: int = Query(365), division: Optional[str] = None,
 
         all_amazon_fees = round(
             amazon_fees + item_storage + item_placement + item_atoz + item_chargeback +
-            item_coupon_clip + item_removal + item_service_fee - item_safet_reimb, 2
+            item_coupon_clip + item_removal + item_service_fee + item_misc_other - item_safet_reimb, 2
         )
         total_fee_pct = round(all_amazon_fees / rev * 100, 1) if rev > 0 else 0
 
