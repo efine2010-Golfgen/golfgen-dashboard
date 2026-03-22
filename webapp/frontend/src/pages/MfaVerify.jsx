@@ -39,9 +39,9 @@ export default function MfaVerify({ onVerified }) {
         <div style={{ textAlign: "center", marginBottom: 24 }}>
           <div style={{
             fontFamily: "'DM Serif Display', serif",
-            fontSize: 28, color: "var(--teal)", marginBottom: 4,
+            fontSize: 28, marginBottom: 4,
           }}>
-            GolfGen
+            <span style={{color:"#1A2D42"}}>Golf</span><span style={{color:"var(--teal)"}}>Gen</span>
           </div>
           <div style={{
             fontSize: 14, color: "rgba(255,255,255,0.6)",
