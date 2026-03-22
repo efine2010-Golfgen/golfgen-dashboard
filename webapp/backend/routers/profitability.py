@@ -284,7 +284,8 @@ def _build_waterfall(con, cogs_data, start, end, division=None, customer=None, p
                    SUM(CASE WHEN event_type = 'SAFETReimbursement' THEN product_charges ELSE 0 END),
                    SUM(CASE WHEN event_type = 'FBALiquidation' THEN product_charges ELSE 0 END),
                    SUM(CASE WHEN event_type = 'FBALiquidation' THEN ABS(other_fees) ELSE 0 END),
-                   SUM(CASE WHEN event_type = 'Shipment' AND other_fees > 0 THEN other_fees ELSE 0 END)
+                   SUM(CASE WHEN event_type = 'Shipment' AND other_fees > 0 THEN other_fees ELSE 0 END),
+                   SUM(CASE WHEN event_type = 'Shipment' THEN ABS(product_charges) ELSE 0 END)
             FROM financial_events
             WHERE date >= ? AND date < ?{fin_sql}
         """, [start, end] + fin_params).fetchone()
@@ -302,6 +303,7 @@ def _build_waterfall(con, cogs_data, start, end, division=None, customer=None, p
                 "liquidation_proceeds": _n(acct_row[15]),
                 "liquidation_fees": _n(acct_row[16]),
                 "misc_other": _n(acct_row[17]),
+                "shipment_charges": _n(acct_row[18]),
             }
     except Exception:
         pass
