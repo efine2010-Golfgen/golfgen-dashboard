@@ -869,7 +869,7 @@ function Legend({ items }) {
   );
 }
 
-function MetricCard({ label, value, ly, delta, expandContent, invert, goal, goalLabel, accent }) {
+function MetricCard({ label, value, ly, delta, expandContent, invert, goal, goalLabel, accent, spark, momentum, targetPct, targetLabel }) {
   const [expanded, setExpanded] = useState(false);
   const isPos = invert ? delta < 0 : delta > 0;
   const _lbl = typeof label === 'string' ? label : '';
@@ -881,12 +881,22 @@ function MetricCard({ label, value, ly, delta, expandContent, invert, goal, goal
       {delta > 0 ? '\u25B2' : '\u25BC'}&nbsp;{Math.abs(delta).toFixed(1)}%
     </span>
   ) : null;
+  // Momentum badge: WoW 7-day rolling signal (separate from YOY delta)
+  const momEl = momentum != null ? (
+    <span title="7-day vs prior 7-day momentum" style={{fontSize:8,fontWeight:700,padding:'1px 4px',borderRadius:4,
+      color:momentum>1?'#4ade80':momentum<-1?'#fb923c':'#5b7fa0',
+      background:momentum>1?'rgba(74,222,128,.08)':momentum<-1?'rgba(251,146,60,.08)':'rgba(91,127,160,.06)',
+      border:`1px solid ${momentum>1?'rgba(74,222,128,.2)':momentum<-1?'rgba(251,146,60,.2)':'rgba(91,127,160,.15)'}`,
+      whiteSpace:'nowrap',flexShrink:0}}>
+      {momentum>1?'\u2191':momentum<-1?'\u2193':'\u2192'}&thinsp;{Math.abs(momentum).toFixed(1)}%
+    </span>
+  ) : null;
   return (
     <div style={{flex:'1 1 0',minWidth:155,background:'linear-gradient(145deg,var(--card),var(--card2))',borderRadius:12,padding:'10px 12px 9px',border:'1px solid var(--brd)',transition:'background .3s',...(_acc&&{borderTop:`3px solid ${_acc}`})}}>
       {/* Label */}
       <div style={{fontSize:9,color:'var(--txt3)',textTransform:'uppercase',letterSpacing:'.07em',marginBottom:5,whiteSpace:'nowrap'}}>{label}</div>
-      {/* Single row: TY value | LY | delta badge */}
-      <div style={{display:'flex',alignItems:'center',gap:7,flexWrap:'nowrap',overflow:'hidden'}}>
+      {/* Value row: TY value · LY · Δ vs LY · WoW momentum */}
+      <div style={{display:'flex',alignItems:'center',gap:6,flexWrap:'wrap',overflow:'hidden'}}>
         <span style={{fontSize:16,fontWeight:800,letterSpacing:'-.02em',color:'var(--txt)',lineHeight:1,flexShrink:0}}>{value}</span>
         {ly && (
           <span style={{fontSize:10,color:'var(--txt3)',whiteSpace:'nowrap',letterSpacing:'-.01em',flexShrink:0,borderLeft:'1px solid var(--brd2)',paddingLeft:7}}>
@@ -894,7 +904,40 @@ function MetricCard({ label, value, ly, delta, expandContent, invert, goal, goal
           </span>
         )}
         {deltaEl}
+        {momEl}
       </div>
+      {/* Target progress bar — TY vs LY benchmark */}
+      {targetPct != null && targetPct > 0 && (
+        <div style={{marginTop:5}}>
+          <div style={{display:'flex',justifyContent:'space-between',fontSize:8,color:'var(--txt3)',marginBottom:2}}>
+            <span>{targetLabel||'vs LY'}</span>
+            <span style={{fontWeight:700,color:targetPct>=100?'#4ade80':targetPct>=75?B.o3:'#fb923c'}}>{Math.min(999,Math.round(targetPct))}%</span>
+          </div>
+          <div style={{height:3,background:'rgba(255,255,255,.06)',borderRadius:2,overflow:'hidden'}}>
+            <div style={{height:'100%',width:`${Math.min(100,Math.max(0,targetPct))}%`,
+              background:targetPct>=100?'linear-gradient(90deg,#4ade80,#22c55e)':targetPct>=75?`linear-gradient(90deg,${B.o1},${B.o2})`:'linear-gradient(90deg,#f87171,#fb923c)',
+              borderRadius:2,transition:'width .5s ease'}}/>
+          </div>
+        </div>
+      )}
+      {/* Inline sparkline — momentum context in one glance */}
+      {spark && spark.length >= 4 && (() => {
+        const vs = spark.filter(v => v != null && v >= 0);
+        if (vs.length < 4) return null;
+        const mn=Math.min(...vs), mx=Math.max(...vs), rng=mx-mn||1;
+        const W=200,H=28,n=vs.length;
+        const pts=vs.map((v,i)=>`${(i/(n-1))*W},${H-((v-mn)/rng)*(H-6)-3}`).join(' ');
+        const isUp=vs[n-1]>=vs[n-2];
+        const lc=_acc||(isUp?'rgba(74,222,128,.65)':'rgba(251,146,60,.65)');
+        return (
+          <div style={{marginTop:5,opacity:.8}}>
+            <svg width="100%" height="22" viewBox={`0 0 ${W} ${H}`} preserveAspectRatio="none" style={{display:'block'}}>
+              <polyline points={pts} fill="none" stroke={lc} strokeWidth="1.5" strokeLinejoin="round" strokeLinecap="round"/>
+              <circle cx={W} cy={H-((vs[n-1]-mn)/rng)*(H-6)-3} r="2.5" fill={lc}/>
+            </svg>
+          </div>
+        );
+      })()}
       {/* Goal row — shown if goal prop provided */}
       {goal != null && (
         <div style={{marginTop:5,fontSize:9,color:'var(--txt3)'}}>
@@ -1240,8 +1283,67 @@ export default function Sales({ filters = {} }) {
         const EXEC_PERIODS = ['Today','Yesterday','WTD','MTD','YTD'];
         const ACCENTS      = [B.o2, '#F5B731', B.t2, B.b2, B.b3];
 
+        // ── Sparkline + momentum from execTrend (last 14 days) ──────────────
+        const etArr    = toArr(execTrend);
+        const etLast   = etArr.slice(-14);
+        const sparkSales = etLast.map(d => d.ty_sales || 0);
+        const sparkUnits = etLast.map(d => d.ty_units || 0);
+        const sparkAur   = etLast.map(d => d.ty_aur   || 0);
+        const sparkConv  = etLast.map(d => (d.ty_conv || d.conversion || 0) * 100); // as %
+        const momCalc = key => {
+          const last7  = etArr.slice(-7).reduce((s,d)=>s+(d[key]||0),0);
+          const prev7  = etArr.slice(-14,-7).reduce((s,d)=>s+(d[key]||0),0);
+          return prev7 > 0 ? parseFloat(((last7-prev7)/prev7*100).toFixed(1)) : null;
+        };
+        const momSales = momCalc('ty_sales');
+        const momUnits = momCalc('ty_units');
+        const momAur   = momCalc('ty_aur');
+        // Target progress: TY vs LY for selected period (100% = matched LY)
+        const tgtPct = (ty, lyv) => (lyv && lyv > 0 && ty != null) ? parseFloat((ty/lyv*100).toFixed(1)) : null;
+
         return (
           <>
+            {/* ── Daily Brief ─────────────────────────────────── */}
+            {(() => {
+              const tBrief   = toArr(execTrend);
+              const tyNow    = tod.sales || 0;
+              const lyEodBr  = tod.ly_eod_sales ?? tod.ly_sales ?? 0;
+              const pacingPct = lyEodBr > 0 ? ((tyNow - lyEodBr) / lyEodBr * 100) : null;
+              const last7s   = tBrief.slice(-7).reduce((s,d)=>s+(d.ty_sales||0),0);
+              const prev7s   = tBrief.slice(-14,-7).reduce((s,d)=>s+(d.ty_sales||0),0);
+              const wow      = prev7s > 0 ? ((last7s-prev7s)/prev7s*100) : null;
+              const conv     = tod.conversion || 0;
+              const mtdBr    = periodCols?.['MTD'] || {};
+              const retRate  = (mtdBr.sales||0) > 0 ? (mtdBr.returns_amount||0) / mtdBr.sales : 0;
+              const mtdS     = mtdBr.sales || 0;
+              const mtdLyS   = mtdBr.ly_sales || 0;
+              if (!tyNow && !mtdS) return null; // no data yet
+              const s1 = tyNow > 0
+                ? `Today is pacing at ${f$(tyNow)}${pacingPct != null ? ` (${pacingPct > 0 ? '+' : ''}${pacingPct.toFixed(1)}% vs LY EOD)` : ''}${wow != null ? ` — 7-day revenue momentum is ${wow >= 0 ? 'accelerating' : 'softening'} at ${wow > 0 ? '+' : ''}${wow.toFixed(1)}% WoW` : ''}.`
+                : 'Today snapshot loading…';
+              const s2 = conv > 0 && conv < 0.10
+                ? `\u26A0\uFE0F Conversion is ${fP(conv)} — below the 10% benchmark; check traffic quality and listing content.`
+                : retRate > 0.12
+                ? `\u26A0\uFE0F Return rate is elevated at ${(retRate*100).toFixed(1)}% of MTD revenue — review top return drivers in Item Alerts.`
+                : conv > 0
+                ? `Conversion is ${fP(conv)} and return rate is ${retRate > 0 ? (retRate*100).toFixed(1)+'%' : 'within normal range'} — no critical flags.`
+                : '';
+              const s3 = mtdS > 0 && mtdLyS > 0
+                ? `MTD is ${f$(mtdS)} — ${mtdS >= mtdLyS ? 'running ahead of' : 'tracking behind'} LY MTD (${f$(mtdLyS)}, ${mtdS > mtdLyS ? '+' : ''}${((mtdS-mtdLyS)/mtdLyS*100).toFixed(1)}%).`
+                : '';
+              return (
+                <div style={{background:'linear-gradient(135deg,rgba(27,79,138,.1),rgba(15,122,110,.07))',
+                  border:'1px solid rgba(46,111,187,.25)',borderLeft:`3px solid ${B.b2}`,
+                  borderRadius:10,padding:'11px 16px 10px',marginBottom:14}}>
+                  <div style={{fontSize:8,fontWeight:700,textTransform:'uppercase',letterSpacing:'.1em',color:B.b3,marginBottom:5}}>
+                    \uD83D\uDCC8 Daily Brief
+                  </div>
+                  <p style={{margin:0,fontSize:11,lineHeight:1.75,color:'var(--txt)',fontWeight:400}}>
+                    {s1}{s2 ? ' ' + s2 : ''}{s3 ? ' ' + s3 : ''}
+                  </p>
+                </div>
+              );
+            })()}
             {/* 4-column Today Hero */}
             {loading.periodCols
               ? <div style={{height:180,display:'flex',alignItems:'center',justifyContent:'center'}}><Spinner/></div>
@@ -1488,14 +1590,14 @@ export default function Sales({ filters = {} }) {
             {/* ── Sales Overview KPIs ── */}
             <div style={{display:'flex',gap:8,marginBottom:10,overflowX:'auto',paddingBottom:2}}>
               {loading.metrics ? <Spinner/> : <>
-                <MetricCard label="Sales $"       value={f$(m.sales)}         ly={f$(ly('sales'))}         delta={dp(m.sales,ly('sales'))}/>
-                <MetricCard label="Unit Sales"    value={fN(m.unit_sales)}     ly={fN(ly('unit_sales'))}    delta={dp(m.unit_sales,ly('unit_sales'))}/>
-                <MetricCard label="AUR"           value={f$(m.aur)}            ly={f$(ly('aur'))}           delta={dp(m.aur,ly('aur'))}/>
-                <MetricCard label="COGS"          value={f$(m.cogs)}           ly={f$(ly('cogs'))}          delta={dp(m.cogs,ly('cogs'))}/>
-                <MetricCard label="Amazon Fees"   value={f$(m.amazon_fees)}    ly={f$(ly('amazon_fees'))}   delta={dp(m.amazon_fees,ly('amazon_fees'))}/>
-                <MetricCard label="Returns" value={`${fN(m.returns)} · ${f$(m.returns_amount)}`} ly={`${fN(ly('returns'))} · ${f$(ly('returns_amount'))}`} delta={dp(m.returns,ly('returns'))} invert/>
-                <MetricCard label="Gross Margin $"  value={f$(m.gross_margin)}     ly={f$(ly('gross_margin'))}     delta={dp(m.gross_margin,ly('gross_margin'))}/>
-                <MetricCard label="Gross Margin %"  value={fP(m.gross_margin_pct)} ly={fP(ly('gross_margin_pct'))} delta={dp(m.gross_margin_pct,ly('gross_margin_pct'))}/>
+                <MetricCard label="Sales $"       value={f$(m.sales)}         ly={f$(ly('sales'))}         delta={dp(m.sales,ly('sales'))}         spark={sparkSales} momentum={momSales} targetPct={tgtPct(m.sales,ly('sales'))}         targetLabel="TY/LY"/>
+                <MetricCard label="Unit Sales"    value={fN(m.unit_sales)}     ly={fN(ly('unit_sales'))}    delta={dp(m.unit_sales,ly('unit_sales'))} spark={sparkUnits} momentum={momUnits} targetPct={tgtPct(m.unit_sales,ly('unit_sales'))} targetLabel="TY/LY"/>
+                <MetricCard label="AUR"           value={f$(m.aur)}            ly={f$(ly('aur'))}           delta={dp(m.aur,ly('aur'))}              spark={sparkAur}   momentum={momAur}   targetPct={tgtPct(m.aur,ly('aur'))}             targetLabel="TY/LY"/>
+                <MetricCard label="COGS"          value={f$(m.cogs)}           ly={f$(ly('cogs'))}          delta={dp(m.cogs,ly('cogs'))}            targetPct={tgtPct(m.cogs,ly('cogs'))} targetLabel="TY/LY"/>
+                <MetricCard label="Amazon Fees"   value={f$(m.amazon_fees)}    ly={f$(ly('amazon_fees'))}   delta={dp(m.amazon_fees,ly('amazon_fees'))} targetPct={tgtPct(m.amazon_fees,ly('amazon_fees'))} targetLabel="TY/LY"/>
+                <MetricCard label="Returns" value={`${fN(m.returns)} · ${f$(m.returns_amount)}`} ly={`${fN(ly('returns'))} · ${f$(ly('returns_amount'))}`} delta={dp(m.returns,ly('returns'))} invert targetPct={tgtPct(m.returns,ly('returns'))} targetLabel="TY/LY"/>
+                <MetricCard label="Gross Margin $"  value={f$(m.gross_margin)}     ly={f$(ly('gross_margin'))}     delta={dp(m.gross_margin,ly('gross_margin'))}     spark={sparkSales} targetPct={tgtPct(m.gross_margin,ly('gross_margin'))}     targetLabel="TY/LY"/>
+                <MetricCard label="Gross Margin %"  value={fP(m.gross_margin_pct)} ly={fP(ly('gross_margin_pct'))} delta={dp(m.gross_margin_pct,ly('gross_margin_pct'))} targetPct={tgtPct(m.gross_margin_pct,ly('gross_margin_pct'))} targetLabel="TY/LY"/>
               </>}
             </div>
 
@@ -1894,8 +1996,65 @@ export default function Sales({ filters = {} }) {
         const DAILY_PERIODS = ['Today','Yesterday','WTD','MTD','YTD'];
         const ACCENTS = [B.o2, '#F5B731', B.t2, B.b2, B.b3];
 
+        // ── Sparkline + momentum from trend (last 14 days) ──────────────────
+        const dtArr    = toArr(trend);
+        const dtLast   = dtArr.slice(-14);
+        const dsparkSales = dtLast.map(d => d.ty_sales || 0);
+        const dsparkUnits = dtLast.map(d => d.ty_units || 0);
+        const dsparkAur   = dtLast.map(d => d.ty_aur   || 0);
+        const dmomCalc = key => {
+          const last7  = dtArr.slice(-7).reduce((s,d)=>s+(d[key]||0),0);
+          const prev7  = dtArr.slice(-14,-7).reduce((s,d)=>s+(d[key]||0),0);
+          return prev7 > 0 ? parseFloat(((last7-prev7)/prev7*100).toFixed(1)) : null;
+        };
+        const dmomSales = dmomCalc('ty_sales');
+        const dmomUnits = dmomCalc('ty_units');
+        const dmomAur   = dmomCalc('ty_aur');
+        const dtgtPct = (ty, lyv) => (lyv && lyv > 0 && ty != null) ? parseFloat((ty/lyv*100).toFixed(1)) : null;
+
         return (
           <>
+            {/* ── Daily Brief ─────────────────────────────────── */}
+            {(() => {
+              const tBriefD  = toArr(trend);
+              const tyNowD   = tod.sales || 0;
+              const lyEodD   = tod.ly_eod_sales ?? tod.ly_sales ?? 0;
+              const pacingD  = lyEodD > 0 ? ((tyNowD - lyEodD) / lyEodD * 100) : null;
+              const last7D   = tBriefD.slice(-7).reduce((s,d)=>s+(d.ty_sales||0),0);
+              const prev7D   = tBriefD.slice(-14,-7).reduce((s,d)=>s+(d.ty_sales||0),0);
+              const wowD     = prev7D > 0 ? ((last7D-prev7D)/prev7D*100) : null;
+              const convD    = tod.conversion || 0;
+              const mtdBrD   = periodCols?.['MTD'] || {};
+              const retRateD = (mtdBrD.sales||0) > 0 ? (mtdBrD.returns_amount||0) / mtdBrD.sales : 0;
+              const mtdSD    = mtdBrD.sales || 0;
+              const mtdLySD  = mtdBrD.ly_sales || 0;
+              if (!tyNowD && !mtdSD) return null;
+              const s1D = tyNowD > 0
+                ? `Today is pacing at ${f$(tyNowD)}${pacingD != null ? ` (${pacingD > 0 ? '+' : ''}${pacingD.toFixed(1)}% vs LY EOD)` : ''}${wowD != null ? ` — 7-day momentum is ${wowD >= 0 ? 'accelerating' : 'softening'} at ${wowD > 0 ? '+' : ''}${wowD.toFixed(1)}% WoW` : ''}.`
+                : 'Today snapshot loading…';
+              const s2D = convD > 0 && convD < 0.10
+                ? `\u26A0\uFE0F Conversion is ${fP(convD)} — below the 10% benchmark; check traffic quality and listing content.`
+                : retRateD > 0.12
+                ? `\u26A0\uFE0F Return rate is elevated at ${(retRateD*100).toFixed(1)}% of MTD revenue — review Item Alerts.`
+                : convD > 0
+                ? `Conversion is ${fP(convD)}${retRateD > 0 ? ` · returns ${(retRateD*100).toFixed(1)}% of revenue` : ''} — no critical flags.`
+                : '';
+              const s3D = mtdSD > 0 && mtdLySD > 0
+                ? `MTD is ${f$(mtdSD)} — ${mtdSD >= mtdLySD ? 'ahead of' : 'behind'} LY MTD (${f$(mtdLySD)}, ${mtdSD > mtdLySD ? '+' : ''}${((mtdSD-mtdLySD)/mtdLySD*100).toFixed(1)}%).`
+                : '';
+              return (
+                <div style={{background:'linear-gradient(135deg,rgba(27,79,138,.1),rgba(15,122,110,.07))',
+                  border:'1px solid rgba(46,111,187,.25)',borderLeft:`3px solid ${B.b2}`,
+                  borderRadius:10,padding:'11px 16px 10px',marginBottom:14}}>
+                  <div style={{fontSize:8,fontWeight:700,textTransform:'uppercase',letterSpacing:'.1em',color:B.b3,marginBottom:5}}>
+                    \uD83D\uDCC8 Daily Brief
+                  </div>
+                  <p style={{margin:0,fontSize:11,lineHeight:1.75,color:'var(--txt)',fontWeight:400}}>
+                    {s1D}{s2D ? ' ' + s2D : ''}{s3D ? ' ' + s3D : ''}
+                  </p>
+                </div>
+              );
+            })()}
             {/* ── ANOMALY BANNER ── */}
             {!dailyAnomalyDismissed && periodCols?.['Today'] && (() => {
               const tod2b = periodCols['Today'];
@@ -2504,14 +2663,14 @@ export default function Sales({ filters = {} }) {
               return (
                 <div style={{display:'flex',gap:8,marginBottom:10,overflowX:'auto',paddingBottom:2}}>
                   {loading.metrics ? <Spinner/> : <>
-                    <MetricCard label="Sales $"       value={f$(m.sales)}         ly={f$(ly('sales'))}         delta={dp(m.sales,ly('sales'))}         goal={projSales}  goalLabel="Proj EOM:"/>
-                    <MetricCard label="Unit Sales"    value={fN(m.unit_sales)}     ly={fN(ly('unit_sales'))}    delta={dp(m.unit_sales,ly('unit_sales'))} goal={projUnits}  goalLabel="Proj EOM:"/>
-                    <MetricCard label="AUR"           value={f$(m.aur)}            ly={f$(ly('aur'))}           delta={dp(m.aur,ly('aur'))}/>
-                    <MetricCard label={<>COGS{estBadge}</>}          value={f$(m.cogs)}           ly={f$(ly('cogs'))}          delta={dp(m.cogs,ly('cogs'))}          goal="35% fallback" goalLabel="Rate:" accent={B.b3}/>
-                    <MetricCard label="Amazon Fees"   value={f$(m.amazon_fees)}    ly={f$(ly('amazon_fees'))}   delta={dp(m.amazon_fees,ly('amazon_fees'))} goal={feesPct ? `${feesPct}% of rev` : null} goalLabel=""/>
-                    <MetricCard label="Returns" value={`${fN(m.returns)} · ${f$(m.returns_amount)}`} ly={`${fN(ly('returns'))} · ${f$(ly('returns_amount'))}`} delta={dp(m.returns,ly('returns'))} invert goal={retRatePct ? `${retRatePct}%` : null} goalLabel="Return rate:"/>
-                    <MetricCard label={<>Gross Margin ${estBadge}</>}  value={f$(m.gross_margin)}     ly={f$(ly('gross_margin'))}     delta={dp(m.gross_margin,ly('gross_margin'))} accent={B.t2}/>
-                    <MetricCard label={<>GM %{estBadge}</>}            value={fP(m.gross_margin_pct)} ly={fP(ly('gross_margin_pct'))} delta={dp(m.gross_margin_pct,ly('gross_margin_pct'))} goal="35% COGS est." goalLabel="Based on:" accent={B.t2}/>
+                    <MetricCard label="Sales $"       value={f$(m.sales)}         ly={f$(ly('sales'))}         delta={dp(m.sales,ly('sales'))}         goal={projSales}  goalLabel="Proj EOM:" spark={dsparkSales} momentum={dmomSales} targetPct={dtgtPct(m.sales,ly('sales'))}         targetLabel="TY/LY"/>
+                    <MetricCard label="Unit Sales"    value={fN(m.unit_sales)}     ly={fN(ly('unit_sales'))}    delta={dp(m.unit_sales,ly('unit_sales'))} goal={projUnits}  goalLabel="Proj EOM:" spark={dsparkUnits} momentum={dmomUnits} targetPct={dtgtPct(m.unit_sales,ly('unit_sales'))} targetLabel="TY/LY"/>
+                    <MetricCard label="AUR"           value={f$(m.aur)}            ly={f$(ly('aur'))}           delta={dp(m.aur,ly('aur'))}              spark={dsparkAur}  momentum={dmomAur}   targetPct={dtgtPct(m.aur,ly('aur'))}             targetLabel="TY/LY"/>
+                    <MetricCard label={<>COGS{estBadge}</>}          value={f$(m.cogs)}           ly={f$(ly('cogs'))}          delta={dp(m.cogs,ly('cogs'))}          goal="35% fallback" goalLabel="Rate:" accent={B.b3} targetPct={dtgtPct(m.cogs,ly('cogs'))} targetLabel="TY/LY"/>
+                    <MetricCard label="Amazon Fees"   value={f$(m.amazon_fees)}    ly={f$(ly('amazon_fees'))}   delta={dp(m.amazon_fees,ly('amazon_fees'))} goal={feesPct ? `${feesPct}% of rev` : null} goalLabel="" targetPct={dtgtPct(m.amazon_fees,ly('amazon_fees'))} targetLabel="TY/LY"/>
+                    <MetricCard label="Returns" value={`${fN(m.returns)} · ${f$(m.returns_amount)}`} ly={`${fN(ly('returns'))} · ${f$(ly('returns_amount'))}`} delta={dp(m.returns,ly('returns'))} invert goal={retRatePct ? `${retRatePct}%` : null} goalLabel="Return rate:" targetPct={dtgtPct(m.returns,ly('returns'))} targetLabel="TY/LY"/>
+                    <MetricCard label={<>Gross Margin ${estBadge}</>}  value={f$(m.gross_margin)}     ly={f$(ly('gross_margin'))}     delta={dp(m.gross_margin,ly('gross_margin'))} accent={B.t2} spark={dsparkSales} targetPct={dtgtPct(m.gross_margin,ly('gross_margin'))}     targetLabel="TY/LY"/>
+                    <MetricCard label={<>GM %{estBadge}</>}            value={fP(m.gross_margin_pct)} ly={fP(ly('gross_margin_pct'))} delta={dp(m.gross_margin_pct,ly('gross_margin_pct'))} goal="35% COGS est." goalLabel="Based on:" accent={B.t2} targetPct={dtgtPct(m.gross_margin_pct,ly('gross_margin_pct'))} targetLabel="TY/LY"/>
                   </>}
                 </div>
               );
