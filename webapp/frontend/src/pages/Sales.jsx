@@ -888,15 +888,26 @@ const METRIC_DEFS = {
   'Velocity':       'Average weekly units sold. Measures how quickly your inventory is turning.',
 };
 
-function MetricCard({ label, value, ly, delta, expandContent, invert, goal, goalLabel, accent, spark, momentum, targetPct, targetLabel }) {
+function MetricCard({ label, value, ly, delta, expandContent, invert, goal, goalLabel, accent, spark, momentum, targetPct, targetLabel, tipKey }) {
   const [expanded, setExpanded] = useState(false);
   const isPos = invert ? delta < 0 : delta > 0;
-  const _lbl = typeof label === 'string' ? label : '';
+  const _lbl = typeof label === 'string' ? label : (tipKey || '');
   const _acc = accent ?? {'Sales $':B.o2,'Unit Sales':B.b2,'AUR':'#F5B731','COGS':B.b3,'Amazon Fees':B.b2,'Returns':'#F5B731','Gross Margin $':B.t2,'Gross Margin %':B.t2,'Sessions':B.t2,'Glance Views':B.t2,'Click Through':B.b2,'Conversion':B.b2,'Ad Spend $':'#F5B731','ROAS':B.o2,'TACOS':'#F5B731'}[_lbl];
   const [showTip, setShowTip] = useState(false);
+  const [tipPos, setTipPos]   = useState({top:0,left:0});
   const tipText = METRIC_DEFS[_lbl] ?? null;
   const tipTimer = useRef(null);
-  const openTip  = () => { clearTimeout(tipTimer.current); if (tipText) setShowTip(true); };
+  const labelRef = useRef(null);
+  const openTip  = () => {
+    clearTimeout(tipTimer.current);
+    if (tipText) {
+      if (labelRef.current) {
+        const r = labelRef.current.getBoundingClientRect();
+        setTipPos({ top: r.bottom + 6, left: Math.min(r.left, window.innerWidth - 234) });
+      }
+      setShowTip(true);
+    }
+  };
   const closeTip = () => { tipTimer.current = setTimeout(() => setShowTip(false), 160); };
   const deltaEl = delta != null ? (
     <span style={{fontSize:9,fontWeight:700,padding:'2px 5px',borderRadius:6,
@@ -919,6 +930,7 @@ function MetricCard({ label, value, ly, delta, expandContent, invert, goal, goal
     <div style={{flex:'1 1 0',minWidth:155,background:'linear-gradient(145deg,var(--card),var(--card2))',borderRadius:12,padding:'10px 12px 9px',border:'1px solid var(--brd)',transition:'background .3s',...(_acc&&{borderTop:`3px solid ${_acc}`})}}>
       {/* Label with hover tooltip */}
       <div
+        ref={labelRef}
         style={{position:'relative',display:'inline-flex',alignItems:'center',gap:3,fontSize:9,color:'var(--txt3)',
           textTransform:'uppercase',letterSpacing:'.07em',marginBottom:5,whiteSpace:'nowrap',
           cursor:tipText?'help':'default',userSelect:'none'}}
@@ -932,10 +944,10 @@ function MetricCard({ label, value, ly, delta, expandContent, invert, goal, goal
             onMouseEnter={openTip}
             onMouseLeave={closeTip}
             style={{position:'fixed',zIndex:9999,width:220,
+              top:tipPos.top,left:tipPos.left,
               background:'#0d1b2e',border:'1px solid rgba(46,111,187,.5)',borderRadius:10,
               padding:'10px 13px',boxShadow:'0 8px 32px rgba(0,0,0,.7)',
-              pointerEvents:'auto',textTransform:'none',letterSpacing:'normal',
-              marginTop:4}}>
+              pointerEvents:'auto',textTransform:'none',letterSpacing:'normal'}}>
             <div style={{fontSize:8,fontWeight:700,textTransform:'uppercase',letterSpacing:'.1em',color:'#5b9bd5',marginBottom:5}}>{_lbl||label}</div>
             <p style={{margin:0,fontSize:10.5,lineHeight:1.65,color:'rgba(215,230,250,.88)',fontWeight:400}}>{tipText}</p>
           </div>
@@ -2712,11 +2724,11 @@ export default function Sales({ filters = {} }) {
                     <MetricCard label="Sales $"       value={f$(m.sales)}         ly={f$(ly('sales'))}         delta={dp(m.sales,ly('sales'))}         goal={projSales}  goalLabel="Proj EOM:" spark={dsparkSales} momentum={dmomSales} targetPct={dtgtPct(m.sales,ly('sales'))}         targetLabel="TY/LY"/>
                     <MetricCard label="Unit Sales"    value={fN(m.unit_sales)}     ly={fN(ly('unit_sales'))}    delta={dp(m.unit_sales,ly('unit_sales'))} goal={projUnits}  goalLabel="Proj EOM:" spark={dsparkUnits} momentum={dmomUnits} targetPct={dtgtPct(m.unit_sales,ly('unit_sales'))} targetLabel="TY/LY"/>
                     <MetricCard label="AUR"           value={f$(m.aur)}            ly={f$(ly('aur'))}           delta={dp(m.aur,ly('aur'))}              spark={dsparkAur}  momentum={dmomAur}   targetPct={dtgtPct(m.aur,ly('aur'))}             targetLabel="TY/LY"/>
-                    <MetricCard label={<>COGS{estBadge}</>}          value={f$(m.cogs)}           ly={f$(ly('cogs'))}          delta={dp(m.cogs,ly('cogs'))}          goal="35% fallback" goalLabel="Rate:" accent={B.b3} targetPct={dtgtPct(m.cogs,ly('cogs'))} targetLabel="TY/LY"/>
+                    <MetricCard label={<>COGS{estBadge}</>} tipKey="COGS" value={f$(m.cogs)}           ly={f$(ly('cogs'))}          delta={dp(m.cogs,ly('cogs'))}          goal="35% fallback" goalLabel="Rate:" accent={B.b3} targetPct={dtgtPct(m.cogs,ly('cogs'))} targetLabel="TY/LY"/>
                     <MetricCard label="Amazon Fees"   value={f$(m.amazon_fees)}    ly={f$(ly('amazon_fees'))}   delta={dp(m.amazon_fees,ly('amazon_fees'))} goal={feesPct ? `${feesPct}% of rev` : null} goalLabel="" targetPct={dtgtPct(m.amazon_fees,ly('amazon_fees'))} targetLabel="TY/LY"/>
                     <MetricCard label="Returns" value={`${fN(m.returns)} · ${f$(m.returns_amount)}`} ly={`${fN(ly('returns'))} · ${f$(ly('returns_amount'))}`} delta={dp(m.returns,ly('returns'))} invert goal={retRatePct ? `${retRatePct}%` : null} goalLabel="Return rate:" targetPct={dtgtPct(m.returns,ly('returns'))} targetLabel="TY/LY"/>
-                    <MetricCard label={<>Gross Margin ${estBadge}</>}  value={f$(m.gross_margin)}     ly={f$(ly('gross_margin'))}     delta={dp(m.gross_margin,ly('gross_margin'))} accent={B.t2} spark={dsparkSales} targetPct={dtgtPct(m.gross_margin,ly('gross_margin'))}     targetLabel="TY/LY"/>
-                    <MetricCard label={<>GM %{estBadge}</>}            value={fP(m.gross_margin_pct)} ly={fP(ly('gross_margin_pct'))} delta={dp(m.gross_margin_pct,ly('gross_margin_pct'))} goal="35% COGS est." goalLabel="Based on:" accent={B.t2} targetPct={dtgtPct(m.gross_margin_pct,ly('gross_margin_pct'))} targetLabel="TY/LY"/>
+                    <MetricCard label={<>Gross Margin ${estBadge}</>} tipKey="Gross Margin $" value={f$(m.gross_margin)}     ly={f$(ly('gross_margin'))}     delta={dp(m.gross_margin,ly('gross_margin'))} accent={B.t2} spark={dsparkSales} targetPct={dtgtPct(m.gross_margin,ly('gross_margin'))}     targetLabel="TY/LY"/>
+                    <MetricCard label={<>GM %{estBadge}</>} tipKey="Gross Margin %" value={fP(m.gross_margin_pct)} ly={fP(ly('gross_margin_pct'))} delta={dp(m.gross_margin_pct,ly('gross_margin_pct'))} goal="35% COGS est." goalLabel="Based on:" accent={B.t2} targetPct={dtgtPct(m.gross_margin_pct,ly('gross_margin_pct'))} targetLabel="TY/LY"/>
                   </>}
                 </div>
               );
