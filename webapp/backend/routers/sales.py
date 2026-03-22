@@ -1084,6 +1084,10 @@ def sales_period_comparison(
             ly_same_time_orders  = 0
             ty_forecast          = None
             ty_units_forecast    = None
+            ly_same_time_fees         = 0.0
+            ly_same_time_returns_amt  = 0.0
+            ty_forecast_fees          = None
+            ty_forecast_returns_amt   = None
             snapshot_time        = None
             if period_key == 'today':
                 now_ct = datetime.now(CENTRAL)
@@ -1175,6 +1179,25 @@ def sales_period_comparison(
                     if _day_frac_u >= 0.04:
                         ty_units_forecast = max(_safe_units, round(_safe_units / _day_frac_u))
 
+                # ── Fees & Returns: LY same-time + TY EOD forecast ───────────────
+                # LY same-time = LY full-day × day fraction (linear scale).
+                # TY EOD = TY current × (LY full-day / LY same-time) — same pacing
+                # ratio as sales so the four columns are internally consistent.
+                _day_frac_fr = (now_ct.hour * 60 + now_ct.minute) / (24 * 60)
+                if _day_frac_fr > 0:
+                    ly_same_time_fees        = round(float(ly_fees_val) * _day_frac_fr, 2)
+                    ly_same_time_returns_amt = round(float(ly_ret_amt)  * _day_frac_fr, 2)
+                # TY EOD fees: pacing ratio if LY data available, else scale by sales ratio
+                if ly_same_time_fees > 0 and ly_fees_val > 0:
+                    ty_forecast_fees = round(float(ty_fees) * (float(ly_fees_val) / ly_same_time_fees), 2)
+                elif ty_forecast and sales > 0 and ty_fees > 0:
+                    ty_forecast_fees = round(float(ty_fees) * (float(ty_forecast) / float(sales)), 2)
+                # TY EOD returns: same approach
+                if ly_same_time_returns_amt > 0 and ly_ret_amt > 0:
+                    ty_forecast_returns_amt = round(float(ty_ret_amt) * (float(ly_ret_amt) / ly_same_time_returns_amt), 2)
+                elif ty_forecast and sales > 0 and ty_ret_amt > 0:
+                    ty_forecast_returns_amt = round(float(ty_ret_amt) * (float(ty_forecast) / float(sales)), 2)
+
             result[label] = {
                 "sales": round(sales, 2), "units": units, "aur": aur,
                 "orders": orders, "aov": aov,
@@ -1196,6 +1219,10 @@ def sales_period_comparison(
                 "ly_eod_units":        ly_units,
                 "ty_forecast":         ty_forecast,
                 "ty_units_forecast":   ty_units_forecast,
+                "ly_same_time_fees":         ly_same_time_fees,
+                "ly_same_time_returns_amt":  ly_same_time_returns_amt,
+                "ty_forecast_fees":          ty_forecast_fees,
+                "ty_forecast_returns_amt":   ty_forecast_returns_amt,
                 "snapshot_time":       snapshot_time,
             }
 

@@ -869,9 +869,11 @@ function Legend({ items }) {
   );
 }
 
-function MetricCard({ label, value, ly, delta, expandContent, invert, goal, goalLabel }) {
+function MetricCard({ label, value, ly, delta, expandContent, invert, goal, goalLabel, accent }) {
   const [expanded, setExpanded] = useState(false);
   const isPos = invert ? delta < 0 : delta > 0;
+  const _lbl = typeof label === 'string' ? label : '';
+  const _acc = accent ?? {'Sales $':B.o2,'Unit Sales':B.b2,'AUR':'#F5B731','COGS':B.b3,'Amazon Fees':B.b2,'Returns':'#F5B731','Gross Margin $':B.t2,'Gross Margin %':B.t2,'Sessions':B.t2,'Glance Views':B.t2,'Click Through':B.b2,'Conversion':B.b2,'Ad Spend $':'#F5B731','ROAS':B.o2,'TACOS':'#F5B731'}[_lbl];
   const deltaEl = delta != null ? (
     <span style={{fontSize:9,fontWeight:700,padding:'2px 5px',borderRadius:6,
       color:isPos?'#4ade80':'#fb923c',
@@ -880,7 +882,7 @@ function MetricCard({ label, value, ly, delta, expandContent, invert, goal, goal
     </span>
   ) : null;
   return (
-    <div style={{flex:'1 1 0',minWidth:155,background:'linear-gradient(145deg,var(--card),var(--card2))',borderRadius:12,padding:'10px 12px 9px',border:'1px solid var(--brd)',transition:'background .3s'}}>
+    <div style={{flex:'1 1 0',minWidth:155,background:'linear-gradient(145deg,var(--card),var(--card2))',borderRadius:12,padding:'10px 12px 9px',border:'1px solid var(--brd)',transition:'background .3s',...(_acc&&{borderTop:`3px solid ${_acc}`})}}>
       {/* Label */}
       <div style={{fontSize:9,color:'var(--txt3)',textTransform:'uppercase',letterSpacing:'.07em',marginBottom:5,whiteSpace:'nowrap'}}>{label}</div>
       {/* Single row: TY value | LY | delta badge */}
@@ -1249,9 +1251,9 @@ export default function Sales({ filters = {} }) {
                   { lbl:'🟠 TY NOW', sub:`thru ${tod.snapshot_time||'today'} · ${fN(tyO)} orders`, val:f$(tyS), color:B.o2,
                     rows:[['Units', fN(tyU)], ['AUR', f$(tyAur)], ['Fees', f$(tod.amazon_fees||0)], ['Returns', f$(tod.returns_amount||0)], ['Conv %', fP(tod.conversion)]] },
                   { lbl:'🔵 LY NOW', sub:'same time last year', val:f$(lyNowS), color:B.b3,
-                    rows:[['Units', fN(lyNowU)], ['AUR', f$(lyNowAur)], ['Fees', '—'], ['Returns', '—'], ['Conv %', fP(tod.ly_conversion)]] },
+                    rows:[['Units', fN(lyNowU)], ['AUR', f$(lyNowAur)], ['Fees', tod.ly_same_time_fees > 0 ? f$(tod.ly_same_time_fees) : '—'], ['Returns', tod.ly_same_time_returns_amt > 0 ? f$(tod.ly_same_time_returns_amt) : '—'], ['Conv %', fP(tod.ly_conversion)]] },
                   { lbl:'🟢 TY EOD FCST', sub:`projected full day · pacing ${tyFcstS > 0 && lyEodS > 0 ? ((tyFcstS/lyEodS-1)*100).toFixed(1)+'% vs LY EOD' : '—'}`, val:f$(tyFcstS), color:B.t2,
-                    rows:[['Units', tyFcstU > 0 ? `~${fN(tyFcstU)}` : '—'], ['AUR', tyFcstAur > 0 ? f$(tyFcstAur) : '—'], ['Fees', '—'], ['Returns', '—'], ['Conv %', '—']] },
+                    rows:[['Units', tyFcstU > 0 ? `~${fN(tyFcstU)}` : '—'], ['AUR', tyFcstAur > 0 ? f$(tyFcstAur) : '—'], ['Fees', tod.ty_forecast_fees != null ? f$(tod.ty_forecast_fees) : '—'], ['Returns', tod.ty_forecast_returns_amt != null ? f$(tod.ty_forecast_returns_amt) : '—'], ['Conv %', '—']] },
                   { lbl:'⬜ LY EOD ACTUAL', sub:'full day last year', val:f$(lyEodS), color:'var(--txt3)',
                     rows:[['Units', fN(lyEodU)], ['AUR', f$(lyEodAur)], ['Fees', f$(tod.ly_amazon_fees||0)], ['Returns', f$(tod.ly_returns_amount||0)], ['Conv %', fP(tod.ly_conversion)]] },
                 ].map((col, i, arr) => (
@@ -1277,11 +1279,14 @@ export default function Sales({ filters = {} }) {
                       const pts=vals.map((v,i)=>`${(i/(n-1))*W},${H-(v/maxV)*(H-6)-3}`).join(' ');
                       const col2=isLY?'rgba(91,159,212,.5)':col.color;
                       return (
-                        <div style={{height:32,margin:'8px 0 2px',position:'relative',opacity:.85}}>
-                          <svg width="100%" height="32" viewBox={`0 0 ${W} ${H}`} preserveAspectRatio="none" style={{display:'block'}}>
-                            <polyline points={pts} fill="none" stroke={col2} strokeWidth="2" strokeLinejoin="round" strokeLinecap="round"/>
-                            <circle cx={(n-1)/(n-1)*W} cy={H-(vals[n-1]/maxV)*(H-6)-3} r="3" fill={col2}/>
-                          </svg>
+                        <div>
+                          <div style={{fontSize:8,color:'var(--txt3)',textTransform:'uppercase',letterSpacing:'.08em',marginTop:8,marginBottom:2}}>7-day trend</div>
+                          <div style={{height:32,margin:'0 0 2px',position:'relative',opacity:.85}}>
+                            <svg width="100%" height="32" viewBox={`0 0 ${W} ${H}`} preserveAspectRatio="none" style={{display:'block'}}>
+                              <polyline points={pts} fill="none" stroke={col2} strokeWidth="2" strokeLinejoin="round" strokeLinecap="round"/>
+                              <circle cx={(n-1)/(n-1)*W} cy={H-(vals[n-1]/maxV)*(H-6)-3} r="3" fill={col2}/>
+                            </svg>
+                          </div>
                         </div>
                       );
                     })()}
@@ -1380,7 +1385,7 @@ export default function Sales({ filters = {} }) {
                 const pillBtn=(label,active,onClick)=>(<button key={label} onClick={e=>{e.stopPropagation();onClick();}} style={{padding:'3px 10px',borderRadius:6,fontSize:10,fontWeight:600,cursor:'pointer',transition:'all .15s',border:`1px solid ${active?B.b2:'var(--brd)'}`,background:active?`${B.b1}33`:'transparent',color:active?B.b3:'var(--txt3)'}}>{label}</button>);
                 const last7=hmDays.slice(-7);
                 return (
-                  <div style={{background:'var(--surf)',border:'1px solid var(--brd)',borderRadius:14,padding:'14px 16px',marginBottom:10}}>
+                  <div style={{background:'var(--surf)',border:'1px solid var(--brd)',borderTop:`3px solid ${B.b2}`,borderRadius:14,padding:'14px 16px',marginBottom:10}}>
                     <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:10,flexWrap:'wrap',gap:8}}>
                       <span style={{fontSize:13,fontWeight:700,color:'var(--txt)'}}>Hourly Sales — Last 7 Days</span>
                       <div style={{display:'flex',gap:5,alignItems:'center',flexWrap:'wrap'}}>
@@ -1585,7 +1590,7 @@ export default function Sales({ filters = {} }) {
             );})()}
 
             {/* ── Traffic & Conversion Pipeline (exec period-controlled) ── */}
-            <div style={{background:'var(--card)',border:'1px solid var(--brd)',borderRadius:12,padding:16,marginBottom:12}}>
+            <div style={{background:'var(--card)',border:'1px solid var(--brd)',borderTop:`3px solid ${B.t2}`,borderRadius:12,padding:16,marginBottom:12}}>
               <div style={{display:'flex',alignItems:'center',gap:10,marginBottom:12}}>
                 <div style={{flex:1,height:1,background:'var(--brd)'}}/>
                 <span style={{fontSize:10,fontWeight:700,textTransform:'uppercase',letterSpacing:'.1em',color:'var(--txt3)',whiteSpace:'nowrap'}}>Traffic &amp; Conversion Pipeline</span>
@@ -1624,7 +1629,7 @@ export default function Sales({ filters = {} }) {
                   </>}
                 </ChartCard>
                 <div style={{display:'flex',flexDirection:'column',gap:10}}>
-                  <div style={{background:'var(--card2)',border:'1px solid var(--brd)',borderRadius:10,padding:'12px 14px'}}>
+                  <div style={{background:'var(--card2)',border:'1px solid var(--brd)',borderTop:`3px solid ${B.t2}`,borderRadius:10,padding:'12px 14px'}}>
                     <div style={{fontSize:9,fontWeight:700,textTransform:'uppercase',letterSpacing:'.08em',color:'var(--txt3)',marginBottom:8}}>Traffic KPIs · MTD</div>
                     {metricsTraffic && [
                       ['Page Views', fN(metricsTraffic.glance_views||0), metricsTraffic.glance_views||0, metricsTraffic.ly_glance_views||0],
@@ -1666,7 +1671,7 @@ export default function Sales({ filters = {} }) {
                 const scoreLabel=overall>=80?'Excellent':overall>=65?'Good':overall>=50?'Fair':'Needs Attention';
                 const circ=2*Math.PI*38;
                 return (
-                  <div style={{background:'var(--card)',border:'1px solid var(--brd)',borderRadius:12,padding:16,display:'flex',flexDirection:'column',alignItems:'center',gap:14}}>
+                  <div style={{background:'var(--card)',border:'1px solid var(--brd)',borderTop:`3px solid ${B.b2}`,borderRadius:12,padding:16,display:'flex',flexDirection:'column',alignItems:'center',gap:14}}>
                     <div style={{fontSize:9,fontWeight:700,textTransform:'uppercase',letterSpacing:'.1em',color:'var(--txt3)',width:'100%',textAlign:'center'}}>Business Health Score</div>
                     <div style={{display:'flex',alignItems:'center',gap:16,width:'100%'}}>
                       <div style={{position:'relative',width:88,height:88,flexShrink:0}}>
@@ -1718,7 +1723,7 @@ export default function Sales({ filters = {} }) {
                 if(actions.length===0) actions.push({type:'info',title:'✅ All metrics within healthy ranges',desc:'No urgent actions detected. Review the detailed tabs for optimization opportunities in advertising, inventory, and pricing.'});
                 const tStyle={alert:{border:'rgba(239,68,68,.2)',bg:'rgba(239,68,68,.05)',dot:'#ef4444'},warn:{border:'rgba(245,158,11,.2)',bg:'rgba(245,158,11,.05)',dot:'#f59e0b'},ok:{border:'rgba(34,197,94,.2)',bg:'rgba(34,197,94,.05)',dot:'#22c55e'},info:{border:'rgba(91,159,212,.2)',bg:'rgba(91,159,212,.04)',dot:B.b3}};
                 return (
-                  <div style={{background:'var(--card)',border:'1px solid var(--brd)',borderRadius:12,padding:16}}>
+                  <div style={{background:'var(--card)',border:'1px solid var(--brd)',borderTop:'3px solid #F5B731',borderRadius:12,padding:16}}>
                     <div style={{fontSize:9,fontWeight:700,textTransform:'uppercase',letterSpacing:'.1em',color:'var(--txt3)',marginBottom:12}}>📋 Actions to Take Today</div>
                     <div style={{display:'flex',flexDirection:'column',gap:8}}>
                       {actions.slice(0,6).map((a,i)=>{
@@ -1937,9 +1942,9 @@ export default function Sales({ filters = {} }) {
                   { lbl:'🟠 TY NOW', sub:`thru ${tod.snapshot_time||'today'} · ${fN(tyO)} orders`, val:f$(tyS), color:B.o2,
                     rows:[['Units', fN(tyU)], ['AUR', f$(tyAur)], ['Fees', f$(tod.amazon_fees||0)], ['Returns', f$(tod.returns_amount||0)], ['Conv %', fP(tod.conversion)]] },
                   { lbl:'🔵 LY NOW', sub:'same time last year', val:f$(lyNowS), color:B.b3,
-                    rows:[['Units', fN(lyNowU)], ['AUR', f$(lyNowAur)], ['Fees', '—'], ['Returns', '—'], ['Conv %', fP(tod.ly_conversion)]] },
+                    rows:[['Units', fN(lyNowU)], ['AUR', f$(lyNowAur)], ['Fees', tod.ly_same_time_fees > 0 ? f$(tod.ly_same_time_fees) : '—'], ['Returns', tod.ly_same_time_returns_amt > 0 ? f$(tod.ly_same_time_returns_amt) : '—'], ['Conv %', fP(tod.ly_conversion)]] },
                   { lbl:'🟢 TY EOD FCST', sub:`projected full day · pacing ${tyFcstS > 0 && lyEodS > 0 ? ((tyFcstS/lyEodS-1)*100).toFixed(1)+'% vs LY EOD' : '—'}`, val:f$(tyFcstS), color:B.t2,
-                    rows:[['Units', tyFcstU > 0 ? `~${fN(tyFcstU)}` : '—'], ['AUR', tyFcstAur > 0 ? f$(tyFcstAur) : '—'], ['Fees', '—'], ['Returns', '—'], ['Conv %', '—']] },
+                    rows:[['Units', tyFcstU > 0 ? `~${fN(tyFcstU)}` : '—'], ['AUR', tyFcstAur > 0 ? f$(tyFcstAur) : '—'], ['Fees', tod.ty_forecast_fees != null ? f$(tod.ty_forecast_fees) : '—'], ['Returns', tod.ty_forecast_returns_amt != null ? f$(tod.ty_forecast_returns_amt) : '—'], ['Conv %', '—']] },
                   { lbl:'⬜ LY EOD ACTUAL', sub:'full day last year', val:f$(lyEodS), color:'var(--txt3)',
                     rows:[['Units', fN(lyEodU)], ['AUR', f$(lyEodAur)], ['Fees', f$(tod.ly_amazon_fees||0)], ['Returns', f$(tod.ly_returns_amount||0)], ['Conv %', fP(tod.ly_conversion)]] },
                 ].map((col, i, arr) => (
@@ -1965,11 +1970,14 @@ export default function Sales({ filters = {} }) {
                       const pts=vals.map((v,idx2)=>`${(idx2/(n-1))*W},${H-(v/maxV)*(H-6)-3}`).join(' ');
                       const sparkCol=isLY?'rgba(91,159,212,.5)':col.color;
                       return (
-                        <div style={{height:32,margin:'8px 0 2px',opacity:.85}}>
-                          <svg width='100%' height='32' viewBox={`0 0 ${W} ${H}`} preserveAspectRatio='none' style={{display:'block'}}>
-                            <polyline points={pts} fill='none' stroke={sparkCol} strokeWidth='2' strokeLinejoin='round' strokeLinecap='round'/>
-                            <circle cx={W} cy={H-(vals[n-1]/maxV)*(H-6)-3} r='3' fill={sparkCol}/>
-                          </svg>
+                        <div>
+                          <div style={{fontSize:8,color:'var(--txt3)',textTransform:'uppercase',letterSpacing:'.08em',marginTop:8,marginBottom:2}}>7-day trend</div>
+                          <div style={{height:32,margin:'0 0 2px',opacity:.85}}>
+                            <svg width='100%' height='32' viewBox={`0 0 ${W} ${H}`} preserveAspectRatio='none' style={{display:'block'}}>
+                              <polyline points={pts} fill='none' stroke={sparkCol} strokeWidth='2' strokeLinejoin='round' strokeLinecap='round'/>
+                              <circle cx={W} cy={H-(vals[n-1]/maxV)*(H-6)-3} r='3' fill={sparkCol}/>
+                            </svg>
+                          </div>
                         </div>
                       );
                     })()}
@@ -2134,7 +2142,7 @@ export default function Sales({ filters = {} }) {
                 const pillBtn=(label,active,onClick2)=>(<button key={label} onClick={e=>{e.stopPropagation();onClick2();}} style={{padding:'3px 10px',borderRadius:6,fontSize:10,fontWeight:600,cursor:'pointer',transition:'all .15s',border:`1px solid ${active?B.b2:'var(--brd)'}`,background:active?`${B.b1}33`:'transparent',color:active?B.b3:'var(--txt3)'}}>{label}</button>);
                 const last7=hmDays.slice(-7);
                 return (
-                  <div style={{background:'var(--surf)',border:'1px solid var(--brd)',borderRadius:14,padding:'14px 16px',marginBottom:10}}>
+                  <div style={{background:'var(--surf)',border:'1px solid var(--brd)',borderTop:`3px solid ${B.b2}`,borderRadius:14,padding:'14px 16px',marginBottom:10}}>
                     <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:10,flexWrap:'wrap',gap:8}}>
                       <span style={{fontSize:13,fontWeight:700,color:'var(--txt)'}}>Hourly Sales — Last 7 Days</span>
                       <div style={{display:'flex',gap:5,alignItems:'center',flexWrap:'wrap'}}>
@@ -2320,7 +2328,7 @@ export default function Sales({ filters = {} }) {
               const windowLabel = hmWindows.map(w => HM_WINDOWS_DEF[w].label).join(' + ');
 
               return (
-                <div style={{background:'var(--surf)',border:'1px solid var(--brd)',borderRadius:14,padding:16,marginBottom:12,transition:'background .3s'}}>
+                <div style={{background:'var(--surf)',border:'1px solid var(--brd)',borderTop:`3px solid ${B.b2}`,borderRadius:14,padding:16,marginBottom:12,transition:'background .3s'}}>
                   {/* Controls row */}
                   <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:8,flexWrap:'wrap',gap:8}}>
                     <span style={{fontSize:13,fontWeight:700,color:'var(--txt)'}}>
@@ -2345,7 +2353,7 @@ export default function Sales({ filters = {} }) {
 
                   {/* ── Day-of-Week Averages panel ── */}
                   {!loading.heatmap && filteredHm.length > 0 && (
-                    <div style={{marginTop:12,padding:'12px 14px',background:'var(--card)',borderRadius:10,border:'1px solid var(--brd)'}}>
+                    <div style={{marginTop:12,padding:'12px 14px',background:'var(--card)',borderRadius:10,border:'1px solid var(--brd)',borderTop:`3px solid ${B.b3}`}}>
                       <div style={{display:'flex',justifyContent:'space-between',alignItems:'flex-start',gap:16,flexWrap:'wrap'}}>
                         {/* Left: bar chart of day averages */}
                         <div style={{flex:'1 1 420px'}}>
@@ -2499,11 +2507,11 @@ export default function Sales({ filters = {} }) {
                     <MetricCard label="Sales $"       value={f$(m.sales)}         ly={f$(ly('sales'))}         delta={dp(m.sales,ly('sales'))}         goal={projSales}  goalLabel="Proj EOM:"/>
                     <MetricCard label="Unit Sales"    value={fN(m.unit_sales)}     ly={fN(ly('unit_sales'))}    delta={dp(m.unit_sales,ly('unit_sales'))} goal={projUnits}  goalLabel="Proj EOM:"/>
                     <MetricCard label="AUR"           value={f$(m.aur)}            ly={f$(ly('aur'))}           delta={dp(m.aur,ly('aur'))}/>
-                    <MetricCard label={<>COGS{estBadge}</>}          value={f$(m.cogs)}           ly={f$(ly('cogs'))}          delta={dp(m.cogs,ly('cogs'))}          goal="35% fallback" goalLabel="Rate:"/>
+                    <MetricCard label={<>COGS{estBadge}</>}          value={f$(m.cogs)}           ly={f$(ly('cogs'))}          delta={dp(m.cogs,ly('cogs'))}          goal="35% fallback" goalLabel="Rate:" accent={B.b3}/>
                     <MetricCard label="Amazon Fees"   value={f$(m.amazon_fees)}    ly={f$(ly('amazon_fees'))}   delta={dp(m.amazon_fees,ly('amazon_fees'))} goal={feesPct ? `${feesPct}% of rev` : null} goalLabel=""/>
                     <MetricCard label="Returns" value={`${fN(m.returns)} · ${f$(m.returns_amount)}`} ly={`${fN(ly('returns'))} · ${f$(ly('returns_amount'))}`} delta={dp(m.returns,ly('returns'))} invert goal={retRatePct ? `${retRatePct}%` : null} goalLabel="Return rate:"/>
-                    <MetricCard label={<>Gross Margin ${estBadge}</>}  value={f$(m.gross_margin)}     ly={f$(ly('gross_margin'))}     delta={dp(m.gross_margin,ly('gross_margin'))}/>
-                    <MetricCard label={<>GM %{estBadge}</>}            value={fP(m.gross_margin_pct)} ly={fP(ly('gross_margin_pct'))} delta={dp(m.gross_margin_pct,ly('gross_margin_pct'))} goal="35% COGS est." goalLabel="Based on:"/>
+                    <MetricCard label={<>Gross Margin ${estBadge}</>}  value={f$(m.gross_margin)}     ly={f$(ly('gross_margin'))}     delta={dp(m.gross_margin,ly('gross_margin'))} accent={B.t2}/>
+                    <MetricCard label={<>GM %{estBadge}</>}            value={fP(m.gross_margin_pct)} ly={fP(ly('gross_margin_pct'))} delta={dp(m.gross_margin_pct,ly('gross_margin_pct'))} goal="35% COGS est." goalLabel="Based on:" accent={B.t2}/>
                   </>}
                 </div>
               );
@@ -2642,7 +2650,7 @@ export default function Sales({ filters = {} }) {
                 {lbl:'− Returns',     val:ret,  col:'#94a3b8', bg:'rgba(148,163,184,.25)',                  neg:true},
               ];
               return (
-                <div style={{background:'var(--card)',border:'1px solid var(--brd)',borderRadius:12,padding:16,marginBottom:12}}>
+                <div style={{background:'var(--card)',border:'1px solid var(--brd)',borderTop:'3px solid #F5B731',borderRadius:12,padding:16,marginBottom:12}}>
                   <div style={{display:'grid',gridTemplateColumns:'1fr auto 1fr',alignItems:'center',marginBottom:12,gap:8}}>
                     <span style={{fontSize:10,fontWeight:700,color:'var(--txt2)'}}>P&L Waterfall</span>
                     <div style={{display:'flex',justifyContent:'center',alignItems:'center'}}>
@@ -2683,7 +2691,7 @@ export default function Sales({ filters = {} }) {
             })()}
 
             {/* ── Traffic & Conversion Pipeline ── */}
-            <div style={{background:'var(--card)',border:'1px solid var(--brd)',borderRadius:12,padding:16,marginBottom:12}}>
+            <div style={{background:'var(--card)',border:'1px solid var(--brd)',borderTop:`3px solid ${B.t2}`,borderRadius:12,padding:16,marginBottom:12}}>
               <div style={{display:'grid',gridTemplateColumns:'1fr auto 1fr',alignItems:'center',gap:10,marginBottom:14}}>
                 <div style={{display:'flex',alignItems:'center',gap:10}}>
                   <span style={{fontSize:9,fontWeight:700,textTransform:'uppercase',letterSpacing:'.14em',color:'var(--txt3)',whiteSpace:'nowrap'}}>Traffic &amp; Conversion</span>
@@ -2756,7 +2764,7 @@ export default function Sales({ filters = {} }) {
                   </>}
                 </ChartCard>
                 <div style={{display:'flex',flexDirection:'column',gap:10}}>
-                  <div style={{background:'var(--card2)',border:'1px solid var(--brd)',borderRadius:10,padding:'12px 14px'}}>
+                  <div style={{background:'var(--card2)',border:'1px solid var(--brd)',borderTop:`3px solid ${B.t2}`,borderRadius:10,padding:'12px 14px'}}>
                     <div style={{fontSize:9,fontWeight:700,textTransform:'uppercase',letterSpacing:'.08em',color:'var(--txt3)',marginBottom:8}}>Traffic KPIs · MTD</div>
                     {metricsTraffic && [
                       ['Page Views', fN(metricsTraffic.glance_views||0), metricsTraffic.glance_views||0, metricsTraffic.ly_glance_views||0],
@@ -2798,7 +2806,7 @@ export default function Sales({ filters = {} }) {
                 const scoreLabel=overall>=80?'Excellent':overall>=65?'Good':overall>=50?'Fair':'Needs Attention';
                 const circ=2*Math.PI*38;
                 return (
-                  <div style={{background:'var(--card)',border:'1px solid var(--brd)',borderRadius:12,padding:16,display:'flex',flexDirection:'column',alignItems:'center',gap:14}}>
+                  <div style={{background:'var(--card)',border:'1px solid var(--brd)',borderTop:`3px solid ${B.b2}`,borderRadius:12,padding:16,display:'flex',flexDirection:'column',alignItems:'center',gap:14}}>
                     <div style={{fontSize:9,fontWeight:700,textTransform:'uppercase',letterSpacing:'.1em',color:'var(--txt3)',width:'100%',textAlign:'center'}}>Business Health Score</div>
                     <div style={{display:'flex',alignItems:'center',gap:16,width:'100%'}}>
                       <div style={{position:'relative',width:88,height:88,flexShrink:0}}>
@@ -2850,7 +2858,7 @@ export default function Sales({ filters = {} }) {
                 if(actions.length===0) actions.push({type:'info',title:'✅ All metrics within healthy ranges',desc:'No urgent actions detected. Review the detailed tabs for optimization opportunities in advertising, inventory, and pricing.'});
                 const tStyle={alert:{border:'rgba(239,68,68,.2)',bg:'rgba(239,68,68,.05)',dot:'#ef4444'},warn:{border:'rgba(245,158,11,.2)',bg:'rgba(245,158,11,.05)',dot:'#f59e0b'},ok:{border:'rgba(34,197,94,.2)',bg:'rgba(34,197,94,.05)',dot:'#22c55e'},info:{border:'rgba(91,159,212,.2)',bg:'rgba(91,159,212,.04)',dot:B.b3}};
                 return (
-                  <div style={{background:'var(--card)',border:'1px solid var(--brd)',borderRadius:12,padding:16}}>
+                  <div style={{background:'var(--card)',border:'1px solid var(--brd)',borderTop:'3px solid #F5B731',borderRadius:12,padding:16}}>
                     <div style={{fontSize:9,fontWeight:700,textTransform:'uppercase',letterSpacing:'.1em',color:'var(--txt3)',marginBottom:12}}>📋 Actions to Take Today</div>
                     <div style={{display:'flex',flexDirection:'column',gap:8}}>
                       {actions.slice(0,6).map((a,i)=>{
@@ -2905,7 +2913,7 @@ export default function Sales({ filters = {} }) {
                     <div style={{flex:1,height:1,background:'var(--brd)'}}/>
                   </div>
                   <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:10}}>
-                    <div style={{background:'rgba(232,130,30,.04)',border:'1px solid rgba(232,130,30,.3)',borderRadius:10,padding:'12px 14px',display:'flex',alignItems:'center',gap:14}}>
+                    <div style={{background:'rgba(232,130,30,.04)',border:'1px solid rgba(232,130,30,.3)',borderTop:'3px solid #E8821E',borderRadius:10,padding:'12px 14px',display:'flex',alignItems:'center',gap:14}}>
                       <span style={{fontSize:32,flexShrink:0}}>🥇</span>
                       <div style={{flex:1}}>
                         <div style={{fontSize:9,fontWeight:700,textTransform:'uppercase',letterSpacing:'.09em',color:'var(--txt3)',marginBottom:3}}>This Period's Best Day</div>
@@ -2914,7 +2922,7 @@ export default function Sales({ filters = {} }) {
                         <div style={{fontSize:11,fontWeight:700,color:'#4ade80',marginTop:3}}>▲ {bestVsAvg}% above daily avg &nbsp;·&nbsp; Weekend premium {parseInt(bestVsAvg)>30?'confirmed':'noted'}</div>
                       </div>
                     </div>
-                    <div style={{background:'var(--card)',border:'1px solid rgba(100,116,139,.25)',borderRadius:10,padding:'12px 14px',display:'flex',alignItems:'center',gap:14}}>
+                    <div style={{background:'var(--card)',border:'1px solid rgba(100,116,139,.25)',borderTop:`3px solid ${B.b3}`,borderRadius:10,padding:'12px 14px',display:'flex',alignItems:'center',gap:14}}>
                       <span style={{fontSize:32,flexShrink:0}}>📉</span>
                       <div style={{flex:1}}>
                         <div style={{fontSize:9,fontWeight:700,textTransform:'uppercase',letterSpacing:'.09em',color:'var(--txt3)',marginBottom:3}}>Softest Day</div>
@@ -2944,7 +2952,7 @@ export default function Sales({ filters = {} }) {
                     <span style={{fontSize:9,fontWeight:700,textTransform:'uppercase',letterSpacing:'.12em',color:'var(--txt3)',whiteSpace:'nowrap'}}>Inventory Health</span>
                     <div style={{flex:1,height:1,background:'var(--brd)'}}/>
                   </div>
-                  <div style={{background:'var(--card)',border:'1px solid var(--brd)',borderRadius:12,padding:16}}>
+                  <div style={{background:'var(--card)',border:'1px solid var(--brd)',borderTop:`3px solid ${B.t2}`,borderRadius:12,padding:16}}>
                     <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',marginBottom:12,flexWrap:'wrap',gap:10}}>
                       <div>
                         <div style={{fontSize:9,textTransform:'uppercase',letterSpacing:'.07em',color:'var(--txt3)',marginBottom:4}}>Current DOS</div>
@@ -3047,21 +3055,21 @@ export default function Sales({ filters = {} }) {
             {loading.metrics ? <Spinner/> : (
               <div style={{display:'flex',gap:8,marginBottom:12,overflowX:'auto',paddingBottom:4}}>
                 {/* Ad Spend */}
-                <div style={{background:'var(--card)',border:'1px solid var(--brd)',borderRadius:10,padding:'10px 12px',minWidth:130,flex:1}}>
+                <div style={{background:'var(--card)',border:'1px solid var(--brd)',borderTop:'3px solid #F5B731',borderRadius:10,padding:'10px 12px',minWidth:130,flex:1}}>
                   <div style={{fontSize:9,textTransform:'uppercase',letterSpacing:'.07em',color:'var(--txt3)',marginBottom:6}}>Ad Spend $</div>
                   <div style={{fontSize:18,fontWeight:800,lineHeight:1.1,color:'var(--txt)'}}>{f$(m.ad_spend||0)}</div>
                   {ly('ad_spend')>0 && <div style={{fontSize:10,color:'var(--txt3)',marginTop:2}}>LY: {f$(ly('ad_spend'))} &nbsp;<span style={{color:(m.ad_spend||0)>(ly('ad_spend')||0)?'#f87171':'#4ade80',fontWeight:700}}>{(m.ad_spend||0)>(ly('ad_spend')||0)?'▲':'▼'}{Math.abs(dp(m.ad_spend,ly('ad_spend'))||0).toFixed(1)}%</span></div>}
                   <div style={{fontSize:10,marginTop:3,color:B.sub}}>{(m.tacos||0)>0?(m.tacos*100).toFixed(1)+'% TACOS':null}</div>
                 </div>
                 {/* ROAS */}
-                <div style={{background:'var(--card)',border:'1px solid var(--brd)',borderRadius:10,padding:'10px 12px',minWidth:130,flex:1}}>
+                <div style={{background:'var(--card)',border:'1px solid var(--brd)',borderTop:`3px solid ${B.o2}`,borderRadius:10,padding:'10px 12px',minWidth:130,flex:1}}>
                   <div style={{fontSize:9,textTransform:'uppercase',letterSpacing:'.07em',color:'var(--txt3)',marginBottom:6}}>ROAS</div>
                   <div style={{fontSize:18,fontWeight:800,lineHeight:1.1,color:(m.roas||0)>=2.5?'#4ade80':'#f87171'}}>{fX(m.roas||0)}</div>
                   {ly('roas')>0 && <div style={{fontSize:10,color:'var(--txt3)',marginTop:2}}>LY: {fX(ly('roas'))} &nbsp;<span style={{color:(m.roas||0)>=(ly('roas')||0)?'#4ade80':'#f87171',fontWeight:700}}>{(m.roas||0)>=(ly('roas')||0)?'▲':'▼'}{Math.abs(dp(m.roas,ly('roas'))||0).toFixed(0)}%</span></div>}
                   <div style={{fontSize:10,marginTop:3}}>{(m.roas||0)>=2.5?<span style={{color:'#4ade80'}}>✓ Above 2.5× floor</span>:<span style={{color:'#f87171'}}>⚠ Below 2.5× floor</span>}</div>
                 </div>
                 {/* TACOS */}
-                <div style={{background:'var(--card)',border:'1px solid var(--brd)',borderRadius:10,padding:'10px 12px',minWidth:130,flex:1}}>
+                <div style={{background:'var(--card)',border:'1px solid var(--brd)',borderTop:'3px solid #F5B731',borderRadius:10,padding:'10px 12px',minWidth:130,flex:1}}>
                   <div style={{fontSize:9,textTransform:'uppercase',letterSpacing:'.07em',color:'var(--txt3)',marginBottom:6}}>TACOS</div>
                   <div style={{fontSize:18,fontWeight:800,lineHeight:1.1,color:(m.tacos||0)>0.14?B.o3:'var(--txt)'}}>{fP(m.tacos||0)}</div>
                   {ly('tacos')>0 && <div style={{fontSize:10,color:'var(--txt3)',marginTop:2}}>LY: {fP(ly('tacos'))} &nbsp;<span style={{color:(m.tacos||0)<=(ly('tacos')||0)?'#4ade80':'#f87171',fontWeight:700}}>{(m.tacos||0)<=(ly('tacos')||0)?'▼':'▲'}{Math.abs(dp(m.tacos,ly('tacos'))||0).toFixed(0)}%</span></div>}
@@ -3102,7 +3110,7 @@ export default function Sales({ filters = {} }) {
                   {lbl:'- COGS (est.)', val:-cogs,    col:'#ef4444',neg:true, eq:false},
                 ];
                 return (
-                  <div style={{background:'var(--card)',border:'1px solid var(--brd)',borderRadius:12,padding:16}}>
+                  <div style={{background:'var(--card)',border:'1px solid var(--brd)',borderTop:'3px solid #F5B731',borderRadius:12,padding:16}}>
                     <div style={{fontSize:9,fontWeight:700,textTransform:'uppercase',letterSpacing:'.08em',color:'var(--txt3)',marginBottom:10}}>P&L Summary · MTD</div>
                     {wfRows.map((r,idx)=>(
                       <div key={idx} style={{display:'flex',justifyContent:'space-between',padding:'6px 0',borderBottom:r.eq?'1px solid var(--brd)':'1px solid rgba(26,47,74,.4)',alignItems:'center'}}>
@@ -3411,7 +3419,7 @@ export default function Sales({ filters = {} }) {
       </div>
 
       {/* Monthly Revenue YOY — independent chart, NOT controlled by the Charts period bar below */}
-      <div style={{background:'var(--surf)',border:'1px solid var(--brd)',borderRadius:14,padding:16,marginBottom:12,transition:'background .3s'}}>
+      <div style={{background:'var(--surf)',border:'1px solid var(--brd)',borderTop:`3px solid ${B.o2}`,borderRadius:14,padding:16,marginBottom:12,transition:'background .3s'}}>
         <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:12,flexWrap:'wrap',gap:8}}>
           {/* Left: title + year toggles */}
           <div style={{display:'flex',gap:6,alignItems:'center',flexWrap:'wrap'}}>
