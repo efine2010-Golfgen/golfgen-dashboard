@@ -2495,9 +2495,9 @@ def _sync_fc_inventory():
 
 
 
-def _fill_financial_events_gaps():
+def _fill_financial_events_gaps(months_back: int = 14):
     """Additive gap-fill for financial_events: finds completely empty calendar months
-    in the last 14 months and fetches them from the SP-API without touching existing data.
+    in the last `months_back` months and fetches them from the SP-API without touching existing data.
 
     Unlike the main sync which deletes-then-reinserts, this function ONLY inserts into
     months that have zero existing rows, so it can never overwrite or lose existing data.
@@ -2526,9 +2526,9 @@ def _fill_financial_events_gaps():
         rows = con_check.execute("""
             SELECT TO_CHAR(date::date, 'YYYY-MM') as month
             FROM financial_events
-            WHERE date >= CURRENT_DATE - INTERVAL '14 months'
+            WHERE date >= CURRENT_DATE - INTERVAL '%(mb)s months'
             GROUP BY 1
-        """).fetchall()
+        """ % {"mb": months_back}).fetchall()
         months_with_data = {r[0] for r in rows}
     except Exception as e:
         logger.error(f"Gap fill: could not query existing months: {e}")
@@ -2537,9 +2537,9 @@ def _fill_financial_events_gaps():
     finally:
         con_check.close()
 
-    # Build list of all months in last 14 months
+    # Build list of all months in lookback window
     all_months = []
-    for i in range(14):
+    for i in range(months_back):
         # Work backwards from last month (don't gap-fill current month — it's still accumulating)
         yr = today.year
         mo = today.month - 1 - i

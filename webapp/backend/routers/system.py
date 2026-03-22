@@ -757,7 +757,7 @@ async def trigger_gap_fill(request: Request):
 
 @router.post("/api/sync/fee-gap-fill")
 async def trigger_fee_gap_fill(request: Request):
-    """Fill missing financial_events months (Sep-Dec 2025 + Jan 2026) from SP-API.
+    """Fill missing financial_events months in the last 14 months from SP-API.
     Additive only — never deletes existing data."""
     from core.auth import get_session
     from fastapi import HTTPException
@@ -769,7 +769,25 @@ async def trigger_fee_gap_fill(request: Request):
         raise HTTPException(status_code=401, detail="Not authenticated")
 
     loop = asyncio.get_event_loop()
-    result = await loop.run_in_executor(None, _fill_financial_events_gaps)
+    result = await loop.run_in_executor(None, lambda: _fill_financial_events_gaps(months_back=14))
+    return result
+
+
+@router.post("/api/sync/fee-gap-fill-extended")
+async def trigger_fee_gap_fill_extended(request: Request):
+    """Fill missing financial_events months going back 26 months (covers full 2024).
+    Additive only — never deletes existing data. Use for initial 2-year backfill."""
+    from core.auth import get_session
+    from fastapi import HTTPException
+    from services.sp_api import _fill_financial_events_gaps
+
+    token = request.cookies.get("golfgen_session")
+    sess = get_session(token)
+    if not sess:
+        raise HTTPException(status_code=401, detail="Not authenticated")
+
+    loop = asyncio.get_event_loop()
+    result = await loop.run_in_executor(None, lambda: _fill_financial_events_gaps(months_back=26))
     return result
 
 

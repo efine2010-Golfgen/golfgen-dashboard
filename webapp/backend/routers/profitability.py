@@ -139,6 +139,8 @@ def _build_product_list(con, cutoff: str, division=None, customer=None, platform
 
     cogs_data = load_cogs()
     item_master = load_item_master()
+
+    # fba_inventory: ASIN → {sku, product_name}
     inv_names = {}
     try:
         inv_rows = con.execute("SELECT asin, sku, product_name FROM fba_inventory").fetchall()
@@ -147,27 +149,93 @@ def _build_product_list(con, cutoff: str, division=None, customer=None, platform
     except Exception:
         pass
 
-    # Get item_master for division info
-    im_div = {}
+    # item_master DB table: ASIN → {division, product_name}
+    # product_name here is the full Amazon listing title synced via SP-API/orders
+    im_info = {}
     try:
-        im_rows = con.execute("SELECT asin, division FROM item_master").fetchall()
+        im_rows = con.execute("SELECT asin, division, product_name FROM item_master").fetchall()
         for imr in im_rows:
-            im_div[imr[0]] = imr[1] or "unknown"
+            im_info[imr[0]] = {"division": imr[1] or "unknown", "product_name": imr[2] or ""}
+    except Exception:
+        pass
+
+    # ── BULK financial_events query with SKU→ASIN resolution ──────────────────
+    # financial_events.asin stores SKUs for legacy data — resolve to real ASINs
+    # via fba_inventory map so we get actual fees instead of falling back to estimates
+    sku_to_asin: dict = {}
+    asin_to_sku: dict = {}
+    try:
+        inv_map = con.execute(
+            "SELECT sku, asin FROM fba_inventory WHERE sku IS NOT NULL AND asin IS NOT NULL"
+        ).fetchall()
+        for im_row in inv_map:
+            raw_sku, real_asin = im_row[0], im_row[1]
+            if raw_sku and real_asin:
+                sku_to_asin[raw_sku] = real_asin
+                asin_to_sku[real_asin] = raw_sku
+                base = raw_sku.rsplit("-", 1)[0] if "-" in raw_sku else raw_sku
+                if base not in sku_to_asin:
+                    sku_to_asin[base] = real_asin
+    except Exception:
+        pass
+
+    # Single bulk financial_events query (no per-ASIN N+1 queries)
+    fin_by_asin: dict = {}
+    try:
+        fe_filter = "WHERE date >= ?" + ff
+        fe_params = [cutoff] + fp
+        fe_rows = con.execute(f"""
+            SELECT asin,
+                   COALESCE(SUM(ABS(fba_fees)), 0),
+                   COALESCE(SUM(ABS(commission)), 0)
+            FROM financial_events
+            {fe_filter}
+            GROUP BY asin
+        """, fe_params).fetchall()
+        for fe_r in fe_rows:
+            raw_key = fe_r[0]
+            resolved = sku_to_asin.get(raw_key, raw_key)
+            fba_val = _n(fe_r[1])
+            comm_val = _n(fe_r[2])
+            if resolved in fin_by_asin:
+                fin_by_asin[resolved]["fba"] += fba_val
+                fin_by_asin[resolved]["comm"] += comm_val
+            else:
+                fin_by_asin[resolved] = {"fba": fba_val, "comm": comm_val}
+    except Exception:
+        pass
+
+    # Bulk ad spend query
+    ad_by_asin: dict = {}
+    try:
+        ad_filter = "WHERE date >= ?" + ff
+        ad_params = [cutoff] + fp
+        ad_rows = con.execute(f"""
+            SELECT asin, COALESCE(SUM(spend), 0)
+            FROM advertising {ad_filter}
+            GROUP BY asin
+        """, ad_params).fetchall()
+        ad_by_asin = {r[0]: _n(r[1]) for r in ad_rows}
     except Exception:
         pass
 
     products = []
     for r in asin_rows:
         asin, rev, units = r[0], _n(r[1]), int(r[2] or 0)
-        inv = inv_names.get(asin, {})
-        sku = inv.get("sku", "")
-        # Priority: amazon_item_master.json productName → fba_inventory → cogs csv
-        name = (item_master.get(asin, {}).get("productName", "")
-                or item_master.get(sku, {}).get("productName", "")
-                or inv.get("product_name", "")
-                or cogs_data.get(asin, {}).get("product_name", ""))
         if units == 0:
             continue
+
+        inv = inv_names.get(asin, {})
+        sku = inv.get("sku", "") or asin_to_sku.get(asin, "")
+
+        # Name priority: DB item_master.product_name → fba_inventory.product_name
+        #                → amazon_item_master.json → cogs CSV
+        im_db = im_info.get(asin, {})
+        name = (im_db.get("product_name", "")
+                or inv.get("product_name", "")
+                or item_master.get(asin, {}).get("productName", "")
+                or item_master.get(sku, {}).get("productName", "")
+                or cogs_data.get(asin, {}).get("product_name", ""))
 
         aur = rev / units if units else 0
         ci = cogs_data.get(asin) or cogs_data.get(sku or "") or {}
@@ -178,40 +246,17 @@ def _build_product_list(con, cutoff: str, division=None, customer=None, platform
         cogsTotal = units * cpu
         cogsPerUnit = cpu
 
-        # Financial data — use ff/fp (no marketplace) since financial_events lacks that column
-        fin_filter = "WHERE asin = ? AND date >= ?" + ff
-        fin_params = [asin, cutoff] + fp
-        fin_row = con.execute(f"""
-            SELECT COALESCE(SUM(ABS(fba_fees)), 0),
-                   COALESCE(SUM(ABS(commission)), 0)
-            FROM financial_events
-            {fin_filter}
-        """, fin_params).fetchone()
-        fba_actual, comm_actual = _n(fin_row[0]), _n(fin_row[1]) if fin_row else (0, 0)
-
+        # Actual fees from bulk query (SKU-resolved); fall back to estimates only if truly absent
+        fin = fin_by_asin.get(asin, {})
+        # Also try the ASIN's SKU in case financial_events stored it under SKU key directly
+        if not fin and sku:
+            fin = fin_by_asin.get(sku, fin_by_asin.get(sku.rsplit("-", 1)[0] if "-" in sku else sku, {}))
+        fba_actual = fin.get("fba", 0)
+        comm_actual = fin.get("comm", 0)
         fbaTotal = fba_actual if fba_actual > 0 else round(rev * 0.12, 2)
         referralTotal = comm_actual if comm_actual > 0 else round(rev * 0.15, 2)
 
-        # Ad spend
-        adSpend = 0
-        try:
-            ad_filter = "WHERE asin = ? AND date >= ?"
-            ad_params = [asin, cutoff]
-            if division:
-                ad_filter += " AND division = ?"
-                ad_params.append(division)
-            if customer:
-                ad_filter += " AND customer = ?"
-                ad_params.append(customer)
-            ad_row = con.execute(f"""
-                SELECT COALESCE(SUM(spend), 0)
-                FROM advertising
-                {ad_filter}
-            """, ad_params).fetchone()
-            adSpend = _n(ad_row[0]) if ad_row else 0
-        except Exception:
-            pass
-
+        adSpend = ad_by_asin.get(asin, 0)
         net = round(rev - cogsTotal - fbaTotal - referralTotal - adSpend, 2)
 
         products.append({
@@ -227,7 +272,7 @@ def _build_product_list(con, cutoff: str, division=None, customer=None, platform
             "referralTotal": referralTotal,
             "adSpend": adSpend,
             "net": net,
-            "division": im_div.get(asin, "unknown"),
+            "division": im_db.get("division", "unknown"),
         })
 
     return products
