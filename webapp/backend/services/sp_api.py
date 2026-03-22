@@ -1413,6 +1413,27 @@ def _run_sp_api_sync_inner():
                     ])
                 con.execute("COMMIT")
                 logger.info(f"  Inventory sync done: {len(summaries)} items")
+
+                # ── Auto-refresh item_master.product_name from fba_inventory ──
+                # Keeps displayed product names in sync with Amazon listing titles.
+                # Uses a separate connection so it's independent of the inventory transaction.
+                try:
+                    _name_con = get_db_rw()
+                    updated_names = 0
+                    for item in summaries:
+                        _asin = item.get("asin", "")
+                        _pname = (item.get("productName") or "").strip()
+                        if _asin and _pname and len(_pname) > 6:
+                            _name_con.execute(
+                                "UPDATE item_master SET product_name = ? WHERE asin = ?",
+                                [_pname[:300], _asin]
+                            )
+                            updated_names += 1
+                    _name_con.close()
+                    logger.info(f"  Product name refresh: {updated_names} item_master rows updated")
+                except Exception as _pne:
+                    logger.warning(f"  Product name refresh (non-fatal): {_pne}")
+
             except Exception as e:
                 logger.error(f"  Inventory transaction error: {e}")
                 try:

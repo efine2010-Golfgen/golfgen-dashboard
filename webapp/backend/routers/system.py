@@ -791,6 +791,63 @@ async def trigger_fee_gap_fill_extended(request: Request):
     return result
 
 
+@router.post("/api/sync/refresh-product-names")
+async def trigger_product_name_refresh(request: Request):
+    """Refresh item_master.product_name from fba_inventory.product_name (Amazon listing titles).
+    Overwrites only rows where fba_inventory has a non-empty product_name for that ASIN.
+    Safe to run at any time — only updates, never deletes."""
+    from core.auth import get_session
+    from fastapi import HTTPException
+    from core.database import get_db_rw
+
+    token = request.cookies.get("golfgen_session")
+    sess = get_session(token)
+    if not sess:
+        raise HTTPException(status_code=401, detail="Not authenticated")
+
+    try:
+        con = get_db_rw()
+        # Get latest product_name per ASIN from fba_inventory (most recent snapshot wins)
+        inv_rows = con.execute("""
+            SELECT asin, product_name
+            FROM fba_inventory
+            WHERE asin IS NOT NULL AND asin <> ''
+              AND product_name IS NOT NULL AND product_name <> ''
+            GROUP BY asin
+            HAVING product_name = MAX(product_name)
+        """).fetchall()
+
+        updated = 0
+        skipped = 0
+        for asin, pname in inv_rows:
+            if not pname or not pname.strip():
+                skipped += 1
+                continue
+            # Only update if item_master row exists for this ASIN
+            existing = con.execute(
+                "SELECT asin FROM item_master WHERE asin = ?", [asin]
+            ).fetchone()
+            if existing:
+                con.execute(
+                    "UPDATE item_master SET product_name = ? WHERE asin = ?",
+                    [pname.strip()[:300], asin]
+                )
+                updated += 1
+            else:
+                skipped += 1
+
+        con.close()
+        return {
+            "status": "ok",
+            "updated": updated,
+            "skipped_no_item_master_row": skipped,
+            "source": "fba_inventory.product_name → item_master.product_name",
+        }
+    except Exception as e:
+        import traceback
+        return {"status": "error", "error": str(e), "traceback": traceback.format_exc()}
+
+
 @router.post("/api/backup/trigger")
 async def trigger_backup(request: Request):
     """Manually trigger a Google Drive database backup."""

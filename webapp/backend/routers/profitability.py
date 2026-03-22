@@ -84,10 +84,15 @@ def load_item_master() -> dict:
     try:
         with open(ITEM_MASTER_PATH, encoding="utf-8") as f:
             items = json.load(f)
+        # Internal tags that appear as productName in the JSON — filter them out
+        _GARBAGE = {"FBM", "T-", "DONATE", "RB", "RETD", "HOLD", "DAM", ""}
         for item in items:
             asin = (item.get("asin") or "").strip()
             sku  = (item.get("sku")  or "").strip()
-            name = (item.get("productName") or "").strip()
+            raw  = (item.get("productName") or "").strip()
+            # Only keep names that look like real product titles (>6 chars, no leading '/')
+            name = raw if (raw and len(raw) > 6 and not raw.startswith("/")
+                          and raw not in _GARBAGE) else ""
             if asin:
                 master[asin] = {"productName": name, "sku": sku}
             if sku:
@@ -228,14 +233,18 @@ def _build_product_list(con, cutoff: str, division=None, customer=None, platform
         inv = inv_names.get(asin, {})
         sku = inv.get("sku", "") or asin_to_sku.get(asin, "")
 
-        # Name priority: DB item_master.product_name → fba_inventory.product_name
-        #                → amazon_item_master.json → cogs CSV
+        # Name priority:
+        #  1. fba_inventory.product_name   — Amazon Inventory Summaries API → real listing title
+        #  2. amazon_item_master.json       — manually maintained product data
+        #  3. DB item_master.product_name   — may have stale short internal names (fallback only)
+        #  4. COGS CSV product_name
         im_db = im_info.get(asin, {})
-        name = (im_db.get("product_name", "")
-                or inv.get("product_name", "")
-                or item_master.get(asin, {}).get("productName", "")
-                or item_master.get(sku, {}).get("productName", "")
-                or cogs_data.get(asin, {}).get("product_name", ""))
+        _inv_name  = (inv.get("product_name") or "").strip()
+        _json_name = (item_master.get(asin, {}).get("productName", "")
+                      or item_master.get(sku, {}).get("productName", "")).strip()
+        _db_name   = (im_db.get("product_name") or "").strip()
+        _cogs_name = (cogs_data.get(asin, {}).get("product_name") or "").strip()
+        name = _inv_name or _json_name or _db_name or _cogs_name
 
         aur = rev / units if units else 0
         ci = cogs_data.get(asin) or cogs_data.get(sku or "") or {}
