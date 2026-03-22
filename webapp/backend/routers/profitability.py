@@ -456,9 +456,22 @@ def _build_waterfall(con, cogs_data, start, end, division=None, customer=None, p
     if prod_rev > 0 and total_cogs > 0:
         scale = sales / prod_rev if prod_rev > 0 else 1
         cogs = round(total_cogs * scale, 2)
-        # FBA, referral, and misc other are account-level totals — no scaling needed
-        fba_fees = round(total_fba, 2)
-        referral_fees = round(total_referral, 2)
+        # FBA / referral: if real fee data exists (acct_fin > 0) use it directly — it is already
+        # an account-level total covering the full period and needs no scaling.
+        # If only per-ASIN estimates exist (acct_fin == 0), scale them the same way as COGS so
+        # they reflect the FULL sales period rather than just the per-ASIN subset.
+        # Without this, the branch switch from elif (sales*rate) to here (prod_rev*rate)
+        # causes a fee DROP when prod_rev << sales (e.g. only a snapshot exists in daily_sales).
+        if acct_fin["fba"] > 0:
+            fba_fees = round(total_fba, 2)           # real data — no scaling needed
+        else:
+            fba_fees = round(total_fba * scale, 2)   # estimates — scale to full period
+
+        if acct_fin["comm"] > 0:
+            referral_fees = round(total_referral, 2)          # real data — no scaling needed
+        else:
+            referral_fees = round(total_referral * scale, 2)  # estimates — scale to full period
+
         other_fees = round(total_other_fees, 2)
         promo = round(total_promo * scale, 2)
         shipping = round(total_shipping * scale, 2)
