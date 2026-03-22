@@ -21,7 +21,7 @@ from typing import Optional
 from fastapi import APIRouter, Query, Body
 from pydantic import BaseModel
 
-from core.config import DB_PATH, COGS_PATH, TIMEZONE, USE_POSTGRES
+from core.config import DB_PATH, COGS_PATH, ITEM_MASTER_PATH, TIMEZONE, USE_POSTGRES
 from core.database import get_db, get_db_rw
 from core.hierarchy import hierarchy_filter
 
@@ -76,6 +76,27 @@ def load_cogs() -> dict:
     return cogs
 
 
+def load_item_master() -> dict:
+    """Load amazon_item_master.json → {asin: {productName, sku, ...}, sku: {productName, asin, ...}}."""
+    master = {}
+    if not ITEM_MASTER_PATH.exists():
+        return master
+    try:
+        with open(ITEM_MASTER_PATH, encoding="utf-8") as f:
+            items = json.load(f)
+        for item in items:
+            asin = (item.get("asin") or "").strip()
+            sku  = (item.get("sku")  or "").strip()
+            name = (item.get("productName") or "").strip()
+            if asin:
+                master[asin] = {"productName": name, "sku": sku}
+            if sku:
+                master[sku] = {"productName": name, "asin": asin}
+    except Exception:
+        pass
+    return master
+
+
 def _load_pricing_cache() -> dict:
     """Load pricing sync cache from JSON."""
     from core.config import PRICING_CACHE_PATH
@@ -117,6 +138,7 @@ def _build_product_list(con, cutoff: str, division=None, customer=None, platform
     """, params).fetchall()
 
     cogs_data = load_cogs()
+    item_master = load_item_master()
     inv_names = {}
     try:
         inv_rows = con.execute("SELECT asin, sku, product_name FROM fba_inventory").fetchall()
@@ -139,7 +161,11 @@ def _build_product_list(con, cutoff: str, division=None, customer=None, platform
         asin, rev, units = r[0], _n(r[1]), int(r[2] or 0)
         inv = inv_names.get(asin, {})
         sku = inv.get("sku", "")
-        name = inv.get("product_name", "") or cogs_data.get(asin, {}).get("product_name", "")
+        # Priority: amazon_item_master.json productName → fba_inventory → cogs csv
+        name = (item_master.get(asin, {}).get("productName", "")
+                or item_master.get(sku, {}).get("productName", "")
+                or inv.get("product_name", "")
+                or cogs_data.get(asin, {}).get("product_name", ""))
         if units == 0:
             continue
 
@@ -560,8 +586,31 @@ def profitability_items(days: int = Query(365), division: Optional[str] = None,
             {fin_filter}
             GROUP BY asin
         """, fin_params).fetchall()
-        fin_by_asin = {r[0]: {"promo": _n(r[1]), "shipping": _n(r[2]), "other": _n(r[3]),
-                               "refund_amt": _n(r[4]), "refund_count": int(r[5] or 0)} for r in fin_rows}
+        # financial_events.asin contains SKUs (e.g. GG2SS2226BM), not ASINs.
+        # Build SKU→ASIN map from fba_inventory to resolve to real ASINs.
+        sku_to_asin = {}
+        try:
+            inv_map = con.execute(
+                "SELECT sku, asin FROM fba_inventory WHERE sku IS NOT NULL AND asin IS NOT NULL"
+            ).fetchall()
+            for im in inv_map:
+                if im[0] and im[1]:
+                    sku_to_asin[im[0]] = im[1]
+                    base = im[0].rsplit("-", 1)[0] if "-" in im[0] else im[0]
+                    if base not in sku_to_asin:
+                        sku_to_asin[base] = im[1]
+        except Exception:
+            pass
+        for r in fin_rows:
+            raw_key = r[0]
+            resolved = sku_to_asin.get(raw_key, raw_key)
+            entry = {"promo": _n(r[1]), "shipping": _n(r[2]), "other": _n(r[3]),
+                     "refund_amt": _n(r[4]), "refund_count": int(r[5] or 0)}
+            if resolved in fin_by_asin:
+                for k in entry:
+                    fin_by_asin[resolved][k] = fin_by_asin[resolved].get(k, 0) + entry[k]
+            else:
+                fin_by_asin[resolved] = entry
     except Exception:
         pass
 
@@ -634,6 +683,7 @@ def profitability_items(days: int = Query(365), division: Optional[str] = None,
             "name": p["name"],
             "division": p.get("division", "unknown"),
             "units": p["units"],
+            "rev": rev,
             "sales": rev,
             "promo": round(fin.get("promo", 0), 2),
             "adSpend": round(ad_spend, 2),
