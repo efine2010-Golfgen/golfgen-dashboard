@@ -1567,7 +1567,7 @@ def _sync_asin_spend_from_mapping(headers):
     con = get_db_rw()
     try:
         rows = con.execute("""
-            SELECT CAST(date AS VARCHAR), campaign_id,
+            SELECT CAST(date AS TEXT), campaign_id,
                    COALESCE(spend, 0), COALESCE(sales, 0),
                    COALESCE(impressions, 0), COALESCE(clicks, 0),
                    COALESCE(orders, 0), COALESCE(units, 0),
@@ -1575,6 +1575,7 @@ def _sync_asin_spend_from_mapping(headers):
             FROM advertising
             WHERE spend > 0
         """).fetchall()
+        logger.info(f"ASIN mapping: advertising query returned {len(rows)} spend rows")
     except Exception as e:
         logger.error(f"ASIN mapping: advertising query error: {e}")
         con.close()
@@ -1586,6 +1587,7 @@ def _sync_asin_spend_from_mapping(headers):
         return
 
     # ── Step 3 & 4: Distribute spend and upsert ──
+    logger.info(f"ASIN mapping: beginning upsert loop ({len(rows)} rows × campaigns)...")
     con.execute("BEGIN TRANSACTION")
     inserted = 0
     try:
