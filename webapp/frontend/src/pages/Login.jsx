@@ -101,7 +101,7 @@ export default function Login({ onLogin }) {
     <div className="login-page">
       <div className="login-card">
         <div className="brand-logo" style={{ textAlign: "center", marginBottom: 8 }}>
-          <span className="golf">Golf</span>
+          <span className="golf" style={{color:"#1A2D42"}}>Golf</span>
           <span className="gen">Gen</span>
         </div>
         <p style={{ color: "var(--muted)", fontSize: 14, textAlign: "center", marginBottom: 24 }}>Dashboard Login</p>
