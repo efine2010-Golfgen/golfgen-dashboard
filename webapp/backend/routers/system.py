@@ -807,14 +807,14 @@ async def trigger_product_name_refresh(request: Request):
 
     try:
         con = get_db_rw()
-        # Get latest product_name per ASIN from fba_inventory (most recent snapshot wins)
+        # Get a product_name per ASIN from fba_inventory.
+        # MAX(product_name) is PostgreSQL-compatible and returns a consistent non-empty name.
         inv_rows = con.execute("""
-            SELECT asin, product_name
+            SELECT asin, MAX(product_name) AS product_name
             FROM fba_inventory
             WHERE asin IS NOT NULL AND asin <> ''
               AND product_name IS NOT NULL AND product_name <> ''
             GROUP BY asin
-            HAVING product_name = MAX(product_name)
         """).fetchall()
 
         updated = 0
