@@ -78,6 +78,10 @@ export const api = {
 
   // Amazon Live Pricing + Coupons (read-only from SP-API cache)
   amazonPricing: () => fetchJSON(`/api/profitability/amazon-pricing`),
+  syncPricing: () =>
+    fetch(`${API_BASE}/api/profitability/sync-pricing`, {
+      method: "POST", credentials: "include",
+    }).then(r => r.json()),
 
   // Sale Prices CRUD
   salePrices: (h = {}) => fetchJSON(`/api/profitability/sale-prices${_hq(h) ? '?' + _hq(h).slice(1) : ''}`),

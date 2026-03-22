@@ -1328,6 +1328,7 @@ def get_amazon_pricing():
         if cid not in seen_coupons:
             seen_coupons[cid] = {
                 "couponId": cid,
+                "name": data.get("name", ""),
                 "state": data.get("state", "UNKNOWN"),
                 "discountType": data.get("discountType", "%"),
                 "discountValue": _n(data.get("discountValue", 0)),
@@ -1354,6 +1355,20 @@ def get_amazon_pricing():
         "pricingCount": len(pricing_rows),
         "couponCount": len(coupon_rows),
     }
+
+
+@router.post("/api/profitability/sync-pricing")
+async def trigger_pricing_sync():
+    """Manually trigger a pricing + coupon sync from Amazon Ads/SP-API."""
+    try:
+        import asyncio
+        from services.ads_api import _sync_pricing_and_coupons
+        loop = asyncio.get_event_loop()
+        await loop.run_in_executor(None, _sync_pricing_and_coupons)
+        return {"status": "sync_complete", "message": "Pricing and coupon data refreshed from Amazon"}
+    except Exception as e:
+        logger.error(f"Manual pricing sync error: {e}")
+        return {"status": "error", "message": str(e)}
 
 
 # ── NEW: Sale Prices CRUD ────────────────────────────────────────────────

@@ -270,6 +270,7 @@ def _sync_coupon_data():
 
             for coupon in coupon_list:
                 coupon_id = coupon.get("couponId", "")
+                name = coupon.get("name", "") or coupon.get("title", "") or ""
                 state = coupon.get("state", "UNKNOWN")
                 discount = coupon.get("discount", {})
                 disc_type = discount.get("discountType", "")  # PERCENTAGE or AMOUNT
@@ -292,6 +293,7 @@ def _sync_coupon_data():
 
                 coupon_info = {
                     "couponId": coupon_id,
+                    "name": name,
                     "state": state,
                     "discountType": "%" if disc_type == "PERCENTAGE" else "$",
                     "discountValue": disc_value,

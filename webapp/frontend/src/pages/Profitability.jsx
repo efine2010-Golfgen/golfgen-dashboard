@@ -660,6 +660,7 @@ function PricingCoupons({ filters, showToast }) {
   const [amazonCoupons, setAmazonCoupons] = useState([]);
   const [lastSync, setLastSync] = useState(null);
   const [loading, setLoading] = useState(true);
+  const [syncing, setSyncing] = useState(false);
 
   // Forms
   const [showPriceForm, setShowPriceForm] = useState(false);
@@ -686,6 +687,23 @@ function PricingCoupons({ filters, showToast }) {
   }, [filters.division, filters.customer, filters.marketplace]);
 
   useEffect(() => { reload(); }, [reload]);
+
+  const handleSyncPricing = async () => {
+    setSyncing(true);
+    try {
+      const res = await api.syncPricing();
+      if (res.status === "sync_complete") {
+        showToast("Pricing & coupons synced from Amazon");
+        reload();
+      } else {
+        showToast(res.message || "Sync failed", "error");
+      }
+    } catch (e) {
+      showToast("Sync error: " + e.message, "error");
+    } finally {
+      setSyncing(false);
+    }
+  };
 
   // Price CRUD
   const handleCreatePrice = async (data) => {
@@ -800,14 +818,23 @@ function PricingCoupons({ filters, showToast }) {
       </div>
 
       {/* Amazon Active Coupons — read-only from Ads API */}
-      <div className="sec-div"><span>Amazon Active Coupons — Live from Ads API</span></div>
+      <div className="sec-div" style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+        <span>Amazon Active Coupons — Live from Ads API {lastSync ? `(synced ${fmtDate(lastSync)})` : ""}</span>
+        <button
+          onClick={handleSyncPricing}
+          disabled={syncing}
+          style={{ fontSize: 11, padding: "4px 12px", borderRadius: 6, border: "1px solid var(--brd)", background: "var(--card2)", color: "var(--txt1)", cursor: syncing ? "not-allowed" : "pointer", opacity: syncing ? 0.6 : 1 }}
+        >
+          {syncing ? "Syncing…" : "↻ Sync Now"}
+        </button>
+      </div>
       <div className="table-card" style={{ padding: 0, marginBottom: 12 }}>
         <div style={{ overflowX: "auto" }}>
           <table style={{ width: "100%", borderCollapse: "collapse" }}>
             <thead>
               <tr style={{ background: "var(--card2)" }}>
-                {["Coupon ID", "Items", "Discount", "Budget", "Used", "Redemptions", "State", "Start", "End"].map((h, i) => (
-                  <th key={i} style={{ ...SG(8, 700), padding: "8px 10px", textAlign: i <= 1 ? "left" : "center", color: "rgba(255,255,255,0.6)", textTransform: "uppercase" }}>{h}</th>
+                {["Title", "Coupon ID", "Items", "Discount", "Budget", "Used", "Redemptions", "State", "Start", "End"].map((h, i) => (
+                  <th key={i} style={{ ...SG(8, 700), padding: "8px 10px", textAlign: i <= 2 ? "left" : "center", color: "rgba(255,255,255,0.6)", textTransform: "uppercase" }}>{h}</th>
                 ))}
               </tr>
             </thead>
@@ -816,8 +843,11 @@ function PricingCoupons({ filters, showToast }) {
                 const usedPct = c.budgetAmount > 0 ? round(c.budgetUsed / c.budgetAmount * 100, 0) : 0;
                 return (
                   <tr key={c.couponId} style={{ borderBottom: "1px solid var(--brd)" }}>
+                    <td style={{ ...cellL, maxWidth: 180 }}>
+                      <div style={SG(9, 600)}>{c.name || <span style={{ color: "var(--txt3)", fontStyle: "italic" }}>—</span>}</div>
+                    </td>
                     <td style={{ ...cellL, maxWidth: 130 }}>
-                      <div style={SG(9, 600)}>{c.couponId}</div>
+                      <div style={{ ...SG(8, 500), color: "var(--txt3)", fontFamily: "monospace" }}>{c.couponId}</div>
                     </td>
                     <td style={{ ...cellL, maxWidth: 200 }}>
                       <div style={SG(8, 500, "var(--txt3)")}>
@@ -853,7 +883,7 @@ function PricingCoupons({ filters, showToast }) {
                 );
               })}
               {amazonCoupons.length === 0 && (
-                <tr><td colSpan={9} style={{ padding: 20, textAlign: "center", color: "var(--txt3)" }}>No active Amazon coupons found — coupon sync runs hourly</td></tr>
+                <tr><td colSpan={10} style={{ padding: 20, textAlign: "center", color: "var(--txt3)" }}>No active Amazon coupons found — click ↻ Sync Now or wait for the hourly sync</td></tr>
               )}
             </tbody>
           </table>
