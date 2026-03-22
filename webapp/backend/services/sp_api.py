@@ -630,6 +630,7 @@ def _run_sp_api_sync_inner():
         # Manual NextToken pagination (more reliable than @load_all_pages)
         all_shipment_events = []
         all_refund_events = []
+        all_fee_adj_events = []   # storage fees, placement fees, other Amazon charges
         page = 0
         next_token = None
 
@@ -667,12 +668,15 @@ def _run_sp_api_sync_inner():
             adjustments = events.get("AdjustmentEventList", []) or []
             all_shipment_events.extend(shipments)
             all_refund_events.extend(refunds)
-            # AdjustmentEventList often contains return-related adjustments
+            # Route adjustments: returns/refunds go to all_refund_events,
+            # fee charges (storage, placement, etc.) go to all_fee_adj_events
             for adj in adjustments:
                 adj_type = adj.get("AdjustmentType", "") if isinstance(adj, dict) else getattr(adj, "AdjustmentType", "")
                 adj_type_str = str(adj_type or "").lower()
                 if "return" in adj_type_str or "refund" in adj_type_str or "reversal" in adj_type_str:
                     all_refund_events.append(adj)
+                else:
+                    all_fee_adj_events.append(adj)
             logger.info(f"  Financial events page {page}: {len(shipments)} shipments, {len(refunds)} refunds, {len(adjustments)} adjustments")
 
             # Check for next page
@@ -975,9 +979,69 @@ def _run_sp_api_sync_inner():
                 except Exception as ins_err:
                     logger.error(f"  Refund insert error for {order_id}/{asin_val}: {ins_err}")
 
+        # Process fee adjustment events: storage fees, placement fees, and other
+        # Amazon account-level charges posted via AdjustmentEventList.
+        # AdjustmentType values for storage: StorageRenewalBilling, FBALongTermStorageFeeCharge
+        # AdjustmentType values for other fees: FBAInventoryPlacementServiceFee,
+        # InventoryPlacementServiceFee, FBAInboundConvenienceFee, etc.
+        _STORAGE_ADJ_KEYWORDS = ("storagebilling", "storagerenewal", "storagefee",
+                                  "longtermstoragefecharge", "longtermstorage")
+        logger.info(f"  Processing {len(all_fee_adj_events)} fee adjustment events")
+        for event in all_fee_adj_events:
+            adj_type = _safe_get(event, "AdjustmentType", "") or ""
+            posted_date = _safe_get(event, "PostedDate", "")
+            date_str = _posted_date_str(posted_date)
+            if not date_str:
+                continue
+            adj_norm = adj_type.lower().replace("_", "").replace("-", "")
+            is_storage = any(kw in adj_norm for kw in _STORAGE_ADJ_KEYWORDS)
+            ev_type = "StorageFee" if is_storage else "FeeAdjustment"
+
+            item_list = _safe_get(event, "AdjustmentItemList") or []
+            if item_list:
+                # Per-ASIN adjustment items
+                for item in item_list:
+                    sku = _safe_get(item, "SellerSKU", "") or ""
+                    asin_val = _safe_get(item, "ASIN", "") or sku
+                    total_amt = abs(_money(_safe_get(item, "TotalAmount")))
+                    if total_amt == 0:
+                        continue
+                    try:
+                        _div = _get_division_for_asin(asin_val)
+                        con.execute("""
+                            INSERT INTO financial_events
+                            (date, asin, sku, order_id, event_type,
+                             product_charges, shipping_charges, fba_fees,
+                             commission, promotion_amount, other_fees, net_proceeds,
+                             division, customer, platform)
+                            VALUES (?, ?, ?, '', ?, 0, 0, 0, 0, 0, ?, ?, ?, 'amazon', 'sp_api')
+                        """, [date_str, asin_val, sku, ev_type,
+                              total_amt, -total_amt, _div])
+                        fin_records += 1
+                    except Exception as ins_err:
+                        logger.warning(f"  Fee adj insert error ({adj_type}): {ins_err}")
+            else:
+                # Aggregate (no item list) — store as asin='ALL'
+                total_amt = abs(_money(
+                    _safe_get(event, "TotalAmount") or _safe_get(event, "AdjustmentTotalAmount")
+                ))
+                if total_amt > 0:
+                    try:
+                        con.execute("""
+                            INSERT INTO financial_events
+                            (date, asin, sku, order_id, event_type,
+                             product_charges, shipping_charges, fba_fees,
+                             commission, promotion_amount, other_fees, net_proceeds,
+                             division, customer, platform)
+                            VALUES (?, 'ALL', '', '', ?, 0, 0, 0, 0, 0, ?, ?, 'unknown', 'amazon', 'sp_api')
+                        """, [date_str, ev_type, total_amt, -total_amt])
+                        fin_records += 1
+                    except Exception as ins_err:
+                        logger.warning(f"  Fee adj (agg) insert error ({adj_type}): {ins_err}")
+
         con.execute("COMMIT")
         con.close()
-        logger.info(f"  Financial events sync done: {fin_records} records (shipments + refunds)")
+        logger.info(f"  Financial events sync done: {fin_records} records (shipments + refunds + fee adjustments)")
     except Exception as e:
         logger.error(f"  Financial events sync error: {e}")
         _section_errors.append(("financial_events", str(e)))
