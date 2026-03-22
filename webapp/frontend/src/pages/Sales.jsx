@@ -869,11 +869,32 @@ function Legend({ items }) {
   );
 }
 
+const METRIC_DEFS = {
+  'Sales $':        'Total revenue from customer orders in the selected period, before fees or returns.',
+  'Unit Sales':     'Number of individual units sold to customers.',
+  'AUR':            'Average Unit Retail — total revenue ÷ units sold. Indicates the typical price point customers are buying.',
+  'COGS':           'Cost of Goods Sold — direct product cost, used to calculate gross margin.',
+  'Amazon Fees':    'Fees paid to Amazon: referral, FBA fulfillment, and storage.',
+  'Returns':        'Dollar value of orders returned and refunded by customers.',
+  'Gross Margin $': 'Revenue minus COGS, fees, and returns — the profit left before overhead.',
+  'Gross Margin %': 'Gross Margin as a percentage of revenue. Higher % means more profitable sales.',
+  'Sessions':       'Customer visit sessions on your product listings during the period.',
+  'Glance Views':   'Number of times shoppers viewed your product detail pages.',
+  'Click Through':  'Ad click-through rate — percentage of ad impressions that led to a click.',
+  'Conversion':     'Percentage of listing sessions that resulted in a purchase. Key listing effectiveness metric.',
+  'Ad Spend $':     'Total Amazon advertising spend (Sponsored Products, Brands, Display) in the period.',
+  'ROAS':           'Return on Ad Spend — revenue generated per $1 of ad spend. Higher is better.',
+  'TACOS':          'Total ACoS — ad spend as a % of total revenue (not just ad-attributed). Lower is better.',
+  'Velocity':       'Average weekly units sold. Measures how quickly your inventory is turning.',
+};
+
 function MetricCard({ label, value, ly, delta, expandContent, invert, goal, goalLabel, accent, spark, momentum, targetPct, targetLabel }) {
   const [expanded, setExpanded] = useState(false);
   const isPos = invert ? delta < 0 : delta > 0;
   const _lbl = typeof label === 'string' ? label : '';
   const _acc = accent ?? {'Sales $':B.o2,'Unit Sales':B.b2,'AUR':'#F5B731','COGS':B.b3,'Amazon Fees':B.b2,'Returns':'#F5B731','Gross Margin $':B.t2,'Gross Margin %':B.t2,'Sessions':B.t2,'Glance Views':B.t2,'Click Through':B.b2,'Conversion':B.b2,'Ad Spend $':'#F5B731','ROAS':B.o2,'TACOS':'#F5B731'}[_lbl];
+  const [showTip, setShowTip] = useState(false);
+  const tipText = METRIC_DEFS[_lbl] ?? null;
   const deltaEl = delta != null ? (
     <span style={{fontSize:9,fontWeight:700,padding:'2px 5px',borderRadius:6,
       color:isPos?'#4ade80':'#fb923c',
@@ -893,8 +914,26 @@ function MetricCard({ label, value, ly, delta, expandContent, invert, goal, goal
   ) : null;
   return (
     <div style={{flex:'1 1 0',minWidth:155,background:'linear-gradient(145deg,var(--card),var(--card2))',borderRadius:12,padding:'10px 12px 9px',border:'1px solid var(--brd)',transition:'background .3s',...(_acc&&{borderTop:`3px solid ${_acc}`})}}>
-      {/* Label */}
-      <div style={{fontSize:9,color:'var(--txt3)',textTransform:'uppercase',letterSpacing:'.07em',marginBottom:5,whiteSpace:'nowrap'}}>{label}</div>
+      {/* Label with hover tooltip */}
+      <div
+        style={{position:'relative',display:'inline-flex',alignItems:'center',gap:3,fontSize:9,color:'var(--txt3)',
+          textTransform:'uppercase',letterSpacing:'.07em',marginBottom:5,whiteSpace:'nowrap',
+          cursor:tipText?'help':'default',userSelect:'none'}}
+        onMouseEnter={()=>tipText&&setShowTip(true)}
+        onMouseLeave={()=>setShowTip(false)}
+      >
+        {label}
+        {tipText && <span style={{opacity:.45,fontSize:8,lineHeight:1}}>ⓘ</span>}
+        {showTip && tipText && (
+          <div style={{position:'absolute',zIndex:120,top:'calc(100% + 5px)',left:0,width:210,
+            background:'#111c2d',border:'1px solid rgba(46,111,187,.4)',borderRadius:9,
+            padding:'9px 11px',boxShadow:'0 6px 24px rgba(0,0,0,.6)',pointerEvents:'none',
+            textTransform:'none',letterSpacing:'normal'}}>
+            <div style={{fontSize:8,fontWeight:700,textTransform:'uppercase',letterSpacing:'.1em',color:'#5b9bd5',marginBottom:4}}>{_lbl||label}</div>
+            <p style={{margin:0,fontSize:10,lineHeight:1.6,color:'rgba(210,225,245,.82)',fontWeight:400}}>{tipText}</p>
+          </div>
+        )}
+      </div>
       {/* Value row: TY value · LY · Δ vs LY · WoW momentum */}
       <div style={{display:'flex',alignItems:'center',gap:6,flexWrap:'wrap',overflow:'hidden'}}>
         <span style={{fontSize:16,fontWeight:800,letterSpacing:'-.02em',color:'var(--txt)',lineHeight:1,flexShrink:0}}>{value}</span>

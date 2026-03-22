@@ -693,8 +693,8 @@ export default function Products({ filters = {} }) {
                       <td style={{ ...SG(), padding: "8px 8px", borderBottom: "1px solid var(--brd)", textAlign: "right", fontWeight: 700, color: "#2ECFAA", fontSize: 10, borderLeft: "1px solid var(--brd)" }}>{fmt$(p.rev)}</td>
                       {/* Velocity */}
                       <td style={{ ...SG(), padding: "8px 8px", borderBottom: "1px solid var(--brd)", textAlign: "right", fontWeight: 700, color: "var(--txt2)", fontSize: 10 }}>{p.velocity}/wk</td>
-                      {/* AUR Trend */}
-                      <td style={{ ...SG(), padding: "8px 8px", borderBottom: "1px solid var(--brd)", textAlign: "right", fontSize: 10 }}>{aurDeltaBadge}</td>
+                      {/* AUR */}
+                      <td style={{ ...SG(), padding: "8px 8px", borderBottom: "1px solid var(--brd)", textAlign: "right", fontWeight: 700, color: "var(--txt)", fontSize: 10 }}>{fmt$(p.aur)}</td>
                       {/* vs LY */}
                       <td style={{ ...SG(), padding: "8px 8px", borderBottom: "1px solid var(--brd)", textAlign: "right", fontSize: 10 }}>{lyBadge}</td>
                       {/* Sessions */}
