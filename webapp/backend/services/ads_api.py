@@ -823,15 +823,11 @@ def _sync_ads_data_inner():
     # ── Phase C: Sync campaign metadata ──
     _sync_campaign_metadata(headers, today)
 
-    # ── Phase D: ASIN-level spend via v2 productAds (last 7 days) ──
+    # ── Phase D: ASIN-level spend — entity mapping + derive from campaign spend ──
     try:
-        ads_creds_local = _load_ads_credentials()
-        if ads_creds_local:
-            pa_start = (today - timedelta(days=7)).strftime("%Y-%m-%d")
-            pa_end   = (today - timedelta(days=1)).strftime("%Y-%m-%d")
-            _sync_product_ads_v2(ads_creds_local, pa_start, pa_end)
+        _sync_asin_spend_from_mapping(headers)
     except Exception as _e:
-        logger.error(f"Ads sync: productAds v2 phase error: {_e}")
+        logger.error(f"Ads sync: ASIN spend phase error: {_e}")
 
     logger.info("Ads sync complete")
 
@@ -1506,6 +1502,115 @@ def _handle_campaign_report(data):
     logger.info(f"Campaign report handler: {inserted} inserted, {errors} errors out of {len(data)} rows")
 
 
+def _sync_asin_spend_from_mapping(headers):
+    """Derive ASIN-level ad spend by fetching SP product ads entity list,
+    then distributing campaign spend from the advertising table proportionally.
+
+    Flow:
+      1. POST /sp/productAds/list  →  {campaignId: [asin, ...]}
+      2. Query advertising table   →  {(date, campaign_id): spend}
+      3. For each (date, campaign_id, spend): split equally among ASINs in that campaign
+      4. Upsert into advertising_asin
+    """
+    import requests as req
+
+    # ── Step 1: Fetch all product ads (entity API, not a report) ──
+    try:
+        resp = req.post(
+            "https://advertising-api.amazon.com/sp/productAds/list",
+            headers={**headers, "Content-Type": "application/vnd.spProductAd.v3+json",
+                     "Accept": "application/vnd.spProductAd.v3+json"},
+            json={"stateFilter": "ENABLED,PAUSED,ARCHIVED", "maxResults": 1000},
+            timeout=30,
+        )
+        if resp.status_code not in (200, 207):
+            logger.warning(f"ASIN mapping: productAds/list failed {resp.status_code} {resp.text[:300]}")
+            return
+        items = resp.json().get("productAds", [])
+        if not items:
+            logger.warning("ASIN mapping: productAds/list returned 0 items")
+            return
+    except Exception as e:
+        logger.error(f"ASIN mapping: entity API error: {e}")
+        return
+
+    # Build campaign → [asin] mapping (deduplicated)
+    from collections import defaultdict
+    campaign_asins: dict = defaultdict(set)
+    for item in items:
+        cid = str(item.get("campaignId", ""))
+        asin = (item.get("asin") or "").strip()
+        if cid and asin:
+            campaign_asins[cid].add(asin)
+
+    if not campaign_asins:
+        logger.warning("ASIN mapping: no campaign→ASIN pairs found")
+        return
+
+    logger.info(f"ASIN mapping: {len(items)} product ads → {len(campaign_asins)} campaigns, "
+                f"{sum(len(v) for v in campaign_asins.values())} total asin slots")
+
+    # ── Step 2: Query advertising table for all rows ──
+    con = get_db_rw()
+    try:
+        rows = con.execute("""
+            SELECT CAST(date AS VARCHAR), campaign_id,
+                   COALESCE(spend, 0), COALESCE(sales, 0),
+                   COALESCE(impressions, 0), COALESCE(clicks, 0),
+                   COALESCE(orders, 0), COALESCE(units, 0),
+                   COALESCE(campaign_name, '')
+            FROM advertising
+            WHERE spend > 0
+        """).fetchall()
+    except Exception as e:
+        logger.error(f"ASIN mapping: advertising query error: {e}")
+        con.close()
+        return
+
+    if not rows:
+        logger.info("ASIN mapping: no spend rows in advertising table yet")
+        con.close()
+        return
+
+    # ── Step 3 & 4: Distribute spend and upsert ──
+    con.execute("BEGIN TRANSACTION")
+    inserted = 0
+    try:
+        for date_str, campaign_id, spend, sales, impressions, clicks, orders, units, cname in rows:
+            asins = list(campaign_asins.get(str(campaign_id), []))
+            if not asins:
+                continue
+            n = len(asins)
+            per_asin_spend = round(spend / n, 4)
+            per_asin_sales = round(sales / n, 4)
+            per_asin_impr  = impressions // n
+            per_asin_clicks = clicks // n
+            per_asin_orders = orders // n
+            per_asin_units  = units // n
+            for asin in asins:
+                con.execute(
+                    "DELETE FROM advertising_asin WHERE date = CAST(? AS DATE) AND asin = ? AND campaign_id = ?",
+                    [date_str, asin, str(campaign_id)]
+                )
+                con.execute("""
+                    INSERT INTO advertising_asin
+                    (date, asin, campaign_id, campaign_name, impressions, clicks, spend, sales, orders, units,
+                     division, customer, platform)
+                    VALUES (CAST(? AS DATE), ?, ?, ?, ?, ?, ?, ?, ?, ?, 'golf', 'amazon', 'sp_api')
+                """, [date_str, asin, str(campaign_id), cname,
+                      per_asin_impr, per_asin_clicks, per_asin_spend, per_asin_sales,
+                      per_asin_orders, per_asin_units])
+                inserted += 1
+        con.execute("COMMIT")
+        logger.info(f"ASIN mapping: inserted {inserted} rows into advertising_asin")
+    except Exception as e:
+        try: con.execute("ROLLBACK")
+        except: pass
+        logger.error(f"ASIN mapping: DB upsert error: {e}")
+    finally:
+        con.close()
+
+
 def _sync_product_ads_v2(creds, start_date, end_date):
     """Pull ASIN-level ad spend using v2 SP productAds report (one per day).
 
@@ -2058,13 +2163,12 @@ def ads_backfill_30days(days=90):
     full_start = chunks[0][0] if chunks else "?"
     full_end = chunks[-1][1] if chunks else "?"
 
-    # Pull ASIN-level ad spend via v2 productAds report (v3 spAdvertisedProduct has no ASIN breakout)
-    logger.info(f"Backfill: pulling ASIN-level spend via v2 productAds ({full_start} to {full_end})...")
+    # Derive ASIN-level spend from campaign mapping (v3 entity API + advertising table)
+    logger.info("Backfill: deriving ASIN-level spend from product ads mapping...")
     try:
-        pa_rows = _sync_product_ads_v2(ads_creds, full_start, full_end)
-        total_rows += pa_rows
+        _sync_asin_spend_from_mapping(headers)
     except Exception as _e:
-        logger.error(f"Backfill: productAds v2 error: {_e}")
+        logger.error(f"Backfill: ASIN mapping error: {_e}")
 
     logger.info(f"Backfill complete: {days} days, {len(chunks)} chunks, {total_rows} total rows")
     return {
