@@ -282,8 +282,8 @@ function PnlOverview({ filters, days, showToast }) {
                   }
                   labelFormatter={() => ""}
                 />
-                {/* Transparent spacer positions each bar at the correct cumulative height */}
-                <Bar dataKey="spacer" stackId="wf" fill="transparent" isAnimationActive={false} />
+                {/* Invisible spacer positions each bar at the correct cumulative height */}
+                <Bar dataKey="spacer" stackId="wf" fill="transparent" fillOpacity={0} stroke="none" isAnimationActive={false} />
                 {/* Colored value bar stacked on top of spacer */}
                 <Bar dataKey="bar" stackId="wf" radius={[4,4,0,0]}>
                   {wfChartData.map((e, i) => <Cell key={i} fill={e.fill} />)}
