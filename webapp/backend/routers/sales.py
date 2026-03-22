@@ -187,7 +187,43 @@ def _build_product_list(con, cutoff: str) -> list:
     except Exception:
         pass
 
+    # Build SKU→ASIN map because financial_events stores SellerSKU (not ASIN) in the asin column.
+    # We need this to translate refund SKU keys back to real ASINs for the per-product lookup.
+    _sku_to_asin: dict = {}
+    try:
+        # fba_inventory is most complete — use latest snapshot
+        _inv_sku = con.execute(
+            "SELECT asin, sku FROM fba_inventory WHERE date = (SELECT MAX(date) FROM fba_inventory) AND sku IS NOT NULL AND asin IS NOT NULL"
+        ).fetchall()
+        for _r in _inv_sku:
+            _a, _s = (_r[0] or "").strip(), (_r[1] or "").strip()
+            if _a and _s:
+                _sku_to_asin[_s] = _a
+                # also index without trailing suffix variants
+                for _sfx in ("-CA", "-FBM", "-FBA", "-ca", "-fbm", "-fba"):
+                    if _s.endswith(_sfx):
+                        _sku_to_asin[_s[:-len(_sfx)]] = _a
+    except Exception:
+        pass
+    try:
+        # item_master supplements with any ASINs not in fba_inventory
+        _im_sku = con.execute(
+            "SELECT asin, sku FROM item_master WHERE sku IS NOT NULL AND asin IS NOT NULL"
+        ).fetchall()
+        for _r in _im_sku:
+            _a, _s = (_r[0] or "").strip(), (_r[1] or "").strip()
+            if _a and _s:
+                _sku_to_asin.setdefault(_s, _a)
+                for _sfx in ("-CA", "-FBM", "-FBA", "-ca", "-fbm", "-fba"):
+                    if _s.endswith(_sfx):
+                        _sku_to_asin.setdefault(_s[:-len(_sfx)], _a)
+    except Exception:
+        pass
+
     # Refund data per ASIN from financial_events
+    # NOTE: financial_events.asin column stores SellerSKU (not ASIN) because the
+    # SP-API financial events API returns SellerSKU not ASIN for line items.
+    # We translate using _sku_to_asin map built above.
     refund_map = {}
     try:
         ref_rows = con.execute("""
@@ -199,7 +235,18 @@ def _build_product_list(con, cutoff: str) -> list:
             GROUP BY asin
         """, [cutoff]).fetchall()
         for rr in ref_rows:
-            refund_map[rr[0]] = {"count": int(rr[1] or 0), "amount": float(rr[2] or 0)}
+            fe_key = (rr[0] or "").strip()
+            # Translate SKU → ASIN (if it already looks like an ASIN, keep as-is)
+            if fe_key.startswith("B0") or fe_key.startswith("B00"):
+                actual_asin = fe_key
+            else:
+                actual_asin = _sku_to_asin.get(fe_key, fe_key)
+            if actual_asin:
+                existing = refund_map.get(actual_asin, {"count": 0, "amount": 0.0})
+                refund_map[actual_asin] = {
+                    "count": existing["count"] + int(rr[1] or 0),
+                    "amount": existing["amount"] + float(rr[2] or 0),
+                }
     except Exception:
         pass
 
