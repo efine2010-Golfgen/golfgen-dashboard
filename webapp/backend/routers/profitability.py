@@ -261,7 +261,8 @@ def _build_waterfall(con, cogs_data, start, end, division=None, customer=None, p
                 "refund_amt": 0, "refund_count": 0,
                 "storage": 0, "placement": 0, "atoz": 0, "chargeback": 0,
                 "coupon_clip": 0, "removal": 0, "service_fee": 0,
-                "safet_reimb": 0, "liquidation_proceeds": 0, "liquidation_fees": 0}
+                "safet_reimb": 0, "liquidation_proceeds": 0, "liquidation_fees": 0,
+                "misc_other": 0}
     try:
         acct_row = con.execute(f"""
             SELECT SUM(ABS(fba_fees)),
@@ -282,7 +283,8 @@ def _build_waterfall(con, cogs_data, start, end, division=None, customer=None, p
                    SUM(CASE WHEN event_type = 'ServiceFee' THEN ABS(other_fees) ELSE 0 END),
                    SUM(CASE WHEN event_type = 'SAFETReimbursement' THEN product_charges ELSE 0 END),
                    SUM(CASE WHEN event_type = 'FBALiquidation' THEN product_charges ELSE 0 END),
-                   SUM(CASE WHEN event_type = 'FBALiquidation' THEN ABS(other_fees) ELSE 0 END)
+                   SUM(CASE WHEN event_type = 'FBALiquidation' THEN ABS(other_fees) ELSE 0 END),
+                   SUM(CASE WHEN event_type = 'Shipment' AND other_fees > 0 THEN other_fees ELSE 0 END)
             FROM financial_events
             WHERE date >= ? AND date < ?{fin_sql}
         """, [start, end] + fin_params).fetchone()
@@ -299,6 +301,7 @@ def _build_waterfall(con, cogs_data, start, end, division=None, customer=None, p
                 "safet_reimb": _n(acct_row[14]),
                 "liquidation_proceeds": _n(acct_row[15]),
                 "liquidation_fees": _n(acct_row[16]),
+                "misc_other": _n(acct_row[17]),
             }
     except Exception:
         pass
@@ -426,23 +429,26 @@ def _build_waterfall(con, cogs_data, start, end, division=None, customer=None, p
         total_promo = acct_fin["promo"]
     if total_shipping == 0 and acct_fin["shipping"] > 0:
         total_shipping = acct_fin["shipping"]
-    # Account-level fallback for per-type fees (these don't need scaling — they're account-level)
-    if total_storage == 0 and acct_fin["storage"] > 0:
+    # Always prefer account-level for per-type fees — SKU→ASIN gaps cause per-ASIN under-counting
+    if acct_fin["storage"] > 0:
         total_storage = acct_fin["storage"]
-    if total_placement == 0 and acct_fin["placement"] > 0:
+    if acct_fin["placement"] > 0:
         total_placement = acct_fin["placement"]
-    if total_atoz == 0 and acct_fin["atoz"] > 0:
+    if acct_fin["atoz"] > 0:
         total_atoz = acct_fin["atoz"]
-    if total_chargeback == 0 and acct_fin["chargeback"] > 0:
+    if acct_fin["chargeback"] > 0:
         total_chargeback = acct_fin["chargeback"]
-    if total_coupon_clip == 0 and acct_fin["coupon_clip"] > 0:
+    if acct_fin["coupon_clip"] > 0:
         total_coupon_clip = acct_fin["coupon_clip"]
-    if total_removal == 0 and acct_fin["removal"] > 0:
+    if acct_fin["removal"] > 0:
         total_removal = acct_fin["removal"]
-    if total_service_fee == 0 and acct_fin["service_fee"] > 0:
+    if acct_fin["service_fee"] > 0:
         total_service_fee = acct_fin["service_fee"]
-    if total_safet_reimb == 0 and acct_fin["safet_reimb"] > 0:
+    if acct_fin["safet_reimb"] > 0:
         total_safet_reimb = acct_fin["safet_reimb"]
+    # Always use account-level misc other fees (Shipment event other_fees only)
+    if acct_fin["misc_other"] > 0:
+        total_other_fees = acct_fin["misc_other"]
     total_liquidation_proceeds = acct_fin["liquidation_proceeds"]
     total_liquidation_fees = acct_fin["liquidation_fees"]
 
@@ -450,19 +456,20 @@ def _build_waterfall(con, cogs_data, start, end, division=None, customer=None, p
     if prod_rev > 0 and total_cogs > 0:
         scale = sales / prod_rev if prod_rev > 0 else 1
         cogs = round(total_cogs * scale, 2)
-        # FBA and referral are account-level totals — no scaling needed
+        # FBA, referral, and misc other are account-level totals — no scaling needed
         fba_fees = round(total_fba, 2)
         referral_fees = round(total_referral, 2)
+        other_fees = round(total_other_fees, 2)
         promo = round(total_promo * scale, 2)
         shipping = round(total_shipping * scale, 2)
         refunds = round(total_refunds * scale, 2)
-        other_fees = round(total_other_fees * scale, 2)
     elif sales > 0:
         cogs = round(sales * 0.35, 2)
         # Use account-level if available, otherwise fall back to estimates
         fba_fees = round(total_fba, 2) if total_fba > 0 else round(sales * 0.12, 2)
         referral_fees = round(total_referral, 2) if total_referral > 0 else round(sales * 0.15, 2)
-        promo = shipping = refunds = other_fees = 0
+        other_fees = round(total_other_fees, 2)
+        promo = shipping = refunds = 0
     else:
         cogs = fba_fees = referral_fees = promo = shipping = refunds = other_fees = 0
 
@@ -479,8 +486,8 @@ def _build_waterfall(con, cogs_data, start, end, division=None, customer=None, p
 
     amazon_fees = round(fba_fees + referral_fees + storage_fees + placement_fees +
                         atoz_fees + chargeback_fees + coupon_clip_fees +
-                        removal_fees + service_fees + liquidation_fees -
-                        safet_reimbursements, 2)
+                        removal_fees + service_fees + liquidation_fees +
+                        other_fees - safet_reimbursements, 2)
     ad_spend = round(total_ad, 2)
     refund_units = total_refund_units
     return_pct = round(refund_units / units * 100, 1) if units > 0 else 0
