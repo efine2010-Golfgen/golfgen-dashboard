@@ -1067,6 +1067,10 @@ export default function Sales({ filters = {} }) {
   const [execPeriod,  setExecPeriod]  = useState('L30');       // executive tab chart period
   const [showDailyCharts, setShowDailyCharts] = useState(false); // daily tab heatmap toggle
   const [expandedPeriods, setExpandedPeriods] = useState({}); // period card row expand
+  const [plOpenHero,    setPlOpenHero]    = useState(null); // 0-3: which hero col P&L is open
+  const [plOpenPeriod,  setPlOpenPeriod]  = useState(null); // period label whose P&L is open
+  const [plCache,       setPlCache]       = useState({});   // {periodKey: {summary,feeBreak,adBreak}}
+  const [plLoading,     setPlLoading]     = useState({});   // {periodKey: bool}
   const [dismissedDailyInsights, setDismissedDailyInsights] = useState([]); // dismissed insight keys
   const [snoozedDailyInsights,  setSnoozedDailyInsights]  = useState({}); // {key: snoozeUntilMs}
   const [dailyAnomalyDismissed, setDailyAnomalyDismissed] = useState(false); // anomaly banner
@@ -1128,6 +1132,22 @@ export default function Sales({ filters = {} }) {
     } finally {
       setLoad(key, false);
     }
+  }
+
+  // Lazy-load full P&L detail for a given period key (today/yesterday/wtd/mtd/ytd)
+  async function loadPL(periodKey) {
+    if (plCache[periodKey] || plLoading[periodKey]) return;
+    setPlLoading(l => ({...l, [periodKey]: true}));
+    try {
+      const params = {division: divRaw||null, customer: custRaw||null, marketplace: mpRaw||null, period: periodKey};
+      const [smry, fb, ab] = await Promise.all([
+        apiFetch('summary',       params),
+        apiFetch('fee-breakdown', params),
+        apiFetch('ad-breakdown',  params),
+      ]);
+      setPlCache(c => ({...c, [periodKey]: {summary: smry, feeBreak: fb, adBreak: ab}}));
+    } catch(e) { /* silent */ }
+    finally { setPlLoading(l => ({...l, [periodKey]: false})); }
   }
 
   // Fetch metrics when period/division/customer changes
@@ -2054,6 +2074,72 @@ export default function Sales({ filters = {} }) {
         const DAILY_PERIODS = ['Today','Yesterday','WTD','MTD','YTD'];
         const ACCENTS = [B.o2, '#F5B731', B.t2, B.b2, B.b3];
 
+        // ── P&L Breakdown panel ──────────────────────────────────────────────
+        const renderPL = (periodKey, synthetic) => {
+          const isLdg = plLoading[periodKey];
+          const cached = plCache[periodKey];
+          const d = synthetic || cached;
+          if (isLdg || (!d && !synthetic)) return (
+            <div style={{padding:'8px 0',textAlign:'center',fontSize:10,color:'var(--txt3)'}}>
+              {isLdg ? 'Loading…' : 'No data'}
+            </div>
+          );
+          const smry     = d.summary || {};
+          const feeItems = d.feeBreak?.items || [];
+          const adItems  = (d.adBreak || []).filter(a => (a.spend||0) > 0);
+          const fba      = feeItems.find(x => x.type?.toLowerCase().includes('fba'))?.amount || 0;
+          const referral = feeItems.find(x => x.type?.toLowerCase().includes('referral'))?.amount || 0;
+          const promo    = feeItems.find(x => x.type?.toLowerCase().includes('promo'))?.amount || 0;
+          const adSpend  = smry.ad_spend || 0;
+          const cogs     = smry.cogs || 0;
+          const sales    = smry.sales || smry.ordered_product_sales || 0;
+          const amzFees  = smry.amazon_fees || (fba + referral);
+          const retAmt   = smry.returns_amount || 0;
+          const gross    = smry.gross_margin ?? (sales - amzFees - cogs);
+          const net      = gross - adSpend;
+          const margin   = smry.gross_margin_pct ?? (sales > 0 ? gross / sales : 0);
+          const roi      = cogs > 0 ? (net / cogs) : null;
+          const acos     = smry.tacos || 0;
+          const units    = smry.unit_sales || smry.units || 0;
+          const retCnt   = smry.returns || 0;
+          const retPct   = units > 0 ? retCnt / units : 0;
+          const estPayout = sales - (promo + amzFees) - adSpend - cogs;
+
+          const plRow = (lbl, val, sub=false, posColor=null) => (
+            <div key={lbl} style={{display:'flex',justifyContent:'space-between',alignItems:'center',
+              padding: sub ? '1px 0 1px 10px' : '3px 0',
+              borderBottom:'1px solid rgba(255,255,255,.035)', fontSize: sub ? 9 : 10}}>
+              <span style={{color: sub ? 'var(--txt3)' : 'var(--txt2)', flex:1}}>{lbl}</span>
+              <span style={{fontWeight: sub ? 400 : 600,
+                color: posColor === null ? 'var(--txt)' : posColor ? '#4ade80' : '#fb923c'
+              }}>{val}</span>
+            </div>
+          );
+          const neg = v => v > 0 ? `-${f$(v)}` : f$(v);
+
+          return (
+            <div style={{marginTop:8, paddingTop:8, borderTop:'1px solid var(--brd)'}}>
+              {plRow('Promo', neg(promo))}
+              {plRow('Advertising cost', neg(adSpend))}
+              {adItems.map(a => plRow(a.type, `-${f$(a.spend)}`, true))}
+              {plRow('Refund cost', neg(retAmt))}
+              {plRow('Amazon fees', neg(amzFees))}
+              {fba > 0 && plRow('FBA fulfilment', neg(fba), true)}
+              {referral > 0 && plRow('Referral fee', neg(referral), true)}
+              {plRow('Cost of goods', neg(cogs))}
+              <div style={{height:1,background:'rgba(255,255,255,.07)',margin:'4px 0'}}/>
+              {plRow('Gross profit', f$(gross), false, gross >= 0)}
+              {plRow('Net profit', f$(net), false, net >= 0)}
+              {plRow('Est. payout', f$(estPayout))}
+              <div style={{height:1,background:'rgba(255,255,255,.07)',margin:'4px 0'}}/>
+              {plRow('Real ACOS', fP(acos))}
+              {plRow('% Refunds', fP(retPct))}
+              {plRow('Margin', fP(margin), false, margin >= 0.3)}
+              {roi !== null && plRow('ROI', `${(roi*100).toFixed(0)}%`, false, roi >= 1)}
+            </div>
+          );
+        };
+
         // ── Sparkline + momentum from trend (last 14 days) ──────────────────
         const dtArr    = toArr(trend);
         const dtLast   = dtArr.slice(-14);
@@ -2174,6 +2260,52 @@ export default function Sales({ filters = {} }) {
                     <div style={{fontSize:28,fontWeight:800,color:col.color,lineHeight:1,marginBottom:3}}>{col.val}</div>
                     <div style={{fontSize:10,color:'var(--txt3)',marginBottom:10}}>{col.sub}</div>
                     {heroRows(col.rows)}
+                    {/* ── P&L toggle ── */}
+                    {(() => {
+                      // map each column to a period key or synthetic data
+                      const heroPlKey = ['today','ly_now','ty_fcst','ly_eod'][i];
+                      const isOpen = plOpenHero === i;
+                      // Synthetic data for LY/forecast columns (no dedicated endpoint)
+                      const synthetic = i === 1 ? {
+                        summary: {sales:lyNowS, units:lyNowU, amazon_fees:tod.ly_same_time_fees||0,
+                          returns_amount:tod.ly_same_time_returns_amt||0, ad_spend:0, cogs:0,
+                          gross_margin:lyNowS-(tod.ly_same_time_fees||0),
+                          gross_margin_pct:lyNowS>0?(lyNowS-(tod.ly_same_time_fees||0))/lyNowS:0,
+                          tacos:tod.ly_tacos||0, returns:0},
+                        feeBreak:{items:[]}, adBreak:[]
+                      } : i === 2 ? {
+                        summary: {sales:tyFcstS, units:tyFcstU, amazon_fees:tod.ty_forecast_fees||0,
+                          returns_amount:tod.ty_forecast_returns_amt||0, ad_spend:0, cogs:0,
+                          gross_margin:tyFcstS-(tod.ty_forecast_fees||0),
+                          gross_margin_pct:tyFcstS>0?(tyFcstS-(tod.ty_forecast_fees||0))/tyFcstS:0,
+                          tacos:0, returns:0},
+                        feeBreak:{items:[]}, adBreak:[]
+                      } : i === 3 ? {
+                        summary: {sales:lyEodS, units:lyEodU, amazon_fees:tod.ly_amazon_fees||0,
+                          returns_amount:tod.ly_returns_amount||0, ad_spend:0, cogs:0,
+                          gross_margin:lyEodS-(tod.ly_amazon_fees||0),
+                          gross_margin_pct:lyEodS>0?(lyEodS-(tod.ly_amazon_fees||0))/lyEodS:0,
+                          tacos:tod.ly_tacos||0, returns:tod.ly_returns||0},
+                        feeBreak:{items:[]}, adBreak:[]
+                      } : null;
+                      return (
+                        <>
+                          <button
+                            onClick={() => {
+                              const next = isOpen ? null : i;
+                              setPlOpenHero(next);
+                              if (next === 0 && !plCache['today']) loadPL('today');
+                            }}
+                            style={{fontSize:9,color:isOpen?B.t3:B.b3,background:'none',border:'none',
+                              cursor:'pointer',padding:'5px 0 0',width:'100%',textAlign:'left',
+                              display:'flex',alignItems:'center',gap:4}}>
+                            <span>{isOpen ? '▲' : '▼'}</span>
+                            <span>{isOpen ? 'Hide P&L' : 'P&L Details'}</span>
+                          </button>
+                          {isOpen && renderPL(heroPlKey, synthetic)}
+                        </>
+                      );
+                    })()}
                     {/* sparkline */}
                     {(() => {
                       const tArr = toArr(trend);
@@ -2320,10 +2452,31 @@ export default function Sales({ filters = {} }) {
                       </div>
                       {alwaysRows2.map(pRow2)}
                       {isExpPeriod && extraRows2.map(pRow2)}
-                      <button onClick={()=>setExpandedPeriods(p=>({...p,[lbl]:!p[lbl]}))}
-                        style={{fontSize:9,color:'var(--b3)',background:'none',border:'none',cursor:'pointer',padding:'4px 0 0',width:'100%',textAlign:'left'}}>
-                        {isExpPeriod ? '− Show less' : `+ ${extraRows2.length} more rows`}
-                      </button>
+                      <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginTop:2}}>
+                        <button onClick={()=>setExpandedPeriods(p=>({...p,[lbl]:!p[lbl]}))}
+                          style={{fontSize:9,color:'var(--b3)',background:'none',border:'none',cursor:'pointer',padding:'4px 0 0',textAlign:'left'}}>
+                          {isExpPeriod ? '− less' : `+ ${extraRows2.length} more`}
+                        </button>
+                        {(() => {
+                          const pKey = PERIOD_API_MAP[lbl] || lbl.toLowerCase();
+                          const isPlOpen = plOpenPeriod === lbl;
+                          return (
+                            <button
+                              onClick={() => {
+                                const next = isPlOpen ? null : lbl;
+                                setPlOpenPeriod(next);
+                                if (next && !plCache[pKey]) loadPL(pKey);
+                              }}
+                              style={{fontSize:9,color:isPlOpen?B.t3:B.b3,background:'none',border:'none',
+                                cursor:'pointer',padding:'4px 0 0',textAlign:'right',
+                                display:'flex',alignItems:'center',gap:3}}>
+                              <span>{isPlOpen ? '▲' : '▼'}</span>
+                              <span>P&amp;L</span>
+                            </button>
+                          );
+                        })()}
+                      </div>
+                      {plOpenPeriod === lbl && renderPL(PERIOD_API_MAP[lbl] || lbl.toLowerCase(), null)}
                     </div>
                   );
                 })}
