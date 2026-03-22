@@ -398,6 +398,26 @@ def _build_waterfall(con, cogs_data, start, end, division=None, customer=None, p
     else:
         cogs = fba_fees = referral_fees = promo = shipping = refunds = other_fees = 0
 
+    # When financial_events has no other-fees data (all zero), estimate storage
+    # from current FBA inventory. Amazon charges ~$1.50/unit/month for large
+    # standard items (golf equipment). This is applied as a pure storage estimate;
+    # "other fees" beyond storage stays 0 since we have no real breakdown.
+    if other_fees == 0 and sales > 0:
+        try:
+            from datetime import datetime as _dt
+            _period_days = max(1, (_dt.strptime(end[:10], "%Y-%m-%d") -
+                                   _dt.strptime(start[:10], "%Y-%m-%d")).days)
+            _inv_row = con.execute("""
+                SELECT COALESCE(SUM(fulfillable_quantity + COALESCE(reserved_quantity, 0)), 0)
+                FROM fba_inventory
+                WHERE date = (SELECT MAX(date) FROM fba_inventory)
+            """).fetchone()
+            _inv_units = int(_inv_row[0] or 0) if _inv_row else 0
+            if _inv_units > 0:
+                other_fees = round(_inv_units * 1.50 * (_period_days / 30), 2)
+        except Exception:
+            pass
+
     amazon_fees = round(fba_fees + referral_fees, 2)
     ad_spend = round(total_ad, 2)
     refund_units = total_refund_units
@@ -422,7 +442,7 @@ def _build_waterfall(con, cogs_data, start, end, division=None, customer=None, p
         "fbaFees": fba_fees,
         "referralFees": referral_fees,
         "otherFees": other_fees,
-        "storageFees": round(other_fees * 0.5, 2),  # Estimate storage as ~50% of other
+        "storageFees": other_fees,  # All other_fees treated as storage (no finer breakdown available)
         "cogs": cogs,
         "indirect": 0,
         "grossProfit": gross_profit,
@@ -626,6 +646,21 @@ def profitability_items(days: int = Query(365), division: Optional[str] = None,
     except Exception:
         pass
 
+    # Per-ASIN FBA inventory quantities for storage fee estimation
+    # Used as fallback when financial_events.other_fees is zero
+    inv_qty_by_asin: dict = {}
+    try:
+        _inv_rows = con.execute("""
+            SELECT asin, COALESCE(fulfillable_quantity, 0) + COALESCE(reserved_quantity, 0)
+            FROM fba_inventory
+            WHERE date = (SELECT MAX(date) FROM fba_inventory)
+        """).fetchall()
+        for _ir in _inv_rows:
+            if _ir[0]:
+                inv_qty_by_asin[_ir[0]] = int(_ir[1] or 0)
+    except Exception:
+        pass
+
     # Pricing/coupon enrichment
     pricing_cache = _load_pricing_cache()
     live_prices = pricing_cache.get("prices", {})
@@ -674,8 +709,14 @@ def profitability_items(days: int = Query(365), division: Optional[str] = None,
         cogs_pct = round(cogs_total / rev * 100, 1) if rev > 0 else 0
         # Total fee % of revenue
         total_fee_pct = round(amazon_fees / rev * 100, 1) if rev > 0 else 0
-        # Storage estimate (portion of other fees)
-        storage = round(fin.get("other", 0) * 0.5, 2)
+        # Storage fees: use financial_events other_fees if present, else estimate
+        # from current FBA inventory quantity (~$1.50/unit/month for large items)
+        _other_amt = fin.get("other", 0)
+        if _other_amt > 0:
+            storage = round(_other_amt, 2)   # real data — treat all as storage
+        else:
+            _inv_qty = inv_qty_by_asin.get(asin, 0)
+            storage = round(_inv_qty * 1.50 * days / 30, 2)
 
         items.append({
             "asin": asin,
@@ -694,7 +735,7 @@ def profitability_items(days: int = Query(365), division: Optional[str] = None,
             "amazonFees": round(amazon_fees, 2),
             "fbaFees": round(p["fbaTotal"], 2),
             "referralFees": round(p["referralTotal"], 2),
-            "otherFees": round(fin.get("other", 0), 2),
+            "otherFees": round(fin.get("other", 0) if fin.get("other", 0) > 0 else 0, 2),
             "storageFees": storage,
             "cogs": round(cogs_total, 2),
             "cogsPerUnit": round(p["cogsPerUnit"], 2),
