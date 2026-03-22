@@ -208,19 +208,10 @@ const RANGES = [
   { label: "1Y", days: 365 },
 ];
 
-const SUB_TABS = [
-  { key: "overview", label: "Sales Overview" },
-  { key: "command", label: "Item Command Center" },
-  { key: "channel", label: "Sales by Channel" },
-  { key: "returns", label: "Returns Analysis" },
-  { key: "promos", label: "Promotions" },
-];
-
 export default function Products({ filters = {} }) {
   const [days, setDays] = useState(30);
   const [products, setProducts] = useState([]);
   const [loading, setLoading] = useState(true);
-  const [activeTab, setActiveTab] = useState("command");
   const [sortKey, setSortKey] = useState("rev");
   const [sortDir, setSortDir] = useState("desc");
   const [filterTag, setFilterTag] = useState("all");
@@ -315,24 +306,6 @@ export default function Products({ filters = {} }) {
   /* ═══ RENDER ═══ */
   return (
     <div style={{ padding: "0 0 24px" }}>
-
-      {/* ── Sub-nav tabs ── */}
-      <div style={{ display: "flex", gap: 4, marginBottom: 18, borderBottom: "2px solid var(--brd)" }}>
-        {SUB_TABS.map(t => (
-          <button key={t.key} onClick={() => setActiveTab(t.key)} style={{
-            display: "inline-flex", alignItems: "center", height: 32, padding: "0 14px",
-            borderRadius: "8px 8px 0 0", fontSize: 11, fontWeight: 600,
-            color: activeTab === t.key ? "#fff" : "var(--txt2)",
-            border: activeTab === t.key ? "1px solid var(--brd)" : "1px solid transparent",
-            borderBottom: "none",
-            background: activeTab === t.key ? "var(--atab)" : "transparent",
-            cursor: "pointer", whiteSpace: "nowrap", position: "relative", bottom: -2,
-            boxShadow: activeTab === t.key ? "inset 0 -2px 0 #2ECFAA" : "none",
-          }}>
-            {t.label}
-          </button>
-        ))}
-      </div>
 
       {/* ── Page Header ── */}
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 14, flexWrap: "wrap", gap: 10 }}>
