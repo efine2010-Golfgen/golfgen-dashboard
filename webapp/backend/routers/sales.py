@@ -765,6 +765,23 @@ def sales_summary(
             stock_units = 0
             dos = 0
 
+        # Buy Box % — weighted average by sessions
+        def _buy_box_pct(s, e, params):
+            try:
+                r = con.execute(f"""
+                    SELECT COALESCE(SUM(buy_box_percentage * sessions) / NULLIF(SUM(sessions), 0), 0)
+                    FROM daily_sales
+                    WHERE asin = 'ALL' AND date >= ? AND date <= ? {hw}
+                """, [str(s), str(e)] + params).fetchone()
+                # buy_box_percentage stored as 0-100; convert to 0-1 decimal
+                val = float(r[0]) if r and r[0] else 0
+                return round(val / 100.0, 4)
+            except Exception:
+                return 0
+
+        ty_buy_box = _buy_box_pct(sd, ed, hp)
+        ly_buy_box = _buy_box_pct(ly_sd, ly_ed, hp)
+
         con.close()
         return {
             "sales": round(ty_sales, 2), "unit_sales": ty_units, "aur": ty_aur,
@@ -786,6 +803,7 @@ def sales_summary(
             "dos": dos, "stock_units": stock_units,
             "returns": ty_return_units, "returns_amount": round(ty_return_amt, 2),
             "ly_returns": ly_return_units, "ly_returns_amount": round(ly_return_amt, 2),
+            "buy_box": ty_buy_box, "ly_buy_box": ly_buy_box,
             "fell_back": fell_back,
             "period_label": f"Yesterday ({sd.strftime('%b %d')})" if fell_back else None,
         }
@@ -809,6 +827,8 @@ def sales_trend(
         con = get_db()
         sd, ed = _period_to_dates(period, start, end)
         hw, hp = _hier_where(division, customer, marketplace=marketplace)
+        # financial_events has no marketplace column
+        fw, fp = _hier_where(division, customer, marketplace=None)
 
         rows = con.execute(f"""
             SELECT date,
@@ -832,6 +852,30 @@ def sales_trend(
             WHERE asin = 'ALL' AND date >= ? AND date <= ? {hw}
             GROUP BY date ORDER BY date
         """, [str(ly_sd), str(ly_ed)] + hp).fetchall()
+        # Returns per day (TY) from financial_events
+        try:
+            ret_rows_ty = con.execute(f"""
+                SELECT date, COUNT(*) FROM financial_events
+                WHERE date >= ? AND date <= ?
+                  AND (event_type ILIKE '%%refund%%' OR event_type ILIKE '%%return%%') {fw}
+                GROUP BY date
+            """, [str(sd), str(ed + timedelta(days=2))] + fp).fetchall()
+            ret_map_ty = {fmt_date(r[0]): int(r[1]) for r in ret_rows_ty}
+        except Exception:
+            ret_map_ty = {}
+
+        # Returns per day (LY) from financial_events
+        try:
+            ret_rows_ly = con.execute(f"""
+                SELECT date, COUNT(*) FROM financial_events
+                WHERE date >= ? AND date <= ?
+                  AND (event_type ILIKE '%%refund%%' OR event_type ILIKE '%%return%%') {fw}
+                GROUP BY date
+            """, [str(ly_sd), str(ly_ed + timedelta(days=2))] + fp).fetchall()
+            ret_map_ly = {fmt_date(r[0]): int(r[1]) for r in ret_rows_ly}
+        except Exception:
+            ret_map_ly = {}
+
         con.close()
 
         ly_map = {}
@@ -868,6 +912,8 @@ def sales_trend(
                 "ly_aur": ly_aur,
                 "ty_conv": ty_conv,
                 "ly_conv": ly_conv,
+                "returns": ret_map_ty.get(d_str, 0),
+                "ly_returns": ret_map_ly.get(ly_d, 0) if ly_d else 0,
             })
         return result
     except Exception as e:

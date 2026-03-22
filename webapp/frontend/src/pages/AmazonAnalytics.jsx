@@ -4,6 +4,7 @@ import Profitability from "./Profitability";
 import Advertising from "./Advertising";
 import AmazonInsights from "./AmazonInsights";
 import FBACombined from "./FBACombined";
+import SalesPlanning from "./SalesPlanning";
 
 export default function AmazonAnalytics({ filters = {}, onMarketplaceChange, page, setPage }) {
   return (
@@ -14,6 +15,7 @@ export default function AmazonAnalytics({ filters = {}, onMarketplaceChange, pag
       {page === "profitability"    && <Profitability filters={filters} />}
       {page === "fba-combined"     && <FBACombined filters={filters} />}
       {page === "advertising"      && <Advertising filters={filters} />}
+      {page === "planning"         && <SalesPlanning filters={filters} />}
     </div>
   );
 }

@@ -101,6 +101,7 @@ const AMAZON_TABS = [
   { key: "profitability",   label: "PRICING & PROFIT" },
   { key: "fba-combined",    label: "FBA INV. & SHIPMENTS" },
   { key: "advertising",     label: "ADVERTISING" },
+  { key: "planning",        label: "PLANNING" },
 ];
 
 /* ── Navigation (subnav bar + sub-views row) ── */
