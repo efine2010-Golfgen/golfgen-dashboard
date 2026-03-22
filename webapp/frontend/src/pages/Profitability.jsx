@@ -940,20 +940,97 @@ function KpiCard({ label, value, color, sub, delta }) {
 
 function WfRow({ label, amount, pct, color, maxVal, isTotal, isSub }) {
   const barW = maxVal > 0 ? Math.abs(amount) / maxVal * 100 : 0;
+  const isRevRow = label.includes("Gross Rev");
+  const isNOPRow = label.includes("Net Operating");
+  const isNetRevRow = label.includes("Net Rev");
+  const isProfit = amount >= 0;
+
+  // Revenue row: bright blue; NOP row: green/red; others: their assigned color
+  const barColor = isNOPRow
+    ? (isProfit ? "#2ECFAA" : "#f87171")
+    : isRevRow ? "#3b82f6"
+    : color;
+
+  const rowH = isTotal ? 11 : isSub ? 6 : 8;
+
   return (
     <div style={{
-      display: "flex", alignItems: "center", gap: 10, padding: "6px 18px",
+      display: "flex", alignItems: "center", gap: 10,
+      padding: isTotal ? "9px 18px" : "5px 18px",
       borderBottom: "1px solid var(--brd)",
-      ...(isTotal ? { background: "rgba(14,31,45,0.04)", borderTop: "3px solid #2ECFAA" } : {}),
+      background: isNOPRow
+        ? "rgba(46,207,170,0.04)"
+        : isRevRow ? "rgba(59,130,246,0.04)"
+        : "transparent",
+      ...(isTotal ? { borderTop: isNOPRow ? "2px solid rgba(46,207,170,0.4)" : "2px solid rgba(59,130,246,0.3)" } : {}),
     }}>
-      <span style={{ ...SG(isSub ? 8 : 9, isTotal ? 700 : 600), color: isSub ? "var(--txt3)" : undefined, width: 200, flexShrink: 0, paddingLeft: isSub ? 12 : 0 }}>{label}</span>
-      <div style={{ flex: 1, height: 8, background: "var(--brd)", borderRadius: 4, overflow: "hidden" }}>
-        <div style={{ width: `${Math.min(barW, 100)}%`, height: "100%", borderRadius: 4, background: color, opacity: isSub ? 0.5 : 0.8, transition: "width 0.6s" }} />
+
+      {/* Label */}
+      <span style={{
+        ...SG(isSub ? 8 : 9, isTotal ? 700 : 600),
+        color: isNOPRow ? "#2ECFAA" : isRevRow ? "#7BAED0" : isSub ? "var(--txt3)" : "var(--txt)",
+        width: 160, flexShrink: 0,
+        paddingLeft: isSub ? 12 : 0,
+      }}>{label}</span>
+
+      {/* Bar track */}
+      <div style={{ flex: 1, height: rowH, position: "relative", borderRadius: 4 }}>
+
+        {/* Ghost revenue track — visible on expense rows so you can see the full-revenue reference */}
+        {!isRevRow && (
+          <div style={{
+            position: "absolute", inset: 0,
+            background: isNOPRow
+              ? "rgba(46,207,170,0.08)"
+              : "rgba(59,130,246,0.10)",
+            borderRadius: 4,
+            /* right-edge tick to mark full-revenue boundary */
+            borderRight: "1.5px solid rgba(59,130,246,0.30)",
+          }} />
+        )}
+
+        {/* The actual bar — left-aligned, stops at proportional width */}
+        <div style={{
+          position: "absolute", left: 0, top: 0, bottom: 0,
+          width: `${Math.min(barW, 100)}%`,
+          background: isNOPRow
+            ? (isProfit
+                ? "linear-gradient(90deg,#1a9e7c,#2ECFAA)"
+                : "linear-gradient(90deg,#dc2626,#f87171)")
+            : isRevRow
+              ? "linear-gradient(90deg,#2563eb,#3b82f6)"
+              : barColor,
+          borderRadius: 4,
+          opacity: isSub ? 0.55 : isRevRow || isNOPRow ? 0.92 : 0.72,
+          transition: "width 0.7s cubic-bezier(0.4,0,0.2,1)",
+        }} />
+
+        {/* NOP row: glowing vertical tick at right edge of profit bar */}
+        {isNOPRow && (
+          <div style={{
+            position: "absolute",
+            left: `${Math.min(barW, 100)}%`,
+            top: -5, bottom: -5,
+            width: 3,
+            background: isProfit ? "#2ECFAA" : "#f87171",
+            borderRadius: 2,
+            boxShadow: isProfit
+              ? "0 0 6px 1px rgba(46,207,170,0.7)"
+              : "0 0 6px 1px rgba(248,113,113,0.7)",
+            transform: "translateX(-50%)",
+          }} />
+        )}
       </div>
-      <span style={{ ...DM(14, color), width: 80, textAlign: "right", flexShrink: 0 }}>
+
+      {/* Amount */}
+      <span style={{ ...DM(isTotal ? 14 : 13, barColor), width: 80, textAlign: "right", flexShrink: 0 }}>
         {amount < 0 ? "−" : ""}{fmt$2(Math.abs(amount))}
       </span>
-      <span style={{ ...SG(9, 700, color), width: 42, textAlign: "right", flexShrink: 0 }}>{pct}%</span>
+
+      {/* Percent */}
+      <span style={{ ...SG(9, 700, barColor), width: 42, textAlign: "right", flexShrink: 0 }}>
+        {pct}%
+      </span>
     </div>
   );
 }
