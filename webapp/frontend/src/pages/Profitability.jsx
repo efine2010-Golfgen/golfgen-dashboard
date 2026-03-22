@@ -193,31 +193,56 @@ function PnlOverview({ filters, days, showToast }) {
     { label: "Net Operating Profit", value: wf.netProfit || 0 },
   ].filter(w => Math.abs(w.value) > 0.01 || w.label === "Net Operating Profit" || w.label === "Gross Revenue");
 
-  // Build waterfall chart data
-  const wfChartData = waterfall.map(w => ({
-    name: w.label,
-    value: w.value,
-    fill: w.label.includes("Gross Rev") ? WF_COLORS.revenue :
-          w.label.includes("Return") || w.label.includes("Refund") ? WF_COLORS.refund :
-          w.label.includes("Promo") ? WF_COLORS.promo :
-          w.label.includes("Referral") ? WF_COLORS.referral :
-          w.label.includes("FBA") ? WF_COLORS.fba :
-          w.label.includes("Storage") ? WF_COLORS.storage :
-          w.label.includes("Placement") || w.label.includes("Inbound") ? WF_COLORS.placement :
-          w.label.includes("A-to-Z") ? WF_COLORS.atoz :
-          w.label.includes("Chargeback") ? WF_COLORS.chargeback :
-          w.label.includes("Coupon Clip") ? WF_COLORS.couponClip :
-          w.label.includes("Removal") ? WF_COLORS.removal :
-          w.label.includes("Service Fee") ? WF_COLORS.serviceFee :
-          w.label.includes("SAFET") ? WF_COLORS.safet :
-          w.label.includes("Liquidation") ? WF_COLORS.liquidation :
-          w.label.includes("Net Rev") ? WF_COLORS.netRev :
-          w.label.includes("COGS") ? WF_COLORS.cogs :
-          w.label.includes("Ad Spend") ? WF_COLORS.adSpend :
-          w.label.includes("Ship") ? WF_COLORS.shipping :
-          w.label.includes("Misc") || w.label.includes("Other") ? WF_COLORS.other :
-          (w.value >= 0 ? WF_COLORS.nop : WF_COLORS.nopNeg),
-  }));
+  // Build waterfall chart data — proper floating-bar (transparent spacer + colored bar).
+  // "Total" rows (Gross Revenue, Net Revenue, Net Operating Profit) start from 0.
+  // Downward deltas: bar sits at (running + delta) → running; spacer anchors the bottom.
+  // Upward deltas: bar sits at running → running + delta; spacer anchors the bottom.
+  const WF_TOTAL_LABELS = new Set(["Gross Revenue", "Net Revenue", "Net Operating Profit"]);
+  const wfChartData = (() => {
+    let running = 0;
+    return waterfall.map(w => {
+      const isTotal = WF_TOTAL_LABELS.has(w.label);
+      const fill =
+        w.label.includes("Gross Rev") ? WF_COLORS.revenue :
+        w.label.includes("Return") || w.label.includes("Refund") ? WF_COLORS.refund :
+        w.label.includes("Promo") ? WF_COLORS.promo :
+        w.label.includes("Referral") ? WF_COLORS.referral :
+        w.label.includes("FBA") ? WF_COLORS.fba :
+        w.label.includes("Storage") ? WF_COLORS.storage :
+        w.label.includes("Placement") || w.label.includes("Inbound") ? WF_COLORS.placement :
+        w.label.includes("A-to-Z") ? WF_COLORS.atoz :
+        w.label.includes("Chargeback") ? WF_COLORS.chargeback :
+        w.label.includes("Coupon Clip") ? WF_COLORS.couponClip :
+        w.label.includes("Removal") ? WF_COLORS.removal :
+        w.label.includes("Service Fee") ? WF_COLORS.serviceFee :
+        w.label.includes("SAFET") ? WF_COLORS.safet :
+        w.label.includes("Liquidation") ? WF_COLORS.liquidation :
+        w.label.includes("Net Rev") ? WF_COLORS.netRev :
+        w.label.includes("COGS") ? WF_COLORS.cogs :
+        w.label.includes("Ad Spend") ? WF_COLORS.adSpend :
+        w.label.includes("Ship") ? WF_COLORS.shipping :
+        w.label.includes("Misc") || w.label.includes("Other") ? WF_COLORS.other :
+        (w.value >= 0 ? WF_COLORS.nop : WF_COLORS.nopNeg);
+      let spacer, bar;
+      if (isTotal) {
+        // Total bars always start from 0, reset the running cumulative
+        spacer = 0;
+        bar = Math.abs(w.value);
+        running = w.value;
+      } else if (w.value >= 0) {
+        // Upward delta (e.g. SAFET reimbursement)
+        spacer = running;
+        bar = w.value;
+        running += w.value;
+      } else {
+        // Downward delta (fees, costs): bar bottom = new running total
+        running += w.value;
+        spacer = running;
+        bar = Math.abs(w.value);
+      }
+      return { name: w.label, value: w.value, spacer, bar, fill };
+    });
+  })();
 
   const grossRev = kpis.grossRevenue || 0;
 
@@ -250,8 +275,17 @@ function PnlOverview({ filters, days, showToast }) {
                 <CartesianGrid strokeDasharray="3 3" stroke="var(--brd)" />
                 <XAxis dataKey="name" tick={{ ...SG(8, 600), fill: "var(--txt3)" }} interval={0} angle={-20} textAnchor="end" height={40} />
                 <YAxis tick={{ ...SG(9, 600), fill: "var(--txt3)" }} tickFormatter={v => `$${(Math.abs(v)/1000).toFixed(0)}k`} />
-                <Tooltip contentStyle={TOOLTIP_STYLE} formatter={v => [fmt$2(v), ""]} />
-                <Bar dataKey="value" radius={[4,4,0,0]}>
+                <Tooltip
+                  contentStyle={TOOLTIP_STYLE}
+                  formatter={(v, name, props) =>
+                    name === "spacer" ? [null, null] : [fmt$2(props.payload.value), props.payload.name]
+                  }
+                  labelFormatter={() => ""}
+                />
+                {/* Transparent spacer positions each bar at the correct cumulative height */}
+                <Bar dataKey="spacer" stackId="wf" fill="transparent" isAnimationActive={false} />
+                {/* Colored value bar stacked on top of spacer */}
+                <Bar dataKey="bar" stackId="wf" radius={[4,4,0,0]}>
                   {wfChartData.map((e, i) => <Cell key={i} fill={e.fill} />)}
                 </Bar>
               </BarChart>
