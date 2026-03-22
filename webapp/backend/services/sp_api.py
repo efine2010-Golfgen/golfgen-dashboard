@@ -602,42 +602,28 @@ def _run_sp_api_sync_inner():
         from sp_api.api import Finances as FinancesAPI
         logger.info("  Pulling financial events (fees, refunds)...")
 
-        # Smart sync window: if we have < 12 months of history OR there are coverage
-        # gaps in the data, do a deep 400-day backfill so LY comparisons work.
-        # Otherwise only re-pull the last 35 days (enough to catch late-posted events).
+        # Smart sync window: if we have < 12 months of history, do a deep 400-day
+        # backfill so LY comparisons work. Otherwise only re-pull the last 35 days
+        # (enough to catch late-posted events) and keep the historical rows intact.
+        # NOTE: The 400-day window is handled in a separate gap-fill job to avoid
+        # deleting recent data that can't be re-fetched due to API pagination limits.
         _con_check = get_db()
         _fin_count_row = _con_check.execute(
             "SELECT COUNT(*), MIN(date) FROM financial_events"
         ).fetchone()
-        # Count distinct calendar months with data in the last 14 months
-        try:
-            _months_row = _con_check.execute("""
-                SELECT COUNT(DISTINCT TO_CHAR(date::date, 'YYYY-MM'))
-                FROM financial_events
-                WHERE date >= CURRENT_DATE - INTERVAL '14 months'
-            """).fetchone()
-            _months_covered = int(_months_row[0] or 0) if _months_row else 0
-        except Exception:
-            _months_covered = 0
         _con_check.close()
         _fin_count = int(_fin_count_row[0] or 0) if _fin_count_row else 0
         _oldest_date = _fin_count_row[1] if _fin_count_row and _fin_count_row[1] else None
         _oldest_days = (datetime.utcnow().date() - date.fromisoformat(str(_oldest_date)[:10])).days \
             if _oldest_date else 0
 
-        # Trigger backfill if: (a) data is young (<380 days), OR (b) coverage gaps detected
-        # (fewer than 70% of the last 14 months have any financial event data)
-        _expected_months = 14
-        _has_gap = _months_covered < int(_expected_months * 0.70)  # gap if < 10/14 months covered
-        if _oldest_days < 380 or _has_gap:
+        if _oldest_days < 380:  # don't have 12+ months — do backfill
             fin_days = 400  # covers LY for full YTD comparison
             logger.info(f"  Financial events: backfill mode (oldest={_oldest_date}, "
-                        f"months_covered={_months_covered}/{_expected_months}, gap={_has_gap}, "
                         f"count={_fin_count}) — pulling {fin_days} days")
         else:
             fin_days = 35   # regular refresh: catch late-posted events
-            logger.info(f"  Financial events: regular mode (oldest={_oldest_date}, "
-                        f"months_covered={_months_covered}/{_expected_months}) "
+            logger.info(f"  Financial events: regular mode (oldest={_oldest_date}) "
                         f"— pulling {fin_days} days")
 
         fin_start = (datetime.utcnow() - timedelta(days=fin_days)).strftime("%Y-%m-%dT%H:%M:%SZ")
